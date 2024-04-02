@@ -1,0 +1,25 @@
+[package]
+name = "liscov"
+version = "0.0.0"
+authors = ["Sifi Takashina <sifyfy@sifyfy.dev>"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[[bin]]
+name = "liscov"
+path = "src/bin/liscov.rs"
+doc = false
+
+[dependencies]
+# dioxus = "0.4.3"
+# dioxus-desktop = "0.4.3"
+anyhow = "1.0"
+derive_more = "0.99"
+tracing = "0.1"
+regex = "1.10"
+reqwest = "0.11"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+tokio = { version = "1", features = ["full"] }
+yup-oauth2 = { version = "8.3.2", features = ["rustls"] }
