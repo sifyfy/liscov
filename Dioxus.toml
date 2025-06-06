@@ -1,0 +1,32 @@
+[application]
+# アプリケーション名
+name = "liscov"
+
+# アプリケーションの既定プラットフォーム
+default_platform = "desktop"
+
+# アセットディレクトリ
+out_dir = "dist"
+
+# デスクトップアプリ設定
+[desktop]
+# アプリケーション設定
+title = "🎬 liscov - YouTube Live Chat Monitor"
+width = 900
+height = 700
+
+# ウィンドウ設定
+resizable = true
+minimizable = true
+maximizable = true
+closable = true
+
+# 開発設定
+[development]
+# ホットリロード有効化
+hot_reload = true
+# ウォッチディレクトリ
+watch_paths = ["src"]
+
+# ログレベル
+log_level = "debug"

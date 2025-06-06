@@ -1,0 +1,40 @@
+# liscov GUI デバッグ設定ファイル
+# 使用方法: LISCOV_DEBUG_CONFIG=debug.toml cargo run --bin liscov-gui
+
+[logging]
+# ログレベル: off, error, warn, info, debug, trace
+level = "debug"
+# ファイル出力の有効化
+file_output = false
+file_path = "liscov-gui-debug.log"
+
+[development]
+# 開発用の追加ログ
+show_ui_timing = true
+show_memory_usage = true
+show_api_details = true
+show_file_operations = true
+
+[mock_data]
+# モックデータの使用（テスト用）
+enabled = false
+message_interval_ms = 1000
+max_messages = 100
+
+[performance]
+# パフォーマンス監視
+ui_update_threshold_ms = 16    # 60fps基準
+memory_check_interval_sec = 30
+api_timeout_sec = 10
+
+[ui_debug]
+# UI関連のデバッグ
+highlight_updates = false
+show_component_boundaries = false
+log_slint_events = false
+
+[testing]
+# テスト関連設定
+auto_connect_url = ""                                # 自動接続用URL（テスト時）
+skip_real_api = false                                # 実際のAPI呼び出しをスキップ
+test_data_file = "tests/data/sample_messages.ndjson"

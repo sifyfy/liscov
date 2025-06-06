@@ -1,4 +1,5 @@
-use anyhow::anyhow;
+#[allow(dead_code)]
+use anyhow::Result;
 use regex::Regex;
 
 #[derive(thiserror::Error, Debug)]
@@ -17,8 +18,20 @@ pub struct VideoId(pub String);
 #[derive(Debug, Clone, derive_more::Display)]
 pub struct ApiKey(String);
 
+impl ApiKey {
+    pub fn new(value: String) -> Self {
+        Self(value)
+    }
+}
+
 #[derive(Debug, Clone, derive_more::Display)]
 pub struct ClientVersion(String);
+
+impl ClientVersion {
+    pub fn new(value: String) -> Self {
+        Self(value)
+    }
+}
 
 #[derive(Debug, Clone, derive_more::Display, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
@@ -35,32 +48,7 @@ pub struct InnerTube {
     pub continuation: Continuation,
 }
 
-pub async fn fetch_live_chat_page(url: &str) -> anyhow::Result<InnerTube> {
-    let response = reqwest::get(url).await?;
-    let html = response.text().await?;
-
-    let video_id = extract_video_id(&html).ok_or_else(|| anyhow!("video_id not found"))?;
-    let api_key = extract_api_key(&html).ok_or_else(|| anyhow!("api_key not found"))?;
-    let is_replay = extract_replay(&html);
-    let client_version =
-        extract_client_version(&html).ok_or_else(|| anyhow!("client_version not found"))?;
-    let gl = extract_gl(&html).unwrap_or_default();
-    let hl = extract_hl(&html).unwrap_or_default();
-    let continuation =
-        extract_continuation(&html).ok_or_else(|| anyhow!("continuation not found"))?;
-
-    return Ok(InnerTube {
-        video_id,
-        api_key,
-        is_replay,
-        client_version,
-        gl,
-        hl,
-        continuation,
-    });
-}
-
-fn extract_video_id(html: &str) -> Option<VideoId> {
+pub fn extract_video_id(html: &str) -> Option<VideoId> {
     Regex::new(r#"<link rel="canonical" href="https:\/\/www.youtube.com\/watch\?v=(.+?)">"#)
         .unwrap()
         .captures(html)
@@ -68,29 +56,29 @@ fn extract_video_id(html: &str) -> Option<VideoId> {
         .map(|m| VideoId(m.as_str().to_string()))
 }
 
-fn extract_api_key(html: &str) -> Option<ApiKey> {
+pub fn extract_api_key(html: &str) -> Option<ApiKey> {
     Regex::new(r#"['"]INNERTUBE_API_KEY['"]:\s*['"](.+?)['"]"#)
         .unwrap()
         .captures(html)
         .and_then(|cap| cap.get(1))
-        .map(|m| ApiKey(m.as_str().to_string()))
+        .map(|m| ApiKey::new(m.as_str().to_string()))
 }
 
-fn extract_replay(html: &str) -> bool {
+pub fn extract_replay(html: &str) -> bool {
     Regex::new(r#"['"]isReplay['"]:\s*true"#)
         .unwrap()
         .is_match(html)
 }
 
-fn extract_client_version(html: &str) -> Option<ClientVersion> {
+pub fn extract_client_version(html: &str) -> Option<ClientVersion> {
     Regex::new(r#"['"]INNERTUBE_CLIENT_VERSION['"]:\s*['"](.+?)['"]"#)
         .unwrap()
         .captures(html)
         .and_then(|cap| cap.get(1))
-        .map(|m| ClientVersion(m.as_str().to_string()))
+        .map(|m| ClientVersion::new(m.as_str().to_string()))
 }
 
-fn extract_continuation(html: &str) -> Option<Continuation> {
+pub fn extract_continuation(html: &str) -> Option<Continuation> {
     Regex::new(r#"['"]continuation['"]:\s*['"](.+?)['"]"#)
         .unwrap()
         .captures(html)
@@ -114,19 +102,32 @@ fn extract_gl(html: &str) -> Option<String> {
         .map(|m| m.as_str().to_string())
 }
 
-#[derive(thiserror::Error, Debug)]
-pub enum GetLiveChatError {
-    #[error("Request failed")]
-    Request(#[from] reqwest::Error),
-    #[error("Failed to parse JSON")]
-    Parse(#[from] serde_json::Error),
-    #[error("Failed to convert Value to GetLiveChatResponse: {0}")]
-    FromValue(#[from] FromValueError),
+pub async fn fetch_live_chat_page(url: &str) -> Result<InnerTube> {
+    let response = reqwest::get(url).await?;
+    let html = response.text().await?;
+
+    let video_id = extract_video_id(&html).ok_or_else(|| anyhow::anyhow!("video_id not found"))?;
+    let api_key = extract_api_key(&html).ok_or_else(|| anyhow::anyhow!("api_key not found"))?;
+    let is_replay = extract_replay(&html);
+    let client_version =
+        extract_client_version(&html).ok_or_else(|| anyhow::anyhow!("client_version not found"))?;
+    let gl = extract_gl(&html).unwrap_or_default();
+    let hl = extract_hl(&html).unwrap_or_default();
+    let continuation =
+        extract_continuation(&html).ok_or_else(|| anyhow::anyhow!("continuation not found"))?;
+
+    Ok(InnerTube {
+        video_id,
+        api_key,
+        is_replay,
+        client_version,
+        gl,
+        hl,
+        continuation,
+    })
 }
 
-pub async fn fetch_live_chat_messages(
-    inner_tube: &InnerTube,
-) -> Result<GetLiveChatResponse, GetLiveChatError> {
+pub async fn fetch_live_chat_messages(inner_tube: &InnerTube) -> Result<serde_json::Value> {
     let url = format!(
         "https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?key={}",
         inner_tube.api_key
@@ -146,412 +147,11 @@ pub async fn fetch_live_chat_messages(
 
     let client = reqwest::Client::new();
     let res = client.post(&url).body(post_body).send().await?;
-    let value: serde_json::Value = serde_json::from_slice(&res.bytes().await?)?;
+    let value: serde_json::Value = res.json().await?;
 
-    let response = GetLiveChatResponse::from_get_live_chat(&value)?;
-
-    Ok(response)
+    Ok(value)
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error("Failed to convert value to {target}. error: {error:?}. value: {value:?}")]
-pub struct FromValueError {
-    pub target: String,
-    pub value: serde_json::Value,
-    #[source]
-    pub error: Option<anyhow::Error>,
-}
-
-impl FromValueError {
-    pub fn new(target: String, value: &serde_json::Value, error: Option<anyhow::Error>) -> Self {
-        Self {
-            target,
-            value: value.clone(),
-            error,
-        }
-    }
-}
-
-pub trait FromGetLiveChat: Sized {
-    fn from_get_live_chat(value: &serde_json::Value) -> Result<Self, FromValueError>;
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct GetLiveChatResponse {
-    // pub response_context: serde_json::Value, // ignore
-    #[serde(rename = "continuationContents")]
-    pub continuation_contents: ContinuationContents,
-}
-
-impl FromGetLiveChat for GetLiveChatResponse {
-    fn from_get_live_chat(
-        value: &serde_json::Value,
-    ) -> Result<GetLiveChatResponse, FromValueError> {
-        if let Some(v) = value.get("continuationContents") {
-            Ok(GetLiveChatResponse {
-                continuation_contents: ContinuationContents::from_get_live_chat(v)?,
-            })
-        } else {
-            Err(FromValueError::new(
-                "continuationContents".to_string(),
-                value,
-                None,
-            ))
-        }
-    }
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ContinuationContents {
-    pub live_chat_continuation: LiveChatContinuation,
-}
-
-impl FromGetLiveChat for ContinuationContents {
-    fn from_get_live_chat(
-        value: &serde_json::Value,
-    ) -> Result<ContinuationContents, FromValueError> {
-        if let Some(v) = value.get("liveChatContinuation") {
-            Ok(ContinuationContents {
-                live_chat_continuation: LiveChatContinuation::from_get_live_chat(v)?,
-            })
-        } else {
-            Err(FromValueError::new(
-                "liveChatContinuation".to_string(),
-                value,
-                None,
-            ))
-        }
-    }
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct LiveChatContinuation {
-    pub continuation: Continuation,
-    pub actions: Vec<Action>,
-}
-
-impl FromGetLiveChat for LiveChatContinuation {
-    fn from_get_live_chat(value: &serde_json::Value) -> Result<Self, FromValueError> {
-        let continuation = value
-            .pointer("/continuations/0")
-            .and_then(|v| {
-                v.get("invalidationContinuationData")
-                    .or_else(|| v.get("timedContinuationData"))
-                    .or_else(|| v.get("reloadContinuationData"))
-            })
-            .and_then(|v| {
-                let c = v.get("continuation")?.as_str()?;
-                Some(Continuation(c.to_string()))
-            });
-
-        let actions = value
-            .get("actions")
-            .and_then(|v| v.as_array())
-            .map(|actions| {
-                actions
-                    .iter()
-                    .map(|a| Action::from_get_live_chat(a))
-                    .collect::<Result<Vec<_>, _>>()
-            })
-            .unwrap_or_else(|| Ok(vec![]))?;
-
-        if let Some(continuation) = continuation {
-            Ok(LiveChatContinuation {
-                continuation,
-                actions,
-            })
-        } else {
-            Err(FromValueError::new(
-                "LiveChatContinuation".to_string(),
-                value,
-                None,
-            ))
-        }
-    }
-}
-
-#[derive(Debug, Clone, derive_more::Display, serde::Serialize, serde::Deserialize)]
-#[serde(transparent)]
-pub struct ClientId(pub String);
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum Action {
-    // 通常のチャットメッセージをどの様に表示するべきかという情報が入っている。
-    AddChatItem(AddChatItemAction),
-    // スパチャが来た時にチャット欄上部に表示されるやつ。どの様に表示するべきかという情報が入っている。
-    AddLiveChatTickerItem(serde_json::Value),
-    Unknown(serde_json::Value),
-}
-
-impl FromGetLiveChat for Action {
-    fn from_get_live_chat(value: &serde_json::Value) -> Result<Self, FromValueError> {
-        if let Some(v) = value.get("addChatItemAction") {
-            Ok(Action::AddChatItem(AddChatItemAction::from_get_live_chat(
-                v,
-            )?))
-        } else if let Some(v) = value.get("addLiveChatTickerItemAction") {
-            Ok(Action::AddLiveChatTickerItem(v.clone()))
-        } else {
-            Ok(Action::Unknown(value.clone()))
-        }
-    }
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AddChatItemAction {
-    pub item: ChatItem,
-    pub client_id: ClientId,
-}
-
-impl FromGetLiveChat for AddChatItemAction {
-    fn from_get_live_chat(value: &serde_json::Value) -> Result<Self, FromValueError> {
-        let v = value
-            .get("item")
-            .ok_or_else(|| FromValueError::new("addChatItemAction".to_string(), value, None))?;
-        let item = ChatItem::from_get_live_chat(&v)?;
-        let client_id = value
-            .get("clientId")
-            .and_then(|v| Some(v.as_str()?.to_string()))
-            .map(ClientId);
-
-        if let Some(client_id) = client_id {
-            Ok(AddChatItemAction { item, client_id })
-        } else {
-            Err(FromValueError::new(
-                "AddChatItemAction".to_string(),
-                value,
-                None,
-            ))
-        }
-    }
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum ChatItem {
-    // 通常のチャットメッセージ。
-    LiveChatTextMessage(LiveChatTextMessage),
-    // スーパーチャット
-    LiveChatPaidMessage(LiveChatPaidMessage),
-    // スーパースティッカー
-    LiveChatPaidSticker(serde_json::Value),
-    // メンバーシップ加入のお知らせ。
-    LiveChatMembershipItem(serde_json::Value),
-    // 不明。
-    LiveChatPlaceholderItem(serde_json::Value),
-    // 不明。
-    LiveChatSponsorshipsGiftPurchaseAnnouncement(serde_json::Value),
-    // 不明。
-    LiveChatSponsorshipsGiftRedemptionAnnouncement(serde_json::Value),
-    // コメビュ的にはたぶん不要。
-    LiveChatAutoModMessage(serde_json::Value),
-    // コメビュ的にはたぶん不要。
-    LiveChatModeChangeMessage(serde_json::Value),
-    // チャットを開いた時に出るyoutubeからの案内メッセージっぽい. コメビュ的には無視で良い。
-    LiveChatViewerEngagementMessage(serde_json::Value),
-    // 想定していないオブジェクト構造のデータが来るとこれになります。
-    Unknown(serde_json::Value),
-}
-
-impl FromGetLiveChat for ChatItem {
-    fn from_get_live_chat(value: &serde_json::Value) -> Result<Self, FromValueError> {
-        if let Some((key, value)) = value.as_object().and_then(|o| o.iter().next()) {
-            let renderer = match key.as_str() {
-                "liveChatTextMessageRenderer" => {
-                    ChatItem::LiveChatTextMessage(LiveChatTextMessage::from_get_live_chat(value)?)
-                }
-                "liveChatPaidMessageRenderer" => {
-                    ChatItem::LiveChatPaidMessage(LiveChatPaidMessage::from_get_live_chat(value)?)
-                }
-                "liveChatPaidStickerRenderer" => {
-                    // TODO
-                    ChatItem::LiveChatPaidSticker(value.clone())
-                }
-                "liveChatMembershipItemRenderer" => {
-                    // TODO
-                    ChatItem::LiveChatMembershipItem(value.clone())
-                }
-                "liveChatPlaceholderItemRenderer" => {
-                    // TODO
-                    ChatItem::LiveChatPlaceholderItem(value.clone())
-                }
-                "liveChatSponsorshipsGiftPurchaseAnnouncementRenderer" => {
-                    // TODO
-                    ChatItem::LiveChatSponsorshipsGiftPurchaseAnnouncement(value.clone())
-                }
-                "liveChatSponsorshipsGiftRedemptionAnnouncementRenderer" => {
-                    // TODO
-                    ChatItem::LiveChatSponsorshipsGiftRedemptionAnnouncement(value.clone())
-                }
-                "liveChatAutoModMessage" => {
-                    // コメビュ的にはたぶん不要
-                    ChatItem::LiveChatAutoModMessage(value.clone())
-                }
-                "liveChatModeChangeMessage" => {
-                    // コメビュ的にはたぶん不要
-                    ChatItem::LiveChatModeChangeMessage(value.clone())
-                }
-                "liveChatViewerEngagementMessageRenderer" => {
-                    ChatItem::LiveChatViewerEngagementMessage(value.clone())
-                }
-                _ => ChatItem::Unknown(value.clone()),
-            };
-
-            Ok(renderer)
-        } else {
-            Ok(ChatItem::Unknown(value.clone()))
-        }
-    }
-}
-
-#[derive(Debug, Clone, derive_more::Display, serde::Serialize, serde::Deserialize)]
-#[serde(transparent)]
-pub struct ExternalChannelId(pub String);
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct LiveChatTextMessage {
-    pub id: String,
-    pub runs: Vec<Run>,
-    pub author_name: AuthorName,
-}
-
-impl FromGetLiveChat for LiveChatTextMessage {
-    fn from_get_live_chat(value: &serde_json::Value) -> Result<Self, FromValueError> {
-        let runs = value
-            .pointer("/message/runs")
-            .and_then(|runs| runs.as_array())
-            .map(|runs| {
-                runs.iter()
-                    .map(|v| Run::from_get_live_chat(v).expect("no error"))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-
-        let author_name = value
-            .get("authorName")
-            .map(|v| AuthorName::from_get_live_chat(v))
-            .unwrap_or_else(|| Ok(AuthorName::SimpleText("".to_string())))?;
-
-        let id = value
-            .get("id")
-            .and_then(|v| Some(v.as_str()?.to_string()))
-            .unwrap_or_default();
-
-        Ok(LiveChatTextMessage {
-            id,
-            runs,
-            author_name,
-        })
-    }
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct LiveChatPaidMessage {
-    pub id: String,
-    pub runs: Vec<Run>,
-    pub author_name: AuthorName,
-}
-
-impl FromGetLiveChat for LiveChatPaidMessage {
-    fn from_get_live_chat(value: &serde_json::Value) -> Result<Self, FromValueError> {
-        let id = value
-            .get("id")
-            .and_then(|v| Some(v.as_str()?.to_string()))
-            .unwrap_or_default();
-
-        let runs = value
-            .pointer("/message/runs")
-            .and_then(|runs| runs.as_array())
-            .map(|runs| {
-                runs.iter()
-                    .map(|v| Run::from_get_live_chat(v))
-                    .collect::<Result<Vec<_>, _>>()
-            })
-            .unwrap_or_else(|| Ok(vec![]))?;
-
-        let author_name = value
-            .get("authorName")
-            .map(|v| AuthorName::from_get_live_chat(v))
-            .unwrap_or_else(|| Ok(AuthorName::SimpleText("不明なユーザー".to_string())))?;
-
-        Ok(LiveChatPaidMessage {
-            id,
-            runs,
-            author_name,
-        })
-    }
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum AuthorName {
-    SimpleText(String),
-    Unknown(serde_json::Value),
-}
-
-impl FromGetLiveChat for AuthorName {
-    fn from_get_live_chat(value: &serde_json::Value) -> Result<Self, FromValueError> {
-        return if let Some(simple_text) = value.get("simpleText") {
-            Ok(AuthorName::SimpleText(
-                simple_text
-                    .as_str()
-                    .map(|s| s.to_string())
-                    .unwrap_or_default(),
-            ))
-        } else {
-            Ok(AuthorName::Unknown(value.clone()))
-        };
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Message {
-    pub runs: Vec<Run>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum Run {
-    Text(String),
-    Emoji(String),
-    Unknown(serde_json::Value),
-}
-
-impl Default for Run {
-    fn default() -> Self {
-        Run::Text("".to_string())
-    }
-}
-
-impl FromGetLiveChat for Run {
-    fn from_get_live_chat(value: &serde_json::Value) -> Result<Self, FromValueError> {
-        if let Some(text) = value.get("text") {
-            return Ok(Run::Text(
-                text.as_str().map(|s| s.to_string()).unwrap_or_default(),
-            ));
-        }
-
-        if let Some(emoji) = value.get("emoji") {
-            // return Run::Emoji(emoji.as_str().map(|s| s.to_string()).unwrap_or_default());
-            return Ok(Run::Emoji("まだ実装してないよ".to_string()));
-        }
-
-        Ok(Run::Unknown(value.clone()))
-    }
-}
-
-/*
-
-パースエラーの扱い
-- エラーにする
-  - エラーだとそれ以上の処理が不可能
-- Unknownでタグ付けして無視前提の値とする
-- Eitherでパース成功と失敗の共存をする
-  - Resultでもいいけど意味合いとしてはEitherの方が良い。
-
-*/
-
-// video_idはYouTubeのビデオIDで、YouTubeのURLに含まれています。
-// 例えば、"https://www.youtube.com/watch?v=dQw4w9WgXcQ" のURLの場合、
-// video_idは "dQw4w9WgXcQ" になります。
-// このIDを使用して、YouTube APIからライブチャットIDを取得します。
 pub async fn fetch_live_chat_id(api_key: &str, video_id: &str) -> Result<String, FetchError> {
     let url = format!(
         "https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails&id={}&key={}",
@@ -567,7 +167,7 @@ pub async fn fetch_live_chat_id(api_key: &str, video_id: &str) -> Result<String,
         .get("items")
         .and_then(|v| {
             v.as_array()?
-                .get(0)?
+                .first()?
                 .get("liveStreamingDetails")?
                 .get("activeLiveChatId")?
                 .as_str()
@@ -589,4 +189,171 @@ pub async fn fetch_comments(api_key: &str, live_chat_id: &str) -> Result<String,
     let text = res.text().await?;
 
     Ok(text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_video_id_creation_and_display() {
+        let video_id = VideoId("dQw4w9WgXcQ".to_string());
+        assert_eq!(video_id.0, "dQw4w9WgXcQ");
+        assert_eq!(format!("{}", video_id), "dQw4w9WgXcQ");
+    }
+
+    #[test]
+    fn test_api_key_creation_and_display() {
+        let api_key = ApiKey("test_api_key_123".to_string());
+        assert_eq!(api_key.0, "test_api_key_123");
+        assert_eq!(format!("{}", api_key), "test_api_key_123");
+    }
+
+    #[test]
+    fn test_client_version_creation_and_display() {
+        let client_version = ClientVersion("2.20240101.01.00".to_string());
+        assert_eq!(client_version.0, "2.20240101.01.00");
+        assert_eq!(format!("{}", client_version), "2.20240101.01.00");
+    }
+
+    #[test]
+    fn test_continuation_creation_and_display() {
+        let continuation = Continuation("test_continuation_token".to_string());
+        assert_eq!(continuation.0, "test_continuation_token");
+        assert_eq!(format!("{}", continuation), "test_continuation_token");
+    }
+
+    #[test]
+    fn test_continuation_serialization() {
+        let continuation = Continuation("test_token".to_string());
+        let serialized = serde_json::to_string(&continuation).unwrap();
+        assert_eq!(serialized, "\"test_token\"");
+
+        let deserialized: Continuation = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized.0, "test_token");
+    }
+
+    #[test]
+    fn test_inner_tube_creation() {
+        let inner_tube = InnerTube {
+            video_id: VideoId("test_video".to_string()),
+            api_key: ApiKey("test_key".to_string()),
+            is_replay: true,
+            client_version: ClientVersion("2.0".to_string()),
+            gl: "JP".to_string(),
+            hl: "ja".to_string(),
+            continuation: Continuation("test_continuation".to_string()),
+        };
+
+        assert_eq!(inner_tube.video_id.0, "test_video");
+        assert_eq!(inner_tube.api_key.0, "test_key");
+        assert!(inner_tube.is_replay);
+        assert_eq!(inner_tube.client_version.0, "2.0");
+        assert_eq!(inner_tube.gl, "JP");
+        assert_eq!(inner_tube.hl, "ja");
+        assert_eq!(inner_tube.continuation.0, "test_continuation");
+    }
+
+    #[test]
+    fn test_extract_video_id() {
+        let html = r#"<link rel="canonical" href="https://www.youtube.com/watch?v=dQw4w9WgXcQ">"#;
+        let video_id = extract_video_id(html);
+        assert!(video_id.is_some());
+        assert_eq!(video_id.unwrap().0, "dQw4w9WgXcQ");
+    }
+
+    #[test]
+    fn test_extract_video_id_not_found() {
+        let html = r#"<link rel="canonical" href="https://example.com">"#;
+        let video_id = extract_video_id(html);
+        assert!(video_id.is_none());
+    }
+
+    #[test]
+    fn test_extract_api_key() {
+        let html = r#""INNERTUBE_API_KEY": "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8""#;
+        let api_key = extract_api_key(html);
+        assert!(api_key.is_some());
+        assert_eq!(
+            api_key.unwrap().0,
+            "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8"
+        );
+    }
+
+    #[test]
+    fn test_extract_api_key_not_found() {
+        let html = r#"<html><body>No API key here</body></html>"#;
+        let api_key = extract_api_key(html);
+        assert!(api_key.is_none());
+    }
+
+    #[test]
+    fn test_extract_replay_true() {
+        let html = r#""isReplay": true"#;
+        let is_replay = extract_replay(html);
+        assert!(is_replay);
+    }
+
+    #[test]
+    fn test_extract_replay_false() {
+        let html = r#""isReplay": false"#;
+        let is_replay = extract_replay(html);
+        assert!(!is_replay);
+    }
+
+    #[test]
+    fn test_extract_replay_not_found() {
+        let html = r#"<html><body>No replay info</body></html>"#;
+        let is_replay = extract_replay(html);
+        assert!(!is_replay);
+    }
+
+    #[test]
+    fn test_extract_client_version() {
+        let html = r#""INNERTUBE_CLIENT_VERSION": "2.20240101.01.00""#;
+        let client_version = extract_client_version(html);
+        assert!(client_version.is_some());
+        assert_eq!(client_version.unwrap().0, "2.20240101.01.00");
+    }
+
+    #[test]
+    fn test_extract_continuation() {
+        let html = r#""continuation": "0ofMyANBElJDaWtnNVFnPT0%3D""#;
+        let continuation = extract_continuation(html);
+        assert!(continuation.is_some());
+        assert_eq!(continuation.unwrap().0, "0ofMyANBElJDaWtnNVFnPT0%3D");
+    }
+
+    #[test]
+    fn test_extract_hl() {
+        let html = r#""hl": "en""#;
+        let hl = extract_hl(html);
+        assert!(hl.is_some());
+        assert_eq!(hl.unwrap(), "en");
+    }
+
+    #[test]
+    fn test_extract_gl() {
+        let html = r#""gl": "US""#;
+        let gl = extract_gl(html);
+        assert!(gl.is_some());
+        assert_eq!(gl.unwrap(), "US");
+    }
+
+    #[test]
+    fn test_fetch_error_display() {
+        let error = FetchError::NotFound;
+        assert_eq!(format!("{}", error), "Live chat ID not found");
+    }
+
+    #[test]
+    fn test_fetch_error_from_serde_json() {
+        let json_error = serde_json::from_str::<serde_json::Value>("invalid json").unwrap_err();
+        let fetch_error: FetchError = json_error.into();
+
+        match fetch_error {
+            FetchError::Parse(_) => {} // Expected
+            _ => panic!("Expected Parse error"),
+        }
+    }
 }
