@@ -230,16 +230,39 @@ fn ChatMonitorContent(
                 class: "content-header",
                 style: "margin-bottom: 20px; flex-shrink: 0;",
 
-                h2 {
-                    style: "
-                        font-size: 24px;
-                        color: #333;
-                        margin: 0 0 8px 0;
-                        display: flex;
-                        align-items: center;
-                        gap: 12px;
-                    ",
-                    "💬 Live Chat Monitor"
+                div {
+                    style: "display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;",
+
+                    h2 {
+                        style: "
+                            font-size: 24px;
+                            color: #333;
+                            margin: 0;
+                            display: flex;
+                            align-items: center;
+                            gap: 12px;
+                        ",
+                        "💬 Live Chat Monitor"
+                    }
+
+                    // リアルタイム統計ボタン（ヘッダーから移動）
+                    button {
+                        style: "
+                            padding: 6px 12px;
+                            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                            color: white;
+                            border: none;
+                            border-radius: 8px;
+                            font-size: 12px;
+                            cursor: pointer;
+                            transition: all 0.3s ease;
+                            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                        ",
+                        onclick: move |_| {
+                            tracing::info!("🔄 Real-time Analytics button clicked");
+                        },
+                        "📊 Real-time Analytics"
+                    }
                 }
 
                 p {
