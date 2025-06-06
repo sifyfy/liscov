@@ -416,6 +416,7 @@ mod tests {
             channel_id: "test123".to_string(),
             content: "Thank you!".to_string(),
             metadata: None,
+            is_member: false,
         };
 
         analytics.update_from_message(&super_chat_msg);
@@ -437,6 +438,7 @@ mod tests {
             channel_id: "user1".to_string(),
             content: "Thanks!".to_string(),
             metadata: None,
+            is_member: false,
         };
 
         let msg2 = GuiChatMessage {
@@ -448,6 +450,7 @@ mod tests {
             channel_id: "user2".to_string(),
             content: "Great stream!".to_string(),
             metadata: None,
+            is_member: false,
         };
 
         analytics.update_from_message(&msg1);
@@ -470,6 +473,7 @@ mod tests {
             channel_id: "member123".to_string(),
             content: "New member!".to_string(),
             metadata: None,
+            is_member: true,
         };
 
         analytics.update_from_message(&membership_msg);
@@ -490,6 +494,7 @@ mod tests {
             channel_id: "test123".to_string(),
             content: "Thank you!".to_string(),
             metadata: None,
+            is_member: false,
         };
 
         analytics.update_from_message(&super_chat_msg);

@@ -358,6 +358,11 @@ impl MessageFilter {
         })
     }
 
+    /// リンクが含まれているかどうかを判定
+    fn contains_link(&self, content: &str) -> bool {
+        content.contains("http://") || content.contains("https://") || content.contains("www.")
+    }
+
     /// フィルター適用してメッセージリストを取得
     pub fn filter_messages(&self, messages: &[GuiChatMessage]) -> Vec<GuiChatMessage> {
         messages
@@ -719,18 +724,18 @@ mod tests {
         let filter = MessageFilter::new();
 
         // 質問文
-        assert!(filter.looks_like_question("これはどうやって使うんですか？"));
-        assert!(filter.looks_like_question("何時からですか?"));
-        assert!(filter.looks_like_question("教えてください"));
-        assert!(filter.looks_like_question("わからないです"));
-        assert!(filter.looks_like_question("いつ始まりますか？"));
-        assert!(filter.looks_like_question("どこで買えますか？"));
-        assert!(filter.looks_like_question("なぜですか？"));
+        assert!(filter.looks_like_question_fast("これはどうやって使うんですか？"));
+        assert!(filter.looks_like_question_fast("何時からですか?"));
+        assert!(filter.looks_like_question_fast("教えてください"));
+        assert!(filter.looks_like_question_fast("わからないです"));
+        assert!(filter.looks_like_question_fast("いつ始まりますか？"));
+        assert!(filter.looks_like_question_fast("どこで買えますか？"));
+        assert!(filter.looks_like_question_fast("なぜですか？"));
 
         // 質問ではない文
-        assert!(!filter.looks_like_question("ありがとうございます"));
-        assert!(!filter.looks_like_question("こんにちは"));
-        assert!(!filter.looks_like_question("良い配信でした"));
+        assert!(!filter.looks_like_question_fast("ありがとうございます"));
+        assert!(!filter.looks_like_question_fast("こんにちは"));
+        assert!(!filter.looks_like_question_fast("良い配信でした"));
     }
 
     #[test]
@@ -738,12 +743,12 @@ mod tests {
         let filter = MessageFilter::new();
 
         // 絵文字メッセージ（短い）
-        assert!(filter.is_mostly_emoji("😀"));
-        assert!(filter.is_mostly_emoji("🎉"));
+        assert!(filter.is_mostly_emoji_fast("😀"));
+        assert!(filter.is_mostly_emoji_fast("🎉"));
 
         // 長いメッセージは絵文字判定しない
-        assert!(!filter.is_mostly_emoji("Hello 😀 world"));
-        assert!(!filter.is_mostly_emoji("こんにちは"));
+        assert!(!filter.is_mostly_emoji_fast("Hello 😀 world"));
+        assert!(!filter.is_mostly_emoji_fast("こんにちは"));
     }
 
     #[test]
