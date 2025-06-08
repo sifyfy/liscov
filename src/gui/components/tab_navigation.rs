@@ -194,6 +194,22 @@ pub fn TabContent(
                 }
             }
         },
+
+        ActiveTab::Settings => rsx! {
+            div {
+                class: "tab-content settings",
+                style: "
+                    padding: 20px;
+                    background: #fff;
+                    border-radius: 12px;
+                    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+                    height: 100%;
+                    overflow-y: auto;
+                ",
+
+                SettingsContent {}
+            }
+        },
     }
 }
 
@@ -644,6 +660,387 @@ fn DataExportContent(live_chat_handle: crate::gui::hooks::LiveChatHandle) -> Ele
 
             // エクスポートパネルコンポーネントを統合
             crate::gui::components::ExportPanel {}
+        }
+    }
+}
+
+/// 設定画面コンテンツ
+#[component]
+fn SettingsContent() -> Element {
+    let mut app_state = use_context::<Signal<crate::gui::models::AppState>>();
+
+    rsx! {
+        div {
+            class: "settings-content",
+
+            // ヘッダー
+            div {
+                class: "content-header",
+                style: "margin-bottom: 30px;",
+
+                h2 {
+                    style: "
+                        font-size: 28px;
+                        color: #333;
+                        margin: 0 0 8px 0;
+                        display: flex;
+                        align-items: center;
+                        gap: 12px;
+                    ",
+                    "⚙️ Settings"
+                }
+
+                p {
+                    style: "
+                        color: #666;
+                        margin: 0;
+                        font-size: 16px;
+                    ",
+                    "Configure application settings and preferences."
+                }
+            }
+
+            // 設定ファイル情報
+            div {
+                style: "
+                    background: #f8f9fa;
+                    border: 1px solid #e9ecef;
+                    border-radius: 8px;
+                    padding: 16px;
+                    margin-bottom: 20px;
+                ",
+
+                div {
+                    style: "
+                        display: flex;
+                        align-items: center;
+                        justify-content: space-between;
+                        margin-bottom: 12px;
+                    ",
+
+                    h3 {
+                        style: "margin: 0; color: #495057;",
+                        "📁 設定ファイル"
+                    }
+
+                    div {
+                        style: "display: flex; gap: 8px;",
+
+                        button {
+                            style: "
+                                padding: 6px 12px;
+                                background: #28a745;
+                                color: white;
+                                border: none;
+                                border-radius: 4px;
+                                cursor: pointer;
+                                font-size: 13px;
+                                transition: background-color 0.2s;
+                            ",
+                            onclick: move |_| {
+                                let state = app_state.read().clone();
+                                use crate::gui::config_manager::save_app_state_async;
+                                save_app_state_async(state);
+                                tracing::info!("💾 Manual config save requested");
+                            },
+                            "💾 保存"
+                        }
+
+                        button {
+                            style: "
+                                padding: 6px 12px;
+                                background: #ffc107;
+                                color: #333;
+                                border: none;
+                                border-radius: 4px;
+                                cursor: pointer;
+                                font-size: 13px;
+                                transition: background-color 0.2s;
+                            ",
+                            onclick: move |_| {
+                                use crate::gui::config_manager::get_config_manager;
+                                let config_manager = get_config_manager();
+                                if let Ok(manager_guard) = config_manager.lock() {
+                                    if let Err(e) = manager_guard.reset_config() {
+                                        tracing::error!("❌ Failed to reset config: {}", e);
+                                    } else {
+                                        tracing::info!("🔄 Configuration reset to defaults");
+                                        // AppStateをデフォルトにリセット
+                                        let mut state = app_state.write();
+                                        *state = crate::gui::models::AppState::default();
+                                    }
+                                }
+                            },
+                            "🔄 リセット"
+                        }
+                    }
+                }
+
+                div {
+                    style: "
+                        font-size: 13px;
+                        color: #6c757d;
+                        font-family: 'Courier New', monospace;
+                        background: white;
+                        padding: 8px;
+                        border-radius: 4px;
+                        border: 1px solid #dee2e6;
+                        word-break: break-all;
+                    ",
+                    {
+                        // 設定ファイルパスを表示
+                        use crate::gui::config_manager::get_config_manager;
+                        let path = if let Ok(manager_guard) = get_config_manager().lock() {
+                            manager_guard.get_config_file_path().display().to_string()
+                        } else {
+                            "設定ファイルパスを取得できませんでした".to_string()
+                        };
+                        format!("📍 {}", path)
+                    }
+                }
+            }
+
+            // 自動保存設定
+            AutoSaveSettings {}
+
+            // 生レスポンス保存設定
+            crate::gui::components::raw_response_settings::RawResponseSettings {}
+
+            // 自動保存に関する説明
+            div {
+                style: "
+                    background: #e3f2fd;
+                    border: 1px solid #bbdefb;
+                    border-radius: 8px;
+                    padding: 16px;
+                    margin-top: 20px;
+                ",
+
+                h4 {
+                    style: "
+                        margin: 0 0 8px 0;
+                        color: #1976d2;
+                        display: flex;
+                        align-items: center;
+                        gap: 8px;
+                    ",
+                    "💡 自動保存について"
+                }
+
+                ul {
+                    style: "
+                        margin: 0;
+                        padding-left: 20px;
+                        color: #1565c0;
+                        line-height: 1.5;
+                    ",
+                    li { "自動保存は上記の設定で有効・無効を切り替えできます" }
+                    li { "有効にすると、チャットメッセージがリアルタイムで指定ファイルに保存されます" }
+                    li { "無効の場合、メッセージはメモリ内のみで管理され、エクスポート機能で保存できます" }
+                    li { "設定はアプリケーション終了時に自動的に保存されます" }
+                }
+            }
+        }
+    }
+}
+
+/// 自動保存設定コンポーネント
+#[component]
+fn AutoSaveSettings() -> Element {
+    let mut app_state = use_context::<Signal<crate::gui::models::AppState>>();
+    let current_state = app_state.read();
+
+    // 現在の設定値を状態として管理
+    let mut auto_save_enabled = use_signal(|| current_state.auto_save_enabled);
+    let mut output_file = use_signal(|| current_state.output_file.clone());
+
+    rsx! {
+        div {
+            style: "
+                background: #f8f9fa;
+                border: 1px solid #e9ecef;
+                border-radius: 8px;
+                padding: 16px;
+                margin-bottom: 20px;
+            ",
+
+            h3 {
+                style: "
+                    margin: 0 0 16px 0;
+                    color: #495057;
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                ",
+                "📁 自動保存設定"
+            }
+
+            // 自動保存のオン・オフ
+            div {
+                style: "margin-bottom: 16px;",
+                label {
+                    style: "
+                        display: flex;
+                        align-items: center;
+                        gap: 8px;
+                        font-weight: 500;
+                        color: #2d3748;
+                        cursor: pointer;
+                        font-size: 14px;
+                    ",
+                    input {
+                        r#type: "checkbox",
+                        checked: auto_save_enabled(),
+                        onchange: move |event| {
+                            let enabled = event.value().parse::<bool>().unwrap_or(false);
+                            auto_save_enabled.set(enabled);
+
+                            // AppStateを更新
+                            let mut state = app_state.write();
+                            state.auto_save_enabled = enabled;
+
+                            // 設定を永続化
+                            use crate::gui::config_manager::save_app_state_async;
+                            save_app_state_async(state.clone());
+
+                            tracing::info!("💾 Auto save setting changed: {}", enabled);
+                        }
+                    }
+                    "自動保存を有効化"
+                }
+
+                div {
+                    style: "
+                        color: #6c757d;
+                        font-size: 12px;
+                        margin-left: 24px;
+                        margin-top: 4px;
+                    ",
+                    "有効にすると、チャットメッセージがリアルタイムで指定ファイルに保存されます"
+                }
+            }
+
+                        // 出力ファイル設定（自動保存が有効な場合のみ表示）
+            if auto_save_enabled() {
+                div {
+                    label {
+                        style: "
+                            display: block;
+                            margin-bottom: 4px;
+                            font-weight: 500;
+                            color: #495057;
+                            font-size: 14px;
+                        ",
+                        "出力ファイルパス:"
+                    }
+
+                    div {
+                        style: "
+                            display: flex;
+                            gap: 8px;
+                            align-items: center;
+                        ",
+
+                        input {
+                            style: "
+                                flex: 1;
+                                padding: 8px 12px;
+                                border: 1px solid #ced4da;
+                                border-radius: 4px;
+                                font-size: 14px;
+                                background: white;
+                                box-sizing: border-box;
+                            ",
+                            r#type: "text",
+                            value: "{output_file}",
+                            placeholder: "live_chat.ndjson",
+                            oninput: move |event| {
+                                let new_path = event.value();
+                                output_file.set(new_path.clone());
+
+                                // AppStateも更新
+                                let mut state = app_state.write();
+                                state.output_file = new_path;
+
+                                // 設定を永続化
+                                use crate::gui::config_manager::save_app_state_async;
+                                save_app_state_async(state.clone());
+                            }
+                        }
+
+                        button {
+                            style: "
+                                padding: 8px 16px;
+                                background: #007bff;
+                                color: white;
+                                border: none;
+                                border-radius: 4px;
+                                cursor: pointer;
+                                font-size: 14px;
+                                white-space: nowrap;
+                                transition: background-color 0.2s;
+                            ",
+                                                        onclick: move |_| {
+                                // ファイル保存ダイアログを開く
+                                let mut output_file_clone = output_file.clone();
+                                let mut app_state_clone = app_state.clone();
+
+                                // 現在のファイル名を取得
+                                let current_filename = output_file_clone.read().to_string();
+
+                                wasm_bindgen_futures::spawn_local(async move {
+                                    use rfd::AsyncFileDialog;
+
+                                    if let Some(file_handle) = AsyncFileDialog::new()
+                                        .set_title("保存ファイルを選択")
+                                        .add_filter("NDJSON", &["ndjson", "jsonl"])
+                                        .add_filter("JSON", &["json"])
+                                        .add_filter("すべてのファイル", &["*"])
+                                        .set_file_name(&current_filename)
+                                        .save_file()
+                                        .await
+                                    {
+                                        let path = file_handle.path().to_string_lossy().to_string();
+                                        output_file_clone.set(path.clone());
+
+                                        // AppStateも更新
+                                        let mut state = app_state_clone.write();
+                                        state.output_file = path;
+
+                                        // 設定を永続化
+                                        use crate::gui::config_manager::save_app_state_async;
+                                        save_app_state_async(state.clone());
+
+                                        tracing::info!("📁 Output file path selected: {}", state.output_file);
+                                    }
+                                });
+                            },
+                            "📁 参照"
+                        }
+                    }
+
+                    div {
+                        style: "
+                            color: #6c757d;
+                            font-size: 12px;
+                            margin-top: 4px;
+                        ",
+                        "💡 チャットメッセージがndjson形式で保存されます"
+                    }
+                }
+            } else {
+                div {
+                    style: "
+                        background: #fff3cd;
+                        border: 1px solid #ffeaa7;
+                        border-radius: 4px;
+                        padding: 12px;
+                        color: #856404;
+                        font-size: 13px;
+                    ",
+                    "自動保存が無効です。メッセージはメモリ内のみで管理され、エクスポート機能で保存できます。"
+                }
+            }
         }
     }
 }

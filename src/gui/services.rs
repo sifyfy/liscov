@@ -1,7 +1,7 @@
 // ライブチャットサービス層
 // Phase 2で実装予定
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use tokio::sync::{mpsc, Mutex as TokioMutex};
 
 use super::models::GuiChatMessage;
@@ -10,6 +10,8 @@ use crate::api::innertube::{
 };
 use crate::api::youtube::Continuation;
 use crate::get_live_chat::Action;
+use crate::io::{RawResponseSaver, SaveConfig};
+use tracing;
 
 /// 一時的にグローバル状態機能を無効化
 // use crate::gui::hooks::{ChatStats, GlobalLiveChatState, GLOBAL_LIVE_CHAT};
@@ -31,6 +33,7 @@ pub struct LiveChatService {
     state: Arc<TokioMutex<ServiceState>>,
     shutdown_sender: Option<mpsc::UnboundedSender<()>>,
     output_file: Arc<TokioMutex<Option<String>>>,
+    response_saver: Arc<TokioMutex<RawResponseSaver>>,
     last_url: Option<String>,
 }
 
@@ -41,6 +44,9 @@ impl LiveChatService {
             state: Arc::new(TokioMutex::new(ServiceState::Idle)),
             shutdown_sender: None,
             output_file: Arc::new(TokioMutex::new(None)),
+            response_saver: Arc::new(TokioMutex::new(
+                RawResponseSaver::new(SaveConfig::default()),
+            )),
             last_url: None,
         }
     }
@@ -237,6 +243,46 @@ impl LiveChatService {
         state.clone()
     }
 
+    /// レスポンス保存設定を更新
+    pub async fn update_save_config(&self, config: SaveConfig) {
+        tracing::info!(
+            "🔧 Updating save config: enabled={}, file_path={}, max_size_mb={}",
+            config.enabled,
+            config.file_path,
+            config.max_file_size_mb
+        );
+
+        let mut saver = self.response_saver.lock().await;
+        let old_config = saver.get_config().clone();
+        saver.update_config(config.clone());
+
+        tracing::info!(
+            "✅ Raw response save config updated: {} -> {}",
+            if old_config.enabled {
+                "enabled"
+            } else {
+                "disabled"
+            },
+            if config.enabled {
+                "enabled"
+            } else {
+                "disabled"
+            }
+        );
+    }
+
+    /// 現在の保存設定を取得
+    pub async fn get_save_config(&self) -> SaveConfig {
+        let saver = self.response_saver.lock().await;
+        saver.get_config().clone()
+    }
+
+    /// 保存されたレスポンス数を取得
+    pub async fn get_saved_response_count(&self) -> anyhow::Result<usize> {
+        let saver = self.response_saver.lock().await;
+        saver.get_saved_response_count().await
+    }
+
     /// グローバル状態に直接メッセージを送信するバックグラウンドタスク
     async fn spawn_global_message_receiver_task(
         &self,
@@ -245,6 +291,7 @@ impl LiveChatService {
         let inner_tube = Arc::clone(&self.inner_tube);
         let state = Arc::clone(&self.state);
         let output_file = Arc::clone(&self.output_file);
+        let response_saver = Arc::clone(&self.response_saver);
 
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(2));
@@ -318,8 +365,8 @@ impl LiveChatService {
                                             // ChatItemをGuiChatMessageに変換
                                             let gui_message: GuiChatMessage = chat_item.clone().into();
 
-                                            // 新しいメッセージは必ずログ出力
-                                            tracing::info!("📝 New message: {} - {}", gui_message.author, gui_message.content);
+                                            // 新しいメッセージのログをdebugレベルに変更
+                                            tracing::debug!("📝 New message: {} - {}", gui_message.author, gui_message.content);
 
                                             // グローバル状態に直接メッセージを追加
                                             Self::add_message_to_global_state(gui_message.clone(), &start_time);
@@ -328,16 +375,47 @@ impl LiveChatService {
                                             use crate::gui::state_management::{get_state_manager, AppEvent};
                                             let _ = get_state_manager().send_event(AppEvent::MessageAdded(gui_message.clone()));
 
-                                            // ファイルに保存（オプション）
+                                            // ファイルに保存（オプション・自動保存設定に基づく）
                                             let file_path = output_file.lock().await;
                                             if let Some(ref path) = *file_path {
-                                                if let Err(e) = Self::save_message_to_file(path, &gui_message).await {
-                                                    tracing::error!("❌ Failed to save message to file: {}", e);
+                                                                                                // 設定管理から自動保存設定を確認
+                                                use crate::gui::config_manager::get_current_config;
+                                                let should_auto_save = if let Some(config) = get_current_config() {
+                                                    config.auto_save_enabled
+                                                } else {
+                                                    // 設定が取得できない場合は、出力ファイルが指定されていれば保存
+                                                    true
+                                                };
+
+                                                if should_auto_save {
+                                                    if let Err(e) = Self::save_message_to_file(path, &gui_message).await {
+                                                        tracing::error!("❌ Failed to save message to file: {}", e);
+                                                    } else {
+                                                        tracing::debug!("💾 Message auto-saved to: {}", path);
+                                                    }
+                                                } else {
+                                                    tracing::debug!("⏭️ Auto save disabled, skipping file save");
                                                 }
                                             }
                                         } else if should_log_request {
                                             tracing::debug!("🔄 Non-message action received: {:?}", std::mem::discriminant(action));
                                         }
+                                    }
+
+                                                                        // 生レスポンスの保存
+                                    let saver = response_saver.lock().await;
+                                    let is_enabled = saver.is_enabled();
+                                    let config = saver.get_config();
+
+                                    // 保存処理のログは常に出力（デバッグ用）
+                                    tracing::info!("💾 Raw response save attempt: enabled={}, file_path={}", is_enabled, config.file_path);
+
+                                    if let Err(e) = saver.save_response(&response).await {
+                                        tracing::warn!("❌ Failed to save raw response: {}", e);
+                                    } else if is_enabled {
+                                        tracing::info!("💾 Raw response saved successfully to: {}", config.file_path);
+                                    } else {
+                                        tracing::debug!("💾 Raw response save skipped (disabled)");
                                     }
                                 }
                                 Err(e) => {
@@ -400,4 +478,15 @@ impl Default for LiveChatService {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// グローバルライブチャットサービスインスタンス
+pub static GLOBAL_SERVICE: OnceLock<Arc<TokioMutex<LiveChatService>>> = OnceLock::new();
+
+/// グローバルサービスを取得（遅延初期化）
+pub fn get_global_service() -> &'static Arc<TokioMutex<LiveChatService>> {
+    GLOBAL_SERVICE.get_or_init(|| {
+        tracing::debug!("🏗️ Creating global live chat service");
+        Arc::new(TokioMutex::new(LiveChatService::new()))
+    })
 }

@@ -65,41 +65,23 @@ impl DebugLevel {
     }
 }
 
-/// 環境に応じたログ初期化（軽量版）
+/// 強化されたログ初期化
 pub fn init_logging() -> anyhow::Result<()> {
-    // RUST_LOG環境変数を最優先で使用
-    let env_filter = if let Ok(rust_log) = std::env::var("RUST_LOG") {
-        // RUST_LOG環境変数が設定されている場合はそれを使用
-        EnvFilter::try_new(rust_log)?
-    } else {
-        // RUST_LOG環境変数が設定されていない場合のみ独自の設定を使用
-        let debug_level = std::env::var("LISCOV_DEBUG_LEVEL").unwrap_or_else(|_| {
-            if cfg!(debug_assertions) {
-                "info" // デバッグ版でもinfoレベルに軽量化
-            } else {
-                "warn" // リリース版はwarnレベルに軽量化
-            }
-            .to_string()
-        });
+    let env_filter = EnvFilter::try_from_default_env()
+        .or_else(|_| EnvFilter::try_new("info"))
+        .unwrap();
 
-        EnvFilter::try_new(format!(
-            "liscov={},tokio=warn,hyper=warn,reqwest=warn", // すべてのライブラリのログを削減
-            debug_level
-        ))?
-    };
+    let subscriber = tracing_subscriber::registry().with(env_filter).with(
+        tracing_subscriber::fmt::layer()
+            .with_target(false)
+            .with_thread_ids(false)
+            .with_file(false)
+            .with_line_number(false)
+            .compact(),
+    );
 
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_target(false) // ターゲット情報を削除してI/O負荷軽減
-                .with_thread_ids(false) // スレッドID出力を削除してI/O負荷軽減
-                .with_file(false) // ファイル名出力を削除してI/O負荷軽減
-                .with_line_number(false), // 行番号出力を削除してI/O負荷軽減
-        )
-        .with(env_filter)
-        .init();
+    subscriber.try_init()?;
 
-    // 起動時のログも削減
     Ok(())
 }
 
@@ -244,7 +226,7 @@ pub fn log_file_operation(
     }
 }
 
-/// 設定値のデバッグダンプ
+/// アプリケーション状態のダンプ（デバッグ用）
 pub fn dump_app_state(state: &crate::gui::models::AppState) {
     debug!(
         url = %state.url,
@@ -255,6 +237,86 @@ pub fn dump_app_state(state: &crate::gui::models::AppState) {
         messages_in_memory = state.messages.len(),
         "📊 App state dump"
     );
+}
+
+/// デスクトップサイズを取得（Tao/DioxusのEventLoopを使用）
+pub fn get_primary_monitor_size() -> Option<(u32, u32)> {
+    // Tao EventLoopを作成してモニター情報を取得
+    let event_loop = dioxus::desktop::tao::event_loop::EventLoop::new();
+    if let Some(monitor) = event_loop.primary_monitor() {
+        let size = monitor.size();
+        Some((size.width, size.height))
+    } else {
+        None
+    }
+}
+
+/// 利用可能な全モニターのサイズを取得
+pub fn get_available_monitors_bounds() -> Vec<(i32, i32, u32, u32)> {
+    let event_loop = dioxus::desktop::tao::event_loop::EventLoop::new();
+    event_loop
+        .available_monitors()
+        .map(|monitor| {
+            let position = monitor.position();
+            let size = monitor.size();
+            (position.x, position.y, size.width, size.height)
+        })
+        .collect()
+}
+
+/// ウィンドウ位置がデスクトップ範囲内にあるかチェック
+pub fn validate_window_bounds(config: &mut crate::gui::config_manager::WindowConfig) {
+    // Taoを使用してモニター情報を取得（より統一的なアプローチ）
+    if let Some((primary_width, primary_height)) = get_primary_monitor_size() {
+        // プライマリモニターサイズを使用して検証
+        let screen_width = primary_width;
+        let screen_height = primary_height;
+
+        // ウィンドウがスクリーン範囲外にある場合は調整
+        if config.x < 0 || config.x > (screen_width as i32) - (config.width as i32) {
+            config.x = 100;
+        }
+        if config.y < 0 || config.y > (screen_height as i32) - (config.height as i32) {
+            config.y = 100;
+        }
+
+        // ウィンドウサイズがスクリーンより大きい場合は調整
+        if config.width > screen_width {
+            config.width = screen_width.min(1200);
+        }
+        if config.height > screen_height {
+            config.height = screen_height.min(800);
+        }
+
+        debug!(
+            "🖥️ プライマリモニターサイズ: {}x{}, ウィンドウ位置調整済み",
+            screen_width, screen_height
+        );
+
+        // 複数モニター環境での詳細情報をログ出力
+        let monitors = get_available_monitors_bounds();
+        if monitors.len() > 1 {
+            debug!("🖥️ 複数モニター検出: {} 個のモニター", monitors.len());
+            for (i, (x, y, w, h)) in monitors.iter().enumerate() {
+                debug!("   モニター {}: {}x{} at ({}, {})", i + 1, w, h, x, y);
+            }
+        }
+    } else {
+        // フォールバック: 基本的な検証のみ
+        if config.x < 0 {
+            config.x = 100;
+        }
+        if config.y < 0 {
+            config.y = 100;
+        }
+        if config.width < 400 {
+            config.width = 400;
+        }
+        if config.height < 300 {
+            config.height = 300;
+        }
+        warn!("⚠️ モニター情報を取得できませんでした。基本的な検証のみ実行");
+    }
 }
 
 #[cfg(test)]

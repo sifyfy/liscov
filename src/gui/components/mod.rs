@@ -7,6 +7,7 @@ pub mod export_panel;
 pub mod filter_panel;
 pub mod input_section;
 pub mod main_window;
+pub mod raw_response_settings;
 pub mod revenue_dashboard;
 pub mod status_panel;
 pub mod tab_navigation;

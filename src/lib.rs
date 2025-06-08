@@ -18,6 +18,9 @@ pub use io::ndjson::{
     parse_ndjson_file_timestamped, TimestampedEntry,
 };
 
+// Re-export raw response saver
+pub use io::{RawResponseSaver, SaveConfig};
+
 // Re-export InnerTube HTTP client functions
 pub use api::innertube::{fetch_live_chat_messages, fetch_live_chat_page, InnerTube};
 

@@ -112,7 +112,7 @@ pub fn ChatDisplay(
 
                 // カウンター処理は自動（ハッシュセットのサイズで管理）
 
-                tracing::info!(
+                tracing::debug!(
                     "✨ Added {} messages to highlight: {:?}",
                     new_message_ids.len(),
                     new_message_ids
@@ -131,7 +131,7 @@ pub fn ChatDisplay(
 
                     // カウンターは自動的に減少（ハッシュセットから削除されるため）
 
-                    tracing::info!(
+                    tracing::debug!(
                         "✨ Message highlight expired for {} messages: {:?}",
                         new_message_ids.len(),
                         new_message_ids

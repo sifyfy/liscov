@@ -331,4 +331,160 @@ mod tests {
         let client_id = ClientId("1".to_string());
         assert_eq!(client_id.0, "1");
     }
+
+    #[test]
+    fn test_fetch_error_types() {
+        // FetchErrorの各バリアントをテスト
+        let error = FetchError::NotFound;
+        assert!(format!("{}", error).contains("Not found"));
+        
+        let anyhow_error = anyhow::anyhow!("Test error");
+        let fetch_error = FetchError::from(anyhow_error);
+        match fetch_error {
+            FetchError::Other(_) => (), // 期待される
+            _ => panic!("Expected FetchError::Other variant"),
+        }
+    }
+
+    #[test]
+    fn test_fetch_error_from_serde() {
+        // JSON解析エラーからの変換をテスト
+        let json_error = serde_json::from_str::<serde_json::Value>("invalid json").unwrap_err();
+        let fetch_error = FetchError::from(json_error);
+        
+        match fetch_error {
+            FetchError::Serialization(_) => (), // 期待される
+            _ => panic!("Expected FetchError::Serialization variant"),
+        }
+    }
+
+    #[test]
+    fn test_fetch_error_from_anyhow() {
+        // anyhowエラーからの変換をテスト
+        let anyhow_error = anyhow::anyhow!("Test error");
+        let fetch_error = FetchError::from(anyhow_error);
+        
+        match fetch_error {
+            FetchError::Other(_) => (), // 期待される
+            _ => panic!("Expected FetchError::Other variant"),
+        }
+    }
+
+    #[test]
+    fn test_inner_tube_with_invalid_continuation() {
+        // 無効な継続トークンでのテスト
+        let mut inner_tube = InnerTube::new(
+            VideoId("test_video_id".to_string()),
+            ApiKey::new("test_api_key".to_string()),
+            ClientVersion::new("2.0".to_string()),
+            ClientId("1".to_string()),
+        );
+        
+        // 空の継続トークンを設定
+        inner_tube.continuation = Continuation("".to_string());
+        assert_eq!(inner_tube.continuation.to_string(), "");
+        
+        // 無効な継続トークンを設定
+        inner_tube.continuation = Continuation("invalid_token".to_string());
+        assert_eq!(inner_tube.continuation.to_string(), "invalid_token");
+    }
+
+    #[test]
+    fn test_chat_message_edge_cases() {
+        // 空のメッセージ
+        let empty_message = ChatMessage::new(
+            "msg_empty".to_string(),
+            "TestUser".to_string(),
+            "".to_string(),
+            0,
+        );
+        assert_eq!(empty_message.message, "");
+        assert_eq!(empty_message.timestamp, 0);
+
+        // 極端に長いメッセージ
+        let long_message = "a".repeat(1000);
+        let message = ChatMessage::new(
+            "msg_long".to_string(),
+            "TestUser".to_string(),
+            long_message.clone(),
+            u64::MAX,
+        );
+        assert_eq!(message.message, long_message);
+        assert_eq!(message.timestamp, u64::MAX);
+
+        // 特殊文字を含むメッセージ
+        let special_message = ChatMessage::new(
+            "msg_special".to_string(),
+            "TestUser".to_string(),
+            "🎮🔥 テスト メッセージ with emojis and 日本語!".to_string(),
+            1234567890,
+        );
+        assert!(special_message.message.contains("🎮"));
+        assert!(special_message.message.contains("日本語"));
+    }
+
+    #[test]
+    fn test_chat_message_datetime_formatting() {
+        // 有効なタイムスタンプでの日時フォーマット
+        let message = ChatMessage::new(
+            "msg_time".to_string(),
+            "TestUser".to_string(),
+            "Time test".to_string(),
+            1609459200, // 2021-01-01 00:00:00 UTC
+        );
+        
+        let datetime_str = message.datetime();
+        assert!(!datetime_str.is_empty());
+        
+        // タイムスタンプ0での処理
+        let zero_message = ChatMessage::new(
+            "msg_zero".to_string(),
+            "TestUser".to_string(),
+            "Zero timestamp".to_string(),
+            0,
+        );
+        
+        let zero_datetime = zero_message.datetime();
+        assert!(!zero_datetime.is_empty());
+    }
+
+    #[test]
+    fn test_get_next_continuation_edge_cases() {
+        use crate::api::innertube::get_live_chat::*;
+        use serde_json::json;
+
+        // 空の継続リストの場合
+        let empty_response = GetLiveChatResponse {
+            continuation_contents: ContinuationContents {
+                live_chat_continuation: LiveChatContinuation {
+                    continuation: None,
+                    actions: vec![],
+                    continuations: vec![],
+                },
+            },
+        };
+        assert!(get_next_continuation(&empty_response).is_none());
+
+        // 無効な継続データの場合
+        let invalid_continuation = json!({
+            "invalidKey": "invalidValue"
+        });
+        let invalid_response = GetLiveChatResponse {
+            continuation_contents: ContinuationContents {
+                live_chat_continuation: LiveChatContinuation {
+                    continuation: None,
+                    actions: vec![],
+                    continuations: vec![invalid_continuation],
+                },
+            },
+        };
+        assert!(get_next_continuation(&invalid_response).is_none());
+    }
+
+    #[test]
+    fn test_client_id_display() {
+        let client_id = ClientId("test_client_123".to_string());
+        let display_str = format!("{}", client_id);
+        assert_eq!(display_str, "test_client_123");
+    }
 }

@@ -58,15 +58,16 @@ impl LiveChatHandle {
         is_stopping.set(false);
 
         spawn(async move {
-            // グローバル状態を初期化
+            // グローバルサービスを使用（設定が共有される）
+            let service_arc = crate::gui::services::get_global_service().clone();
+
+            // グローバル状態を初期化（停止フラグ管理用）
             let global_state =
                 GLOBAL_LIVE_CHAT.get_or_init(|| Arc::new(Mutex::new(GlobalLiveChatState::new())));
-
-            let service_arc = {
+            {
                 let mut guard = global_state.lock().unwrap();
                 guard.stopping = false; // 停止フラグをリセット
-                Arc::clone(&guard.service)
-            };
+            }
 
             // StateManagerに状態変更を通知
             let state_manager = get_state_manager();
@@ -80,7 +81,7 @@ impl LiveChatHandle {
             });
 
             let result = {
-                let mut service = service_arc.lock().unwrap();
+                let mut service = service_arc.lock().await;
                 service.start_monitoring(&url, output_file).await
             };
 
@@ -149,10 +150,7 @@ impl LiveChatHandle {
 
                 tracing::info!("⏹️ Stopping live chat monitoring");
 
-                let service_arc = {
-                    let guard = global_state.lock().unwrap();
-                    Arc::clone(&guard.service)
-                };
+                let service_arc = crate::gui::services::get_global_service().clone();
 
                 // StateManagerに停止状態を通知
                 let state_manager = get_state_manager();
@@ -161,7 +159,7 @@ impl LiveChatHandle {
 
                 // サービスを停止
                 let result = {
-                    let mut service = service_arc.lock().unwrap();
+                    let mut service = service_arc.lock().await;
                     service.stop_monitoring().await
                 };
 
@@ -197,15 +195,12 @@ impl LiveChatHandle {
 
         spawn(async move {
             if let Some(global_state) = GLOBAL_LIVE_CHAT.get() {
-                let service_arc = {
-                    let guard = global_state.lock().unwrap();
-                    Arc::clone(&guard.service)
-                };
+                let service_arc = crate::gui::services::get_global_service().clone();
 
                 tracing::info!("⏸️ Pausing live chat monitoring");
 
                 let result = {
-                    let mut service = service_arc.lock().unwrap();
+                    let mut service = service_arc.lock().await;
                     service.pause_monitoring().await
                 };
 
@@ -239,10 +234,7 @@ impl LiveChatHandle {
 
         spawn(async move {
             if let Some(global_state) = GLOBAL_LIVE_CHAT.get() {
-                let service_arc = {
-                    let guard = global_state.lock().unwrap();
-                    Arc::clone(&guard.service)
-                };
+                let service_arc = crate::gui::services::get_global_service().clone();
 
                 tracing::info!("▶️ Resuming live chat monitoring");
                 state.set(ServiceState::Connecting);
@@ -252,7 +244,7 @@ impl LiveChatHandle {
                     .send_event(AppEvent::ServiceStateChanged(ServiceState::Connecting));
 
                 let result = {
-                    let mut service = service_arc.lock().unwrap();
+                    let mut service = service_arc.lock().await;
                     service.resume_monitoring(output_file).await
                 };
 

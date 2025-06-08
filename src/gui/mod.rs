@@ -1,7 +1,8 @@
 // Core modules
+pub mod config_manager;
 pub mod models; // 既存のデータ構造は継続使用
 pub mod services; // 既存のAPIサービスは継続使用
-pub mod utils; // ユーティリティ関数は継続使用
+pub mod utils; // ユーティリティ関数は継続使用 // 設定管理モジュール
 
 // Dioxus UI components - 新アーキテクチャ対応
 pub mod components; // 🆕 UI コンポーネント（有効化）

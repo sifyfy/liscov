@@ -1,5 +1,6 @@
 use crate::gui::models::GuiChatMessage;
 use crate::gui::services::ServiceState;
+use crate::io::SaveConfig;
 use std::sync::{Arc, Mutex, OnceLock};
 use tokio::sync::mpsc;
 
@@ -24,6 +25,8 @@ pub enum AppEvent {
     ContinuationTokenUpdated(Option<String>),
     /// 現在のURLが更新された
     CurrentUrlUpdated(Option<String>),
+    /// 保存設定が更新された
+    UpdateSaveConfig(SaveConfig),
 }
 
 /// チャット統計情報
@@ -205,6 +208,21 @@ impl StateManager {
                 if state_guard.current_url.is_some() {
                     state_guard.continuation_token = None;
                 }
+            }
+
+            AppEvent::UpdateSaveConfig(config) => {
+                tracing::info!(
+                    "⚙️ Save config update requested: enabled={}, file={}",
+                    config.enabled,
+                    config.file_path
+                );
+
+                // サービスに設定を送信
+                let service = crate::gui::services::get_global_service();
+                let service_clone = service.clone();
+                tokio::spawn(async move {
+                    service_clone.lock().await.update_save_config(config).await;
+                });
             }
         }
     }

@@ -224,11 +224,21 @@ fn extract_badge_info(
 pub struct AppState {
     pub url: String,
     pub output_file: String,
+    pub auto_save_enabled: bool, // 自動保存のオン・オフ
     pub is_connected: bool,
     pub message_count: usize,
     pub request_count: usize,
     pub messages: Vec<GuiChatMessage>,
     pub active_tab: ActiveTab,
+
+    // 新しい保存設定
+    pub save_raw_responses: bool,
+    pub raw_response_file: String,
+    pub max_raw_file_size_mb: u64,
+    pub enable_file_rotation: bool,
+
+    // ウィンドウ設定
+    pub window: crate::gui::config_manager::WindowConfig,
 }
 
 impl Default for AppState {
@@ -236,11 +246,17 @@ impl Default for AppState {
         Self {
             url: "https://youtube.com/watch?v=".to_string(),
             output_file: "live_chat.ndjson".to_string(),
+            auto_save_enabled: false,
             is_connected: false,
             message_count: 0,
             request_count: 0,
             messages: Vec::new(),
             active_tab: ActiveTab::default(),
+            save_raw_responses: false,
+            raw_response_file: "raw_responses.ndjson".to_string(),
+            max_raw_file_size_mb: 100,
+            enable_file_rotation: true,
+            window: crate::gui::config_manager::WindowConfig::default(),
         }
     }
 }
@@ -251,6 +267,7 @@ pub enum ActiveTab {
     RevenueAnalytics,
     EngagementAnalytics,
     DataExport,
+    Settings,
 }
 
 impl Default for ActiveTab {
@@ -266,6 +283,7 @@ impl ActiveTab {
             ActiveTab::RevenueAnalytics => "Revenue Analytics",
             ActiveTab::EngagementAnalytics => "Engagement Analytics",
             ActiveTab::DataExport => "Data Export",
+            ActiveTab::Settings => "Settings",
         }
     }
 
@@ -275,6 +293,7 @@ impl ActiveTab {
             ActiveTab::RevenueAnalytics => "💰",
             ActiveTab::EngagementAnalytics => "📊",
             ActiveTab::DataExport => "📥",
+            ActiveTab::Settings => "⚙️",
         }
     }
 }

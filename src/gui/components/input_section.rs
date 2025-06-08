@@ -49,8 +49,26 @@ fn get_url_validation_message(url: &str) -> Option<String> {
 /// Phase 5: エラーハンドリング・バリデーション強化
 #[component]
 pub fn InputSection(live_chat_handle: LiveChatHandle) -> Element {
-    let mut url_input = use_signal(|| String::new());
-    let mut output_file = use_signal(|| "live_chat.ndjson".to_string());
+    // AppStateにアクセスして設定を同期
+    let mut app_state = use_context::<Signal<crate::gui::models::AppState>>();
+
+    let mut url_input = use_signal(|| app_state.read().url.clone());
+    let mut output_file = use_signal(|| app_state.read().output_file.clone());
+    let mut auto_save_enabled = use_signal(|| app_state.read().auto_save_enabled);
+
+    // URL入力の初期化をAppStateから行う
+    use_effect(move || {
+        let state = app_state.read();
+        if url_input.read().is_empty() && !state.url.is_empty() {
+            url_input.set(state.url.clone());
+        }
+        if *output_file.read() != state.output_file {
+            output_file.set(state.output_file.clone());
+        }
+        if *auto_save_enabled.read() != state.auto_save_enabled {
+            auto_save_enabled.set(state.auto_save_enabled);
+        }
+    });
 
     // LiveChatハンドルから状態を取得
     // ボタンの状態: より詳細な状態管理
@@ -111,7 +129,15 @@ pub fn InputSection(live_chat_handle: LiveChatHandle) -> Element {
                             tracing::info!("🔄 URL changed during pause - returning to start button");
                         }
 
-                        url_input.set(new_url);
+                        url_input.set(new_url.clone());
+
+                        // AppStateも更新
+                        let mut state = app_state.write();
+                        state.url = new_url;
+
+                        // 設定を永続化
+                        use crate::gui::config_manager::save_app_state_async;
+                        save_app_state_async(state.clone());
                     },
                 }
 
@@ -147,27 +173,34 @@ pub fn InputSection(live_chat_handle: LiveChatHandle) -> Element {
                 }
             }
 
-            // 出力ファイル設定
+                                                // 自動保存状態の簡潔な表示
             div {
-                class: CssClasses::FORM_GROUP,
-                label {
-                    class: CssClasses::FORM_LABEL,
-                    "出力ファイル:"
-                }
-                input {
-                    class: CssClasses::FORM_INPUT,
-                    r#type: "text",
-                    value: "{output_file}",
-                    disabled: *should_disable_url_input.read(),
-                    oninput: move |event| output_file.set(event.value())
-                }
-                div {
-                    style: "
-                        color: #718096;
-                        font-size: 11px;
-                        margin-top: 4px;
-                    ",
-                    "💡 空白にすると、ファイル保存はスキップされます"
+                style: if auto_save_enabled() {
+                    "
+                        padding: 8px 12px;
+                        border-radius: 6px;
+                        font-size: 13px;
+                        margin-bottom: 8px;
+                        background: #d4edda;
+                        border: 1px solid #c3e6cb;
+                        color: #155724;
+                    "
+                } else {
+                    "
+                        padding: 8px 12px;
+                        border-radius: 6px;
+                        font-size: 13px;
+                        margin-bottom: 8px;
+                        background: #fff3cd;
+                        border: 1px solid #ffeaa7;
+                        color: #856404;
+                    "
+                },
+
+                if auto_save_enabled() {
+                    "✅ 自動保存: 有効"
+                } else {
+                    "⚠️ 自動保存: 無効 (設定画面で有効化可能)"
                 }
             }
 
@@ -243,11 +276,11 @@ pub fn InputSection(live_chat_handle: LiveChatHandle) -> Element {
                     onclick: {
                         let handle = live_chat_handle.clone();
                         let url = url_input.read().clone();
-                        let output = if output_file.read().trim().is_empty() {
-                            None
-                        } else {
-                            Some(output_file.read().clone())
-                        };
+                                                            let output = if auto_save_enabled() && !output_file.read().trim().is_empty() {
+                                        Some(output_file.read().clone())
+                                    } else {
+                                        None
+                                    };
 
                         move |_| {
                             // 停止処理中は操作を無効化

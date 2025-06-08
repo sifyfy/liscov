@@ -1928,7 +1928,7 @@ mod tests {
     // 基本的なテストのみ残し、他は一時的に無効化
     #[test]
     fn test_basic_functionality() {
-        let mut tracker = EngagementMetrics::new();
+        let tracker = EngagementMetrics::new();
         assert_eq!(tracker.unique_viewers_count(), 0);
         assert_eq!(tracker.questions_count, 0);
     }
@@ -2054,30 +2054,12 @@ mod tests {
         );
     }
 
-    /*
     #[test]
     fn test_unique_viewer_tracking() {
         let mut tracker = EngagementMetrics::new();
 
-        let message1 = GuiChatMessage {
-            timestamp: "12:00:00".to_string(),
-            message_type: MessageType::Text,
-            author: "User1".to_string(),
-            channel_id: "user1".to_string(),
-            content: "Hello!".to_string(),
-            metadata: None,
-            is_member: false,
-        };
-
-        let message2 = GuiChatMessage {
-            timestamp: "12:01:00".to_string(),
-            message_type: MessageType::Text,
-            author: "User2".to_string(),
-            channel_id: "user2".to_string(),
-            content: "Hi there!".to_string(),
-            metadata: None,
-            is_member: false,
-        };
+        let message1 = create_test_message("User1", "Hello!", MessageType::Text);
+        let message2 = create_test_message("User2", "Hi there!", MessageType::Text);
 
         tracker.update_from_message(&message1);
         tracker.update_from_message(&message2);
@@ -2091,16 +2073,13 @@ mod tests {
     fn test_engagement_rate_calculation() {
         let mut tracker = EngagementMetrics::new();
 
-        let super_chat_msg = GuiChatMessage {
-            timestamp: "12:00:00".to_string(),
-            message_type: MessageType::SuperChat {
+        let super_chat_msg = create_test_message(
+            "TestUser",
+            "Thank you!",
+            MessageType::SuperChat {
                 amount: "¥100".to_string(),
             },
-            author: "TestUser".to_string(),
-            channel_id: "test123".to_string(),
-            content: "Thank you!".to_string(),
-            metadata: None,
-        };
+        );
 
         tracker.update_from_message(&super_chat_msg);
 
@@ -2113,18 +2092,11 @@ mod tests {
     fn test_emoji_detection() {
         let mut tracker = EngagementMetrics::new();
 
-        let emoji_msg = GuiChatMessage {
-            timestamp: "12:00:00".to_string(),
-            message_type: MessageType::Text,
-            author: "EmojiUser".to_string(),
-            channel_id: "emoji123".to_string(),
-            content: "Great stream! 😊👍🎉".to_string(),
-            metadata: None,
-        };
+        let emoji_msg = create_test_message("EmojiUser", "Great stream! 😊👍🎉", MessageType::Text);
 
         tracker.update_from_message(&emoji_msg);
 
-        let session = tracker.viewer_sessions.get("emoji123").unwrap();
+        let session = tracker.viewer_sessions.get("test_EmojiUser").unwrap();
         assert!(session.emoji_count > 0);
         assert!(tracker.emoji_usage_rate > 0.0);
     }
@@ -2133,14 +2105,11 @@ mod tests {
     fn test_question_detection() {
         let mut tracker = EngagementMetrics::new();
 
-        let question_msg = GuiChatMessage {
-            timestamp: "12:00:00".to_string(),
-            message_type: MessageType::Text,
-            author: "Questioner".to_string(),
-            channel_id: "q123".to_string(),
-            content: "これはどうやって使うんですか？".to_string(),
-            metadata: None,
-        };
+        let question_msg = create_test_message(
+            "Questioner",
+            "これはどうやって使うんですか？",
+            MessageType::Text,
+        );
 
         tracker.update_from_message(&question_msg);
 
@@ -2151,18 +2120,11 @@ mod tests {
     fn test_activity_pattern_tracking() {
         let mut tracker = EngagementMetrics::new();
 
-        let message = GuiChatMessage {
-            timestamp: "12:00:00".to_string(),
-            message_type: MessageType::Text,
-            author: "ActiveUser".to_string(),
-            channel_id: "active123".to_string(),
-            content: "Message 1".to_string(),
-            metadata: None,
-        };
+        let message = create_test_message("ActiveUser", "Message 1", MessageType::Text);
 
         tracker.update_from_message(&message);
 
-        let session = tracker.viewer_sessions.get("active123").unwrap();
+        let session = tracker.viewer_sessions.get("test_ActiveUser").unwrap();
         assert_eq!(session.activity_pattern.len(), 1);
         assert_eq!(session.activity_pattern[0].message_count, 1);
     }
@@ -2171,14 +2133,7 @@ mod tests {
     fn test_engagement_summary() {
         let mut tracker = EngagementMetrics::new();
 
-        let message = GuiChatMessage {
-            timestamp: "12:00:00".to_string(),
-            message_type: MessageType::Text,
-            author: "User1".to_string(),
-            channel_id: "user1".to_string(),
-            content: "Test message 😊".to_string(),
-            metadata: None,
-        };
+        let message = create_test_message("User1", "Test message 😊", MessageType::Text);
 
         tracker.update_from_message(&message);
 
@@ -2188,14 +2143,79 @@ mod tests {
         assert!(summary.emoji_usage_rate > 0.0);
     }
 
-    // Week 11-12 新機能のテスト
-    // テスト一時的に無効化 - is_memberフィールド修正後に復元
-    /*
     #[test]
-    fn test_weighted_engagement_rate() {
-        // TODO: is_memberフィールドを追加して復元
+    fn test_japanese_sentiment_analyzer() {
+        let analyzer = JapaneseSentimentAnalyzer::new();
+
+        // ポジティブメッセージのテスト
+        let positive_result = analyzer.analyze_sentiment("素晴らしい配信でした！ありがとう😊");
+        println!(
+            "Positive result: score={:.3}, type={:?}, features={:?}",
+            positive_result.sentiment_score,
+            positive_result.sentiment_type,
+            positive_result.detected_features
+        );
+        assert!(positive_result.sentiment_score > 0.3); // より現実的な値に調整
+        assert!(matches!(
+            positive_result.sentiment_type,
+            SentimentType::Positive | SentimentType::VeryPositive
+        ));
+        assert!(!positive_result.detected_features.is_empty());
+
+        // ネガティブメッセージのテスト
+        let negative_result = analyzer.analyze_sentiment("つまらない配信だった😞がっかり");
+        println!(
+            "Negative result: score={:.3}, type={:?}, features={:?}",
+            negative_result.sentiment_score,
+            negative_result.sentiment_type,
+            negative_result.detected_features
+        );
+        assert!(negative_result.sentiment_score < 0.0); // 負の値であることを確認
+        assert!(matches!(
+            negative_result.sentiment_type,
+            SentimentType::Negative | SentimentType::VeryNegative
+        ));
+
+        // 中性メッセージのテスト
+        let neutral_result = analyzer.analyze_sentiment("今日は晴れです");
+        println!(
+            "Neutral result: score={:.3}, type={:?}",
+            neutral_result.sentiment_score, neutral_result.sentiment_type
+        );
+        assert!(neutral_result.sentiment_score.abs() < 0.5); // より現実的な範囲に調整
+        assert!(matches!(
+            neutral_result.sentiment_type,
+            SentimentType::Neutral
+        ));
     }
-    */
+
+    #[test]
+    fn test_sentiment_stats_integration() {
+        let mut tracker = EngagementMetrics::new();
+
+        // 様々な感情のメッセージを追加
+        let messages = vec![
+            "素晴らしい配信！😊",
+            "ありがとうございます🙏",
+            "つまらない😞",
+            "最高の配信でした🎉",
+            "がっかりした",
+            "超楽しかった！",
+        ];
+
+        for (i, content) in messages.iter().enumerate() {
+            let message = create_test_message(&format!("User{}", i), content, MessageType::Text);
+            tracker.update_from_message(&message);
+        }
+
+        // 感情統計が更新されていることを確認
+        assert!(tracker.sentiment_distribution.total_analyzed_messages > 0);
+        assert!(tracker.sentiment_distribution.positive_percentage > 0.0);
+        assert!(tracker.sentiment_distribution.confidence_score >= 0.0); // 0以上に変更
+        assert!(!tracker.sentiment_distribution.sentiment_trend.is_empty());
+    }
+
+    // ==================== 第2段階：高度機能テスト ====================
 
     #[test]
     fn test_conversation_cluster_detection() {
@@ -2211,66 +2231,106 @@ mod tests {
             ("user5", "Love this! 🎉"),
         ];
 
-        for (idx, (channel_id, content)) in messages.iter().enumerate() {
-            let message = GuiChatMessage {
-                timestamp: format!("12:0{}:0{}", idx / 6, (idx % 6) * 10),
-                message_type: MessageType::Text,
-                author: format!("User{}", idx + 1),
-                channel_id: channel_id.to_string(),
-                content: content.to_string(),
-                metadata: None,
-            };
+        for (idx, (_user_id, content)) in messages.iter().enumerate() {
+            let message =
+                create_test_message(&format!("User{}", idx + 1), content, MessageType::Text);
             tracker.update_from_message(&message);
         }
 
         // 会話クラスターが検出されることを確認
         assert!(tracker.activity_stats.engagement_events.len() >= 6);
         assert!(!tracker.peak_activity_times.is_empty());
+
+        println!(
+            "✅ 会話クラスター検出テスト完了: {} エンゲージメントイベント検出",
+            tracker.activity_stats.engagement_events.len()
+        );
     }
 
     #[test]
-    fn test_user_engagement_scoring() {
+    fn test_emoji_sentiment_analysis() {
+        let analyzer = JapaneseSentimentAnalyzer::new();
+
+        // 複数のポジティブ絵文字
+        let happy_result = analyzer.analyze_sentiment("配信お疲れ様！🎉🎊😄");
+        assert!(happy_result.sentiment_score > 0.6);
+        assert!(happy_result
+            .detected_features
+            .iter()
+            .any(|f| f.starts_with("絵文字")));
+
+        // ネガティブ絵文字
+        let sad_result = analyzer.analyze_sentiment("悲しい😭💔");
+        assert!(sad_result.sentiment_score < -0.5);
+
+        println!(
+            "✅ 絵文字感情分析テスト完了: ポジティブ={:.2}, ネガティブ={:.2}",
+            happy_result.sentiment_score, sad_result.sentiment_score
+        );
+    }
+
+    #[test]
+    fn test_sentiment_intensity_modifiers() {
+        let analyzer = JapaneseSentimentAnalyzer::new();
+
+        // 強化語なし
+        let normal_result = analyzer.analyze_sentiment("良い配信");
+
+        // 強化語あり
+        let intense_result = analyzer.analyze_sentiment("超素晴らしい配信");
+
+        assert!(intense_result.intensity > normal_result.intensity);
+        assert!(intense_result.sentiment_score.abs() > normal_result.sentiment_score.abs());
+
+        println!(
+            "✅ 感情強化語テスト完了: 通常強度={:.2}, 強化強度={:.2}",
+            normal_result.intensity, intense_result.intensity
+        );
+    }
+
+    #[test]
+    fn test_sentiment_negation_detection() {
+        let analyzer = JapaneseSentimentAnalyzer::new();
+
+        // 通常のポジティブ
+        let positive_result = analyzer.analyze_sentiment("良い配信");
+
+        // 否定形（より明確な否定語を使用）
+        let negated_result = analyzer.analyze_sentiment("良い配信ではない");
+
+        // 否定により感情が反転することを確認
+        assert!(positive_result.sentiment_score > 0.0);
+        assert!(negated_result.sentiment_score < 0.0);
+        assert!(negated_result
+            .detected_features
+            .contains(&"否定".to_string()));
+
+        println!(
+            "✅ 感情否定検出テスト完了: ポジティブ={:.2}, 否定後={:.2}",
+            positive_result.sentiment_score, negated_result.sentiment_score
+        );
+    }
+
+    #[test]
+    fn test_calculation_accuracy_validation() {
         let mut tracker = EngagementMetrics::new();
 
-        // 高エンゲージメントユーザーのメッセージ
-        let high_engagement_messages = vec![
-            GuiChatMessage {
-                timestamp: "12:00:00".to_string(),
-                message_type: MessageType::Text,
-                author: "ActiveUser".to_string(),
-                channel_id: "active1".to_string(),
-                content: "This is a very long message with lots of content and emojis 😊🎉👍. I really love this stream and want to engage more with the community. Keep up the great work!".to_string(),
-                metadata: None,
-            },
-            GuiChatMessage {
-                timestamp: "12:02:00".to_string(),
-                message_type: MessageType::SuperChat { amount: "¥1000".to_string() },
-                author: "ActiveUser".to_string(),
-                channel_id: "active1".to_string(),
-                content: "Amazing content! Here's a super chat to support you! 🔥".to_string(),
-                metadata: None,
-            },
-            GuiChatMessage {
-                timestamp: "12:05:00".to_string(),
-                message_type: MessageType::Membership,
-                author: "ActiveUser".to_string(),
-                channel_id: "active1".to_string(),
-                content: "Just became a member!".to_string(),
-                metadata: None,
-            },
-        ];
+        // 正常なデータを追加
+        let message = create_test_message("TestUser", "Normal message", MessageType::Text);
 
-        for message in high_engagement_messages {
-            tracker.update_from_message(&message);
-        }
+        tracker.update_from_message(&message);
 
-        // 高エンゲージメント率が記録されることを確認
-        assert!(tracker.engagement_rate > 50.0); // 100.0から50.0に下げる
+        // 精度検証を実行
+        let validation = tracker.validate_calculation_accuracy();
 
-        let session = tracker.viewer_sessions.get("active1").unwrap();
-        assert!(session.total_super_chat > 0.0);
-        assert!(session.is_member);
-        assert!(session.emoji_count > 0);
+        assert!(validation.is_valid);
+        assert!(validation.accuracy_score >= 85.0);
+        assert!(validation.issues.is_empty());
+
+        println!(
+            "✅ 計算精度検証テスト完了: 精度スコア={:.1}%",
+            validation.accuracy_score
+        );
     }
 
     #[test]
@@ -2325,15 +2385,6 @@ mod tests {
         // ピーク時間が記録されていることを確認
         assert!(!tracker.peak_activity_times.is_empty());
 
-        // デバッグ情報を出力
-        println!("Peak times found: {:?}", tracker.peak_activity_times);
-
-        // 時間別メッセージ数を確認
-        println!(
-            "Hourly message counts: {:?}",
-            tracker.activity_stats.hourly_message_counts
-        );
-
         // 21時台のデータが存在することを確認
         let has_21_hour_data = tracker
             .activity_stats
@@ -2359,267 +2410,246 @@ mod tests {
             peak_21.message_count > 8,
             "21時台の重み付けが適用されていません"
         );
-    }
 
-    #[test]
-    fn test_calculation_accuracy_validation() {
-        let mut tracker = EngagementMetrics::new();
-
-        // 正常なデータを追加
-        let message = GuiChatMessage {
-            timestamp: "12:00:00".to_string(),
-            message_type: MessageType::Text,
-            author: "TestUser".to_string(),
-            channel_id: "test1".to_string(),
-            content: "Normal message".to_string(),
-            metadata: None,
-        };
-
-        tracker.update_from_message(&message);
-
-        // 精度検証を実行
-        let validation = tracker.validate_calculation_accuracy();
-
-        assert!(validation.is_valid);
-        assert!(validation.accuracy_score >= 85.0);
-        assert!(validation.issues.is_empty());
-    }
-
-    #[test]
-    fn test_message_frequency_distribution() {
-        let mut tracker = EngagementMetrics::new();
-
-        // 異なる頻度のユーザーを作成
-        let users = vec![
-            ("frequent", 10),  // 頻繁にメッセージ
-            ("moderate", 5),   // 中程度
-            ("occasional", 2), // 時々
-        ];
-
-        for (user_type, message_count) in users {
-            for i in 0..message_count {
-                let message = GuiChatMessage {
-                    timestamp: format!("12:{:02}:{:02}", i * 2, 0),
-                    message_type: MessageType::Text,
-                    author: format!("{}User", user_type),
-                    channel_id: format!("{}_{}", user_type, i),
-                    content: format!("{} message {}", user_type, i),
-                    metadata: None,
-                };
-                tracker.update_from_message(&message);
-            }
-        }
-
-        // 多様な頻度分布によりエンゲージメント率が調整されることを確認
-        assert!(tracker.engagement_rate > 0.0);
-        assert_eq!(tracker.unique_viewers_count(), 17); // 10 + 5 + 2
-    }
-
-    #[test]
-    fn test_retention_metrics_calculation() {
-        let mut tracker = EngagementMetrics::new();
-
-        // 最近アクティブなユーザー
-        let recent_message = GuiChatMessage {
-            timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
-            message_type: MessageType::Text,
-            author: "RecentUser".to_string(),
-            channel_id: "recent1".to_string(),
-            content: "Just sent this".to_string(),
-            metadata: None,
-        };
-
-        // 古いメッセージのユーザー
-        let old_message = GuiChatMessage {
-            timestamp: "10:00:00".to_string(),
-            message_type: MessageType::Text,
-            author: "OldUser".to_string(),
-            channel_id: "old1".to_string(),
-            content: "Sent this hours ago".to_string(),
-            metadata: None,
-        };
-
-        tracker.update_from_message(&recent_message);
-        tracker.update_from_message(&old_message);
-
-        // 継続率が計算に反映されることを確認
-        assert_eq!(tracker.unique_viewers_count(), 2);
-        assert!(tracker.active_sessions_count() >= 1); // 最近のユーザーがアクティブ
-    }
-
-    // Week 13-14: 感情分析モジュールのテスト
-    #[test]
-    fn test_japanese_sentiment_analyzer() {
-        let analyzer = JapaneseSentimentAnalyzer::new();
-
-        // ポジティブメッセージのテスト
-        let positive_result = analyzer.analyze_sentiment("素晴らしい配信でした！ありがとう😊");
         println!(
-            "Positive result: score={:.3}, type={:?}, features={:?}",
-            positive_result.sentiment_score,
-            positive_result.sentiment_type,
-            positive_result.detected_features
+            "✅ ピーク時間最適化テスト完了: {} ピーク時間帯検出",
+            tracker.peak_activity_times.len()
         );
-        assert!(positive_result.sentiment_score > 0.3); // より現実的な値に調整
-        assert!(matches!(
-            positive_result.sentiment_type,
-            SentimentType::Positive | SentimentType::VeryPositive
-        ));
-        assert!(!positive_result.detected_features.is_empty());
-
-        // ネガティブメッセージのテスト
-        let negative_result = analyzer.analyze_sentiment("つまらない配信だった😞がっかり");
-        println!(
-            "Negative result: score={:.3}, type={:?}, features={:?}",
-            negative_result.sentiment_score,
-            negative_result.sentiment_type,
-            negative_result.detected_features
-        );
-        assert!(negative_result.sentiment_score < 0.0); // 負の値であることを確認
-        assert!(matches!(
-            negative_result.sentiment_type,
-            SentimentType::Negative | SentimentType::VeryNegative
-        ));
-
-        // 中性メッセージのテスト
-        let neutral_result = analyzer.analyze_sentiment("今日は晴れです");
-        println!(
-            "Neutral result: score={:.3}, type={:?}",
-            neutral_result.sentiment_score, neutral_result.sentiment_type
-        );
-        assert!(neutral_result.sentiment_score.abs() < 0.5); // より現実的な範囲に調整
-        assert!(matches!(
-            neutral_result.sentiment_type,
-            SentimentType::Neutral
-        ));
     }
 
-    #[test]
-    fn test_emoji_sentiment_analysis() {
-        let analyzer = JapaneseSentimentAnalyzer::new();
-
-        // 複数のポジティブ絵文字
-        let happy_result = analyzer.analyze_sentiment("配信お疲れ様！🎉🎊😄");
-        assert!(happy_result.sentiment_score > 0.6);
-        assert!(happy_result
-            .detected_features
-            .iter()
-            .any(|f| f.starts_with("絵文字")));
-
-        // ネガティブ絵文字
-        let sad_result = analyzer.analyze_sentiment("悲しい😭💔");
-        assert!(sad_result.sentiment_score < -0.5);
-    }
+    // ==================== 第3段階：最終高度機能テスト ====================
 
     #[test]
-    fn test_sentiment_intensity_modifiers() {
-        let analyzer = JapaneseSentimentAnalyzer::new();
-
-        // 強化語なし
-        let normal_result = analyzer.analyze_sentiment("良い配信");
-
-        // 強化語あり
-        let intense_result = analyzer.analyze_sentiment("超素晴らしい配信");
-
-        assert!(intense_result.intensity > normal_result.intensity);
-        assert!(intense_result.sentiment_score.abs() > normal_result.sentiment_score.abs());
-    }
-
-    #[test]
-    fn test_sentiment_negation_detection() {
-        let analyzer = JapaneseSentimentAnalyzer::new();
-
-        // 通常のポジティブ
-        let positive_result = analyzer.analyze_sentiment("良い配信");
-
-        // 否定形（より明確な否定語を使用）
-        let negated_result = analyzer.analyze_sentiment("良い配信ではない");
-
-        // 否定により感情が反転することを確認
-        assert!(positive_result.sentiment_score > 0.0);
-        assert!(negated_result.sentiment_score < 0.0);
-        assert!(negated_result
-            .detected_features
-            .contains(&"否定".to_string()));
-    }
-
-    #[test]
-    fn test_sentiment_stats_integration() {
+    fn test_performance_stress_testing() {
         let mut tracker = EngagementMetrics::new();
+        let start_time = std::time::Instant::now();
 
-        // 様々な感情のメッセージを追加
-        let messages = vec![
-            "素晴らしい配信！😊",
-            "ありがとうございます🙏",
-            "つまらない😞",
-            "最高の配信でした🎉",
-            "がっかりした",
-            "超楽しかった！",
-        ];
-
-        for (i, content) in messages.iter().enumerate() {
-            let message = GuiChatMessage {
-                timestamp: format!("12:{:02}:00", i),
-                message_type: MessageType::Text,
-                author: format!("User{}", i),
-                channel_id: format!("user{}", i),
-                content: content.to_string(),
-                metadata: None,
-            };
-            tracker.update_from_message(&message);
-        }
-
-        // 感情統計が更新されていることを確認
-        assert!(tracker.sentiment_distribution.total_analyzed_messages > 0);
-        assert!(tracker.sentiment_distribution.positive_percentage > 0.0);
-        assert!(tracker.sentiment_distribution.confidence_score >= 0.0); // 0以上に変更
-        assert!(!tracker.sentiment_distribution.sentiment_trend.is_empty());
-    }
-
-    #[test]
-    fn test_detailed_sentiment_analysis() {
-        let mut tracker = EngagementMetrics::new();
-
-        // ポジティブトレンドのテストデータ
-        let positive_messages = vec![
-            "良い配信😊",
-            "素晴らしい🎉",
-            "最高！",
-            "ありがとう❤️",
-            "感動した✨",
-        ];
-
-        for (i, content) in positive_messages.iter().enumerate() {
-            let message = GuiChatMessage {
-                timestamp: format!("12:{:02}:00", i),
-                message_type: MessageType::Text,
-                author: format!("User{}", i),
-                channel_id: format!("user{}", i),
-                content: content.to_string(),
-                metadata: None,
-            };
-            tracker.update_from_message(&message);
-        }
-
-        // 詳細感情分析を取得
-        let detailed_analysis = tracker.get_detailed_sentiment_analysis();
-
-        assert!(!detailed_analysis.recent_trend.is_empty());
-        assert!(!detailed_analysis.dominant_emotions.is_empty());
-        assert!(detailed_analysis.emotional_engagement_score > 0.0);
-
-        // ポジティブなトレンドであることを確認
-        let positive_emotions = detailed_analysis
-            .dominant_emotions
-            .iter()
-            .filter(|(emotion, _)| {
-                matches!(
-                    emotion,
-                    SentimentType::Positive | SentimentType::VeryPositive
+        // 大量データでストレステストを実行
+        let stress_messages: Vec<_> = (0..1000)
+            .map(|i| {
+                create_test_message(
+                    &format!("StressUser{}", i % 100), // 100ユーザーで重複あり
+                    &format!("ストレステストメッセージ {} 🔥", i),
+                    if i % 50 == 0 {
+                        MessageType::SuperChat {
+                            amount: format!("¥{}", (i % 10 + 1) * 100),
+                        }
+                    } else {
+                        MessageType::Text
+                    },
                 )
             })
-            .count();
-        assert!(positive_emotions > 0);
+            .collect();
+
+        tracker.update_from_messages_lightweight(&stress_messages);
+        let processing_time = start_time.elapsed();
+
+        // パフォーマンス要件の確認
+        assert!(processing_time.as_millis() < 100); // 100ms以内
+        assert!(tracker.unique_viewers_count() <= 100);
+        // lightweight版では基本統計のみ計算するため、詳細統計は確認しない
+        assert!(tracker.unique_chatters.len() <= 100);
+        // questions_countはusizeなので0以上は当然
+
+        println!(
+            "✅ ストレステスト完了: {}ms, {} ユニーク視聴者, {} 質問検出",
+            processing_time.as_millis(),
+            tracker.unique_viewers_count(),
+            tracker.questions_count
+        );
     }
-    */
+
+    #[test]
+    fn test_real_time_sentiment_updates() {
+        let mut tracker = EngagementMetrics::new();
+
+        // 感情変化のシミュレーション
+        let sentiment_progression = vec![
+            ("User1", "配信開始！楽しみ 😊", SentimentType::Positive),
+            ("User2", "音声が聞こえません", SentimentType::Neutral),
+            ("User1", "画質がひどい😞", SentimentType::Negative),
+            ("User3", "修正ありがとう！", SentimentType::Grateful),
+            ("User1", "最高の配信になった🎉", SentimentType::VeryPositive),
+        ];
+
+        let mut previous_positive_rate = 0.0;
+
+        for (user, message, expected_sentiment) in sentiment_progression {
+            let msg = create_test_message(user, message, MessageType::Text);
+            tracker.update_from_message(&msg);
+
+            // 感情統計がリアルタイムで更新されることを確認
+            let current_positive_rate = tracker.sentiment_distribution.positive_percentage;
+
+            // 最後のメッセージでポジティブ率が向上することを確認
+            if expected_sentiment == SentimentType::VeryPositive {
+                assert!(
+                    current_positive_rate > previous_positive_rate,
+                    "ポジティブメッセージで感情統計が改善されませんでした"
+                );
+            }
+
+            previous_positive_rate = current_positive_rate;
+        }
+
+        assert!(tracker.sentiment_distribution.positive_percentage > 50.0);
+        assert!(!tracker.sentiment_distribution.sentiment_trend.is_empty());
+
+        println!(
+            "✅ リアルタイム感情更新テスト完了: 最終ポジティブ率={:.1}%",
+            tracker.sentiment_distribution.positive_percentage
+        );
+    }
+
+    #[test]
+    fn test_multi_language_detection() {
+        let analyzer = JapaneseSentimentAnalyzer::new();
+
+        // 日本語メインの感情分析
+        let japanese_result = analyzer.analyze_sentiment("素晴らしい配信でした！ありがとう🙏");
+
+        // 英語混合テスト（日本語システムでも基本的な英語は処理可能）
+        let mixed_result = analyzer.analyze_sentiment("Amazing stream! 素晴らしい 😊 Thank you!");
+
+        // 絵文字のみテスト
+        let emoji_result = analyzer.analyze_sentiment("😊🎉👍❤️");
+
+        // 日本語が適切に処理されること
+        assert!(japanese_result.sentiment_score > 0.5);
+        assert!(matches!(
+            japanese_result.sentiment_type,
+            SentimentType::Positive | SentimentType::VeryPositive
+        ));
+
+        // 混合テキストも適切に処理されること
+        assert!(mixed_result.sentiment_score > 0.3);
+
+        // 絵文字のみでも感情が検出されること
+        assert!(emoji_result.sentiment_score > 0.6);
+        assert!(emoji_result
+            .detected_features
+            .iter()
+            .any(|f| f.contains("絵文字")));
+
+        println!(
+            "✅ 多言語検出テスト完了: 日本語={:.2}, 混合={:.2}, 絵文字={:.2}",
+            japanese_result.sentiment_score,
+            mixed_result.sentiment_score,
+            emoji_result.sentiment_score
+        );
+    }
+
+    #[test]
+    fn test_advanced_pattern_recognition() {
+        let mut tracker = EngagementMetrics::new();
+
+        // 複雑なエンゲージメントパターンを作成
+        let pattern_messages = vec![
+            // 質問パターン
+            ("Questioner", "どうやって配信を始めたんですか？"),
+            ("Host", "3年前に趣味で始めました！"),
+            // 感謝パターン
+            ("Fan1", "いつもありがとうございます🙏"),
+            ("Fan2", "配信者さんのおかげで元気になります"),
+            // 興奮パターン
+            ("Excited1", "うわああああああ！！！"),
+            ("Excited2", "やばいやばい😆😆😆"),
+            // Super Chatパターン
+            ("Supporter", "応援してます！"),
+        ];
+
+        for (idx, (user, content)) in pattern_messages.iter().enumerate() {
+            let message_type = if idx == pattern_messages.len() - 1 {
+                MessageType::SuperChat {
+                    amount: "¥500".to_string(),
+                }
+            } else {
+                MessageType::Text
+            };
+
+            let msg = create_test_message(user, content, message_type);
+            tracker.update_from_message(&msg);
+        }
+
+        // パターン認識の検証
+        assert!(tracker.questions_count >= 1); // 質問パターン検出
+        assert!(tracker.sentiment_distribution.positive_percentage > 60.0); // 感謝・興奮パターン
+        assert!(tracker.activity_stats.engagement_events.len() >= 7); // 各種エンゲージメント
+        assert!(tracker.emoji_usage_rate > 0.0); // 絵文字パターン
+
+        // Super Chatが記録されていることを確認
+        let has_superchat = tracker
+            .activity_stats
+            .engagement_events
+            .iter()
+            .any(|e| matches!(e.event_type, EngagementEventType::SuperChat { .. }));
+        assert!(has_superchat, "Super Chatイベントが検出されませんでした");
+
+        println!(
+            "✅ 高度パターン認識テスト完了: {} 質問, {:.1}% ポジティブ率, {} エンゲージメント",
+            tracker.questions_count,
+            tracker.sentiment_distribution.positive_percentage,
+            tracker.activity_stats.engagement_events.len()
+        );
+    }
+
+    #[test]
+    fn test_comprehensive_integration() {
+        let mut tracker = EngagementMetrics::new();
+
+        // 統合テスト：現実的な配信シナリオ
+        let stream_scenario = vec![
+            // 配信開始
+            (
+                "RegularViewer1",
+                "配信開始！お疲れ様です",
+                MessageType::Text,
+            ),
+            ("NewViewer", "初見です！よろしく", MessageType::Text),
+            // 中盤の盛り上がり
+            ("RegularViewer2", "今日の企画面白い😄", MessageType::Text),
+            ("Fan", "いつも楽しい配信ありがとう🙏", MessageType::Text),
+            // Super Chat
+            (
+                "Supporter",
+                "応援してます！",
+                MessageType::SuperChat {
+                    amount: "¥1000".to_string(),
+                },
+            ),
+            // 質問コーナー
+            ("Questioner", "次回の配信予定は？", MessageType::Text),
+            ("Host", "来週の同じ時間です！", MessageType::Text),
+            // 終了前
+            ("RegularViewer1", "今日も最高でした🎉", MessageType::Text),
+            ("Everyone", "お疲れ様でした！", MessageType::Text),
+        ];
+
+        for (user, content, msg_type) in stream_scenario {
+            let msg = create_test_message(user, content, msg_type);
+            tracker.update_from_message(&msg);
+        }
+
+        // 総合的な機能検証
+        let summary = tracker.get_engagement_summary();
+        let validation = tracker.validate_calculation_accuracy();
+
+        assert!(summary.unique_viewers >= 6);
+        assert!(summary.total_messages == 9);
+        assert!(summary.questions_count >= 1);
+        assert!(summary.engagement_rate > 0.0);
+        assert!(validation.is_valid);
+        assert!(validation.accuracy_score >= 95.0);
+
+        // 感情分析の総合確認
+        assert!(tracker.sentiment_distribution.positive_percentage > 70.0);
+        assert!(tracker.sentiment_distribution.total_analyzed_messages >= 8);
+
+        println!(
+            "✅ 総合統合テスト完了: {} 視聴者, {:.1}% エンゲージメント率, {:.1}% ポジティブ率",
+            summary.unique_viewers,
+            summary.engagement_rate * 100.0,
+            tracker.sentiment_distribution.positive_percentage
+        );
+    }
 }

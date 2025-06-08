@@ -435,4 +435,268 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_create_session_with_invalid_url() -> Result<()> {
+        let mut db = LiscovDatabase::new_in_memory()?;
+        
+        // 非常に長いURLでのテスト
+        let long_url = format!("https://youtube.com/watch?v={}", "x".repeat(1000));
+        let session_id = db.create_session(&long_url, None)?;
+        assert!(!session_id.is_empty());
+        
+        // 空のURLでのテスト
+        let empty_session_id = db.create_session("", None)?;
+        assert!(!empty_session_id.is_empty());
+        
+        Ok(())
+    }
+
+    #[test]
+    fn test_session_operations_with_nonexistent_id() -> Result<()> {
+        let mut db = LiscovDatabase::new_in_memory()?;
+        let fake_session_id = "nonexistent-session-id";
+        
+        // 存在しないセッションの終了を試行
+        db.end_session(fake_session_id)?; // エラーにならないが何も起こらない
+        
+        // 存在しないセッションの統計更新を試行
+        db.update_session_stats(fake_session_id)?; // エラーにならないが何も起こらない
+        
+        // 存在しないセッションのメッセージを取得
+        let messages = db.get_session_messages(fake_session_id, Some(10))?;
+        assert_eq!(messages.len(), 0);
+        
+        Ok(())
+    }
+
+    #[test]
+    fn test_message_storage_edge_cases() -> Result<()> {
+        let mut db = LiscovDatabase::new_in_memory()?;
+        let session_id = db.create_session("https://youtube.com/watch?v=test", None)?;
+
+        // 空のメッセージコンテンツ
+        let empty_message = GuiChatMessage {
+            timestamp: "12:00:00".to_string(),
+            message_type: crate::gui::models::MessageType::Text,
+            author: "TestUser".to_string(),
+            channel_id: "test123".to_string(),
+            content: "".to_string(), // 空のコンテンツ
+            metadata: None,
+            is_member: false,
+        };
+        
+        let empty_msg_id = db.save_message(&session_id, &empty_message)?;
+        assert!(empty_msg_id > 0);
+
+        // 非常に長いメッセージコンテンツ
+        let long_content = "a".repeat(10000);
+        let long_message = GuiChatMessage {
+            timestamp: "12:01:00".to_string(),
+            message_type: crate::gui::models::MessageType::Text,
+            author: "TestUser".to_string(),
+            channel_id: "test123".to_string(),
+            content: long_content.clone(),
+            metadata: None,
+            is_member: false,
+        };
+        
+        let long_msg_id = db.save_message(&session_id, &long_message)?;
+        assert!(long_msg_id > 0);
+
+        // 特殊文字を含むメッセージ
+        let special_message = GuiChatMessage {
+            timestamp: "12:02:00".to_string(),
+            message_type: crate::gui::models::MessageType::SuperChat {
+                amount: "¥1000".to_string(),
+            },
+            author: "テストユーザー🎮".to_string(),
+            channel_id: "test123".to_string(),
+            content: "🔥日本語メッセージ with special chars: \\n\\t\"'".to_string(),
+            metadata: Some(crate::gui::models::MessageMetadata {
+                amount: Some("¥1000".to_string()),
+                badges: vec!["SuperChat".to_string()],
+                color: Some("#ff0000".to_string()),
+                is_moderator: false,
+                is_verified: false,
+            }),
+            is_member: true,
+        };
+        
+        let special_msg_id = db.save_message(&session_id, &special_message)?;
+        assert!(special_msg_id > 0);
+
+        // 全メッセージを取得して確認
+        let all_messages = db.get_session_messages(&session_id, None)?;
+        assert_eq!(all_messages.len(), 3);
+        
+        // 長いメッセージが正しく保存されているか確認
+        let long_msg = all_messages.iter().find(|m| m.content.len() > 5000).unwrap();
+        assert_eq!(long_msg.content, long_content);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_save_message_to_nonexistent_session() -> Result<()> {
+        let mut db = LiscovDatabase::new_in_memory()?;
+        let fake_session_id = "nonexistent-session-id";
+
+        let message = GuiChatMessage {
+            timestamp: "12:00:00".to_string(),
+            message_type: crate::gui::models::MessageType::Text,
+            author: "TestUser".to_string(),
+            channel_id: "test123".to_string(),
+            content: "Test message".to_string(),
+            metadata: None,
+            is_member: false,
+        };
+
+        // 存在しないセッションへのメッセージ保存
+        // 外部キー制約があれば失敗するが、現在の実装では成功する可能性がある
+        let result = db.save_message(fake_session_id, &message);
+        
+        // エラーになるかメッセージIDが返されるかのどちらか
+        match result {
+            Ok(msg_id) => assert!(msg_id > 0),
+            Err(_) => (), // 外部キー制約エラーの場合
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_database_schema_consistency() -> Result<()> {
+        let db = LiscovDatabase::new_in_memory()?;
+        
+        // スキーマバージョンが正しく設定されているか確認
+        assert_eq!(db.schema_version, 1);
+        
+        // データベース接続が有効か確認
+        let mut stmt = db.connection.prepare("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")?;
+        let table_count: i64 = stmt.query_row([], |row| row.get(0))?;
+        
+        // 期待されるテーブル数を確認（sessions, messages, viewer_profiles, questions, etc.）
+        assert!(table_count >= 5, "Expected at least 5 tables, found {}", table_count);
+        
+        Ok(())
+    }
+
+    #[test]
+    fn test_large_dataset_performance() -> Result<()> {
+        let mut db = LiscovDatabase::new_in_memory()?;
+        let session_id = db.create_session("https://youtube.com/watch?v=perf_test", None)?;
+
+        // 大量のメッセージを挿入してパフォーマンスをテスト
+        let start_time = std::time::Instant::now();
+        
+        for i in 0..1000 {
+            let message = GuiChatMessage {
+                timestamp: format!("12:{:02}:{:02}", i / 60, i % 60),
+                message_type: if i % 10 == 0 {
+                    crate::gui::models::MessageType::SuperChat {
+                        amount: format!("¥{}", (i + 1) * 100),
+                    }
+                } else {
+                    crate::gui::models::MessageType::Text
+                },
+                author: format!("User{}", i),
+                channel_id: format!("channel{}", i % 100),
+                content: format!("Test message number {}", i),
+                metadata: if i % 50 == 0 {
+                    Some(crate::gui::models::MessageMetadata {
+                        amount: Some(format!("¥{}", i * 10)),
+                        badges: vec![format!("Badge{}", i)],
+                        color: Some("#0000ff".to_string()),
+                        is_moderator: false,
+                        is_verified: false,
+                    })
+                } else {
+                    None
+                },
+                is_member: i % 20 == 0,
+            };
+            
+            db.save_message(&session_id, &message)?;
+        }
+        
+        let insert_duration = start_time.elapsed();
+        println!("1000メッセージの挿入時間: {:?}", insert_duration);
+        
+        // 全メッセージの取得時間をテスト
+        let fetch_start = std::time::Instant::now();
+        let all_messages = db.get_session_messages(&session_id, None)?;
+        let fetch_duration = fetch_start.elapsed();
+        
+        assert_eq!(all_messages.len(), 1000);
+        println!("1000メッセージの取得時間: {:?}", fetch_duration);
+        
+        // パフォーマンスの期待値（あまり厳しくない）
+        assert!(insert_duration.as_millis() < 5000, "メッセージ挿入が遅すぎます: {:?}", insert_duration);
+        assert!(fetch_duration.as_millis() < 1000, "メッセージ取得が遅すぎます: {:?}", fetch_duration);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_concurrent_access_safety() -> Result<()> {
+        use std::sync::{Arc, Mutex};
+        use std::thread;
+        
+        // メモリ内データベースは単一接続のため、実際の同時アクセステストは制限される
+        // ここでは基本的な排他制御の動作確認のみ行う
+        
+        let mut db = LiscovDatabase::new_in_memory()?;
+        let session_id = db.create_session("https://youtube.com/watch?v=concurrent_test", None)?;
+        
+        // データベースを共有可能な形でラップ
+        let db_mutex = Arc::new(Mutex::new(db));
+        let session_id_clone = session_id.clone();
+        
+        let db_clone = Arc::clone(&db_mutex);
+        let handle = thread::spawn(move || {
+            let mut db_guard = db_clone.lock().unwrap();
+            
+            for i in 0..10 {
+                let message = GuiChatMessage {
+                    timestamp: format!("12:00:{:02}", i),
+                    message_type: crate::gui::models::MessageType::Text,
+                    author: format!("ThreadUser{}", i),
+                    channel_id: "thread_test".to_string(),
+                    content: format!("Thread message {}", i),
+                    metadata: None,
+                    is_member: false,
+                };
+                
+                db_guard.save_message(&session_id_clone, &message).unwrap();
+            }
+        });
+        
+        // メインスレッドでも並行してメッセージを追加
+        {
+            let mut db_guard = db_mutex.lock().unwrap();
+            for i in 10..20 {
+                let message = GuiChatMessage {
+                    timestamp: format!("12:00:{:02}", i),
+                    message_type: crate::gui::models::MessageType::Text,
+                    author: format!("MainUser{}", i),
+                    channel_id: "main_test".to_string(),
+                    content: format!("Main message {}", i),
+                    metadata: None,
+                    is_member: false,
+                };
+                
+                db_guard.save_message(&session_id, &message)?;
+            }
+        }
+        
+        handle.join().unwrap();
+        
+        // 全メッセージが正しく挿入されたか確認
+        let db_guard = db_mutex.lock().unwrap();
+        let all_messages = db_guard.get_session_messages(&session_id, None)?;
+        assert_eq!(all_messages.len(), 20);
+        
+        Ok(())
+    }
 }

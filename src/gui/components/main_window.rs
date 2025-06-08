@@ -14,6 +14,7 @@ fn IntegratedHeaderTabs(active_tab: ActiveTab, on_tab_change: EventHandler<Activ
         ActiveTab::RevenueAnalytics,
         ActiveTab::EngagementAnalytics,
         ActiveTab::DataExport,
+        ActiveTab::Settings,
     ];
 
     rsx! {
@@ -171,6 +172,22 @@ pub fn MainWindow() -> Element {
     // フィルタ状態をアプリレベルで永続化
     let global_filter = use_signal(|| crate::chat_management::MessageFilter::new());
 
+    // AppStateコンテキストを提供（設定画面で使用）
+    let app_state = use_signal(|| {
+        // 設定ファイルから初期状態を読み込み
+        let config_manager = crate::gui::config_manager::get_config_manager();
+        if let Ok(manager_guard) = config_manager.lock() {
+            if let Ok(config) = manager_guard.load_config() {
+                let mut state = crate::gui::models::AppState::default();
+                manager_guard.apply_to_app_state(&config, &mut state);
+                tracing::info!("✅ Configuration loaded and applied to AppState");
+                return state;
+            }
+        }
+        tracing::warn!("⚠️ Failed to load configuration, using defaults");
+        crate::gui::models::AppState::default()
+    });
+
     // パフォーマンスモニターを完全無効化（CPU負荷軽減のため）
     // 起動時のパフォーマンス問題解決のため、すべてのモニター機能を無効化
 
@@ -178,6 +195,19 @@ pub fn MainWindow() -> Element {
         "🖥️ MainWindow: Rendering with active_tab={:?}",
         active_tab()
     );
+
+    // AppStateコンテキストを提供
+    use_context_provider(|| app_state.clone());
+
+    // アプリケーション終了時に設定を自動保存
+    use_drop(move || {
+        let state = app_state.read().clone();
+        tokio::spawn(async move {
+            use crate::gui::config_manager::save_app_state_async;
+            save_app_state_async(state);
+            tracing::info!("💾 Configuration auto-saved on application exit");
+        });
+    });
 
     rsx! {
         // CSSスタイルをdocument headに注入

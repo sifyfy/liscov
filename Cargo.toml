@@ -12,6 +12,11 @@ name = "liscov"
 path = "src/bin/liscov.rs"
 doc = false
 
+[[bin]]
+name = "generate_test_data"
+path = "src/bin/generate_test_data.rs"
+doc = false
+
 [dependencies]
 # Dioxus 0.6.3 dependencies for migration
 dioxus = { version = "0.6.3", features = ["signals", "desktop"] }
@@ -56,8 +61,21 @@ dioxus-charts = "0.3"
 # Web APIs for browser functionality
 web-sys = { version = "0.3", features = ["Window"] }
 
+# Native file dialogs
+rfd = "0.15"
+
+# WASM futures support
+wasm-bindgen-futures = "0.4"
+
 # デバッグ・開発用依存関係
 toml = "0.8" # 設定ファイル読み込み用
+
+# 設定ファイル管理
+directories = "5.0" # XDGディレクトリサポート
+
+# シグナルハンドリング
+ctrlc = "3.4"
+
 
 # 条件付きデバッグ依存関係（デバッグビルドのみ）
 [dependencies.console-subscriber]
@@ -88,3 +106,6 @@ overflow-checks = true
 inherits = "release"
 debug = true
 strip = false
+
+[dev-dependencies]
+tempfile = "3.0"

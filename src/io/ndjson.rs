@@ -289,7 +289,7 @@ mod tests {
 
     #[test]
     fn test_parse_ndjson_file() {
-        let file_path = get_test_file_path("live_chat_qAjO7p-wYys.ndjson");
+        let file_path = get_test_file_path("live_chat.ndjson");
         let entries = parse_ndjson_file(file_path.to_str().unwrap()).unwrap();
         assert!(!entries.is_empty());
 
@@ -301,7 +301,7 @@ mod tests {
 
     #[test]
     fn test_parse_ndjson_file_legacy() {
-        let file_path = get_test_file_path("live_chat_qAjO7p-wYys.ndjson");
+        let file_path = get_test_file_path("live_chat.ndjson");
         let entries = parse_ndjson_file_legacy(file_path.to_str().unwrap()).unwrap();
         assert!(!entries.is_empty());
     }
