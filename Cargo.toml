@@ -8,10 +8,9 @@ autobins = false                                 # 自動バイナリ検出を�
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [[bin]]
-name = "liscov-gui"
-path = "src/bin/liscov-gui.rs"
+name = "liscov"
+path = "src/bin/liscov.rs"
 doc = false
-
 
 [dependencies]
 # Dioxus 0.6.3 dependencies for migration

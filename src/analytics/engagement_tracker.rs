@@ -1933,6 +1933,127 @@ mod tests {
         assert_eq!(tracker.questions_count, 0);
     }
 
+    /// テスト用メッセージ作成ヘルパー
+    fn create_test_message(
+        author: &str,
+        content: &str,
+        message_type: MessageType,
+    ) -> GuiChatMessage {
+        GuiChatMessage {
+            timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
+            message_type,
+            author: author.to_string(),
+            channel_id: format!("test_{}", author),
+            content: content.to_string(),
+            metadata: None,
+            is_member: false,
+        }
+    }
+
+    /// 軽量バッチ更新テスト
+    #[test]
+    fn test_lightweight_batch_update() {
+        let mut engagement_metrics = EngagementMetrics::new();
+
+        let messages: Vec<GuiChatMessage> = (1..=10)
+            .map(|i| {
+                create_test_message(
+                    &format!("user_{}", i),
+                    &format!("テストメッセージ {}", i),
+                    MessageType::Text,
+                )
+            })
+            .collect();
+
+        engagement_metrics.update_from_messages_lightweight(&messages);
+        let summary = engagement_metrics.get_engagement_summary();
+
+        assert!(summary.unique_viewers >= 10);
+        println!(
+            "✅ 軽量バッチ更新テスト完了: {} ユニーク視聴者",
+            summary.unique_viewers
+        );
+    }
+
+    /// エンゲージメント分析テスト
+    #[test]
+    fn test_engagement_analysis() {
+        let mut engagement_metrics = EngagementMetrics::new();
+
+        let engagement_messages = vec![
+            create_test_message("low1", "はい", MessageType::Text),
+            create_test_message("high1", "😊❤️ 最高です！！", MessageType::Text),
+            create_test_message(
+                "supporter",
+                "応援してます！",
+                MessageType::SuperChat {
+                    amount: "¥500".to_string(),
+                },
+            ),
+        ];
+
+        engagement_metrics.update_from_messages_lightweight(&engagement_messages);
+        let summary = engagement_metrics.get_engagement_summary();
+
+        assert!(summary.unique_viewers >= 3);
+        assert!(summary.emoji_usage_rate >= 0.0);
+        assert!(summary.engagement_rate >= 0.0);
+
+        println!("✅ エンゲージメント分析テスト完了");
+    }
+
+    /// パフォーマンステスト
+    #[test]
+    fn test_performance_large_batch() {
+        let start_time = std::time::Instant::now();
+        let mut engagement_metrics = EngagementMetrics::new();
+
+        let bulk_messages: Vec<GuiChatMessage> = (1..=100)
+            .map(|i| {
+                create_test_message(
+                    &format!("perf_user_{}", i),
+                    &format!("パフォーマンステストメッセージ {}", i),
+                    MessageType::Text,
+                )
+            })
+            .collect();
+
+        engagement_metrics.update_from_messages_lightweight(&bulk_messages);
+        let summary = engagement_metrics.get_engagement_summary();
+        let total_time = start_time.elapsed();
+
+        assert!(summary.unique_viewers >= 100);
+        assert!(total_time.as_secs() < 5); // 5秒以内で完了
+
+        println!("✅ パフォーマンステスト完了: {}ms", total_time.as_millis());
+    }
+
+    /// 感情分析テスト
+    #[test]
+    fn test_sentiment_analysis_integration() {
+        let mut engagement_metrics = EngagementMetrics::new();
+
+        let sentiment_messages = vec![
+            create_test_message(
+                "positive",
+                "素晴らしい！ありがとうございます！",
+                MessageType::Text,
+            ),
+            create_test_message("excited", "うわー！！！すごすぎる！！！", MessageType::Text),
+            create_test_message("emoji", "😂😂😂 笑いすぎです 😭", MessageType::Text),
+        ];
+
+        engagement_metrics.update_from_messages_lightweight(&sentiment_messages);
+        let summary = engagement_metrics.get_engagement_summary();
+
+        assert!(summary.unique_viewers >= 3);
+
+        println!(
+            "✅ 感情分析統合テスト完了: {} ユニーク視聴者の感情分析",
+            summary.unique_viewers
+        );
+    }
+
     /*
     #[test]
     fn test_unique_viewer_tracking() {

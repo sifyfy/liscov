@@ -768,4 +768,97 @@ mod tests {
 
         println!("✅ 分析結果シリアライゼーションテスト完了");
     }
+
+    /// 分析結果構造の整合性テスト
+    #[test]
+    fn test_analysis_result_structure_consistency() {
+        let summary = EngagementSummary {
+            unique_viewers: 15,
+            engagement_rate: 78.5,
+            emoji_usage_rate: 45.2,
+            average_message_length: 28.7,
+            questions_count: 4,
+            active_sessions: 8,
+            total_messages: 32,
+            peak_hour: Some(16),
+        };
+
+        let analysis = AnalysisResult {
+            timestamp: chrono::Utc::now(),
+            engagement_summary: summary.clone(),
+            analyzed_message_count: 32,
+            analysis_duration_ms: 320,
+        };
+
+        // 構造の整合性確認
+        assert_eq!(analysis.analyzed_message_count, summary.total_messages);
+        assert_eq!(analysis.engagement_summary.unique_viewers, 15);
+        assert!(analysis.analysis_duration_ms > 0);
+
+        // シリアライゼーション確認
+        let json_result = serde_json::to_string(&analysis);
+        assert!(json_result.is_ok());
+
+        println!("✅ 分析結果構造整合性テスト完了");
+    }
+
+    /// 総合機能テスト
+    #[test]
+    fn test_comprehensive_analytics_functionality() {
+        let mut engagement_metrics = EngagementMetrics::new();
+
+        // 複数のシナリオのメッセージを作成
+        let mut all_messages = Vec::new();
+
+        // 基本メッセージ
+        for i in 1..=10 {
+            all_messages.push(create_test_message(
+                &format!("basic_user_{}", i),
+                &format!("基本メッセージ {}", i),
+                MessageType::Text,
+            ));
+        }
+
+        // 高エンゲージメントメッセージ
+        all_messages.push(create_test_message(
+            "emoji_user",
+            "😊❤️🎉 素晴らしいです！",
+            MessageType::Text,
+        ));
+        all_messages.push(create_test_message(
+            "superchat_user",
+            "応援しています！",
+            MessageType::SuperChat {
+                amount: "¥1000".to_string(),
+            },
+        ));
+        all_messages.push(create_test_message(
+            "excited_user",
+            "うわー！！！すごい！！！",
+            MessageType::Text,
+        ));
+        all_messages.push(create_test_message(
+            "question_user",
+            "これはどういう意味ですか？",
+            MessageType::Text,
+        ));
+
+        // 軽量バッチ更新
+        engagement_metrics.update_from_messages_lightweight(&all_messages);
+        let summary = engagement_metrics.get_engagement_summary();
+
+        // 包括的な検証
+        assert!(summary.unique_viewers >= 10);
+        assert!(summary.emoji_usage_rate >= 0.0);
+        assert!(summary.engagement_rate >= 0.0);
+        assert!(summary.questions_count >= 1);
+
+        println!("✅ 総合機能テスト完了");
+        println!("   - 処理シナリオ数: 4");
+        println!("   - ユニーク視聴者数: {}", summary.unique_viewers);
+        println!(
+            "   - 最終エンゲージメント率: {:.1}%",
+            summary.engagement_rate
+        );
+    }
 }
