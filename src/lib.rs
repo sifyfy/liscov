@@ -7,10 +7,215 @@ pub mod io;
 
 pub use api::innertube::get_live_chat;
 
-// Re-export the main error types for convenience
+// Unified error handling system
+use thiserror::Error;
+
+/// 統一エラー型 - アプリケーション全体で使用される階層化エラー
+#[derive(Error, Debug)]
+pub enum LiscovError {
+    /// API関連エラー（YouTube、InnerTube）
+    #[error("API error: {0}")]
+    Api(#[from] ApiError),
+    
+    /// データベース操作エラー
+    #[error("Database error: {0}")]
+    Database(#[from] DatabaseError),
+    
+    /// ファイルI/O・データ処理エラー
+    #[error("I/O error: {0}")]
+    Io(#[from] IoError),
+    
+    /// GUI・設定関連エラー
+    #[error("GUI error: {0}")]
+    Gui(#[from] GuiError),
+    
+    /// アナリティクス・エクスポート関連エラー
+    #[error("Analytics error: {0}")]
+    Analytics(#[from] AnalyticsError),
+    
+    /// ネットワーク・HTTP関連エラー
+    #[error("Network error: {0}")]
+    Network(#[from] reqwest::Error),
+    
+    /// JSON処理エラー
+    #[error("JSON error: {0}")]
+    Json(#[from] serde_json::Error),
+    
+    /// 標準I/Oエラー
+    #[error("IO error: {0}")]
+    StdIo(#[from] std::io::Error),
+    
+    /// 設定関連エラー
+    #[error("Configuration error: {0}")]
+    Config(String),
+    
+    /// 汎用エラー（既存のanyhowエラーをラップ）
+    #[error("General error: {0}")]
+    General(#[from] anyhow::Error),
+}
+
+/// API関連の具体的エラー
+#[derive(Error, Debug)]
+pub enum ApiError {
+    #[error("Request failed: {0}")]
+    Request(#[source] reqwest::Error),
+    
+    #[error("JSON parsing failed: {0}")]
+    JsonParse(#[source] serde_json::Error),
+    
+    #[error("Resource not found")]
+    NotFound,
+    
+    #[error("Authentication failed")]
+    Authentication,
+    
+    #[error("Rate limit exceeded")]
+    RateLimit,
+    
+    #[error("Invalid response format")]
+    InvalidFormat,
+}
+
+/// データベース関連の具体的エラー
+#[derive(Error, Debug)]
+pub enum DatabaseError {
+    #[error("Connection failed: {0}")]
+    Connection(String),
+    
+    #[error("Query execution failed: {0}")]
+    Query(String),
+    
+    #[error("Migration failed: {0}")]
+    Migration(String),
+    
+    #[error("Transaction failed: {0}")]
+    Transaction(String),
+    
+    #[error("SQLite error: {0}")]
+    Sqlite(#[from] rusqlite::Error),
+}
+
+/// ファイルI/O・データ処理の具体的エラー
+#[derive(Error, Debug)]
+pub enum IoError {
+    #[error("File read error: {0}")]
+    FileRead(String),
+    
+    #[error("File write error: {0}")]
+    FileWrite(String),
+    
+    #[error("Parse error at line {line}: {message}")]
+    Parse { line: usize, message: String },
+    
+    #[error("Invalid file format: {0}")]
+    InvalidFormat(String),
+    
+    #[error("Path error: {0}")]
+    Path(String),
+}
+
+/// GUI関連の具体的エラー
+#[derive(Error, Debug)]
+pub enum GuiError {
+    #[error("Component initialization failed: {0}")]
+    ComponentInit(String),
+    
+    #[error("State management error: {0}")]
+    StateManagement(String),
+    
+    #[error("Configuration error: {0}")]
+    Configuration(String),
+    
+    #[error("Window operation failed: {0}")]
+    WindowOperation(String),
+    
+    #[error("Plugin error: {0}")]
+    PluginError(String),
+    
+    #[error("Service error: {0}")]
+    Service(String),
+}
+
+/// アナリティクス・エクスポート関連の具体的エラー
+#[derive(Error, Debug)]
+pub enum AnalyticsError {
+    #[error("Export failed: {0}")]
+    Export(String),
+    
+    #[error("Data processing error: {0}")]
+    DataProcessing(String),
+    
+    #[error("Format conversion error: {0}")]
+    FormatConversion(String),
+}
+
+// 旧エラー型から新エラー型への変換実装
+impl From<api::innertube::FetchError> for LiscovError {
+    fn from(err: api::innertube::FetchError) -> Self {
+        match err {
+            api::innertube::FetchError::Request(e) => LiscovError::Network(e),
+            api::innertube::FetchError::Serialization(e) => LiscovError::Json(e),
+            api::innertube::FetchError::NotFound => LiscovError::Api(ApiError::NotFound),
+            api::innertube::FetchError::Other(e) => LiscovError::General(e),
+        }
+    }
+}
+
+impl From<api::youtube::FetchError> for LiscovError {
+    fn from(err: api::youtube::FetchError) -> Self {
+        match err {
+            api::youtube::FetchError::Request(e) => LiscovError::Network(e),
+            api::youtube::FetchError::Parse(e) => LiscovError::Json(e),
+            api::youtube::FetchError::NotFound => LiscovError::Api(ApiError::NotFound),
+        }
+    }
+}
+
+impl From<io::ndjson::LiveChatError> for LiscovError {
+    fn from(err: io::ndjson::LiveChatError) -> Self {
+        match err {
+            io::ndjson::LiveChatError::Io(e) => LiscovError::StdIo(e),
+            io::ndjson::LiveChatError::JsonParse { line, source } => {
+                LiscovError::Io(IoError::Parse { 
+                    line, 
+                    message: source.to_string() 
+                })
+            },
+            io::ndjson::LiveChatError::InvalidFormat { reason } => {
+                LiscovError::Io(IoError::InvalidFormat(reason))
+            },
+            io::ndjson::LiveChatError::NoData { context } => {
+                LiscovError::Io(IoError::InvalidFormat(context))
+            },
+            io::ndjson::LiveChatError::MissingField { field, structure } => {
+                LiscovError::Io(IoError::InvalidFormat(format!("Missing field '{}' in {}", field, structure)))
+            },
+            io::ndjson::LiveChatError::InvalidContinuation { token } => {
+                LiscovError::Io(IoError::InvalidFormat(format!("Invalid continuation: {}", token)))
+            },
+            io::ndjson::LiveChatError::UnsupportedMessageType { message_type } => {
+                LiscovError::Io(IoError::InvalidFormat(format!("Unsupported message type: {}", message_type)))
+            },
+            io::ndjson::LiveChatError::Network(e) => LiscovError::Network(e),
+            io::ndjson::LiveChatError::RateLimit { retry_after_seconds: _ } => {
+                LiscovError::Api(ApiError::RateLimit)
+            },
+            io::ndjson::LiveChatError::Generic { context, message } => {
+                LiscovError::Io(IoError::InvalidFormat(format!("{}: {}", context, message)))
+            },
+        }
+    }
+}
+
+// 便利な結果型エイリアス
+pub type LiscovResult<T> = Result<T, LiscovError>;
+
+// Unified error types are defined in this module and available directly
+
+// Re-export the main error types for convenience (legacy compatibility)
 pub use api::innertube::FetchError;
 pub use api::youtube::FetchError as YoutubeFetchError;
-pub use io::LiveChatError;
+pub use io::ndjson::LiveChatError;
 
 // Re-export I/O utilities for convenience
 pub use io::ndjson::{

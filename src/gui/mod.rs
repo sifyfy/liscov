@@ -1,7 +1,13 @@
 // Core modules
 pub mod config_manager;
+pub mod memory_optimized; // メモリ効率最適化
+pub mod message_processor; // メッセージ処理パイプライン
 pub mod models; // 既存のデータ構造は継続使用
+pub mod plugin_system; // プラグインアーキテクチャ
+pub mod plugins; // サンプルプラグイン
 pub mod services; // 既存のAPIサービスは継続使用
+pub mod traits; // トレイトベース設計
+pub mod unified_config; // 統一設定管理システム
 pub mod utils; // ユーティリティ関数は継続使用 // 設定管理モジュール
 
 // Dioxus UI components - 新アーキテクチャ対応

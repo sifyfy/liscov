@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// GUI用のチャットメッセージ構造体
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct GuiChatMessage {
     pub timestamp: String,
     pub message_type: MessageType,
@@ -13,8 +13,9 @@ pub struct GuiChatMessage {
 }
 
 /// メッセージタイプ列挙型
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum MessageType {
+    #[default]
     Text,
     SuperChat { amount: String },
     SuperSticker { amount: String },
@@ -35,7 +36,7 @@ impl MessageType {
 }
 
 /// メッセージメタデータ
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct MessageMetadata {
     pub amount: Option<String>,
     pub badges: Vec<String>,

@@ -270,14 +270,59 @@ impl LiscovDatabase {
         })
     }
 
-    /// 金額文字列をデータベース用にパース
+    /// 金額文字列をデータベース用にパース（堅牢性強化版）
     fn parse_amount_for_db(&self, amount_str: &str) -> Option<f64> {
+        // 入力検証
+        if amount_str.is_empty() {
+            tracing::debug!("Empty amount string provided");
+            return None;
+        }
+        
+        if amount_str.len() > 50 {
+            tracing::warn!("Amount string too long ({}): {}", amount_str.len(), amount_str);
+            return None;
+        }
+
+        // 数字とピリオドのみを抽出
         let clean_amount = amount_str
             .chars()
             .filter(|c| c.is_ascii_digit() || *c == '.')
             .collect::<String>();
 
-        clean_amount.parse::<f64>().ok()
+        // 空の結果をチェック
+        if clean_amount.is_empty() {
+            tracing::debug!("No valid numeric characters in amount: {}", amount_str);
+            return None;
+        }
+
+        // ピリオドが複数ある場合をチェック
+        let dot_count = clean_amount.chars().filter(|&c| c == '.').count();
+        if dot_count > 1 {
+            tracing::warn!("Invalid amount format (multiple decimals): {}", amount_str);
+            return None;
+        }
+
+        // パースを試行
+        match clean_amount.parse::<f64>() {
+            Ok(amount) => {
+                // 負の値や異常に大きな値をチェック
+                if amount < 0.0 {
+                    tracing::warn!("Negative amount detected: {}", amount);
+                    return None;
+                }
+                
+                if amount > 1_000_000.0 {
+                    tracing::warn!("Unusually large amount detected: {}", amount);
+                    // 警告は出すが、値は受け入れる（大額の寄付もあり得る）
+                }
+                
+                Some(amount)
+            }
+            Err(e) => {
+                tracing::warn!("Failed to parse amount '{}': {}", amount_str, e);
+                None
+            }
+        }
     }
 
     /// 質問を保存

@@ -1,7 +1,9 @@
-use anyhow::Result;
 use dioxus::prelude::*;
-use liscov::gui::{components::MainWindow, config_manager, utils};
-use std::sync::Mutex;
+use liscov::{
+    LiscovResult,
+    gui::{components::MainWindow, config_manager, utils, plugin_system::PluginManager},
+};
+use std::sync::{Arc, Mutex};
 
 /// ウィンドウ設定の保存用
 static LAST_WINDOW_CONFIG: Mutex<Option<config_manager::WindowConfig>> = Mutex::new(None);
@@ -60,7 +62,7 @@ fn app() -> Element {
     }
 }
 
-fn main() -> Result<()> {
+fn main() -> LiscovResult<()> {
     // tokio-consoleの初期化（プロファイリング用）
     #[cfg(feature = "debug-tokio")]
     console_subscriber::init();
@@ -78,6 +80,10 @@ fn main() -> Result<()> {
         tracing::warn!("設定読み込みエラー、デフォルト設定を使用: {}", e);
         config_manager::AppConfig::default()
     });
+
+    // プラグインシステムを初期化
+    let plugin_manager = Arc::new(PluginManager::new());
+    tracing::info!("🔌 Plugin system initialized");
 
     // ウィンドウ位置をデスクトップ範囲内に調整
     utils::validate_window_bounds(&mut config.window);
@@ -117,7 +123,7 @@ fn main() -> Result<()> {
         tracing::info!("🛑 終了シグナルを受信しました");
         save_window_config_on_exit();
         std::process::exit(0);
-    })?;
+    }).map_err(|e| liscov::GuiError::Configuration(format!("Failed to set signal handler: {}", e)))?;
 
     // Dioxusアプリケーションを起動
     launch_builder.launch(app);

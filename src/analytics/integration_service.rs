@@ -106,12 +106,13 @@ impl AnalyticsIntegrationService {
             let start_time = std::time::Instant::now();
 
             // 現在の状態を取得
-            let current_state = get_state_manager().get_state();
-            let current_message_count = current_state.messages.len();
+            let current_state = get_state_manager().get_state_unchecked();
+            let current_message_count = current_state.messages().len();
 
             // 新しいメッセージがある場合のみ分析
             if current_message_count > last_analyzed_count {
-                let new_messages = &current_state.messages[last_analyzed_count..];
+                let all_messages = current_state.messages();
+                let new_messages = &all_messages[last_analyzed_count..];
 
                 // エンゲージメント分析を実行
                 Self::process_new_messages(&mut engagement_metrics, new_messages);
@@ -169,18 +170,18 @@ impl AnalyticsIntegrationService {
 
     /// 現在の分析結果を取得
     pub fn get_current_analysis() -> AnalysisResult {
-        let current_state = get_state_manager().get_state();
+        let current_state = get_state_manager().get_state_unchecked();
         let mut engagement_metrics = EngagementMetrics::new();
 
         // 全メッセージを分析（リアルタイム用）
-        for message in &current_state.messages {
+        for message in &current_state.messages() {
             engagement_metrics.update_from_message(message);
         }
 
         AnalysisResult {
             timestamp: chrono::Utc::now(),
             engagement_summary: engagement_metrics.get_engagement_summary(),
-            analyzed_message_count: current_state.messages.len(),
+            analyzed_message_count: current_state.messages().len(),
             analysis_duration_ms: 0, // リアルタイム計算のため0
         }
     }
@@ -200,8 +201,8 @@ impl AnalyticsIntegrationService {
 
         // 現在の状態管理からメッセージを取得
         let state_manager = get_state_manager();
-        let state = state_manager.get_state();
-        let messages = &state.messages;
+        let state = state_manager.get_state_unchecked();
+        let messages = &state.messages();
 
         // SessionDataに変換
         let session_data = Self::convert_to_session_data(messages);
@@ -246,8 +247,8 @@ impl AnalyticsIntegrationService {
 
         // ファイルに書き込み（実際の実装では、export_managerからデータを取得）
         let state_manager = get_state_manager();
-        let state = state_manager.get_state();
-        let messages = &state.messages;
+        let state = state_manager.get_state_unchecked();
+        let messages = &state.messages();
         let session_data = Self::convert_to_session_data(messages);
 
         let config = ExportConfig {

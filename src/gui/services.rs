@@ -1,6 +1,7 @@
 // ライブチャットサービス層
 // Phase 2で実装予定
 
+use async_trait::async_trait;
 use std::sync::{Arc, OnceLock};
 use tokio::sync::{mpsc, Mutex as TokioMutex};
 
@@ -172,7 +173,12 @@ impl LiveChatService {
     ) -> anyhow::Result<mpsc::UnboundedReceiver<GuiChatMessage>> {
         use crate::gui::state_management::get_state_manager;
         let state_manager = get_state_manager();
-        let current_state = state_manager.get_state();
+        let current_state = match state_manager.get_state() {
+            Ok(state) => state,
+            Err(e) => {
+                return Err(anyhow::anyhow!("Failed to get state for resume: {}", e));
+            }
+        };
 
         // 保存されたURLと継続トークンを取得
         let url = match (&self.last_url, &current_state.current_url) {
@@ -477,6 +483,49 @@ impl LiveChatService {
 impl Default for LiveChatService {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// ChatServiceトレイトの実装（Phase 2: トレイトベース設計への移行）
+#[async_trait]
+impl super::traits::ChatService for LiveChatService {
+    async fn start_monitoring(
+        &mut self,
+        url: &str,
+        output_file: Option<String>,
+    ) -> anyhow::Result<mpsc::UnboundedReceiver<GuiChatMessage>> {
+        self.start_monitoring(url, output_file).await
+    }
+
+    async fn stop_monitoring(&mut self) -> anyhow::Result<()> {
+        self.stop_monitoring().await
+    }
+
+    async fn pause_monitoring(&mut self) -> anyhow::Result<()> {
+        self.pause_monitoring().await
+    }
+
+    async fn resume_monitoring(
+        &mut self,
+        output_file: Option<String>,
+    ) -> anyhow::Result<mpsc::UnboundedReceiver<GuiChatMessage>> {
+        self.resume_monitoring(output_file).await
+    }
+
+    async fn get_state(&self) -> ServiceState {
+        self.get_state().await
+    }
+
+    async fn update_save_config(&self, config: crate::io::SaveConfig) {
+        self.update_save_config(config).await
+    }
+
+    async fn get_save_config(&self) -> crate::io::SaveConfig {
+        self.get_save_config().await
+    }
+
+    async fn get_saved_response_count(&self) -> anyhow::Result<usize> {
+        self.get_saved_response_count().await
     }
 }
 

@@ -49,13 +49,13 @@ impl UiSyncService {
                 tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
                 // 現在の状態を取得
-                let current_state = get_state_manager().get_state();
+                let current_state = get_state_manager().get_state_unchecked();
 
                 // 状態変更検出
                 let needs_update = match &last_state {
                     None => true, // 初回は必ず更新
                     Some(last) => {
-                        last.messages.len() != current_state.messages.len()
+                        last.messages().len() != current_state.messages().len()
                             || last.service_state != current_state.service_state
                             || last.is_connected != current_state.is_connected
                             || last.is_stopping != current_state.is_stopping
@@ -65,11 +65,11 @@ impl UiSyncService {
                 if needs_update {
                     // 重要な変更をログ出力
                     if let Some(last) = &last_state {
-                        if last.messages.len() != current_state.messages.len() {
+                        if last.messages().len() != current_state.messages().len() {
                             tracing::info!(
                                 "🎨 UI sync: messages {} → {}",
-                                last.messages.len(),
-                                current_state.messages.len()
+                                last.messages().len(),
+                                current_state.messages().len()
                             );
                         }
                         if last.service_state != current_state.service_state {
@@ -144,13 +144,13 @@ impl UiSyncService {
                 tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
                 // 現在の状態を取得
-                let current_state = get_state_manager().get_state();
+                let current_state = get_state_manager().get_state_unchecked();
 
                 // 状態変更検出
                 let needs_update = match &last_state {
                     None => true, // 初回は必ず更新
                     Some(last) => {
-                        last.messages.len() != current_state.messages.len()
+                        last.messages().len() != current_state.messages().len()
                             || last.service_state != current_state.service_state
                             || last.is_connected != current_state.is_connected
                             || last.is_stopping != current_state.is_stopping
@@ -160,11 +160,11 @@ impl UiSyncService {
                 if needs_update {
                     // 重要な変更をログ出力
                     if let Some(last) = &last_state {
-                        if last.messages.len() != current_state.messages.len() {
+                        if last.messages().len() != current_state.messages().len() {
                             tracing::info!(
                                 "🎨 UI sync: messages {} → {}",
-                                last.messages.len(),
-                                current_state.messages.len()
+                                last.messages().len(),
+                                current_state.messages().len()
                             );
                         }
                         if last.service_state != current_state.service_state {

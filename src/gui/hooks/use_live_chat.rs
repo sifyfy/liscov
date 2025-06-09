@@ -65,7 +65,13 @@ impl LiveChatHandle {
             let global_state =
                 GLOBAL_LIVE_CHAT.get_or_init(|| Arc::new(Mutex::new(GlobalLiveChatState::new())));
             {
-                let mut guard = global_state.lock().unwrap();
+                let mut guard = match global_state.lock() {
+                    Ok(guard) => guard,
+                    Err(poisoned) => {
+                        tracing::error!("⚠️ Global live chat state mutex poisoned, recovering");
+                        poisoned.into_inner()
+                    }
+                };
                 guard.stopping = false; // 停止フラグをリセット
             }
 
@@ -140,7 +146,13 @@ impl LiveChatHandle {
             // グローバル状態をチェックして、既に停止処理中なら何もしない
             if let Some(global_state) = GLOBAL_LIVE_CHAT.get() {
                 {
-                    let mut guard = global_state.lock().unwrap();
+                    let mut guard = match global_state.lock() {
+                        Ok(guard) => guard,
+                        Err(poisoned) => {
+                            tracing::error!("⚠️ Global live chat state mutex poisoned during stop, recovering");
+                            poisoned.into_inner()
+                        }
+                    };
                     if guard.stopping {
                         tracing::debug!("Stop already in progress, skipping");
                         return;
@@ -169,7 +181,13 @@ impl LiveChatHandle {
 
                 // グローバル状態を更新
                 {
-                    let mut guard = global_state.lock().unwrap();
+                    let mut guard = match global_state.lock() {
+                        Ok(guard) => guard,
+                        Err(poisoned) => {
+                            tracing::error!("⚠️ Global live chat state mutex poisoned during cleanup, recovering");
+                            poisoned.into_inner()
+                        }
+                    };
                     guard.stopping = false; // 停止処理完了
                 }
 
@@ -194,7 +212,7 @@ impl LiveChatHandle {
         let mut is_connected = self.is_connected;
 
         spawn(async move {
-            if let Some(global_state) = GLOBAL_LIVE_CHAT.get() {
+            if let Some(_global_state) = GLOBAL_LIVE_CHAT.get() {
                 let service_arc = crate::gui::services::get_global_service().clone();
 
                 tracing::info!("⏸️ Pausing live chat monitoring");
@@ -233,7 +251,7 @@ impl LiveChatHandle {
         let mut is_connected = self.is_connected;
 
         spawn(async move {
-            if let Some(global_state) = GLOBAL_LIVE_CHAT.get() {
+            if let Some(_global_state) = GLOBAL_LIVE_CHAT.get() {
                 let service_arc = crate::gui::services::get_global_service().clone();
 
                 tracing::info!("▶️ Resuming live chat monitoring");
@@ -338,40 +356,47 @@ pub fn use_live_chat() -> LiveChatHandle {
 
     // StateManagerから初期値を取得（遅延初期化）
     let state_manager = get_state_manager();
-    let initial_state = state_manager.get_state();
+    let initial_state = state_manager.get_state_unchecked();
+    
+    // 初期値を事前にクローン（移動問題を回避）
+    let initial_messages = initial_state.messages();
+    let initial_service_state = initial_state.service_state.clone();
+    let initial_is_connected = initial_state.is_connected;
+    let initial_stats = initial_state.stats.clone();
+    let initial_is_stopping = initial_state.is_stopping;
 
     // Signalを初期化（StateManagerの現在値で初期化）
     let messages = use_signal(move || {
         tracing::debug!(
             "📨 Initializing messages signal with {} messages",
-            initial_state.messages.len()
+            initial_messages.len()
         );
-        initial_state.messages.clone()
+        initial_messages.clone()
     });
     let state = use_signal(move || {
         tracing::debug!(
             "🔄 Initializing state signal: {:?}",
-            initial_state.service_state
+            initial_service_state
         );
-        initial_state.service_state.clone()
+        initial_service_state.clone()
     });
     let is_connected = use_signal(move || {
         tracing::debug!(
             "🔗 Initializing connection signal: {}",
-            initial_state.is_connected
+            initial_is_connected
         );
-        initial_state.is_connected
+        initial_is_connected
     });
     let stats = use_signal(move || {
         tracing::debug!("📊 Initializing stats signal");
-        initial_state.stats.clone()
+        initial_stats.clone()
     });
     let is_stopping = use_signal(move || {
         tracing::debug!(
             "🛑 Initializing stopping signal: {}",
-            initial_state.is_stopping
+            initial_is_stopping
         );
-        initial_state.is_stopping
+        initial_is_stopping
     });
 
     tracing::debug!("✅ All signals initialized (optimized)");
@@ -401,12 +426,12 @@ pub fn use_live_chat() -> LiveChatHandle {
             loop {
                 interval.tick().await;
 
-                let current_state = get_state_manager().get_state();
+                let current_state = get_state_manager().get_state_unchecked();
 
                 // メッセージの更新チェック（重要度高）
-                let current_message_count = current_state.messages.len();
+                let current_message_count = current_state.messages().len();
                 if current_message_count != last_message_count {
-                    messages_clone.set(current_state.messages.clone());
+                    messages_clone.set(current_state.messages().clone());
                     tracing::debug!(
                         "📨 UI messages updated: {} → {}",
                         last_message_count,

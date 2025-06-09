@@ -1,6 +1,8 @@
 use crate::gui::models::GuiChatMessage;
 use crate::gui::services::ServiceState;
+use crate::gui::memory_optimized::{OptimizedMessageManager, ComprehensiveStats};
 use crate::io::SaveConfig;
+use crate::{GuiError, LiscovResult};
 use std::sync::{Arc, Mutex, OnceLock};
 use tokio::sync::mpsc;
 
@@ -39,10 +41,11 @@ pub struct ChatStats {
     pub start_time: Option<chrono::DateTime<chrono::Utc>>,
 }
 
-/// アプリケーションの状態
-#[derive(Debug, Clone)]
+/// アプリケーションの状態（メモリ最適化版）
+#[derive(Debug)]
 pub struct AppState {
-    pub messages: Vec<GuiChatMessage>,
+    /// メモリ最適化されたメッセージマネージャー
+    pub message_manager: OptimizedMessageManager,
     pub service_state: ServiceState,
     pub is_connected: bool,
     pub is_stopping: bool,
@@ -51,10 +54,58 @@ pub struct AppState {
     pub current_url: Option<String>,
 }
 
+impl Clone for AppState {
+    fn clone(&self) -> Self {
+        Self {
+            message_manager: OptimizedMessageManager::with_defaults(), // 新しいインスタンスを作成
+            service_state: self.service_state.clone(),
+            is_connected: self.is_connected,
+            is_stopping: self.is_stopping,
+            stats: self.stats.clone(),
+            continuation_token: self.continuation_token.clone(),
+            current_url: self.current_url.clone(),
+        }
+    }
+}
+
+impl AppState {
+    /// メッセージ一覧を取得（互換性のため）
+    pub fn messages(&self) -> Vec<GuiChatMessage> {
+        self.message_manager.messages()
+    }
+
+    /// 最新のN件のメッセージを取得
+    pub fn recent_messages(&self, n: usize) -> Vec<GuiChatMessage> {
+        self.message_manager.recent_messages(n)
+    }
+
+    /// メッセージ数を取得
+    pub fn message_count(&self) -> usize {
+        let stats = self.message_manager.comprehensive_stats();
+        stats.message_count
+    }
+
+    /// 総処理メッセージ数を取得
+    pub fn total_processed_messages(&self) -> usize {
+        let stats = self.message_manager.comprehensive_stats();
+        stats.total_processed
+    }
+
+    /// メモリ統計を取得
+    pub fn memory_stats(&self) -> ComprehensiveStats {
+        self.message_manager.comprehensive_stats()
+    }
+
+    /// メモリ最適化を実行
+    pub fn optimize_memory(&mut self) {
+        self.message_manager.optimize_memory();
+    }
+}
+
 impl Default for AppState {
     fn default() -> Self {
         Self {
-            messages: Vec::new(),
+            message_manager: OptimizedMessageManager::with_defaults(),
             service_state: ServiceState::Idle,
             is_connected: false,
             is_stopping: false,
@@ -85,7 +136,13 @@ impl StateManager {
 
         tokio::spawn(async move {
             {
-                let mut started = is_started_clone.lock().unwrap();
+                let mut started = match is_started_clone.lock() {
+                    Ok(guard) => guard,
+                    Err(poisoned) => {
+                        tracing::error!("⚠️ Startup mutex poisoned, recovering");
+                        poisoned.into_inner()
+                    }
+                };
                 if *started {
                     return; // 既に開始されている
                 }
@@ -115,8 +172,22 @@ impl StateManager {
     }
 
     /// 現在の状態を取得
-    pub fn get_state(&self) -> AppState {
-        self.state.lock().unwrap().clone()
+    pub fn get_state(&self) -> LiscovResult<AppState> {
+        self.state.lock()
+            .map(|guard| guard.clone())
+            .map_err(|_| GuiError::StateManagement("Failed to acquire state lock (mutex poisoned)".to_string()).into())
+    }
+    
+    /// 現在の状態を取得（非安全版・レガシー互換性のため）
+    /// 新しいコードでは get_state() を使用してください
+    pub fn get_state_unchecked(&self) -> AppState {
+        match self.get_state() {
+            Ok(state) => state,
+            Err(e) => {
+                tracing::error!("⚠️ State lock poisoned, returning default state: {}", e);
+                AppState::default()
+            }
+        }
     }
 
     /// イベントを送信
@@ -141,19 +212,25 @@ impl StateManager {
 
     /// イベントを処理して状態を更新（静的メソッド）
     fn handle_event_static(state: &Arc<Mutex<AppState>>, event: AppEvent) {
-        let mut state_guard = state.lock().unwrap();
+        let mut state_guard = match state.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::error!("⚠️ State mutex poisoned during event handling, recovering data");
+                poisoned.into_inner()
+            }
+        };
 
         match event {
             AppEvent::MessageAdded(message) => {
                 // メッセージ追加ログを軽量化（デバッグレベルかつ簡潔に）
                 tracing::debug!("📝 New message: {}", message.author);
-                state_guard.messages.push(message);
+                state_guard.message_manager.add_message(message);
                 Self::update_stats_static(&mut state_guard);
             }
 
             AppEvent::MessagesAdded(messages) => {
                 tracing::debug!("📬 Added {} messages", messages.len());
-                state_guard.messages.extend(messages);
+                state_guard.message_manager.add_messages_batch(messages);
                 Self::update_stats_static(&mut state_guard);
             }
 
@@ -192,7 +269,7 @@ impl StateManager {
 
             AppEvent::MessagesCleared => {
                 tracing::info!("🗑️ Messages cleared");
-                state_guard.messages.clear();
+                state_guard.message_manager.clear_all();
                 state_guard.stats = ChatStats::default();
             }
 
@@ -227,9 +304,11 @@ impl StateManager {
         }
     }
 
-    /// 統計情報を更新（静的メソッド）
+    /// 統計情報を更新（静的メソッド）- メモリ最適化版
     fn update_stats_static(state: &mut AppState) {
-        state.stats.total_messages = state.messages.len();
+        let comprehensive_stats = state.message_manager.comprehensive_stats();
+        
+        state.stats.total_messages = comprehensive_stats.total_processed;
         state.stats.last_message_time = Some(chrono::Utc::now());
 
         // 稼働時間の計算
@@ -244,17 +323,26 @@ impl StateManager {
                 (state.stats.total_messages as f64) / (state.stats.uptime_seconds as f64 / 60.0);
         }
 
-        // メッセージ数の制限
-        if state.messages.len() > 1000 {
-            let drain_count = state.messages.len() - 1000;
-            state.messages.drain(..drain_count);
-            tracing::debug!("🧹 Trimmed {} old messages", drain_count);
+        // メモリ最適化によるメッセージ制限は自動的に処理される
+        if comprehensive_stats.dropped_count > 0 {
+            tracing::debug!(
+                "🧹 Memory manager: {} messages in buffer, {} total processed, {} dropped",
+                comprehensive_stats.message_count,
+                comprehensive_stats.total_processed,
+                comprehensive_stats.dropped_count
+            );
         }
     }
 
     /// 状態マネージャーが開始されているかチェック
     pub fn is_started(&self) -> bool {
-        *self.is_started.lock().unwrap()
+        match self.is_started.lock() {
+            Ok(guard) => *guard,
+            Err(poisoned) => {
+                tracing::error!("⚠️ Is-started mutex poisoned, assuming false");
+                *poisoned.into_inner()
+            }
+        }
     }
 }
 

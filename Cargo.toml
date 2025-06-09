@@ -24,7 +24,9 @@ dioxus = { version = "0.6.3", features = ["signals", "desktop"] }
 
 
 anyhow = "1.0"
+async-trait = "0.1"
 derive_more = { version = "2.0.1", features = ["full"] }
+parking_lot = "0.12"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = [
     "env-filter",
@@ -109,3 +111,4 @@ strip = false
 
 [dev-dependencies]
 tempfile = "3.0"
+tokio-test = "0.4"
