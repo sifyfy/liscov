@@ -460,8 +460,9 @@ mod tests {
             timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
             message_type,
             author: author.to_string(),
-            channel_id: format!("test_channel_{}", author),
+            channel_id: format!("channel_{}", author),
             content: content.to_string(),
+            runs: Vec::new(),
             metadata: None,
             is_member: false,
         }

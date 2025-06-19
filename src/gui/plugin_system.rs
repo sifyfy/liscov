@@ -270,9 +270,7 @@ impl PluginManager {
         let config = self.config.read().clone();
         let execution_order = self.execution_order.read().clone();
         
-        let mut results = Vec::new();
-        
-        if config.allow_parallel_execution {
+        let results = if config.allow_parallel_execution {
             // 並列実行
             let _tasks: Vec<tokio::task::JoinHandle<()>> = Vec::new();
             
@@ -285,11 +283,11 @@ impl PluginManager {
             }
             
             // 暫定的に逐次実行で処理
-            results = self.execute_sequentially(event, &execution_order).await?;
+            self.execute_sequentially(event, &execution_order).await?
         } else {
             // 逐次実行
-            results = self.execute_sequentially(event, &execution_order).await?;
-        }
+            self.execute_sequentially(event, &execution_order).await?
+        };
         
         Ok(results)
     }

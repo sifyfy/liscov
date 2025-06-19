@@ -149,7 +149,9 @@ impl LiveChatHandle {
                     let mut guard = match global_state.lock() {
                         Ok(guard) => guard,
                         Err(poisoned) => {
-                            tracing::error!("⚠️ Global live chat state mutex poisoned during stop, recovering");
+                            tracing::error!(
+                                "⚠️ Global live chat state mutex poisoned during stop, recovering"
+                            );
                             poisoned.into_inner()
                         }
                     };
@@ -328,6 +330,7 @@ impl LiveChatHandle {
             author: author.to_string(),
             channel_id: "test_channel".to_string(),
             content: content.to_string(),
+            runs: Vec::new(), // テストメッセージは通常テキストのみ
             metadata: None,
             is_member: false,
         };
@@ -351,13 +354,12 @@ impl LiveChatHandle {
 ///
 /// シンプルで確実な同期システム
 pub fn use_live_chat() -> LiveChatHandle {
-    // フックが呼び出されたことを軽量ログで記録
-    tracing::debug!("🎯 use_live_chat hook called!");
+    tracing::debug!("use_live_chat hook called");
 
     // StateManagerから初期値を取得（遅延初期化）
     let state_manager = get_state_manager();
     let initial_state = state_manager.get_state_unchecked();
-    
+
     // 初期値を事前にクローン（移動問題を回避）
     let initial_messages = initial_state.messages();
     let initial_service_state = initial_state.service_state.clone();
@@ -374,10 +376,7 @@ pub fn use_live_chat() -> LiveChatHandle {
         initial_messages.clone()
     });
     let state = use_signal(move || {
-        tracing::debug!(
-            "🔄 Initializing state signal: {:?}",
-            initial_service_state
-        );
+        tracing::debug!("🔄 Initializing state signal: {:?}", initial_service_state);
         initial_service_state.clone()
     });
     let is_connected = use_signal(move || {
@@ -392,16 +391,13 @@ pub fn use_live_chat() -> LiveChatHandle {
         initial_stats.clone()
     });
     let is_stopping = use_signal(move || {
-        tracing::debug!(
-            "🛑 Initializing stopping signal: {}",
-            initial_is_stopping
-        );
+        tracing::debug!("🛑 Initializing stopping signal: {}", initial_is_stopping);
         initial_is_stopping
     });
 
     tracing::debug!("✅ All signals initialized (optimized)");
 
-    // StateManagerからの変更を監視してUI同期（改良版）
+    // StateManagerからの変更を監視してUI同期（デバッグ強化版）
     // リアルタイム性を重視し、応答性を向上させた同期処理
     use_effect(move || {
         let mut messages_clone = messages;
@@ -416,35 +412,104 @@ pub fn use_live_chat() -> LiveChatHandle {
             let mut last_state = ServiceState::Idle;
             let mut last_connected = false;
             let mut last_stopping = false;
+            let mut sync_cycle_count = 0;
 
             // 同期間隔を短縮（200ms間隔で応答性向上）
             let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(200));
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
-            tracing::debug!("🔄 Starting responsive UI sync (200ms interval)");
+            tracing::info!(
+                "🔄 [UI_SYNC] Starting responsive UI sync (200ms interval) - Enhanced Debug Mode"
+            );
 
             loop {
                 interval.tick().await;
+                sync_cycle_count += 1;
 
+                // StateManager状態取得の詳細ログ
+                let state_fetch_start = std::time::Instant::now();
                 let current_state = get_state_manager().get_state_unchecked();
+                let state_fetch_duration = state_fetch_start.elapsed();
+
+                // 詳細な状態情報取得
+                let current_message_count = current_state.messages().len();
+                let current_total_processed = current_state.total_processed_messages();
+                let memory_stats = current_state.memory_stats();
+
+                // 10サイクルごとに詳細ログを出力（デバッグ用）
+                if sync_cycle_count % 50 == 0 {
+                    // 50 * 200ms = 10秒ごと
+                    tracing::info!(
+                        "🔄 [UI_SYNC] Cycle #{}: StateManager fetch took {:?}, {} messages in buffer, {} total processed, memory usage: {} bytes",
+                        sync_cycle_count,
+                        state_fetch_duration,
+                        current_message_count,
+                        current_total_processed,
+                        memory_stats.memory_stats.used_memory
+                    );
+                }
 
                 // メッセージの更新チェック（重要度高）
-                let current_message_count = current_state.messages().len();
                 if current_message_count != last_message_count {
-                    messages_clone.set(current_state.messages().clone());
-                    tracing::debug!(
-                        "📨 UI messages updated: {} → {}",
+                    let message_update_start = std::time::Instant::now();
+                    let new_messages = current_state.messages();
+
+                    tracing::info!(
+                        "📨 [UI_SYNC] Message count change detected: {} → {} (total processed: {})",
                         last_message_count,
+                        current_message_count,
+                        current_total_processed
+                    );
+
+                    // Signal更新前の状態をログ
+                    let old_signal_count = messages_clone.read().len();
+
+                    // Signal更新
+                    messages_clone.set(new_messages.clone());
+                    let message_update_duration = message_update_start.elapsed();
+
+                    // Signal更新後の状態をログ
+                    let new_signal_count = messages_clone.read().len();
+
+                    tracing::info!(
+                        "📨 [UI_SYNC] UI messages Signal updated in {:?}: Signal {} → {} (StateManager has {})",
+                        message_update_duration,
+                        old_signal_count,
+                        new_signal_count,
                         current_message_count
                     );
+
+                    // 最新メッセージの詳細（最大3件まで）
+                    if !new_messages.is_empty() {
+                        let preview_count = new_messages.len().min(3);
+                        let latest_messages: Vec<String> = new_messages
+                            .iter()
+                            .rev()
+                            .take(preview_count)
+                            .map(|msg| {
+                                format!(
+                                    "{}: {}",
+                                    msg.author,
+                                    msg.content.chars().take(30).collect::<String>()
+                                )
+                            })
+                            .collect();
+
+                        tracing::info!(
+                            "📨 [UI_SYNC] Latest messages preview: {:?}",
+                            latest_messages
+                        );
+                    }
+
                     last_message_count = current_message_count;
                 }
 
                 // サービス状態の更新チェック（停止ボタンなど）
                 if current_state.service_state != last_state {
                     state_clone.set(current_state.service_state.clone());
-                    tracing::debug!(
-                        "🔄 UI service state updated: {:?}",
+                    tracing::info!(
+                        "🔄 [UI_SYNC] Service state updated: {:?} → {:?}",
+                        last_state,
                         current_state.service_state
                     );
                     last_state = current_state.service_state.clone();
@@ -453,8 +518,9 @@ pub fn use_live_chat() -> LiveChatHandle {
                 // 接続状態の更新チェック（接続インジケーター）
                 if current_state.is_connected != last_connected {
                     is_connected_clone.set(current_state.is_connected);
-                    tracing::debug!(
-                        "🔗 UI connection state updated: {}",
+                    tracing::info!(
+                        "🔗 [UI_SYNC] Connection state updated: {} → {}",
+                        last_connected,
                         current_state.is_connected
                     );
                     last_connected = current_state.is_connected;
@@ -463,8 +529,9 @@ pub fn use_live_chat() -> LiveChatHandle {
                 // 停止処理状態の更新チェック（ボタン無効化など）
                 if current_state.is_stopping != last_stopping {
                     is_stopping_clone.set(current_state.is_stopping);
-                    tracing::debug!(
-                        "🛑 UI stopping state updated: {}",
+                    tracing::info!(
+                        "🛑 [UI_SYNC] Stopping state updated: {} → {}",
+                        last_stopping,
                         current_state.is_stopping
                     );
                     last_stopping = current_state.is_stopping;
@@ -473,15 +540,27 @@ pub fn use_live_chat() -> LiveChatHandle {
                 // 統計情報の更新（頻度は低め）
                 stats_clone.set(current_state.stats.clone());
 
-                // 5秒ごとに生存確認ログ
-                if last_sync_time.elapsed().as_secs() >= 5 {
-                    tracing::debug!(
-                        "🔄 UI sync alive: {} messages, state: {:?}, connected: {}",
+                // 30秒ごとに生存確認ログ（ログ量を調整）
+                if last_sync_time.elapsed().as_secs() >= 30 {
+                    tracing::info!(
+                        "🔄 [UI_SYNC] Heartbeat: Cycle #{}, {} messages in UI, {} total processed, connected: {}, service: {:?}",
+                        sync_cycle_count,
                         current_message_count,
-                        current_state.service_state,
-                        current_state.is_connected
+                        current_total_processed,
+                        current_state.is_connected,
+                        current_state.service_state
                     );
                     last_sync_time = std::time::Instant::now();
+                }
+
+                // 異常検出: Signal更新とStateManagerの不一致
+                let current_signal_count = messages_clone.read().len();
+                if current_signal_count != current_message_count {
+                    tracing::warn!(
+                        "⚠️ [UI_SYNC] DESYNC DETECTED: Signal has {} messages but StateManager has {}",
+                        current_signal_count,
+                        current_message_count
+                    );
                 }
             }
         });
@@ -500,11 +579,5 @@ pub fn use_live_chat() -> LiveChatHandle {
 
 /// 開発モードでのテストメッセージ生成（デバッグ用）
 pub fn use_test_messages() -> Signal<Vec<GuiChatMessage>> {
-    let messages = use_signal(Vec::<GuiChatMessage>::new);
-
-    // パフォーマンス最適化のため、テストメッセージ生成を完全無効化
-    // 起動時のCPU負荷問題を解決するため、自動テストメッセージ機能を無効化
-    tracing::debug!("🧪 Test message generation disabled for performance optimization");
-
-    messages
+    use_signal(Vec::<GuiChatMessage>::new)
 }

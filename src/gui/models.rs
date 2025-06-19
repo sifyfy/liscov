@@ -8,8 +8,30 @@ pub struct GuiChatMessage {
     pub author: String,
     pub channel_id: String,
     pub content: String,
+    pub runs: Vec<MessageRun>, // テキストとスタンプを分離したparts
     pub metadata: Option<MessageMetadata>,
     pub is_member: bool, // メンバーかどうかの判定フラグ
+}
+
+/// メッセージの一部（テキストまたはスタンプ）
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum MessageRun {
+    Text {
+        content: String,
+    },
+    Emoji {
+        emoji_id: String,
+        image_url: String,
+        alt_text: String,
+    },
+}
+
+impl Default for MessageRun {
+    fn default() -> Self {
+        MessageRun::Text {
+            content: String::new(),
+        }
+    }
 }
 
 /// メッセージタイプ列挙型
@@ -17,8 +39,12 @@ pub struct GuiChatMessage {
 pub enum MessageType {
     #[default]
     Text,
-    SuperChat { amount: String },
-    SuperSticker { amount: String },
+    SuperChat {
+        amount: String,
+    },
+    SuperSticker {
+        amount: String,
+    },
     Membership,
     System,
 }
@@ -50,18 +76,40 @@ impl From<crate::get_live_chat::ChatItem> for GuiChatMessage {
     fn from(item: crate::get_live_chat::ChatItem) -> Self {
         match item {
             crate::get_live_chat::ChatItem::TextMessage { renderer } => {
-                let message_parts: Vec<String> = renderer
-                    .message
-                    .runs
-                    .iter()
-                    .filter_map(|run| {
-                        if let Some(text) = run.get_text() {
-                            Some(text.to_string())
+                // 新しい構造：runsを分離して管理
+                let mut runs = Vec::new();
+                let mut content_parts = Vec::new();
+
+                for run in &renderer.message.runs {
+                    if let Some(text) = run.get_text() {
+                        runs.push(MessageRun::Text {
+                            content: text.to_string(),
+                        });
+                        content_parts.push(text.to_string());
+                    } else if let Some(emoji) = run.get_emoji() {
+                        let image_url = emoji
+                            .image
+                            .thumbnails
+                            .first()
+                            .map(|t| t.url.clone())
+                            .unwrap_or_default();
+
+                        let alt_text = if let Some(accessibility) = &emoji.image.accessibility {
+                            accessibility.accessibility_data.label.clone()
                         } else {
-                            run.get_emoji().map(|emoji| format!(":{}:", emoji.emoji_id))
-                        }
-                    })
-                    .collect();
+                            format!("Emoji: {}", emoji.emoji_id)
+                        };
+
+                        runs.push(MessageRun::Emoji {
+                            emoji_id: emoji.emoji_id.clone(),
+                            image_url,
+                            alt_text: alt_text.clone(),
+                        });
+
+                        // contentにはalt_textを入れる（検索・フィルタリング用）
+                        content_parts.push(alt_text);
+                    }
+                }
 
                 let (badges, is_member, is_moderator, is_verified) =
                     extract_badge_info(&renderer.author_badges);
@@ -71,7 +119,8 @@ impl From<crate::get_live_chat::ChatItem> for GuiChatMessage {
                     message_type: MessageType::Text,
                     author: renderer.author_name.simple_text.clone(),
                     channel_id: renderer.author_external_channel_id.clone(),
-                    content: message_parts.join(""),
+                    content: content_parts.join(""),
+                    runs,
                     metadata: Some(MessageMetadata {
                         amount: None,
                         badges,
@@ -104,6 +153,7 @@ impl From<crate::get_live_chat::ChatItem> for GuiChatMessage {
                                 .join("")
                         })
                         .unwrap_or_default(),
+                    runs: Vec::new(), // SuperChatは通常テキストのみ
                     metadata: Some(MessageMetadata {
                         amount: Some(renderer.purchase_amount_text.simple_text.clone()),
                         badges,
@@ -129,6 +179,7 @@ impl From<crate::get_live_chat::ChatItem> for GuiChatMessage {
                         "Super Sticker ({})",
                         renderer.purchase_amount_text.simple_text
                     ),
+                    runs: Vec::new(), // SuperStickerは固定テキスト
                     metadata: Some(MessageMetadata {
                         amount: Some(renderer.purchase_amount_text.simple_text.clone()),
                         badges,
@@ -149,6 +200,7 @@ impl From<crate::get_live_chat::ChatItem> for GuiChatMessage {
                     author: renderer.author_name.simple_text.clone(),
                     channel_id: renderer.author_external_channel_id.clone(),
                     content: "New member!".to_string(),
+                    runs: Vec::new(), // Membershipは固定テキスト
                     metadata: Some(MessageMetadata {
                         amount: None,
                         badges,
@@ -165,6 +217,7 @@ impl From<crate::get_live_chat::ChatItem> for GuiChatMessage {
                 author: "System".to_string(),
                 channel_id: "".to_string(),
                 content: "Unknown message type".to_string(),
+                runs: Vec::new(), // Systemメッセージは固定テキスト
                 metadata: None,
                 is_member: false,
             },
@@ -245,7 +298,7 @@ pub struct AppState {
 impl Default for AppState {
     fn default() -> Self {
         Self {
-            url: "https://youtube.com/watch?v=".to_string(),
+            url: String::new(),
             output_file: "live_chat.ndjson".to_string(),
             auto_save_enabled: false,
             is_connected: false,
@@ -262,11 +315,10 @@ impl Default for AppState {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ActiveTab {
     ChatMonitor,
     RevenueAnalytics,
-    EngagementAnalytics,
     DataExport,
     Settings,
 }
@@ -282,7 +334,6 @@ impl ActiveTab {
         match self {
             ActiveTab::ChatMonitor => "Chat Monitor",
             ActiveTab::RevenueAnalytics => "Revenue Analytics",
-            ActiveTab::EngagementAnalytics => "Engagement Analytics",
             ActiveTab::DataExport => "Data Export",
             ActiveTab::Settings => "Settings",
         }
@@ -292,9 +343,17 @@ impl ActiveTab {
         match self {
             ActiveTab::ChatMonitor => "💬",
             ActiveTab::RevenueAnalytics => "💰",
-            ActiveTab::EngagementAnalytics => "📊",
             ActiveTab::DataExport => "📥",
             ActiveTab::Settings => "⚙️",
+        }
+    }
+
+    pub fn description(&self) -> &'static str {
+        match self {
+            ActiveTab::ChatMonitor => "Monitor real-time YouTube live chat messages",
+            ActiveTab::RevenueAnalytics => "Track SuperChat revenue and membership earnings",
+            ActiveTab::DataExport => "Export and save chat data in various formats",
+            ActiveTab::Settings => "Configure application settings and preferences",
         }
     }
 }

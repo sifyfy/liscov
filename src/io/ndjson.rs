@@ -373,10 +373,13 @@ mod tests {
     fn test_parse_ndjson_file_error_handling() {
         // Test non-existent file
         match parse_ndjson_file("non_existent_file.ndjson") {
+            Err(LiveChatError::InvalidFormat { reason }) => {
+                assert!(reason.contains("Parent directory does not exist"));
+            }
             Err(LiveChatError::Generic { context, .. }) => {
                 assert!(context.contains("opening file"));
             }
-            _ => panic!("Expected generic error for non-existent file"),
+            _ => panic!("Expected InvalidFormat or Generic error for non-existent file"),
         }
     }
 
@@ -467,8 +470,6 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn test_unix_path_validation() {
-        use super::validate_file_path;
-
         // Unix系システムディレクトリ（実際には存在チェックで止まる可能性）
         let restricted_paths = ["/etc/passwd", "/proc/version", "/sys/kernel", "/dev/null"];
         for path in &restricted_paths {

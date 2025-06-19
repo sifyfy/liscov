@@ -32,6 +32,36 @@ impl Default for WindowConfig {
     }
 }
 
+/// ログ設定
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogConfig {
+    /// カスタムログディレクトリ（Noneの場合はXDGデフォルト使用）
+    pub log_dir: Option<PathBuf>,
+    /// ログレベル (trace/debug/info/warn/error)
+    pub log_level: String,
+    /// ファイル出力有効化
+    pub enable_file_logging: bool,
+    /// 保存するログファイル数上限
+    pub max_log_files: u32,
+    /// 古いログファイル自動削除
+    pub auto_cleanup_enabled: bool,
+    /// ログファイル名パターン（内部管理用）
+    pub log_filename_pattern: String,
+}
+
+impl Default for LogConfig {
+    fn default() -> Self {
+        Self {
+            log_dir: None,
+            log_level: "info".to_string(),
+            enable_file_logging: true,
+            max_log_files: 30,
+            auto_cleanup_enabled: true,
+            log_filename_pattern: "liscov_*.log".to_string(),
+        }
+    }
+}
+
 /// アプリケーション設定
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -54,6 +84,10 @@ pub struct AppConfig {
     /// ウィンドウ設定
     #[serde(default)]
     pub window: WindowConfig,
+
+    /// ログ設定
+    #[serde(default)]
+    pub log: LogConfig,
 }
 
 impl Default for AppConfig {
@@ -68,6 +102,7 @@ impl Default for AppConfig {
             enable_file_rotation: true,
             active_tab: "ChatMonitor".to_string(),
             window: WindowConfig::default(),
+            log: LogConfig::default(),
         }
     }
 }
@@ -75,7 +110,8 @@ impl Default for AppConfig {
 impl From<&AppState> for AppConfig {
     fn from(state: &AppState) -> Self {
         Self {
-            url: state.url.clone(),
+            // URLは設定として保存しない（起動時は常に空）
+            url: String::new(),
             auto_save_enabled: state.auto_save_enabled,
             output_file: state.output_file.clone(),
             save_raw_responses: state.save_raw_responses,
@@ -84,6 +120,7 @@ impl From<&AppState> for AppConfig {
             enable_file_rotation: state.enable_file_rotation,
             active_tab: format!("{:?}", state.active_tab),
             window: state.window.clone(),
+            log: LogConfig::default(), // AppStateからは取得せず、デフォルト値を使用
         }
     }
 }
@@ -188,7 +225,6 @@ impl ConfigManager {
         state.active_tab = match config.active_tab.as_str() {
             "ChatMonitor" => crate::gui::models::ActiveTab::ChatMonitor,
             "RevenueAnalytics" => crate::gui::models::ActiveTab::RevenueAnalytics,
-            "EngagementAnalytics" => crate::gui::models::ActiveTab::EngagementAnalytics,
             "DataExport" => crate::gui::models::ActiveTab::DataExport,
             "Settings" => crate::gui::models::ActiveTab::Settings,
             _ => crate::gui::models::ActiveTab::ChatMonitor,
@@ -340,13 +376,16 @@ mod tests {
         let config_path = temp_dir.path().join("nonexistent.toml");
 
         let manager = ConfigManager { config_path };
-        
+
         // 存在しないファイルの読み込み時はデフォルトが返される
         let loaded_config = manager.load_config().unwrap();
         let default_config = AppConfig::default();
-        
+
         assert_eq!(loaded_config.url, default_config.url);
-        assert_eq!(loaded_config.auto_save_enabled, default_config.auto_save_enabled);
+        assert_eq!(
+            loaded_config.auto_save_enabled,
+            default_config.auto_save_enabled
+        );
     }
 
     #[test]
@@ -358,11 +397,14 @@ mod tests {
         std::fs::write(&config_path, "invalid toml content [unclosed section").unwrap();
 
         let manager = ConfigManager { config_path };
-        
+
         // 破損したファイルの場合はエラーが返される
         let result = manager.load_config();
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Failed to parse config file"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Failed to parse config file"));
     }
 
     #[test]
@@ -385,7 +427,7 @@ active_tab = "ChatMonitor"
 
         let manager = ConfigManager { config_path };
         let loaded_config = manager.load_config().unwrap();
-        
+
         // 指定されたフィールドは読み込まれ、省略されたフィールドはデフォルト値になる
         assert_eq!(loaded_config.url, "https://partial.example.com");
         assert_eq!(loaded_config.auto_save_enabled, false);
@@ -393,6 +435,7 @@ active_tab = "ChatMonitor"
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_config_save_to_readonly_directory() {
         use std::fs;
         use std::os::unix::fs::PermissionsExt;
@@ -400,7 +443,7 @@ active_tab = "ChatMonitor"
         let temp_dir = tempdir().unwrap();
         let readonly_dir = temp_dir.path().join("readonly");
         fs::create_dir(&readonly_dir).unwrap();
-        
+
         // ディレクトリを読み取り専用に設定
         let mut perms = fs::metadata(&readonly_dir).unwrap().permissions();
         perms.set_mode(0o444); // 読み取り専用
@@ -409,11 +452,11 @@ active_tab = "ChatMonitor"
         let config_path = readonly_dir.join("config.toml");
         let manager = ConfigManager { config_path };
         let config = AppConfig::default();
-        
+
         // 読み取り専用ディレクトリへの保存は失敗する
         let result = manager.save_config(&config);
         assert!(result.is_err());
-        
+
         // 権限を元に戻してクリーンアップ
         let mut perms = fs::metadata(&readonly_dir).unwrap().permissions();
         perms.set_mode(0o755);
@@ -426,7 +469,7 @@ active_tab = "ChatMonitor"
         let config_path = PathBuf::from("/nonexistent/directory/config.toml");
         let manager = ConfigManager { config_path };
         let config = AppConfig::default();
-        
+
         // 存在しないディレクトリへの保存は失敗する
         let result = manager.save_config(&config);
         assert!(result.is_err());
@@ -447,7 +490,7 @@ active_tab = "ChatMonitor"
         // 特殊文字を含むURLの保存と読み込み
         manager.save_config(&special_config).unwrap();
         let loaded_config = manager.load_config().unwrap();
-        
+
         assert_eq!(special_config.url, loaded_config.url);
     }
 
@@ -466,7 +509,7 @@ active_tab = "ChatMonitor"
         // Unicode文字の保存と読み込み
         manager.save_config(&unicode_config).unwrap();
         let loaded_config = manager.load_config().unwrap();
-        
+
         assert_eq!(unicode_config.url, loaded_config.url);
     }
 
@@ -485,7 +528,7 @@ active_tab = "ChatMonitor"
         // 極端に長い値の保存と読み込み
         manager.save_config(&extreme_config).unwrap();
         let loaded_config = manager.load_config().unwrap();
-        
+
         assert_eq!(extreme_config.url, loaded_config.url);
         assert_eq!(extreme_config.url.len(), 10000);
     }
@@ -494,13 +537,13 @@ active_tab = "ChatMonitor"
     fn test_config_concurrent_access() {
         use std::sync::Arc;
         use std::thread;
-        
+
         let temp_dir = tempdir().unwrap();
         let config_path = temp_dir.path().join("concurrent.toml");
         let manager = Arc::new(ConfigManager { config_path });
 
         let mut handles = Vec::new();
-        
+
         // 複数のスレッドから同時に設定を保存・読み込み
         for i in 0..10 {
             let manager_clone = Arc::clone(&manager);
@@ -510,7 +553,7 @@ active_tab = "ChatMonitor"
                     auto_save_enabled: i % 2 == 0,
                     ..AppConfig::default()
                 };
-                
+
                 // 保存と読み込みを繰り返す
                 for _ in 0..10 {
                     if let Err(_) = manager_clone.save_config(&config) {
@@ -525,27 +568,27 @@ active_tab = "ChatMonitor"
             });
             handles.push(handle);
         }
-        
+
         // すべてのスレッドの完了を待つ
         for handle in handles {
             handle.join().unwrap();
         }
-        
+
         // 最終的に有効な設定が保存されているかを確認（エラーを許容）
         if let Ok(final_config) = manager.load_config() {
             assert!(final_config.url.starts_with("https://"));
         }
     }
 
-    #[test] 
+    #[test]
     fn test_config_file_recovery() {
         let temp_dir = tempdir().unwrap();
         let config_path = temp_dir.path().join("recovery.toml");
 
-        let manager = ConfigManager { 
-            config_path: config_path.clone() 
+        let manager = ConfigManager {
+            config_path: config_path.clone(),
         };
-        
+
         // 正常な設定を保存
         let valid_config = AppConfig {
             url: "https://valid.example.com".to_string(),
@@ -553,18 +596,18 @@ active_tab = "ChatMonitor"
             ..AppConfig::default()
         };
         manager.save_config(&valid_config).unwrap();
-        
+
         // ファイルを破損させる
         std::fs::write(&config_path, "broken toml content").unwrap();
-        
+
         // 破損したファイルからの読み込み時はエラーが返される
         let result = manager.load_config();
         assert!(result.is_err());
-        
+
         // 再度正常な設定を保存してリカバリ
         manager.save_config(&valid_config).unwrap();
         let final_config = manager.load_config().unwrap();
-        
+
         assert_eq!(final_config.url, valid_config.url);
     }
 
@@ -574,22 +617,22 @@ active_tab = "ChatMonitor"
         let config_path = temp_dir.path().join("backup_test.toml");
         let backup_path = temp_dir.path().join("backup_test.toml.backup");
 
-        let manager = ConfigManager { 
-            config_path: config_path.clone() 
+        let manager = ConfigManager {
+            config_path: config_path.clone(),
         };
-        
+
         let original_config = AppConfig {
             url: "https://original.example.com".to_string(),
             auto_save_enabled: false,
             ..AppConfig::default()
         };
-        
+
         // 元の設定を保存
         manager.save_config(&original_config).unwrap();
-        
+
         // バックアップを作成
         std::fs::copy(&config_path, &backup_path).unwrap();
-        
+
         // 設定を変更
         let modified_config = AppConfig {
             url: "https://modified.example.com".to_string(),
@@ -597,12 +640,15 @@ active_tab = "ChatMonitor"
             ..AppConfig::default()
         };
         manager.save_config(&modified_config).unwrap();
-        
+
         // バックアップから復元
         std::fs::copy(&backup_path, &config_path).unwrap();
         let restored_config = manager.load_config().unwrap();
-        
+
         assert_eq!(restored_config.url, original_config.url);
-        assert_eq!(restored_config.auto_save_enabled, original_config.auto_save_enabled);
+        assert_eq!(
+            restored_config.auto_save_enabled,
+            original_config.auto_save_enabled
+        );
     }
 }

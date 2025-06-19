@@ -337,7 +337,7 @@ fn apply_save_config(enabled: bool, file_path: String, max_size_mb: u64, rotatio
         max_backup_files: 5, // デフォルト値
     };
 
-    tracing::info!(
+    tracing::debug!(
         "🔧 apply_save_config called: enabled={}, file_path={}, max_size_mb={}, rotation={}",
         enabled,
         file_path,

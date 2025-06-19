@@ -7,7 +7,6 @@ use serde::{Serialize, de::DeserializeOwned};
 use std::collections::HashMap;
 use std::sync::Arc;
 use parking_lot::RwLock;
-use chrono::{DateTime, Utc};
 
 use crate::api::generic::*;
 use crate::LiscovResult;
@@ -17,15 +16,6 @@ pub struct UnifiedApiClient {
     config: ApiClientConfig,
     http_client: reqwest::Client,
     metrics: Arc<RwLock<UnifiedApiMetrics>>,
-    cache: Arc<RwLock<HashMap<String, CachedResponse>>>,
-}
-
-/// キャッシュされたレスポンス
-#[derive(Debug, Clone)]
-struct CachedResponse {
-    data: serde_json::Value,
-    expires_at: DateTime<Utc>,
-    created_at: DateTime<Utc>,
 }
 
 /// 統合APIメトリクス実装
@@ -47,7 +37,6 @@ impl UnifiedApiClient {
             config,
             http_client,
             metrics: Arc::new(RwLock::new(UnifiedApiMetrics::default())),
-            cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 

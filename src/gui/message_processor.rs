@@ -1,13 +1,11 @@
 //! メッセージ処理パイプライン実装
-//! 
+//!
 //! Phase 2実装: トレイトベース設計への移行
 
 use async_trait::async_trait;
 
 use super::models::GuiChatMessage;
-use super::traits::{
-    MessageProcessor, ProcessingError, MessageFilterConfig, MessageStatistics
-};
+use super::traits::{MessageFilterConfig, MessageProcessor, MessageStatistics, ProcessingError};
 use crate::get_live_chat::ChatItem;
 
 /// デフォルトメッセージプロセッサ実装
@@ -85,7 +83,9 @@ impl DefaultMessageProcessor {
 
         // 空文字列チェック
         if sanitized.trim().is_empty() {
-            return Err(ProcessingError::Validation("Empty message content".to_string()));
+            return Err(ProcessingError::Validation(
+                "Empty message content".to_string(),
+            ));
         }
 
         Ok(sanitized)
@@ -106,10 +106,7 @@ impl DefaultMessageProcessor {
         }
 
         // 制御文字を除去
-        sanitized = sanitized
-            .chars()
-            .filter(|c| !c.is_control())
-            .collect();
+        sanitized = sanitized.chars().filter(|c| !c.is_control()).collect();
 
         Ok(sanitized)
     }
@@ -122,12 +119,12 @@ impl DefaultMessageProcessor {
 
         // 簡易スパム検出ロジック
         let content_lower = message.content.to_lowercase();
-        
+
         // 過度な繰り返し文字
         let mut prev_char = '\0';
         let mut repeat_count = 0;
         let mut max_repeat = 0;
-        
+
         for ch in content_lower.chars() {
             if ch == prev_char {
                 repeat_count += 1;
@@ -138,15 +135,19 @@ impl DefaultMessageProcessor {
             }
         }
         max_repeat = max_repeat.max(repeat_count);
-        
+
         if max_repeat > 10 {
             return true;
         }
 
         // 過度な大文字
         let uppercase_count = message.content.chars().filter(|c| c.is_uppercase()).count();
-        let total_letters = message.content.chars().filter(|c| c.is_alphabetic()).count();
-        
+        let total_letters = message
+            .content
+            .chars()
+            .filter(|c| c.is_alphabetic())
+            .count();
+
         if total_letters > 0 && (uppercase_count as f64 / total_letters as f64) > 0.8 {
             return true;
         }
@@ -169,22 +170,9 @@ impl DefaultMessageProcessor {
                 (0x1F300..=0x1F5FF).contains(&code) ||  // Miscellaneous Symbols
                 (0x1F680..=0x1F6FF).contains(&code) ||  // Transport & Map
                 (0x2600..=0x26FF).contains(&code) ||    // Miscellaneous symbols
-                (0x2700..=0x27BF).contains(&code)       // Dingbats
+                (0x2700..=0x27BF).contains(&code) // Dingbats
             })
             .count()
-    }
-
-    /// URLを検出
-    fn detect_urls(&self, content: &str) -> Vec<String> {
-        if !self.config.enable_url_detection {
-            return Vec::new();
-        }
-
-        let url_pattern = regex::Regex::new(r"https?://[^\s]+").unwrap();
-        url_pattern
-            .find_iter(content)
-            .map(|m| m.as_str().to_string())
-            .collect()
     }
 }
 
@@ -212,13 +200,18 @@ impl MessageProcessor for DefaultMessageProcessor {
 
         // スパム検出
         if self.is_spam(&processed_message) {
-            return Err(ProcessingError::Validation("Spam message detected".to_string()));
+            return Err(ProcessingError::Validation(
+                "Spam message detected".to_string(),
+            ));
         }
 
         Ok(processed_message)
     }
 
-    async fn process_message_batch(&self, items: &[ChatItem]) -> Result<Vec<GuiChatMessage>, ProcessingError> {
+    async fn process_message_batch(
+        &self,
+        items: &[ChatItem],
+    ) -> Result<Vec<GuiChatMessage>, ProcessingError> {
         let mut processed_messages = Vec::with_capacity(items.len());
         let mut errors = Vec::new();
 
@@ -244,50 +237,77 @@ impl MessageProcessor for DefaultMessageProcessor {
         }
 
         if !errors.is_empty() {
-            tracing::info!("Batch processing completed with {} errors out of {} items", errors.len(), items.len());
+            tracing::info!(
+                "Batch processing completed with {} errors out of {} items",
+                errors.len(),
+                items.len()
+            );
         }
 
         Ok(processed_messages)
     }
 
-    fn filter_message(&self, message: &GuiChatMessage, filter_config: &MessageFilterConfig) -> bool {
+    fn filter_message(
+        &self,
+        message: &GuiChatMessage,
+        filter_config: &MessageFilterConfig,
+    ) -> bool {
         // システムメッセージのフィルタリング
         if !filter_config.include_system_messages {
-            if matches!(message.message_type, crate::gui::models::MessageType::System) {
+            if matches!(
+                message.message_type,
+                crate::gui::models::MessageType::System
+            ) {
                 return false;
             }
         }
 
         // SuperChatのフィルタリング
         if !filter_config.include_super_chat {
-            if matches!(message.message_type, crate::gui::models::MessageType::SuperChat { .. }) {
+            if matches!(
+                message.message_type,
+                crate::gui::models::MessageType::SuperChat { .. }
+            ) {
                 return false;
             }
         }
 
         // メンバーシップのフィルタリング
         if !filter_config.include_membership {
-            if matches!(message.message_type, crate::gui::models::MessageType::Membership) {
+            if matches!(
+                message.message_type,
+                crate::gui::models::MessageType::Membership
+            ) {
                 return false;
             }
         }
 
         // 著者フィルタ
         if let Some(ref author_filter) = filter_config.author_filter {
-            if !message.author.to_lowercase().contains(&author_filter.to_lowercase()) {
+            if !message
+                .author
+                .to_lowercase()
+                .contains(&author_filter.to_lowercase())
+            {
                 return false;
             }
         }
 
         // 内容フィルタ
         if let Some(ref content_filter) = filter_config.content_filter {
-            if !message.content.to_lowercase().contains(&content_filter.to_lowercase()) {
+            if !message
+                .content
+                .to_lowercase()
+                .contains(&content_filter.to_lowercase())
+            {
                 return false;
             }
         }
 
         // 金額フィルタ
-        if let (Some(min_amount), Some(max_amount)) = (filter_config.min_amount, filter_config.max_amount) {
+        if let (Some(min_amount), Some(max_amount)) =
+            (filter_config.min_amount, filter_config.max_amount)
+        {
             if let Some(amount) = self.extract_amount_from_message(message) {
                 if amount < min_amount || amount > max_amount {
                     return false;
@@ -325,7 +345,8 @@ impl MessageProcessor for DefaultMessageProcessor {
         }
 
         // 平均メッセージ長を更新
-        let total_length = stats.average_message_length * (stats.total_messages - 1) as f64 + message.content.len() as f64;
+        let total_length = stats.average_message_length * (stats.total_messages - 1) as f64
+            + message.content.len() as f64;
         stats.average_message_length = total_length / stats.total_messages as f64;
 
         // 絵文字数を更新
@@ -343,7 +364,7 @@ impl DefaultMessageProcessor {
             crate::gui::models::MessageType::SuperSticker { amount } => {
                 self.parse_amount_string(amount).ok()
             }
-            _ => None
+            _ => None,
         }
     }
 
@@ -356,10 +377,13 @@ impl DefaultMessageProcessor {
             .collect::<String>();
 
         if clean_amount.is_empty() {
-            return Err(ProcessingError::Format("No numeric content found".to_string()));
+            return Err(ProcessingError::Format(
+                "No numeric content found".to_string(),
+            ));
         }
 
-        clean_amount.parse::<f64>()
+        clean_amount
+            .parse::<f64>()
             .map_err(|e| ProcessingError::Format(format!("Failed to parse amount: {}", e)))
     }
 }
@@ -394,13 +418,18 @@ mod tests {
     use super::*;
     use crate::gui::models::{GuiChatMessage, MessageType};
 
-    fn create_test_message(author: &str, content: &str, message_type: MessageType) -> GuiChatMessage {
+    fn create_test_message(
+        author: &str,
+        content: &str,
+        message_type: MessageType,
+    ) -> GuiChatMessage {
         GuiChatMessage {
             timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
             message_type,
             author: author.to_string(),
             channel_id: "test_channel".to_string(),
             content: content.to_string(),
+            runs: Vec::new(),
             metadata: None,
             is_member: false,
         }
@@ -525,9 +554,11 @@ mod tests {
 
         // SuperChatメッセージ
         let superchat_message = create_test_message(
-            "User2", 
-            "Thanks!", 
-            MessageType::SuperChat { amount: "¥500".to_string() }
+            "User2",
+            "Thanks!",
+            MessageType::SuperChat {
+                amount: "¥500".to_string(),
+            },
         );
         processor.update_statistics(&superchat_message, &mut stats);
         assert_eq!(stats.total_messages, 2);
@@ -563,6 +594,7 @@ mod tests {
             author: "testuser".to_string(),
             channel_id: "test_channel".to_string(),
             content: "spam spam spam spam spam".to_string(), // スパムっぽい内容
+            runs: Vec::new(),
             metadata: None,
             is_member: false,
         };
@@ -577,12 +609,14 @@ mod tests {
             max_amount: None,
         };
 
-        // デフォルトプロセッサとスパムフィルタープロセッサで結果が異なることを確認
+        // デフォルトプロセッサとスパムフィルタープロセッサで結果が同じことを確認
+        // filter_message はスパム検出ではなく MessageFilterConfig に基づくフィルタリングを行う
         let default_result = default_processor.filter_message(&test_message, &filter_config);
-        let spam_filter_result = spam_filter_processor.filter_message(&test_message, &filter_config);
-        
+        let spam_filter_result =
+            spam_filter_processor.filter_message(&test_message, &filter_config);
+
         // 両方ともプロセッサが作成されていることを確認
-        assert_eq!(default_result, true); // デフォルトは通す
-        assert_eq!(spam_filter_result, false); // スパムフィルターは弾く（予想）
+        assert_eq!(default_result, true); // content_filter で "spam" を含むメッセージを通す
+        assert_eq!(spam_filter_result, true); // filter_message は同じロジックを使用
     }
 }

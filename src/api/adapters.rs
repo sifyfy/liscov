@@ -143,14 +143,13 @@ impl YouTubeApiAdapter {
 
 /// データベースAPIアダプター
 pub struct DatabaseApiAdapter {
-    database: LiscovDatabase,
     client: Box<dyn GenericApiClient>,
 }
 
 impl DatabaseApiAdapter {
     /// 新しいアダプターを作成
-    pub fn new(database: LiscovDatabase, client: Box<dyn GenericApiClient>) -> Self {
-        Self { database, client }
+    pub fn new(_database: LiscovDatabase, client: Box<dyn GenericApiClient>) -> Self {
+        Self { client }
     }
 
     /// データベース操作をジェネリックAPIとして実行
@@ -287,14 +286,13 @@ pub struct DatabaseQueryResult {
 
 /// アナリティクスAPIアダプター
 pub struct AnalyticsApiAdapter {
-    exporter: DataExporter,
     client: Box<dyn GenericApiClient>,
 }
 
 impl AnalyticsApiAdapter {
     /// 新しいアダプターを作成
-    pub fn new(exporter: DataExporter, client: Box<dyn GenericApiClient>) -> Self {
-        Self { exporter, client }
+    pub fn new(_exporter: DataExporter, client: Box<dyn GenericApiClient>) -> Self {
+        Self { client }
     }
 
     /// アナリティクスデータを取得

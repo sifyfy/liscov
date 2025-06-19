@@ -12,7 +12,6 @@ fn IntegratedHeaderTabs(active_tab: ActiveTab, on_tab_change: EventHandler<Activ
     let tabs = vec![
         ActiveTab::ChatMonitor,
         ActiveTab::RevenueAnalytics,
-        ActiveTab::EngagementAnalytics,
         ActiveTab::DataExport,
         ActiveTab::Settings,
     ];
@@ -26,44 +25,79 @@ fn IntegratedHeaderTabs(active_tab: ActiveTab, on_tab_change: EventHandler<Activ
                 justify-content: space-between;
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                 border-radius: 12px;
-                padding: 8px 16px;
-                margin-bottom: 16px;
+                padding: 6px 12px;
+                margin-bottom: 6px;
                 box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
                 backdrop-filter: blur(10px);
                 border: 1px solid rgba(255, 255, 255, 0.2);
-                min-height: 56px;
+                min-height: 52px;
             ",
 
-            // 左側: アプリタイトル
+            // 左側: アクティブタブ情報
             div {
-                class: "app-title",
+                class: "active-tab-info",
                 style: "
                     display: flex;
                     align-items: center;
-                    gap: 8px;
-                    flex-shrink: 0;
+                    gap: 12px;
+                    flex: 1;
+                    min-width: 0;
                 ",
 
-                h1 {
+                // タブアイコン（大きめ）
+                div {
                     style: "
-                        font-size: clamp(1.1rem, 2.5vw, 1.4rem);
-                        color: white;
-                        margin: 0;
-                        font-weight: 600;
-                        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-                        letter-spacing: -0.01em;
+                        font-size: 32px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        width: 48px;
+                        height: 48px;
+                        background: rgba(255, 255, 255, 0.15);
+                        border-radius: 12px;
+                        backdrop-filter: blur(10px);
+                        border: 1px solid rgba(255, 255, 255, 0.2);
+                        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
                     ",
-                    "📺 liscov"
+                    "{active_tab.icon()}"
                 }
 
-                span {
+                // タブ情報テキスト
+                div {
                     style: "
-                        color: rgba(255, 255, 255, 0.7);
-                        font-size: clamp(0.7rem, 1.8vw, 0.85rem);
-                        font-weight: 400;
-                        margin-left: 4px;
+                        display: flex;
+                        flex-direction: column;
+                        gap: 2px;
+                        flex: 1;
+                        min-width: 0;
                     ",
-                    "Live Chat Monitor"
+
+                    // タブ名
+                    h1 {
+                        style: "
+                            font-size: clamp(1.2rem, 2.8vw, 1.6rem);
+                            color: white;
+                            margin: 0;
+                            font-weight: 700;
+                            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+                            letter-spacing: -0.02em;
+                            line-height: 1.1;
+                        ",
+                        "{active_tab.to_string()}"
+                    }
+
+                    // タブ説明
+                    p {
+                        style: "
+                            color: rgba(255, 255, 255, 0.8);
+                            font-size: clamp(0.75rem, 1.6vw, 0.9rem);
+                            font-weight: 400;
+                            margin: 0;
+                            line-height: 1.3;
+                            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+                        ",
+                        "{active_tab.description()}"
+                    }
                 }
             }
 
@@ -72,8 +106,13 @@ fn IntegratedHeaderTabs(active_tab: ActiveTab, on_tab_change: EventHandler<Activ
                 class: "tab-navigation-integrated",
                 style: "
                     display: flex;
-                    gap: 4px;
+                    gap: 3px;
                     flex-shrink: 0;
+                    background: rgba(255, 255, 255, 0.1);
+                    border-radius: 10px;
+                    padding: 4px;
+                    backdrop-filter: blur(10px);
+                    border: 1px solid rgba(255, 255, 255, 0.15);
                 ",
 
                 // 各タブボタン
@@ -105,35 +144,36 @@ fn IntegratedTabButton(
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 6px;
-            padding: 8px 12px;
+            gap: 4px;
+            padding: 6px 10px;
             border: none;
-            border-radius: 6px;
+            border-radius: 7px;
             background: rgba(255, 255, 255, 0.95);
             color: #333;
-            font-weight: 600;
-            font-size: 12px;
+            font-weight: 700;
+            font-size: 11px;
             cursor: pointer;
             transition: all 0.3s ease;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-            min-width: 80px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+            min-width: 70px;
+            transform: translateY(-1px);
         "
     } else {
         "
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 6px;
-            padding: 8px 12px;
+            gap: 4px;
+            padding: 6px 10px;
             border: none;
-            border-radius: 6px;
-            background: rgba(255, 255, 255, 0.1);
-            color: rgba(255, 255, 255, 0.8);
+            border-radius: 7px;
+            background: transparent;
+            color: rgba(255, 255, 255, 0.7);
             font-weight: 500;
-            font-size: 12px;
+            font-size: 11px;
             cursor: pointer;
             transition: all 0.3s ease;
-            min-width: 80px;
+            min-width: 70px;
         "
     };
 
@@ -144,7 +184,7 @@ fn IntegratedTabButton(
 
             // タブアイコン
             span {
-                style: "font-size: 14px;",
+                style: "font-size: 12px;",
                 "{tab.icon()}"
             }
 
@@ -154,7 +194,8 @@ fn IntegratedTabButton(
                     white-space: nowrap;
                     overflow: hidden;
                     text-overflow: ellipsis;
-                    max-width: 60px;
+                    max-width: 50px;
+                    font-size: 10px;
                 ",
                 "{tab.to_string()}"
             }
@@ -180,6 +221,10 @@ pub fn MainWindow() -> Element {
             if let Ok(config) = manager_guard.load_config() {
                 let mut state = crate::gui::models::AppState::default();
                 manager_guard.apply_to_app_state(&config, &mut state);
+
+                // 起動時にURLは常にクリアする（前回のURLを残さない）
+                state.url = String::new();
+
                 tracing::info!("✅ Configuration loaded and applied to AppState");
                 return state;
             }
@@ -221,7 +266,7 @@ pub fn MainWindow() -> Element {
                 min-height: 100vh;
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                padding: 20px;
+                padding: 4px;
                 box-sizing: border-box;
                 display: flex;
                 flex-direction: column;

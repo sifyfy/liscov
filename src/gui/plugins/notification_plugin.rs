@@ -1,15 +1,13 @@
 //! 通知プラグイン
-//! 
+//!
 //! 特定の条件に基づいてユーザーに通知を送信するプラグイン
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::gui::plugin_system::{
-    Plugin, PluginInfo, PluginContext, PluginEvent, PluginResult
-};
 use crate::gui::models::{GuiChatMessage, MessageType};
+use crate::gui::plugin_system::{Plugin, PluginContext, PluginEvent, PluginInfo, PluginResult};
 use crate::LiscovResult;
 
 /// 通知の種類
@@ -108,15 +106,15 @@ impl NotificationPlugin {
             session_start_time: chrono::Utc::now(),
         }
     }
-    
+
     /// メッセージを分析して通知が必要かチェック
     async fn check_notifications(&mut self, message: &GuiChatMessage) -> Vec<NotificationType> {
         if !self.config.enabled {
             return vec![];
         }
-        
+
         let mut notifications = Vec::new();
-        
+
         // スーパーチャット通知
         if self.config.superchat_notifications {
             if let Some(amount) = self.extract_superchat_amount(message) {
@@ -125,41 +123,53 @@ impl NotificationPlugin {
                 }
             }
         }
-        
+
         // キーワード通知
         let keyword_notifications = self.config.keyword_notifications.clone();
         for keyword in &keyword_notifications {
-            if message.content.to_lowercase().contains(&keyword.to_lowercase()) {
+            if message
+                .content
+                .to_lowercase()
+                .contains(&keyword.to_lowercase())
+            {
                 if self.check_cooldown(&format!("keyword_{}", keyword)) {
-                    notifications.push(NotificationType::KeywordDetected { keyword: keyword.clone() });
+                    notifications.push(NotificationType::KeywordDetected {
+                        keyword: keyword.clone(),
+                    });
                 }
             }
         }
-        
+
         // VIPユーザー通知
         let vip_users = self.config.vip_users.clone();
         if vip_users.contains(&message.author) {
             if self.check_cooldown(&format!("vip_{}", message.author)) {
-                notifications.push(NotificationType::VipUser { username: message.author.clone() });
+                notifications.push(NotificationType::VipUser {
+                    username: message.author.clone(),
+                });
             }
         }
-        
+
         // メンバーシップ通知
         if matches!(message.message_type, MessageType::Membership) {
-            notifications.push(NotificationType::NewMember { username: message.author.clone() });
+            notifications.push(NotificationType::NewMember {
+                username: message.author.clone(),
+            });
         }
-        
+
         // メッセージ数閾値通知
         self.message_count += 1;
         if self.message_count >= self.config.message_count_threshold {
             if self.check_cooldown("message_threshold") {
-                notifications.push(NotificationType::MessageThreshold { count: self.message_count });
+                notifications.push(NotificationType::MessageThreshold {
+                    count: self.message_count,
+                });
             }
         }
-        
+
         notifications
     }
-    
+
     /// スーパーチャット金額を抽出
     fn extract_superchat_amount(&self, message: &GuiChatMessage) -> Option<f64> {
         match &message.message_type {
@@ -167,29 +177,33 @@ impl NotificationPlugin {
                 let cleaned = amount.replace(['¥', '$', '€', '£', ','], "");
                 cleaned.parse().ok()
             }
-            _ => None
+            _ => None,
         }
     }
-    
+
     /// クールダウンチェック
     fn check_cooldown(&mut self, key: &str) -> bool {
         let now = chrono::Utc::now();
-        
+
         if let Some(last_time) = self.last_notification_time.get(key) {
             let elapsed = now.signed_duration_since(*last_time);
             if elapsed.num_seconds() < self.config.cooldown_seconds as i64 {
                 return false;
             }
         }
-        
+
         self.last_notification_time.insert(key.to_string(), now);
         true
     }
-    
+
     /// 通知を送信
-    async fn send_notification(&mut self, notification_type: NotificationType, message: Option<&GuiChatMessage>) -> LiscovResult<()> {
+    async fn send_notification(
+        &mut self,
+        notification_type: NotificationType,
+        message: Option<&GuiChatMessage>,
+    ) -> LiscovResult<()> {
         let notification_message = self.format_notification_message(&notification_type, message);
-        
+
         // 通知履歴に追加
         let notification_history = NotificationHistory {
             id: uuid::Uuid::new_v4().to_string(),
@@ -198,14 +212,14 @@ impl NotificationPlugin {
             message: notification_message.clone(),
             related_message: message.cloned(),
         };
-        
+
         self.notification_history.push(notification_history);
-        
+
         // 履歴サイズを制限（最新100件のみ保持）
         if self.notification_history.len() > 100 {
             self.notification_history.remove(0);
         }
-        
+
         // プラグインシステムにイベント送信
         if let Some(context) = &self.context {
             let notification_data = serde_json::json!({
@@ -218,27 +232,43 @@ impl NotificationPlugin {
                     "duration_seconds": self.config.notification_duration_seconds
                 }
             });
-            
-            context.event_sender.send_custom_event("notification".to_string(), notification_data).await?;
-            context.logger.info(&context.plugin_id, &format!("Notification sent: {}", notification_message));
+
+            context
+                .event_sender
+                .send_custom_event("notification".to_string(), notification_data)
+                .await?;
+            context.logger.info(
+                &context.plugin_id,
+                &format!("Notification sent: {}", notification_message),
+            );
         }
-        
+
         Ok(())
     }
-    
+
     /// 通知メッセージをフォーマット
-    fn format_notification_message(&self, notification_type: &NotificationType, message: Option<&GuiChatMessage>) -> String {
+    fn format_notification_message(
+        &self,
+        notification_type: &NotificationType,
+        message: Option<&GuiChatMessage>,
+    ) -> String {
         match notification_type {
             NotificationType::SuperChat { amount } => {
                 if let Some(msg) = message {
-                    format!("💰 {}さんから¥{:.0}のスーパーチャット: \"{}\"", msg.author, amount, msg.content)
+                    format!(
+                        "💰 {}さんから¥{:.0}のスーパーチャット: \"{}\"",
+                        msg.author, amount, msg.content
+                    )
                 } else {
                     format!("💰 ¥{:.0}のスーパーチャットが届きました", amount)
                 }
             }
             NotificationType::KeywordDetected { keyword } => {
                 if let Some(msg) = message {
-                    format!("🔍 キーワード「{}」が検出されました - {}さん: \"{}\"", keyword, msg.author, msg.content)
+                    format!(
+                        "🔍 キーワード「{}」が検出されました - {}さん: \"{}\"",
+                        keyword, msg.author, msg.content
+                    )
                 } else {
                     format!("🔍 キーワード「{}」が検出されました", keyword)
                 }
@@ -248,7 +278,10 @@ impl NotificationPlugin {
             }
             NotificationType::VipUser { username } => {
                 if let Some(msg) = message {
-                    format!("⭐ VIPユーザー {}さんのメッセージ: \"{}\"", username, msg.content)
+                    format!(
+                        "⭐ VIPユーザー {}さんのメッセージ: \"{}\"",
+                        username, msg.content
+                    )
                 } else {
                     format!("⭐ VIPユーザー {}さんからメッセージが届きました", username)
                 }
@@ -261,17 +294,17 @@ impl NotificationPlugin {
             }
         }
     }
-    
+
     /// 通知履歴を取得
     pub fn get_notification_history(&self) -> &[NotificationHistory] {
         &self.notification_history
     }
-    
+
     /// 通知履歴をクリア
     pub fn clear_notification_history(&mut self) {
         self.notification_history.clear();
     }
-    
+
     /// 統計情報を取得
     pub fn get_stats(&self) -> serde_json::Value {
         let mut type_counts = HashMap::new();
@@ -286,7 +319,7 @@ impl NotificationPlugin {
             };
             *type_counts.entry(type_key).or_insert(0) += 1;
         }
-        
+
         serde_json::json!({
             "total_notifications": self.notification_history.len(),
             "notification_types": type_counts,
@@ -294,17 +327,20 @@ impl NotificationPlugin {
             "current_message_count": self.message_count
         })
     }
-    
+
     /// 設定を更新
     pub async fn update_config(&mut self, config: NotificationConfig) -> LiscovResult<()> {
         self.config = config;
-        
+
         // 設定を永続化
         if let Some(context) = &self.context {
             let config_json = serde_json::to_value(&self.config)?;
-            context.config_access.set_config(&context.plugin_id, "notification_config", config_json).await?;
+            context
+                .config_access
+                .set_config(&context.plugin_id, "notification_config", config_json)
+                .await?;
         }
-        
+
         Ok(())
     }
 }
@@ -322,87 +358,103 @@ impl Plugin for NotificationPlugin {
             dependencies: vec![],
         }
     }
-    
+
     async fn initialize(&mut self, context: PluginContext) -> LiscovResult<()> {
         // 保存された設定を読み込み
-        if let Ok(Some(config_value)) = context.config_access.get_config(&context.plugin_id, "notification_config").await {
+        if let Ok(Some(config_value)) = context
+            .config_access
+            .get_config(&context.plugin_id, "notification_config")
+            .await
+        {
             if let Ok(config) = serde_json::from_value::<NotificationConfig>(config_value) {
                 self.config = config;
             }
         }
-        
+
         self.session_start_time = chrono::Utc::now();
-        context.logger.info(&context.plugin_id, "Notification Plugin initialized");
+        context
+            .logger
+            .info(&context.plugin_id, "Notification Plugin initialized");
         self.context = Some(context);
         Ok(())
     }
-    
+
     async fn shutdown(&mut self) -> LiscovResult<()> {
         if let Some(context) = &self.context {
-            context.logger.info(&context.plugin_id, "Notification Plugin shutting down");
+            context
+                .logger
+                .info(&context.plugin_id, "Notification Plugin shutting down");
         }
         self.context = None;
         Ok(())
     }
-    
+
     async fn handle_event(&mut self, event: PluginEvent) -> LiscovResult<PluginResult> {
         match event {
             PluginEvent::MessageReceived(message) => {
                 let notifications = self.check_notifications(&message).await;
-                
+
                 for notification_type in notifications {
-                    self.send_notification(notification_type, Some(&message)).await?;
+                    self.send_notification(notification_type, Some(&message))
+                        .await?;
                 }
-                
+
                 Ok(PluginResult::Success)
             }
-            
+
             PluginEvent::MessagesReceived(messages) => {
                 for message in &messages {
                     let notifications = self.check_notifications(message).await;
-                    
+
                     for notification_type in notifications {
-                        self.send_notification(notification_type, Some(message)).await?;
+                        self.send_notification(notification_type, Some(message))
+                            .await?;
                     }
                 }
-                
+
                 Ok(PluginResult::Success)
             }
-            
+
             PluginEvent::ApplicationStarted => {
-                let system_notification = NotificationType::System { 
-                    message: "ライブチャット監視を開始しました".to_string() 
+                let system_notification = NotificationType::System {
+                    message: "ライブチャット監視を開始しました".to_string(),
                 };
                 self.send_notification(system_notification, None).await?;
                 Ok(PluginResult::Success)
             }
-            
+
             PluginEvent::ApplicationStopping => {
-                let system_notification = NotificationType::System { 
-                    message: "ライブチャット監視を停止します".to_string() 
+                let system_notification = NotificationType::System {
+                    message: "ライブチャット監視を停止します".to_string(),
                 };
                 self.send_notification(system_notification, None).await?;
                 Ok(PluginResult::Success)
             }
-            
+
             PluginEvent::ConfigurationChanged { key, value } => {
                 if key == "notification_config" {
                     if let Ok(config) = serde_json::from_value::<NotificationConfig>(value) {
                         self.config = config;
-                        
+
                         if let Some(context) = &self.context {
-                            context.logger.info(&context.plugin_id, "Notification configuration updated");
+                            context
+                                .logger
+                                .info(&context.plugin_id, "Notification configuration updated");
                         }
                     }
                 }
                 Ok(PluginResult::Success)
             }
-            
-            _ => Ok(PluginResult::Skipped)
+
+            _ => Ok(PluginResult::Skipped),
         }
     }
-    
-    async fn handle_plugin_message(&mut self, from: &str, message: serde_json::Value) -> LiscovResult<PluginResult> {
+
+    async fn handle_plugin_message(
+        &mut self,
+        from: &str,
+        message: serde_json::Value,
+    ) -> LiscovResult<PluginResult> {
         if from == "notification-request" {
             if let Some(command) = message.get("command").and_then(|c| c.as_str()) {
                 match command {
@@ -419,9 +471,11 @@ impl Plugin for NotificationPlugin {
                         Ok(PluginResult::SuccessWithData(stats))
                     }
                     "send_custom" => {
-                        if let Some(custom_message) = message.get("message").and_then(|m| m.as_str()) {
-                            let system_notification = NotificationType::System { 
-                                message: custom_message.to_string() 
+                        if let Some(custom_message) =
+                            message.get("message").and_then(|m| m.as_str())
+                        {
+                            let system_notification = NotificationType::System {
+                                message: custom_message.to_string(),
                             };
                             self.send_notification(system_notification, None).await?;
                             Ok(PluginResult::Success)
@@ -429,7 +483,7 @@ impl Plugin for NotificationPlugin {
                             Ok(PluginResult::Error("Missing message parameter".to_string()))
                         }
                     }
-                    _ => Ok(PluginResult::Skipped)
+                    _ => Ok(PluginResult::Skipped),
                 }
             } else {
                 Ok(PluginResult::Skipped)
@@ -438,7 +492,7 @@ impl Plugin for NotificationPlugin {
             Ok(PluginResult::Skipped)
         }
     }
-    
+
     fn get_config_schema(&self) -> Option<serde_json::Value> {
         Some(serde_json::json!({
             "type": "object",
@@ -504,30 +558,40 @@ impl Default for NotificationPlugin {
 mod tests {
     use super::*;
     use crate::gui::models::MessageType;
-    
-    fn create_test_message(author: &str, content: &str, message_type: MessageType) -> GuiChatMessage {
+
+    fn create_test_message(
+        author: &str,
+        content: &str,
+        message_type: MessageType,
+    ) -> GuiChatMessage {
         GuiChatMessage {
             timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
             message_type,
             author: author.to_string(),
-            channel_id: format!("channel_{}", author),
+            channel_id: "test_channel".to_string(),
             content: content.to_string(),
+            runs: Vec::new(),
             metadata: None,
             is_member: false,
         }
     }
-    
+
     #[tokio::test]
     async fn test_superchat_notification() {
         let mut plugin = NotificationPlugin::new();
         plugin.config.superchat_notifications = true;
         plugin.config.superchat_min_amount = 500.0;
-        
-        let superchat_message = create_test_message("donor", "Thank you!", 
-            MessageType::SuperChat { amount: "¥1000".to_string() });
-        
+
+        let superchat_message = create_test_message(
+            "donor",
+            "Thank you!",
+            MessageType::SuperChat {
+                amount: "¥1000".to_string(),
+            },
+        );
+
         let notifications = plugin.check_notifications(&superchat_message).await;
-        
+
         assert_eq!(notifications.len(), 1);
         if let NotificationType::SuperChat { amount } = &notifications[0] {
             assert_eq!(*amount, 1000.0);
@@ -535,90 +599,100 @@ mod tests {
             panic!("Expected SuperChat notification");
         }
     }
-    
+
     #[tokio::test]
     async fn test_keyword_notification() {
         let mut plugin = NotificationPlugin::new();
         plugin.config.keyword_notifications.push("test".to_string());
-        
-        let keyword_message = create_test_message("user", "This is a test message", MessageType::Text);
+
+        let keyword_message =
+            create_test_message("user", "This is a test message", MessageType::Text);
         let normal_message = create_test_message("user", "Normal message", MessageType::Text);
-        
+
         let notifications1 = plugin.check_notifications(&keyword_message).await;
         let notifications2 = plugin.check_notifications(&normal_message).await;
-        
+
         assert_eq!(notifications1.len(), 1);
         assert_eq!(notifications2.len(), 0);
-        
+
         if let NotificationType::KeywordDetected { keyword } = &notifications1[0] {
             assert_eq!(keyword, "test");
         } else {
             panic!("Expected KeywordDetected notification");
         }
     }
-    
+
     #[tokio::test]
     async fn test_vip_user_notification() {
         let mut plugin = NotificationPlugin::new();
         plugin.config.vip_users.push("vipuser".to_string());
-        
+
         let vip_message = create_test_message("vipuser", "Hello from VIP", MessageType::Text);
-        let normal_message = create_test_message("normaluser", "Hello from normal", MessageType::Text);
-        
+        let normal_message =
+            create_test_message("normaluser", "Hello from normal", MessageType::Text);
+
         let notifications1 = plugin.check_notifications(&vip_message).await;
         let notifications2 = plugin.check_notifications(&normal_message).await;
-        
+
         assert_eq!(notifications1.len(), 1);
         assert_eq!(notifications2.len(), 0);
-        
+
         if let NotificationType::VipUser { username } = &notifications1[0] {
             assert_eq!(username, "vipuser");
         } else {
             panic!("Expected VipUser notification");
         }
     }
-    
+
     #[tokio::test]
     async fn test_cooldown_mechanism() {
         let mut plugin = NotificationPlugin::new();
         plugin.config.cooldown_seconds = 5;
         plugin.config.keyword_notifications.push("test".to_string());
-        
+
         let message = create_test_message("user", "test message", MessageType::Text);
-        
+
         // 最初の通知は送信される
         let notifications1 = plugin.check_notifications(&message).await;
         assert_eq!(notifications1.len(), 1);
-        
+
         // すぐに同じキーワードでもクールダウン中なので通知されない
         let notifications2 = plugin.check_notifications(&message).await;
         assert_eq!(notifications2.len(), 0);
     }
-    
+
     #[test]
     fn test_superchat_amount_extraction() {
         let plugin = NotificationPlugin::new();
-        
-        let superchat = create_test_message("user", "Thank you!", 
-            MessageType::SuperChat { amount: "¥1,500".to_string() });
+
+        let superchat = create_test_message(
+            "user",
+            "Thank you!",
+            MessageType::SuperChat {
+                amount: "¥1,500".to_string(),
+            },
+        );
         let normal = create_test_message("user", "Normal message", MessageType::Text);
-        
+
         assert_eq!(plugin.extract_superchat_amount(&superchat), Some(1500.0));
         assert_eq!(plugin.extract_superchat_amount(&normal), None);
     }
-    
+
     #[test]
     fn test_notification_message_formatting() {
         let plugin = NotificationPlugin::new();
-        
+
         let message = create_test_message("testuser", "Hello world", MessageType::Text);
-        
+
         let superchat_notification = NotificationType::SuperChat { amount: 500.0 };
-        let keyword_notification = NotificationType::KeywordDetected { keyword: "test".to_string() };
-        
-        let superchat_msg = plugin.format_notification_message(&superchat_notification, Some(&message));
+        let keyword_notification = NotificationType::KeywordDetected {
+            keyword: "test".to_string(),
+        };
+
+        let superchat_msg =
+            plugin.format_notification_message(&superchat_notification, Some(&message));
         let keyword_msg = plugin.format_notification_message(&keyword_notification, Some(&message));
-        
+
         assert!(superchat_msg.contains("testuser"));
         assert!(superchat_msg.contains("500"));
         assert!(keyword_msg.contains("test"));

@@ -415,6 +415,7 @@ mod tests {
             author: "TestUser".to_string(),
             channel_id: "test123".to_string(),
             content: "Thank you!".to_string(),
+            runs: Vec::new(),
             metadata: None,
             is_member: false,
         };
@@ -437,6 +438,7 @@ mod tests {
             author: "User1".to_string(),
             channel_id: "user1".to_string(),
             content: "Thanks!".to_string(),
+            runs: Vec::new(),
             metadata: None,
             is_member: false,
         };
@@ -449,6 +451,7 @@ mod tests {
             author: "User2".to_string(),
             channel_id: "user2".to_string(),
             content: "Great stream!".to_string(),
+            runs: Vec::new(),
             metadata: None,
             is_member: false,
         };
@@ -472,6 +475,7 @@ mod tests {
             author: "NewMember".to_string(),
             channel_id: "member123".to_string(),
             content: "New member!".to_string(),
+            runs: Vec::new(),
             metadata: None,
             is_member: true,
         };
@@ -493,6 +497,7 @@ mod tests {
             author: "TestUser".to_string(),
             channel_id: "test123".to_string(),
             content: "Thank you!".to_string(),
+            runs: Vec::new(),
             metadata: None,
             is_member: false,
         };

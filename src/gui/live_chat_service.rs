@@ -111,6 +111,7 @@ impl EventDrivenLiveChatHandle {
             author: author.to_string(),
             channel_id: "test_channel".to_string(),
             content: content.to_string(),
+            runs: Vec::new(), // テストメッセージは通常テキストのみ
             metadata: None,
             is_member: false,
         };

@@ -8,25 +8,20 @@ default_platform = "desktop"
 # アセットディレクトリ
 out_dir = "dist"
 
+# Web設定（将来の展開用）
+[web.app]
+title = "🎬 liscov - YouTube Live Chat Monitor"
+
+[web.watcher]
+reload_html = true
+watch_path = ["src"]
+index_on_404 = true
+
 # デスクトップアプリ設定
 [desktop]
-# アプリケーション設定
 title = "🎬 liscov - YouTube Live Chat Monitor"
-width = 900
-height = 700
 
-# ウィンドウ設定
-resizable = true
-minimizable = true
-maximizable = true
-closable = true
-
-# 開発設定
-[development]
-# ホットリロード有効化
-hot_reload = true
-# ウォッチディレクトリ
-watch_paths = ["src"]
-
-# ログレベル
-log_level = "debug"
+# バンドル設定（将来の配布用）
+[bundle]
+identifier = "dev.sifyfy.liscov"
+publisher = "Sifi Takashina"

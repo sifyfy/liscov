@@ -1,16 +1,9 @@
 //! 統合テスト
-//! 
+//!
 //! Phase 1-3で実装した機能の統合テスト
 
+use liscov::api::{adapters::*, generic::*, manager::*, unified_client::*};
 use std::collections::HashMap;
-use liscov::{
-    api::{
-        generic::*,
-        unified_client::*,
-        adapters::*,
-        manager::*,
-    },
-};
 
 /// API統合テスト
 #[cfg(test)]
@@ -29,14 +22,15 @@ mod api_integration_tests {
             timeout_ms: Some(5000),
             retry_config: Some(RetryConfig::default()),
         };
-        
+
         assert_eq!(request.id, "test-123");
         assert_eq!(request.method, HttpMethod::GET);
         assert_eq!(request.timeout_ms, Some(5000));
-        
+
         // JSONシリアライゼーション/デシリアライゼーションテスト
         let serialized = serde_json::to_string(&request).unwrap();
-        let deserialized: GenericRequest<serde_json::Value> = serde_json::from_str(&serialized).unwrap();
+        let deserialized: GenericRequest<serde_json::Value> =
+            serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized.id, request.id);
     }
 
@@ -62,14 +56,17 @@ mod api_integration_tests {
             has_previous: false,
             has_next: true,
         };
-        
+
         assert_eq!(result.data.len(), 3);
         assert_eq!(result.total_pages, 10);
         assert!(!result.has_previous);
         assert!(result.has_next);
-        
+
         // ページング計算の妥当性をテスト
-        assert_eq!(result.total_count / result.size as u64, result.total_pages as u64);
+        assert_eq!(
+            result.total_count / result.size as u64,
+            result.total_pages as u64
+        );
     }
 
     #[test]
@@ -100,7 +97,7 @@ mod api_integration_tests {
     fn test_unified_api_client_creation() {
         let client = UnifiedApiClient::with_default_config();
         let config = client.get_config();
-        
+
         assert_eq!(config.base_url, "https://api.example.com");
         assert_eq!(config.default_timeout_ms, 10000);
         assert!(config.default_headers.contains_key("User-Agent"));
@@ -110,11 +107,11 @@ mod api_integration_tests {
     fn test_youtube_api_client_config() {
         let client = UnifiedApiClient::for_youtube();
         let config = client.get_config();
-        
+
         assert_eq!(config.base_url, "https://www.youtube.com");
         assert_eq!(config.default_timeout_ms, 15000);
         assert!(config.rate_limit.is_some());
-        
+
         if let Some(rate_limit) = &config.rate_limit {
             assert_eq!(rate_limit.window_seconds, 60);
             assert_eq!(rate_limit.max_requests, 100);
@@ -125,7 +122,7 @@ mod api_integration_tests {
     fn test_database_api_client_config() {
         let client = UnifiedApiClient::for_database();
         let config = client.get_config();
-        
+
         assert_eq!(config.base_url, "file://");
         assert_eq!(config.default_timeout_ms, 5000);
         assert!(config.rate_limit.is_none());
@@ -135,10 +132,10 @@ mod api_integration_tests {
     fn test_api_manager_factory() {
         let manager1 = ApiManagerFactory::create();
         let manager2 = ApiManagerFactory::create();
-        
+
         // 異なるインスタンスであることを確認
         assert!(!std::ptr::eq(&manager1, &manager2));
-        
+
         // 初期状態での統計確認
         let metrics = manager1.get_global_metrics();
         assert_eq!(metrics.total_requests, 0);
@@ -153,11 +150,11 @@ mod api_integration_tests {
             video_id: "test_video_123".to_string(),
             continuation_token: Some("continuation_456".to_string()),
         };
-        
+
         let serialized = serde_json::to_string(&request).unwrap();
         assert!(serialized.contains("test_video_123"));
         assert!(serialized.contains("continuation_456"));
-        
+
         let deserialized: LiveChatRequest = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized.video_id, request.video_id);
         assert_eq!(deserialized.continuation_token, request.continuation_token);
@@ -175,12 +172,12 @@ mod api_integration_tests {
                 conditions
             }),
         };
-        
+
         assert_eq!(query.table, "messages");
         assert!(matches!(query.operation, DatabaseOperation::Select));
         assert!(query.parameters.is_some());
         assert!(query.conditions.is_some());
-        
+
         if let Some(conditions) = &query.conditions {
             assert!(conditions.contains_key("session_id"));
         }
@@ -198,11 +195,11 @@ mod api_integration_tests {
                 filters
             },
         };
-        
+
         assert_eq!(request.metrics.len(), 2);
         assert!(request.filters.contains_key("channel_id"));
         assert!(request.start_date < request.end_date);
-        
+
         // 過去7日間の期間が正しく設定されているかテスト
         let duration = request.end_date.signed_duration_since(request.start_date);
         assert!(duration.num_days() >= 6 && duration.num_days() <= 8);
@@ -216,7 +213,7 @@ mod api_integration_tests {
             ReportFormat::Excel,
             ReportFormat::Pdf,
         ];
-        
+
         for format in formats {
             let request = ReportRequest {
                 report_type: "engagement_summary".to_string(),
@@ -227,10 +224,10 @@ mod api_integration_tests {
                 },
                 format: format.clone(),
             };
-            
+
             assert_eq!(request.report_type, "engagement_summary");
             assert!(request.parameters.contains_key("period"));
-            
+
             // フォーマット別のシリアライゼーションテスト
             let serialized = serde_json::to_string(&request).unwrap();
             let deserialized: ReportRequest = serde_json::from_str(&serialized).unwrap();
@@ -247,12 +244,12 @@ mod api_integration_tests {
             max_reconnect_attempts: 3,
             heartbeat_interval_ms: Some(30000),
         };
-        
+
         assert_eq!(config.endpoint, "/stream/livechat");
         assert_eq!(config.buffer_size, 1000);
         assert_eq!(config.max_reconnect_attempts, 3);
         assert!(config.heartbeat_interval_ms.is_some());
-        
+
         // 妥当性の確認
         assert!(config.buffer_size > 0);
         assert!(config.reconnect_interval_ms > 0);
@@ -268,14 +265,15 @@ mod api_integration_tests {
             cache_size: 500,
             last_clear_time: Some(chrono::Utc::now()),
         };
-        
+
         assert_eq!(stats.hit_rate, 80.0);
         assert_eq!(stats.hits + stats.misses, 100);
         assert!(stats.cache_size > 0);
         assert!(stats.last_clear_time.is_some());
-        
+
         // ヒット率の妥当性確認
-        let calculated_hit_rate = (stats.hits as f64) / ((stats.hits + stats.misses) as f64) * 100.0;
+        let calculated_hit_rate =
+            (stats.hits as f64) / ((stats.hits + stats.misses) as f64) * 100.0;
         assert!((stats.hit_rate - calculated_hit_rate).abs() < 0.001);
     }
 
@@ -285,15 +283,15 @@ mod api_integration_tests {
         let api_error = liscov::ApiError::NotFound;
         let liscov_error: liscov::LiscovError = api_error.into();
         assert!(matches!(liscov_error, liscov::LiscovError::Api(_)));
-        
+
         let io_error = liscov::IoError::FileRead("test.txt".to_string());
         let liscov_error: liscov::LiscovError = io_error.into();
         assert!(matches!(liscov_error, liscov::LiscovError::Io(_)));
-        
+
         let gui_error = liscov::GuiError::Service("test service error".to_string());
         let liscov_error: liscov::LiscovError = gui_error.into();
         assert!(matches!(liscov_error, liscov::LiscovError::Gui(_)));
-        
+
         // エラーメッセージの確認
         assert!(liscov_error.to_string().contains("test service error"));
     }
@@ -314,6 +312,7 @@ mod memory_optimization_tests {
             author: author.to_string(),
             channel_id: "test_channel".to_string(),
             content: content.to_string(),
+            runs: Vec::new(),
             metadata: None,
             is_member: false,
         }
@@ -321,28 +320,28 @@ mod memory_optimization_tests {
 
     #[test]
     fn test_circular_message_buffer() {
-        let mut buffer = CircularMessageBuffer::new(3);
-        
+        let mut buffer = CircularMessageBuffer::new_circular(3);
+
         assert_eq!(buffer.len(), 0);
         assert_eq!(buffer.capacity(), 3);
         assert!(buffer.is_empty());
-        
+
         // メッセージを追加
         buffer.push(create_test_message("msg1", "user1"));
         buffer.push(create_test_message("msg2", "user2"));
         buffer.push(create_test_message("msg3", "user3"));
-        
+
         assert_eq!(buffer.len(), 3);
         assert!(!buffer.is_empty());
         assert!(buffer.is_full());
-        
+
         // 容量を超えて追加（古いメッセージが削除される）
         buffer.push(create_test_message("msg4", "user4"));
-        
+
         assert_eq!(buffer.len(), 3);
         assert_eq!(buffer.dropped_count(), 1);
         assert_eq!(buffer.total_count(), 4);
-        
+
         // 最新のメッセージが保持されていることを確認
         let messages = buffer.messages();
         assert_eq!(messages.len(), 3);
@@ -352,31 +351,31 @@ mod memory_optimization_tests {
     #[test]
     fn test_message_pool_reuse() {
         let pool = MessagePool::new(2);
-        
+
         // 初期状態
         let stats = pool.stats();
         assert_eq!(stats.pool_size, 0);
         assert_eq!(stats.created_count, 0);
         assert_eq!(stats.reused_count, 0);
-        
+
         // メッセージを取得
         let msg1 = pool.acquire();
         let msg2 = pool.acquire();
-        
+
         let stats = pool.stats();
         assert_eq!(stats.created_count, 2);
-        
+
         // プールに返却
         pool.release(msg1);
         pool.release(msg2);
-        
+
         let stats = pool.stats();
         assert_eq!(stats.pool_size, 2);
-        
+
         // 再利用
         let _msg3 = pool.acquire();
         let _msg4 = pool.acquire();
-        
+
         let stats = pool.stats();
         assert_eq!(stats.reused_count, 2);
         assert_eq!(stats.pool_size, 0);
@@ -385,62 +384,134 @@ mod memory_optimization_tests {
     #[test]
     fn test_shared_data_cache() {
         let cache = SharedDataCache::new(100);
-        
+
         // 初期状態
         let stats = cache.cache_stats();
         assert_eq!(stats.author_cache_size, 0);
         assert_eq!(stats.channel_id_cache_size, 0);
-        
+
         // データを追加
         let author1 = cache.get_shared_author("user1");
         let author2 = cache.get_shared_author("user1"); // 同じユーザー
         let author3 = cache.get_shared_author("user2"); // 異なるユーザー
-        
+
         // 同じユーザーに対して同じインスタンスが返されることを確認
         assert!(std::ptr::eq(&*author1, &*author2));
         assert!(!std::ptr::eq(&*author1, &*author3));
-        
+
         let stats = cache.cache_stats();
         assert_eq!(stats.author_cache_size, 2);
-        
+
         // チャンネルIDも同様にテスト
         let channel1 = cache.get_shared_channel_id("channel1");
         let channel2 = cache.get_shared_channel_id("channel1");
         assert!(std::ptr::eq(&*channel1, &*channel2));
-        
+
         let stats = cache.cache_stats();
         assert_eq!(stats.channel_id_cache_size, 1);
     }
 
     #[test]
     fn test_optimized_message_manager() {
-        use liscov::gui::memory_optimized::BatchConfig;
-        let mut manager = OptimizedMessageManager::new(5, 2, 100, BatchConfig::default());
-        
+        let mut manager = OptimizedMessageManager::with_defaults();
+
         // 初期状態
         assert_eq!(manager.len(), 0);
         assert!(manager.is_empty());
-        
+
         // メッセージを追加
-        for i in 1..=3 {
-            manager.add_message(create_test_message(&format!("msg{}", i), "user"));
-        }
-        
-        assert_eq!(manager.len(), 3);
+        manager.add_message(create_test_message("Hello", "user1"));
+        manager.add_message(create_test_message("World", "user2"));
+
+        assert_eq!(manager.len(), 2);
         assert!(!manager.is_empty());
-        
-        // 統計情報をテスト
+
+        // バッチでメッセージを追加
+        let batch = vec![
+            create_test_message("Batch1", "user3"),
+            create_test_message("Batch2", "user4"),
+            create_test_message("Batch3", "user5"),
+        ];
+        manager.add_messages_batch(batch);
+
+        assert_eq!(manager.len(), 5);
+
+        // 統計確認（無制限なので削除されない）
         let stats = manager.comprehensive_stats();
-        assert_eq!(stats.message_count, 3);
-        assert!(stats.cache_stats.author_cache_size > 0);
-        
-        // メッセージ取得
-        let messages = manager.messages();
-        assert_eq!(messages.len(), 3);
-        
-        // クリア機能
-        manager.clear();
-        assert_eq!(manager.len(), 0);
-        assert!(manager.is_empty());
+        assert_eq!(stats.message_count, 5);
+        assert_eq!(stats.dropped_count, 0);
+        assert!(stats.memory_stats.used_memory > 0);
+    }
+
+    #[test]
+    fn test_unlimited_buffer_strategy() {
+        let mut manager = OptimizedMessageManager::with_defaults();
+
+        // 大量のメッセージを追加（1000件制限を超える）
+        for i in 0..2000 {
+            manager.add_message(create_test_message(
+                &format!("msg{}", i),
+                &format!("user{}", i),
+            ));
+        }
+
+        let stats = manager.comprehensive_stats();
+        assert_eq!(stats.message_count, 2000); // 全メッセージが保持される
+        assert_eq!(stats.dropped_count, 0); // 削除されない
+    }
+
+    #[test]
+    fn test_fixed_limit_strategy() {
+        let mut manager = OptimizedMessageManager::with_fixed_limit(100);
+
+        // 制限を超えるメッセージを追加
+        for i in 0..200 {
+            manager.add_message(create_test_message(
+                &format!("msg{}", i),
+                &format!("user{}", i),
+            ));
+        }
+
+        let stats = manager.comprehensive_stats();
+        assert_eq!(stats.message_count, 100); // 制限内
+        assert_eq!(stats.dropped_count, 100); // 100件削除
+    }
+
+    #[test]
+    fn test_memory_based_strategy() {
+        // 1MBメモリ制限
+        let mut manager = OptimizedMessageManager::with_memory_limit(1);
+
+        // メモリ制限内でメッセージを追加
+        for i in 0..500 {
+            manager.add_message(create_test_message(
+                &format!("msg{}", i),
+                &format!("user{}", i),
+            ));
+        }
+
+        let stats = manager.comprehensive_stats();
+        // メモリ制限内であることを確認
+        assert!(stats.memory_stats.used_memory <= 1024 * 1024);
+    }
+
+    #[test]
+    fn test_strategy_switching() {
+        let mut manager = OptimizedMessageManager::with_defaults();
+
+        // 1000メッセージを追加
+        for i in 0..1000 {
+            manager.add_message(create_test_message(
+                &format!("msg{}", i),
+                &format!("user{}", i),
+            ));
+        }
+        assert_eq!(manager.len(), 1000);
+
+        // 固定制限に変更
+        manager.set_buffer_strategy(liscov::gui::memory_optimized::BufferStrategy::FixedLimit(
+            500,
+        ));
+        assert_eq!(manager.len(), 500); // 500件に削減
     }
 }

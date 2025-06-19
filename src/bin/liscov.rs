@@ -1,12 +1,37 @@
+use clap::Parser;
 use dioxus::prelude::*;
 use liscov::{
+    gui::{components::MainWindow, config_manager, plugin_system::PluginManager, utils},
     LiscovResult,
-    gui::{components::MainWindow, config_manager, utils, plugin_system::PluginManager},
 };
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 /// ウィンドウ設定の保存用
 static LAST_WINDOW_CONFIG: Mutex<Option<config_manager::WindowConfig>> = Mutex::new(None);
+
+/// CLI引数の定義
+#[derive(Parser, Debug)]
+#[command(name = "liscov")]
+#[command(about = "YouTube Live Chat Monitor - ライブチャット監視ツール")]
+#[command(version)]
+struct Args {
+    /// ログ出力ディレクトリを指定
+    #[arg(long, value_name = "DIR")]
+    log_dir: Option<PathBuf>,
+
+    /// ログレベルを指定 (trace, debug, info, warn, error)
+    #[arg(long, value_name = "LEVEL", default_value = "info")]
+    log_level: String,
+
+    /// ファイルログ出力を無効化
+    #[arg(long)]
+    no_file_logging: bool,
+
+    /// 保存するログファイル数の上限
+    #[arg(long, value_name = "NUM", default_value = "30")]
+    max_log_files: u32,
+}
 
 /// Dioxus 0.6.3ベースのliscov GUI アプリケーション
 /// Slintから移行 (Phase 0-1: 技術検証・基本構造)
@@ -63,26 +88,56 @@ fn app() -> Element {
 }
 
 fn main() -> LiscovResult<()> {
+    // CLI引数を解析
+    let args = Args::parse();
+
+    // 環境変数でログディレクトリを取得（CLI引数より優先度低い）
+    let env_log_dir = std::env::var("LISCOV_LOG_DIR").ok().map(PathBuf::from);
+
     // tokio-consoleの初期化（プロファイリング用）
     #[cfg(feature = "debug-tokio")]
     console_subscriber::init();
 
-    // 強化されたログ初期化
-    #[cfg(not(feature = "debug-tokio"))]
-    utils::init_logging()?;
-
-    tracing::info!("🎬 Starting liscov GUI - YouTube Live Chat Monitor");
-    tracing::debug!("📱 Starting Dioxus desktop application...");
-
-    // 既存の設定管理システムを使用
+    // 既存の設定管理システムを使用してログ設定を取得
     let config_manager = config_manager::ConfigManager::new()?;
     let mut config = config_manager.load_config().unwrap_or_else(|e| {
         tracing::warn!("設定読み込みエラー、デフォルト設定を使用: {}", e);
         config_manager::AppConfig::default()
     });
 
+    // CLI引数でログ設定を上書き
+    if args.no_file_logging {
+        config.log.enable_file_logging = false;
+    }
+    if !args.log_level.is_empty() {
+        config.log.log_level = args.log_level;
+    }
+    config.log.max_log_files = args.max_log_files;
+
+    // ログディレクトリ決定（優先度: CLI > 環境変数 > 設定ファイル > XDGデフォルト）
+    let custom_log_dir = args.log_dir.or(env_log_dir);
+
+    // 強化されたログ初期化
+    #[cfg(not(feature = "debug-tokio"))]
+    utils::init_logging_with_config(&config.log, custom_log_dir.clone())?;
+
+    tracing::info!("🎬 Starting liscov GUI - YouTube Live Chat Monitor");
+    tracing::debug!("📱 Starting Dioxus desktop application...");
+
+    // ログ設定を表示
+    if config.log.enable_file_logging {
+        tracing::info!(
+            "📁 ログ設定: ディレクトリ={:?}, レベル={}, 最大ファイル数={}",
+            custom_log_dir.or(config.log.log_dir.clone()),
+            config.log.log_level,
+            config.log.max_log_files
+        );
+    } else {
+        tracing::info!("📁 ファイルログ出力は無効化されています");
+    }
+
     // プラグインシステムを初期化
-    let plugin_manager = Arc::new(PluginManager::new());
+    let _plugin_manager = Arc::new(PluginManager::new());
     tracing::info!("🔌 Plugin system initialized");
 
     // ウィンドウ位置をデスクトップ範囲内に調整
@@ -123,7 +178,8 @@ fn main() -> LiscovResult<()> {
         tracing::info!("🛑 終了シグナルを受信しました");
         save_window_config_on_exit();
         std::process::exit(0);
-    }).map_err(|e| liscov::GuiError::Configuration(format!("Failed to set signal handler: {}", e)))?;
+    })
+    .map_err(|e| liscov::GuiError::Configuration(format!("Failed to set signal handler: {}", e)))?;
 
     // Dioxusアプリケーションを起動
     launch_builder.launch(app);

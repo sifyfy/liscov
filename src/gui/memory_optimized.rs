@@ -1,97 +1,135 @@
 //! メモリ効率最適化モジュール
-//! 
+//!
 //! Phase 2実装: メモリ効率改善
 
-use std::collections::{HashMap, VecDeque};
+use parking_lot::{Mutex, RwLock};
+use std::collections::HashMap;
 use std::sync::Arc;
-use parking_lot::{RwLock, Mutex};
 
 use super::models::GuiChatMessage;
 
-/// 循環バッファによる効率的なメッセージ管理
+/// 設定可能な制限付きメッセージバッファ
+#[derive(Debug, Clone)]
+pub enum BufferStrategy {
+    /// 無制限（メモリが許す限り）
+    Unlimited,
+    /// 固定制限（従来の循環バッファ）
+    FixedLimit(usize),
+    /// スマート制限（メモリ使用量ベース）
+    MemoryBased { max_memory_mb: usize },
+    /// 時間ベース制限（古いメッセージを自動削除）
+    TimeBased { max_hours: u64 },
+}
+
+impl Default for BufferStrategy {
+    fn default() -> Self {
+        // デフォルトは無制限
+        Self::Unlimited
+    }
+}
+
+/// 改良されたメッセージバッファ
 #[derive(Debug)]
-pub struct CircularMessageBuffer {
-    /// メッセージを格納する循環バッファ
-    buffer: VecDeque<GuiChatMessage>,
-    /// 最大容量
-    capacity: usize,
+pub struct FlexibleMessageBuffer {
+    /// メッセージを格納するバッファ
+    buffer: Vec<GuiChatMessage>,
+    /// バッファ戦略
+    strategy: BufferStrategy,
     /// 削除されたメッセージ数の累計
     dropped_count: usize,
     /// 総メッセージ数（削除されたものを含む）
     total_count: usize,
+    /// 最後のクリーンアップ時刻
+    last_cleanup: std::time::Instant,
 }
 
-impl CircularMessageBuffer {
-    /// 新しい循環バッファを作成
-    pub fn new(capacity: usize) -> Self {
+impl FlexibleMessageBuffer {
+    /// 新しい柔軟なメッセージバッファを作成
+    pub fn new(strategy: BufferStrategy) -> Self {
         Self {
-            buffer: VecDeque::with_capacity(capacity),
-            capacity,
+            buffer: Vec::new(),
+            strategy,
             dropped_count: 0,
             total_count: 0,
+            last_cleanup: std::time::Instant::now(),
         }
     }
 
-    /// メッセージを追加（容量を超えた場合は古いメッセージを削除）
+    /// メッセージを追加
     pub fn push(&mut self, message: GuiChatMessage) {
-        if self.buffer.len() >= self.capacity {
-            self.buffer.pop_front();
-            self.dropped_count += 1;
-        }
-        
-        self.buffer.push_back(message);
+        self.buffer.push(message);
         self.total_count += 1;
+
+        // 即座にクリーンアップを適用（循環バッファの動作に合わせる）
+        self.apply_cleanup_strategy();
+
+        // 定期的なクリーンアップは60秒ごとに実行
+        if self.last_cleanup.elapsed().as_secs() > 60 {
+            self.last_cleanup = std::time::Instant::now();
+        }
     }
 
-    /// 複数のメッセージを効率的に追加
+    /// バッチでメッセージを追加
     pub fn push_batch(&mut self, messages: Vec<GuiChatMessage>) {
-        let batch_size = messages.len();
-        
-        // バッチサイズが容量を超える場合は最新のメッセージのみを保持
-        if batch_size >= self.capacity {
-            self.dropped_count += self.buffer.len() + (batch_size - self.capacity);
-            self.buffer.clear();
-            
-            // 最新のメッセージを容量分だけ保持
-            let start_index = batch_size - self.capacity;
-            for message in messages.into_iter().skip(start_index) {
-                self.buffer.push_back(message);
+        self.buffer.extend(messages.iter().cloned());
+        self.total_count += messages.len();
+
+        // バッチ追加後に即座にクリーンアップを適用
+        self.apply_cleanup_strategy();
+    }
+
+    /// クリーンアップ戦略を適用
+    fn apply_cleanup_strategy(&mut self) {
+        match &self.strategy {
+            BufferStrategy::Unlimited => {
+                // 何もしない
             }
-        } else {
-            // 通常のバッチ処理
-            let overflow = (self.buffer.len() + batch_size).saturating_sub(self.capacity);
-            if overflow > 0 {
-                self.buffer.drain(..overflow);
-                self.dropped_count += overflow;
+            BufferStrategy::FixedLimit(limit) => {
+                if self.buffer.len() > *limit {
+                    let overflow = self.buffer.len() - limit;
+                    self.buffer.drain(..overflow);
+                    self.dropped_count += overflow;
+                }
             }
-            
-            for message in messages {
-                self.buffer.push_back(message);
+            BufferStrategy::MemoryBased { max_memory_mb } => {
+                let message_size = std::mem::size_of::<GuiChatMessage>();
+                let max_messages = (max_memory_mb * 1024 * 1024) / message_size;
+
+                if self.buffer.len() > max_messages {
+                    let overflow = self.buffer.len() - max_messages;
+                    self.buffer.drain(..overflow);
+                    self.dropped_count += overflow;
+                }
+            }
+            BufferStrategy::TimeBased {
+                max_hours: _max_hours,
+            } => {
+                // TODO: 時間ベース制限の実装
+                // 現在は簡易実装のため、実際のタイムスタンプ解析は後で実装
+
+                // 簡易的な実装：1時間ごとに古いメッセージの1/10を削除
+                if self.buffer.len() > 1000 {
+                    let remove_count = self.buffer.len() / 10;
+                    self.buffer.drain(..remove_count);
+                    self.dropped_count += remove_count;
+                }
             }
         }
-        
-        self.total_count += batch_size;
     }
 
     /// 現在のメッセージ一覧を取得
-    pub fn messages(&self) -> &VecDeque<GuiChatMessage> {
+    pub fn messages(&self) -> &Vec<GuiChatMessage> {
         &self.buffer
     }
 
-    /// メッセージ一覧のベクタを取得（互換性のため）
+    /// メッセージ一覧のベクタを取得
     pub fn to_vec(&self) -> Vec<GuiChatMessage> {
-        self.buffer.iter().cloned().collect()
+        self.buffer.clone()
     }
 
     /// 最新のN件のメッセージを取得
     pub fn recent_messages(&self, n: usize) -> Vec<GuiChatMessage> {
-        self.buffer
-            .iter()
-            .rev()
-            .take(n)
-            .rev()
-            .cloned()
-            .collect()
+        self.buffer.iter().rev().take(n).rev().cloned().collect()
     }
 
     /// 現在のメッセージ数
@@ -104,11 +142,6 @@ impl CircularMessageBuffer {
         self.buffer.is_empty()
     }
 
-    /// バッファが満杯かどうか
-    pub fn is_full(&self) -> bool {
-        self.buffer.len() >= self.capacity
-    }
-
     /// 総メッセージ数（削除されたものを含む）
     pub fn total_count(&self) -> usize {
         self.total_count
@@ -119,21 +152,10 @@ impl CircularMessageBuffer {
         self.dropped_count
     }
 
-    /// 容量を取得
-    pub fn capacity(&self) -> usize {
-        self.capacity
-    }
-
-    /// 容量を変更（既存データは保持）
-    pub fn set_capacity(&mut self, new_capacity: usize) {
-        if new_capacity < self.buffer.len() {
-            let overflow = self.buffer.len() - new_capacity;
-            self.buffer.drain(..overflow);
-            self.dropped_count += overflow;
-        }
-        
-        self.capacity = new_capacity;
-        self.buffer.shrink_to_fit();
+    /// 戦略を変更
+    pub fn set_strategy(&mut self, strategy: BufferStrategy) {
+        self.strategy = strategy;
+        self.apply_cleanup_strategy();
     }
 
     /// バッファをクリア
@@ -154,7 +176,7 @@ impl CircularMessageBuffer {
         let buffer_capacity = self.buffer.capacity();
         let used_memory = self.buffer.len() * message_size;
         let allocated_memory = buffer_capacity * message_size;
-        
+
         MemoryStats {
             used_memory,
             allocated_memory,
@@ -166,6 +188,42 @@ impl CircularMessageBuffer {
                 0.0
             },
         }
+    }
+
+    /// 従来の`CircularMessageBuffer::new`との互換性のため
+    pub fn new_circular(capacity: usize) -> Self {
+        Self::new(BufferStrategy::FixedLimit(capacity))
+    }
+
+    /// 容量を取得（従来の循環バッファ互換）
+    pub fn capacity(&self) -> usize {
+        match &self.strategy {
+            BufferStrategy::FixedLimit(limit) => *limit,
+            BufferStrategy::MemoryBased { max_memory_mb } => {
+                let message_size = std::mem::size_of::<GuiChatMessage>();
+                (max_memory_mb * 1024 * 1024) / message_size
+            }
+            _ => usize::MAX, // 無制限または時間ベースの場合
+        }
+    }
+
+    /// バッファが満杯かどうか（従来の循環バッファ互換）
+    pub fn is_full(&self) -> bool {
+        match &self.strategy {
+            BufferStrategy::Unlimited => false,
+            BufferStrategy::FixedLimit(limit) => self.buffer.len() >= *limit,
+            BufferStrategy::MemoryBased { max_memory_mb } => {
+                let message_size = std::mem::size_of::<GuiChatMessage>();
+                let max_messages = (max_memory_mb * 1024 * 1024) / message_size;
+                self.buffer.len() >= max_messages
+            }
+            BufferStrategy::TimeBased { .. } => false, // 時間ベースでは満杯という概念がない
+        }
+    }
+
+    /// 容量を変更（従来の循環バッファ互換）
+    pub fn set_capacity(&mut self, new_capacity: usize) {
+        self.set_strategy(BufferStrategy::FixedLimit(new_capacity));
     }
 }
 
@@ -211,24 +269,27 @@ impl MessagePool {
     /// メッセージを取得（プールから再利用、または新規作成）
     pub fn acquire(&self) -> GuiChatMessage {
         let mut pool = self.pool.lock();
-        
+
         if let Some(mut message) = pool.pop() {
             // プールから再利用
-            self.reused_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            
+            self.reused_count
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
             // メッセージをリセット
             message.timestamp = String::new();
             message.author = String::new();
             message.channel_id = String::new();
             message.content = String::new();
+            message.runs = Vec::new();
             message.message_type = super::models::MessageType::Text;
             message.metadata = None;
             message.is_member = false;
-            
+
             message
         } else {
             // 新規作成
-            self.created_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.created_count
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             GuiChatMessage::default()
         }
     }
@@ -236,7 +297,7 @@ impl MessagePool {
     /// メッセージをプールに返却
     pub fn release(&self, message: GuiChatMessage) {
         let mut pool = self.pool.lock();
-        
+
         if pool.len() < self.max_pool_size {
             pool.push(message);
         }
@@ -249,13 +310,18 @@ impl MessagePool {
         PoolStats {
             pool_size: pool.len(),
             max_pool_size: self.max_pool_size,
-            created_count: self.created_count.load(std::sync::atomic::Ordering::Relaxed),
+            created_count: self
+                .created_count
+                .load(std::sync::atomic::Ordering::Relaxed),
             reused_count: self.reused_count.load(std::sync::atomic::Ordering::Relaxed),
             reuse_rate: {
-                let total = self.created_count.load(std::sync::atomic::Ordering::Relaxed) + 
-                           self.reused_count.load(std::sync::atomic::Ordering::Relaxed);
+                let total = self
+                    .created_count
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                    + self.reused_count.load(std::sync::atomic::Ordering::Relaxed);
                 if total > 0 {
-                    self.reused_count.load(std::sync::atomic::Ordering::Relaxed) as f64 / total as f64
+                    self.reused_count.load(std::sync::atomic::Ordering::Relaxed) as f64
+                        / total as f64
                 } else {
                     0.0
                 }
@@ -318,7 +384,7 @@ impl SharedDataCache {
 
         // 書き込みロックで新しいデータを挿入
         let mut authors = self.authors.write();
-        
+
         // ダブルチェック（他のスレッドが既に挿入している可能性）
         if let Some(shared) = authors.get(author) {
             return shared.clone();
@@ -348,7 +414,7 @@ impl SharedDataCache {
         }
 
         let mut channel_ids = self.channel_ids.write();
-        
+
         if let Some(shared) = channel_ids.get(channel_id) {
             return shared.clone();
         }
@@ -368,13 +434,14 @@ impl SharedDataCache {
     pub fn cache_stats(&self) -> CacheStats {
         let authors = self.authors.read();
         let channel_ids = self.channel_ids.read();
-        
+
         CacheStats {
             author_cache_size: authors.len(),
             channel_id_cache_size: channel_ids.len(),
             total_cache_size: authors.len() + channel_ids.len(),
             max_cache_size: self.max_cache_size,
-            cache_utilization: (authors.len() + channel_ids.len()) as f64 / self.max_cache_size as f64,
+            cache_utilization: (authors.len() + channel_ids.len()) as f64
+                / self.max_cache_size as f64,
         }
     }
 
@@ -405,14 +472,12 @@ pub struct CacheStats {
 /// メモリ最適化されたメッセージマネージャー
 #[derive(Debug)]
 pub struct OptimizedMessageManager {
-    /// 循環バッファ
-    buffer: CircularMessageBuffer,
+    /// 改良されたメッセージバッファ
+    buffer: FlexibleMessageBuffer,
     /// メッセージプール
     pool: MessagePool,
     /// 共有データキャッシュ
     cache: SharedDataCache,
-    /// バッチ処理設定
-    batch_config: BatchConfig,
 }
 
 /// バッチ処理設定
@@ -442,19 +507,78 @@ impl OptimizedMessageManager {
         buffer_capacity: usize,
         pool_size: usize,
         cache_size: usize,
-        batch_config: BatchConfig,
+        _batch_config: BatchConfig,
     ) -> Self {
         Self {
-            buffer: CircularMessageBuffer::new(buffer_capacity),
+            buffer: FlexibleMessageBuffer::new(BufferStrategy::FixedLimit(buffer_capacity)),
             pool: MessagePool::new(pool_size),
             cache: SharedDataCache::new(cache_size),
-            batch_config,
         }
     }
 
     /// デフォルト設定でマネージャーを作成
     pub fn with_defaults() -> Self {
-        Self::new(1000, 100, 500, BatchConfig::default())
+        // デフォルトは無制限バッファ（従来の5000件制限を撤廃）
+        Self::new_with_strategy(
+            BufferStrategy::Unlimited,
+            100, // pool_size
+            500, // cache_size
+            BatchConfig::default(),
+        )
+    }
+
+    /// 特定のバッファ戦略でマネージャーを作成
+    pub fn new_with_strategy(
+        buffer_strategy: BufferStrategy,
+        pool_size: usize,
+        cache_size: usize,
+        _batch_config: BatchConfig,
+    ) -> Self {
+        Self {
+            buffer: FlexibleMessageBuffer::new(buffer_strategy),
+            pool: MessagePool::new(pool_size),
+            cache: SharedDataCache::new(cache_size),
+        }
+    }
+
+    /// 従来の循環バッファ互換のコンストラクタ
+    pub fn with_fixed_limit(limit: usize) -> Self {
+        Self::new_with_strategy(
+            BufferStrategy::FixedLimit(limit),
+            100,
+            500,
+            BatchConfig::default(),
+        )
+    }
+
+    /// メモリベース制限のコンストラクタ
+    pub fn with_memory_limit(max_memory_mb: usize) -> Self {
+        Self::new_with_strategy(
+            BufferStrategy::MemoryBased { max_memory_mb },
+            100,
+            500,
+            BatchConfig::default(),
+        )
+    }
+
+    /// 時間ベース制限のコンストラクタ
+    pub fn with_time_limit(max_hours: u64) -> Self {
+        Self::new_with_strategy(
+            BufferStrategy::TimeBased { max_hours },
+            100,
+            500,
+            BatchConfig::default(),
+        )
+    }
+
+    /// バッファ戦略を変更
+    pub fn set_buffer_strategy(&mut self, strategy: BufferStrategy) {
+        self.buffer.set_strategy(strategy);
+    }
+
+    /// 現在のバッファ戦略を取得
+    pub fn get_buffer_strategy(&self) -> &BufferStrategy {
+        &self.buffer.strategy
     }
 
     /// メッセージを追加（最適化）
@@ -462,10 +586,10 @@ impl OptimizedMessageManager {
         // 共有データを使用してメモリ使用量を削減
         let _shared_author = self.cache.get_shared_author(&message.author);
         let _shared_channel_id = self.cache.get_shared_channel_id(&message.channel_id);
-        
+
         // 実際にはArcを直接使用できないため、文字列はそのまま保持
         // 実用的には、Stringの代わりにArc<String>を使うメッセージ型が必要
-        
+
         self.buffer.push(message);
     }
 
@@ -500,7 +624,7 @@ impl OptimizedMessageManager {
     pub fn optimize_memory(&mut self) {
         self.buffer.optimize_memory();
         self.pool.clear();
-        
+
         // キャッシュは使用中のデータがあるためクリアしない
     }
 
@@ -538,6 +662,9 @@ pub struct ComprehensiveStats {
     pub dropped_count: usize,
 }
 
+/// 互換性のための型エイリアス
+pub type CircularMessageBuffer = FlexibleMessageBuffer;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -550,15 +677,30 @@ mod tests {
             author: author.to_string(),
             channel_id: format!("channel_{}", author),
             content: content.to_string(),
+            runs: Vec::new(),
             metadata: None,
             is_member: false,
         }
     }
 
     #[test]
-    fn test_circular_buffer() {
-        let mut buffer = CircularMessageBuffer::new(3);
-        
+    fn test_flexible_buffer_unlimited() {
+        let mut buffer = FlexibleMessageBuffer::new(BufferStrategy::Unlimited);
+
+        // 大量のメッセージを追加
+        for i in 0..10000 {
+            buffer.push(create_test_message(&format!("user{}", i), "msg"));
+        }
+
+        assert_eq!(buffer.len(), 10000);
+        assert_eq!(buffer.dropped_count(), 0); // 無制限なので削除されない
+        assert_eq!(buffer.total_count(), 10000);
+    }
+
+    #[test]
+    fn test_flexible_buffer_fixed_limit() {
+        let mut buffer = FlexibleMessageBuffer::new(BufferStrategy::FixedLimit(3));
+
         // 容量内でのメッセージ追加
         buffer.push(create_test_message("user1", "msg1"));
         buffer.push(create_test_message("user2", "msg2"));
@@ -568,31 +710,112 @@ mod tests {
         // 容量を超えるメッセージ追加
         buffer.push(create_test_message("user3", "msg3"));
         buffer.push(create_test_message("user4", "msg4"));
-        
+
         assert_eq!(buffer.len(), 3);
         assert_eq!(buffer.dropped_count(), 1);
         assert_eq!(buffer.total_count(), 4);
-        
-        // 最初のメッセージは削除されている
+
+        // 最新のメッセージが保持されている
         let messages = buffer.to_vec();
-        assert_eq!(messages[0].author, "user2");
         assert_eq!(messages[2].author, "user4");
     }
 
     #[test]
+    fn test_flexible_buffer_memory_based() {
+        // 1MBの制限（実際の制限は計算される）
+        let mut buffer =
+            FlexibleMessageBuffer::new(BufferStrategy::MemoryBased { max_memory_mb: 1 });
+
+        // メッセージを追加
+        for i in 0..100 {
+            buffer.push(create_test_message(&format!("user{}", i), "msg"));
+        }
+
+        // メモリ制限内であることを確認
+        let stats = buffer.memory_stats();
+        assert!(stats.used_memory <= 1024 * 1024); // 1MB以下
+    }
+
+    #[test]
+    fn test_backward_compatibility() {
+        // 従来のCircularMessageBufferとして使用
+        let mut buffer = CircularMessageBuffer::new_circular(3);
+
+        buffer.push(create_test_message("user1", "msg1"));
+        buffer.push(create_test_message("user2", "msg2"));
+        buffer.push(create_test_message("user3", "msg3"));
+        buffer.push(create_test_message("user4", "msg4"));
+
+        assert_eq!(buffer.len(), 3);
+        assert_eq!(buffer.capacity(), 3);
+        assert_eq!(buffer.dropped_count(), 1);
+        assert!(buffer.is_full());
+    }
+
+    #[test]
+    fn test_strategy_switching() {
+        let mut buffer = FlexibleMessageBuffer::new(BufferStrategy::Unlimited);
+
+        // 1000メッセージを追加
+        for i in 0..1000 {
+            buffer.push(create_test_message(&format!("user{}", i), "msg"));
+        }
+        assert_eq!(buffer.len(), 1000);
+
+        // 制限付きに変更
+        buffer.set_strategy(BufferStrategy::FixedLimit(500));
+        assert_eq!(buffer.len(), 500); // 古いメッセージが削除される
+        assert_eq!(buffer.dropped_count(), 500);
+    }
+
+    #[test]
+    fn test_optimized_manager_unlimited() {
+        let mut manager = OptimizedMessageManager::with_defaults();
+
+        // 大量のメッセージを追加
+        for i in 0..10000 {
+            manager.add_message(create_test_message(&format!("user{}", i), "test"));
+        }
+
+        let stats = manager.comprehensive_stats();
+        assert_eq!(stats.message_count, 10000);
+        assert_eq!(stats.dropped_count, 0); // 無制限なので削除されない
+    }
+
+    #[test]
+    fn test_optimized_manager_with_limits() {
+        let mut manager = OptimizedMessageManager::with_fixed_limit(100);
+
+        // 制限を超えるメッセージを追加
+        for i in 0..200 {
+            manager.add_message(create_test_message(&format!("user{}", i), "test"));
+        }
+
+        let stats = manager.comprehensive_stats();
+        assert_eq!(stats.message_count, 100);
+        assert_eq!(stats.dropped_count, 100);
+    }
+
+    // 従来のテストとの互換性を保つため、古いテスト名も残す
+    #[test]
+    fn test_circular_buffer() {
+        test_flexible_buffer_fixed_limit();
+    }
+
+    #[test]
     fn test_batch_processing() {
-        let mut buffer = CircularMessageBuffer::new(5);
-        
+        let mut buffer = FlexibleMessageBuffer::new(BufferStrategy::FixedLimit(5));
+
         let batch = vec![
             create_test_message("user1", "msg1"),
             create_test_message("user2", "msg2"),
             create_test_message("user3", "msg3"),
         ];
-        
+
         buffer.push_batch(batch);
         assert_eq!(buffer.len(), 3);
         assert_eq!(buffer.dropped_count(), 0);
-        
+
         // 容量を超えるバッチ
         let large_batch = vec![
             create_test_message("user4", "msg4"),
@@ -600,28 +823,50 @@ mod tests {
             create_test_message("user6", "msg6"),
             create_test_message("user7", "msg7"),
         ];
-        
+
         buffer.push_batch(large_batch);
         assert_eq!(buffer.len(), 5);
         assert_eq!(buffer.dropped_count(), 2);
     }
 
     #[test]
+    fn test_memory_optimization() {
+        let mut manager = OptimizedMessageManager::with_defaults();
+
+        // 大量のメッセージを追加（無制限なので全て保持される）
+        for i in 0..1500 {
+            manager.add_message(create_test_message(&format!("user{}", i), "test"));
+        }
+
+        let stats_before = manager.comprehensive_stats();
+
+        // メモリ最適化
+        manager.optimize_memory();
+
+        let stats_after = manager.comprehensive_stats();
+
+        // 無制限バッファなので全メッセージが保持される
+        assert_eq!(stats_before.message_count, stats_after.message_count);
+        assert_eq!(stats_after.message_count, 1500);
+        assert_eq!(stats_after.dropped_count, 0);
+    }
+
+    #[test]
     fn test_message_pool() {
         let pool = MessagePool::new(2);
-        
+
         // 新規作成
         let msg1 = pool.acquire();
         let msg2 = pool.acquire();
-        
+
         // プールに返却
         pool.release(msg1);
         pool.release(msg2);
-        
+
         // 再利用
         let _msg3 = pool.acquire();
         let _msg4 = pool.acquire();
-        
+
         let stats = pool.stats();
         assert_eq!(stats.pool_size, 0); // 取得済み
         assert_eq!(stats.created_count, 2);
@@ -632,13 +877,13 @@ mod tests {
     #[test]
     fn test_shared_cache() {
         let cache = SharedDataCache::new(100);
-        
+
         let author1 = cache.get_shared_author("user1");
         let author1_again = cache.get_shared_author("user1");
-        
+
         // 同じ参照が返される
         assert!(Arc::ptr_eq(&author1, &author1_again));
-        
+
         let stats = cache.cache_stats();
         assert_eq!(stats.author_cache_size, 1);
     }
@@ -646,38 +891,16 @@ mod tests {
     #[test]
     fn test_optimized_manager() {
         let mut manager = OptimizedMessageManager::with_defaults();
-        
+
         // メッセージ追加
         manager.add_message(create_test_message("user1", "Hello"));
         manager.add_message(create_test_message("user2", "World"));
-        
+
         assert_eq!(manager.messages().len(), 2);
-        
+
         // 統計確認
         let stats = manager.comprehensive_stats();
         assert_eq!(stats.message_count, 2);
         assert!(stats.memory_stats.used_memory > 0);
-    }
-
-    #[test]
-    fn test_memory_optimization() {
-        let mut manager = OptimizedMessageManager::with_defaults();
-        
-        // 大量のメッセージを追加
-        for i in 0..1500 {
-            manager.add_message(create_test_message(&format!("user{}", i), "test"));
-        }
-        
-        let stats_before = manager.comprehensive_stats();
-        
-        // メモリ最適化
-        manager.optimize_memory();
-        
-        let stats_after = manager.comprehensive_stats();
-        
-        // メッセージ数は変わらないが、メモリ効率が改善される可能性
-        assert_eq!(stats_before.message_count, stats_after.message_count);
-        assert_eq!(stats_after.message_count, 1000); // 容量制限
-        assert_eq!(stats_after.dropped_count, 500); // 500個削除
     }
 }

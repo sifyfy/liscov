@@ -358,11 +358,6 @@ impl MessageFilter {
         })
     }
 
-    /// リンクが含まれているかどうかを判定
-    fn contains_link(&self, content: &str) -> bool {
-        content.contains("http://") || content.contains("https://") || content.contains("www.")
-    }
-
     /// フィルター適用してメッセージリストを取得
     pub fn filter_messages(&self, messages: &[GuiChatMessage]) -> Vec<GuiChatMessage> {
         messages
@@ -472,6 +467,7 @@ mod tests {
             author: author.to_string(),
             channel_id: "test_channel".to_string(),
             content: content.to_string(),
+            runs: Vec::new(),
             metadata: amount.map(|amt| MessageMetadata {
                 amount: Some(amt.to_string()),
                 badges: vec![],
@@ -492,6 +488,7 @@ mod tests {
             author: author.to_string(),
             channel_id: "test_channel".to_string(),
             content: content.to_string(),
+            runs: Vec::new(),
             metadata: Some(MessageMetadata {
                 amount: None,
                 badges: vec![],
@@ -512,6 +509,7 @@ mod tests {
             author: author.to_string(),
             channel_id: "test_channel".to_string(),
             content: content.to_string(),
+            runs: Vec::new(),
             metadata: Some(MessageMetadata {
                 amount: None,
                 badges: vec!["メンバー（1年）".to_string()],
@@ -752,16 +750,6 @@ mod tests {
     }
 
     #[test]
-    fn test_link_detection() {
-        let filter = MessageFilter::new();
-
-        assert!(filter.contains_link("Check this out: https://example.com"));
-        assert!(filter.contains_link("Visit http://test.org"));
-        assert!(filter.contains_link("Go to www.example.com"));
-        assert!(!filter.contains_link("No links here"));
-    }
-
-    #[test]
     fn test_message_classification() {
         let filter = MessageFilter::new();
 
@@ -938,6 +926,7 @@ mod tests {
             author: "User".to_string(),
             channel_id: "test".to_string(),
             content: "Thanks!".to_string(),
+            runs: Vec::new(),
             metadata: Some(crate::gui::models::MessageMetadata {
                 amount: Some("¥300".to_string()),
                 badges: vec![],
@@ -956,6 +945,7 @@ mod tests {
             author: "User".to_string(),
             channel_id: "test".to_string(),
             content: "Thanks!".to_string(),
+            runs: Vec::new(),
             metadata: Some(crate::gui::models::MessageMetadata {
                 amount: Some("$200".to_string()),
                 badges: vec![],

@@ -134,7 +134,7 @@ impl LiveChatService {
         // URLも破棄（完全停止）
         self.last_url = None;
 
-        println!("Live chat monitoring stopped");
+        tracing::info!("Live chat monitoring stopped");
         Ok(())
     }
 
@@ -162,7 +162,7 @@ impl LiveChatService {
                 .send_event(AppEvent::ContinuationTokenUpdated(Some(continuation)));
         }
 
-        println!("Live chat monitoring paused");
+        tracing::info!("Live chat monitoring paused");
         Ok(())
     }
 
@@ -239,7 +239,7 @@ impl LiveChatService {
             *state = ServiceState::Connected;
         }
 
-        println!("Live chat monitoring resumed");
+        tracing::info!("Live chat monitoring resumed");
         Ok(message_receiver)
     }
 
@@ -251,30 +251,34 @@ impl LiveChatService {
 
     /// レスポンス保存設定を更新
     pub async fn update_save_config(&self, config: SaveConfig) {
-        tracing::info!(
-            "🔧 Updating save config: enabled={}, file_path={}, max_size_mb={}",
-            config.enabled,
-            config.file_path,
-            config.max_file_size_mb
-        );
-
         let mut saver = self.response_saver.lock().await;
         let old_config = saver.get_config().clone();
-        saver.update_config(config.clone());
 
-        tracing::info!(
-            "✅ Raw response save config updated: {} -> {}",
-            if old_config.enabled {
-                "enabled"
-            } else {
-                "disabled"
-            },
-            if config.enabled {
-                "enabled"
-            } else {
-                "disabled"
-            }
-        );
+        // 設定が実際に変わった場合のみログ出力
+        if old_config.enabled != config.enabled || old_config.file_path != config.file_path {
+            tracing::info!(
+                "✅ Raw response save config updated: {} -> {} (file: {})",
+                if old_config.enabled {
+                    "enabled"
+                } else {
+                    "disabled"
+                },
+                if config.enabled {
+                    "enabled"
+                } else {
+                    "disabled"
+                },
+                config.file_path
+            );
+        } else {
+            tracing::debug!(
+                "🔧 Save config unchanged: enabled={}, file_path={}",
+                config.enabled,
+                config.file_path
+            );
+        }
+
+        saver.update_config(config.clone());
     }
 
     /// 現在の保存設定を取得
@@ -302,7 +306,11 @@ impl LiveChatService {
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(2));
             let mut request_count = 0;
-            let start_time = std::time::Instant::now();
+            let mut consecutive_errors = 0;
+            let mut last_successful_request = std::time::Instant::now();
+            let _start_time = std::time::Instant::now();
+            const MAX_CONSECUTIVE_ERRORS: usize = 5;
+            const HEALTH_CHECK_INTERVAL_SECS: u64 = 30;
 
             tracing::info!("🚀 Message receiver task started");
 
@@ -314,9 +322,20 @@ impl LiveChatService {
                     }
                     _ = interval.tick() => {
                         request_count += 1;
+                        let request_start = std::time::Instant::now();
 
-                        // APIリクエストは1分に1回のみログ出力（デバッグ時は除く）
-                        let should_log_request = (cfg!(debug_assertions) && tracing::level_enabled!(tracing::Level::DEBUG)) || request_count % 30 == 1; // 30回に1回 = 1分に1回
+                        // ヘルスチェック: 長時間成功していない場合は警告
+                        let time_since_success = last_successful_request.elapsed().as_secs();
+                        if time_since_success > HEALTH_CHECK_INTERVAL_SECS {
+                            tracing::warn!(
+                                "⚠️ [HEALTH_CHECK] No successful API response for {} seconds (consecutive errors: {})",
+                                time_since_success,
+                                consecutive_errors
+                            );
+                        }
+
+                        // デバッグ時は全てのAPIリクエストをログ出力（問題調査のため）
+                        let should_log_request = true; // 一時的に全てのリクエストをログ出力
 
                         if should_log_request {
                             tracing::debug!("📡 Request #{} - Attempting to fetch live chat messages", request_count);
@@ -329,21 +348,44 @@ impl LiveChatService {
                                 tracing::debug!("🔧 InnerTube client available, making API request");
                             }
 
-                            match fetch_live_chat_messages(inner_tube_client).await {
-                                Ok(response) => {
-                                    // レスポンス受信の詳細ログは控えめに
-                                    if should_log_request {
-                                        tracing::debug!("✅ Received response from API, processing actions");
-                                    }
+                            // タイムアウト付きでAPI呼び出しを実行
+                            let api_result = tokio::time::timeout(
+                                tokio::time::Duration::from_secs(15),
+                                fetch_live_chat_messages(inner_tube_client)
+                            ).await;
+
+                            match api_result {
+                                Ok(Ok(response)) => {
+                                    // 成功: エラーカウンターをリセット
+                                    consecutive_errors = 0;
+                                    last_successful_request = std::time::Instant::now();
+                                    let request_duration = request_start.elapsed();
+
+                                    let _api_response_time = std::time::Instant::now();
 
                                     // アクション数をログ
                                     let action_count = response.continuation_contents.live_chat_continuation.actions.len();
+
+                                    tracing::info!(
+                                        "✅ [API_SERVICE] API Response #{}: {} actions received (took {:?})",
+                                        request_count,
+                                        action_count,
+                                        request_duration
+                                    );
+
                                     if action_count > 0 {
                                         // 新しいメッセージがある場合は必ずログ出力
-                                        tracing::info!("📬 Received {} actions from API", action_count);
-                                    } else if should_log_request {
-                                        // アクションなしの場合はデバッグ時のみ
-                                        tracing::debug!("📪 No actions in response");
+                                        tracing::info!(
+                                            "📬 [API_SERVICE] Processing {} actions from API (request #{})",
+                                            action_count,
+                                            request_count
+                                        );
+                                    } else {
+                                        // アクションなしの場合もデバッグレベルで記録
+                                        tracing::debug!(
+                                            "📪 [API_SERVICE] No actions in response #{}",
+                                            request_count
+                                        );
                                     }
 
                                     // 継続トークンを更新
@@ -357,34 +399,69 @@ impl LiveChatService {
                                         use crate::gui::state_management::{get_state_manager, AppEvent};
                                         let _ = get_state_manager().send_event(AppEvent::ContinuationTokenUpdated(Some(next_continuation)));
                                     } else {
-                                        tracing::warn!("⚠️ No next continuation token found");
+                                        tracing::warn!("⚠️ No next continuation token found in response #{}", request_count);
+                                        // 継続トークンがない場合は警告レベルで記録
                                     }
 
                                     // アクションを処理
+                                    let mut processed_messages = 0;
+                                    let mut state_manager_send_results = Vec::new();
+
                                     for (index, action) in response.continuation_contents.live_chat_continuation.actions.iter().enumerate() {
                                         if let Action::AddChatItem(add_item_wrapper) = action {
                                             let chat_item = add_item_wrapper.action.get_item();
-                                            if should_log_request {
-                                                tracing::debug!("💬 Processing chat item #{}", index + 1);
-                                            }
+
+                                            tracing::debug!(
+                                                "💬 [API_SERVICE] Processing chat item #{}/{} in request #{}",
+                                                index + 1,
+                                                action_count,
+                                                request_count
+                                            );
 
                                             // ChatItemをGuiChatMessageに変換
+                                            let conversion_start = std::time::Instant::now();
                                             let gui_message: GuiChatMessage = chat_item.clone().into();
+                                            let conversion_duration = conversion_start.elapsed();
 
-                                            // 新しいメッセージのログをdebugレベルに変更
-                                            tracing::debug!("📝 New message: {} - {}", gui_message.author, gui_message.content);
+                                            tracing::info!(
+                                                "📝 [API_SERVICE] New message converted in {:?}: {} - '{}'",
+                                                conversion_duration,
+                                                gui_message.author,
+                                                gui_message.content.chars().take(50).collect::<String>()
+                                            );
 
-                                            // グローバル状態に直接メッセージを追加
-                                            Self::add_message_to_global_state(gui_message.clone(), &start_time);
+                                            // 新しい状態管理システム（StateManager）のみを使用
 
-                                            // イベント駆動状態管理にもメッセージを送信
+                                            // イベント駆動状態管理にメッセージを送信
                                             use crate::gui::state_management::{get_state_manager, AppEvent};
-                                            let _ = get_state_manager().send_event(AppEvent::MessageAdded(gui_message.clone()));
+                                            let state_send_start = std::time::Instant::now();
+                                            let send_result = get_state_manager().send_event(AppEvent::MessageAdded(gui_message.clone()));
+                                            let state_send_duration = state_send_start.elapsed();
+
+                                            match send_result {
+                                                Ok(()) => {
+                                                    tracing::info!(
+                                                        "📤 [API_SERVICE] Message sent to StateManager in {:?}: {} - {}",
+                                                        state_send_duration,
+                                                        gui_message.author,
+                                                        gui_message.content.chars().take(30).collect::<String>()
+                                                    );
+                                                    state_manager_send_results.push(true);
+                                                    processed_messages += 1;
+                                                }
+                                                Err(e) => {
+                                                    tracing::error!(
+                                                        "❌ [API_SERVICE] Failed to send message to StateManager: {:?}",
+                                                        e
+                                                    );
+                                                    state_manager_send_results.push(false);
+                                                }
+                                            }
 
                                             // ファイルに保存（オプション・自動保存設定に基づく）
                                             let file_path = output_file.lock().await;
                                             if let Some(ref path) = *file_path {
-                                                                                                // 設定管理から自動保存設定を確認
+                                                // 設定管理から自動保存設定を確認
                                                 use crate::gui::config_manager::get_current_config;
                                                 let should_auto_save = if let Some(config) = get_current_config() {
                                                     config.auto_save_enabled
@@ -395,17 +472,36 @@ impl LiveChatService {
 
                                                 if should_auto_save {
                                                     if let Err(e) = Self::save_message_to_file(path, &gui_message).await {
-                                                        tracing::error!("❌ Failed to save message to file: {}", e);
+                                                        tracing::error!("❌ [API_SERVICE] Failed to save message to file: {}", e);
                                                     } else {
-                                                        tracing::debug!("💾 Message auto-saved to: {}", path);
+                                                        tracing::debug!("💾 [API_SERVICE] Message auto-saved to: {}", path);
                                                     }
                                                 } else {
-                                                    tracing::debug!("⏭️ Auto save disabled, skipping file save");
+                                                    tracing::debug!("⏭️ [API_SERVICE] Auto save disabled, skipping file save");
                                                 }
                                             }
-                                        } else if should_log_request {
-                                            tracing::debug!("🔄 Non-message action received: {:?}", std::mem::discriminant(action));
+                                        } else {
+                                            tracing::debug!(
+                                                "🔄 [API_SERVICE] Non-message action #{}/{}: {:?}",
+                                                index + 1,
+                                                action_count,
+                                                std::mem::discriminant(action)
+                                            );
                                         }
+                                    }
+
+                                    // 処理結果の集計ログ
+                                    let successful_sends = state_manager_send_results.iter().filter(|&&success| success).count();
+                                    let failed_sends = state_manager_send_results.len() - successful_sends;
+
+                                    if processed_messages > 0 {
+                                        tracing::info!(
+                                            "📊 [API_SERVICE] Request #{} summary: {} messages processed, {} sent to StateManager successfully, {} failed",
+                                            request_count,
+                                            processed_messages,
+                                            successful_sends,
+                                            failed_sends
+                                        );
                                     }
 
                                                                         // 生レスポンスの保存
@@ -413,29 +509,94 @@ impl LiveChatService {
                                     let is_enabled = saver.is_enabled();
                                     let config = saver.get_config();
 
-                                    // 保存処理のログは常に出力（デバッグ用）
-                                    tracing::info!("💾 Raw response save attempt: enabled={}, file_path={}", is_enabled, config.file_path);
-
                                     if let Err(e) = saver.save_response(&response).await {
                                         tracing::warn!("❌ Failed to save raw response: {}", e);
                                     } else if is_enabled {
                                         tracing::info!("💾 Raw response saved successfully to: {}", config.file_path);
-                                    } else {
-                                        tracing::debug!("💾 Raw response save skipped (disabled)");
                                     }
                                 }
-                                Err(e) => {
+                                Ok(Err(e)) => {
+                                    consecutive_errors += 1;
+                                    let request_duration = request_start.elapsed();
+
                                     // エラーは必ずログ出力
-                                    tracing::error!("❌ Error fetching live chat messages: {}", e);
+                                    tracing::error!(
+                                        "❌ [API_SERVICE] API Error (#{}, consecutive: {}, took {:?}): {}",
+                                        request_count,
+                                        consecutive_errors,
+                                        request_duration,
+                                        e
+                                    );
+
                                     if cfg!(debug_assertions) {
                                         tracing::error!("🔍 Error details: {:?}", e);
                                     }
 
-                                    let mut state_guard = state.lock().await;
-                                    *state_guard = ServiceState::Error(format!("Fetch error: {}", e));
+                                    // 連続エラーが多い場合の特別処理
+                                    if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                                        tracing::error!(
+                                            "🚨 [API_SERVICE] Too many consecutive errors ({}). This may indicate:",
+                                            consecutive_errors
+                                        );
+                                        tracing::error!("   - Stream has ended");
+                                        tracing::error!("   - Network connectivity issues");
+                                        tracing::error!("   - YouTube API rate limits");
+                                        tracing::error!("   - Invalid continuation token");
 
-                                    // エラー時もタスクを継続（一時的なネットワークエラーの可能性）
-                                    tracing::warn!("⚠️ Continuing despite error - this might be temporary");
+                                        // エラー情報をより詳細に記録
+                                        let error_str = e.to_string();
+                                        if error_str.contains("404") || error_str.contains("Not Found") {
+                                            tracing::error!("💡 [DIAGNOSIS] Likely cause: Stream ended or chat disabled");
+                                        } else if error_str.contains("403") || error_str.contains("Forbidden") {
+                                            tracing::error!("💡 [DIAGNOSIS] Likely cause: API access denied or rate limited");
+                                        } else if error_str.contains("timeout") || error_str.contains("Timeout") {
+                                            tracing::error!("💡 [DIAGNOSIS] Likely cause: Network timeout or slow connection");
+                                        } else if error_str.contains("connection") {
+                                            tracing::error!("💡 [DIAGNOSIS] Likely cause: Network connectivity problem");
+                                        }
+                                    }
+
+                                    let mut state_guard = state.lock().await;
+                                    *state_guard = ServiceState::Error(format!("API Error ({}): {}", consecutive_errors, e));
+
+                                    // 多連続エラー時は少し待機してから継続
+                                    if consecutive_errors >= 3 {
+                                        let wait_duration = std::cmp::min(consecutive_errors * 2, 30);
+                                        tracing::warn!("⏳ [API_SERVICE] Waiting {} seconds before next attempt", wait_duration);
+                                        tokio::time::sleep(tokio::time::Duration::from_secs(wait_duration as u64)).await;
+                                    }
+
+                                    tracing::warn!("⚠️ [API_SERVICE] Continuing despite error - this might be temporary (attempt {}/{})", consecutive_errors, MAX_CONSECUTIVE_ERRORS);
+                                }
+                                Err(_timeout_error) => {
+                                    consecutive_errors += 1;
+                                    let request_duration = request_start.elapsed();
+
+                                    tracing::error!(
+                                        "⏰ [API_SERVICE] Request #{} timed out after {:?} (consecutive timeouts: {})",
+                                        request_count,
+                                        request_duration,
+                                        consecutive_errors
+                                    );
+
+                                    if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                                        tracing::error!("🚨 [TIMEOUT] Multiple consecutive timeouts detected. This may indicate:");
+                                        tracing::error!("   - Slow network connection");
+                                        tracing::error!("   - YouTube API server issues");
+                                        tracing::error!("   - Local firewall/proxy problems");
+                                    }
+
+                                    let mut state_guard = state.lock().await;
+                                    *state_guard = ServiceState::Error(format!("Timeout ({})", consecutive_errors));
+
+                                    // タイムアウト時も少し待機
+                                    if consecutive_errors >= 3 {
+                                        let wait_duration = std::cmp::min(consecutive_errors * 2, 30);
+                                        tracing::warn!("⏳ [TIMEOUT] Waiting {} seconds before next attempt", wait_duration);
+                                        tokio::time::sleep(tokio::time::Duration::from_secs(wait_duration as u64)).await;
+                                    }
+
+                                    tracing::warn!("⚠️ [TIMEOUT] Continuing despite timeout - this might be temporary");
                                 }
                             }
                         } else {
@@ -447,17 +608,11 @@ impl LiveChatService {
             }
 
             tracing::info!(
-                "🏁 Message receiver task completed. Total requests: {}",
-                request_count
-            );
+                                        "🏁 Message receiver task completed. Total requests: {}, consecutive errors at end: {}",
+                                        request_count,
+                                        consecutive_errors
+                                    );
         });
-    }
-
-    /// グローバル状態にメッセージを追加（一時的に無効化）
-    fn add_message_to_global_state(_message: GuiChatMessage, _start_time: &std::time::Instant) {
-        // 一時的にグローバル状態機能を無効化
-        // TODO: 新しい状態管理システムに統合
-        tracing::debug!("Global state functionality temporarily disabled");
     }
 
     /// メッセージをファイルに保存

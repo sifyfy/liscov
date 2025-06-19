@@ -54,16 +54,16 @@ impl RawResponseSaver {
 
     /// レスポンスを保存
     pub async fn save_response(&self, response: &GetLiveChatResponse) -> Result<()> {
-        tracing::info!(
+        if !self.config.enabled {
+            tracing::debug!("💾 Save response skipped: disabled");
+            return Ok(());
+        }
+
+        tracing::debug!(
             "💾 save_response called: enabled={}, file_path={}",
             self.config.enabled,
             self.config.file_path
         );
-
-        if !self.config.enabled {
-            tracing::info!("💾 Save response skipped: disabled");
-            return Ok(());
-        }
 
         tracing::info!(
             "💾 Starting raw response save process to: {}",

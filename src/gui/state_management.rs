@@ -1,6 +1,6 @@
+use crate::gui::memory_optimized::{ComprehensiveStats, OptimizedMessageManager};
 use crate::gui::models::GuiChatMessage;
 use crate::gui::services::ServiceState;
-use crate::gui::memory_optimized::{OptimizedMessageManager, ComprehensiveStats};
 use crate::io::SaveConfig;
 use crate::{GuiError, LiscovResult};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -56,8 +56,17 @@ pub struct AppState {
 
 impl Clone for AppState {
     fn clone(&self) -> Self {
+        // メッセージマネージャーの内容を手動でクローン
+        let mut new_message_manager = OptimizedMessageManager::with_defaults();
+
+        // 既存のメッセージをバッチで新しいマネージャーに追加
+        let existing_messages = self.message_manager.messages();
+        if !existing_messages.is_empty() {
+            new_message_manager.add_messages_batch(existing_messages);
+        }
+
         Self {
-            message_manager: OptimizedMessageManager::with_defaults(), // 新しいインスタンスを作成
+            message_manager: new_message_manager,
             service_state: self.service_state.clone(),
             is_connected: self.is_connected,
             is_stopping: self.is_stopping,
@@ -144,13 +153,15 @@ impl StateManager {
                     }
                 };
                 if *started {
+                    tracing::error!("🚨 [STATE_MGR] Event loop already started, returning");
                     return; // 既に開始されている
                 }
                 *started = true;
             }
 
-            tracing::debug!("🚀 StateManager event loop started (optimized)");
+            tracing::info!("StateManager event loop starting");
             Self::run_event_loop(state_clone, event_receiver).await;
+            tracing::info!("StateManager event loop ended");
         });
 
         Self {
@@ -165,19 +176,29 @@ impl StateManager {
         state: Arc<Mutex<AppState>>,
         mut event_receiver: mpsc::UnboundedReceiver<AppEvent>,
     ) {
+        tracing::debug!("StateManager event loop ready");
+        let mut event_count = 0;
+
         while let Some(event) = event_receiver.recv().await {
+            event_count += 1;
+            tracing::debug!(
+                "Processing event #{}: {:?}",
+                event_count,
+                std::mem::discriminant(&event)
+            );
             Self::handle_event_static(&state, event);
         }
-        tracing::info!("🏁 StateManager event loop stopped");
+        tracing::debug!("Event loop stopped after {} events", event_count);
     }
 
     /// 現在の状態を取得
     pub fn get_state(&self) -> LiscovResult<AppState> {
-        self.state.lock()
-            .map(|guard| guard.clone())
-            .map_err(|_| GuiError::StateManagement("Failed to acquire state lock (mutex poisoned)".to_string()).into())
+        self.state.lock().map(|guard| guard.clone()).map_err(|_| {
+            GuiError::StateManagement("Failed to acquire state lock (mutex poisoned)".to_string())
+                .into()
+        })
     }
-    
+
     /// 現在の状態を取得（非安全版・レガシー互換性のため）
     /// 新しいコードでは get_state() を使用してください
     pub fn get_state_unchecked(&self) -> AppState {
@@ -194,8 +215,13 @@ impl StateManager {
     pub fn send_event(&self, event: AppEvent) -> Result<(), mpsc::error::SendError<AppEvent>> {
         // メッセージ追加イベントのログを削減
         match &event {
-            AppEvent::MessageAdded(_) => {
-                // メッセージ追加は頻繁なため、ログ出力を完全削除
+            AppEvent::MessageAdded(msg) => {
+                // デバッグ用にメッセージ追加ログを一時的に有効化
+                tracing::info!(
+                    "📤 [STATE_MGR] Receiving MessageAdded event: {} - {}",
+                    msg.author,
+                    msg.content.chars().take(30).collect::<String>()
+                );
             }
             AppEvent::MessagesAdded(messages) => {
                 tracing::debug!(
@@ -212,6 +238,12 @@ impl StateManager {
 
     /// イベントを処理して状態を更新（静的メソッド）
     fn handle_event_static(state: &Arc<Mutex<AppState>>, event: AppEvent) {
+        // 簡素化ログ：イベント処理開始
+        tracing::debug!(
+            "StateManager handling event: {:?}",
+            std::mem::discriminant(&event)
+        );
+
         let mut state_guard = match state.lock() {
             Ok(guard) => guard,
             Err(poisoned) => {
@@ -222,10 +254,67 @@ impl StateManager {
 
         match event {
             AppEvent::MessageAdded(message) => {
-                // メッセージ追加ログを軽量化（デバッグレベルかつ簡潔に）
-                tracing::debug!("📝 New message: {}", message.author);
-                state_guard.message_manager.add_message(message);
+                // メッセージ追加処理の詳細ログ（デバッグ強化版）
+                let before_count = state_guard.message_manager.len();
+                let before_total = state_guard
+                    .message_manager
+                    .comprehensive_stats()
+                    .total_processed;
+
+                tracing::info!(
+                    "📝 [STATE_MGR] Received new message: {} - '{}' (Before: {} in buffer, {} total)",
+                    message.author,
+                    message.content.chars().take(50).collect::<String>(),
+                    before_count,
+                    before_total
+                );
+
+                // メッセージをバッファに追加
+                let add_start = std::time::Instant::now();
+                state_guard.message_manager.add_message(message.clone());
+                let add_duration = add_start.elapsed();
+
+                // 追加後の状態を確認
+                let after_count = state_guard.message_manager.len();
+                let after_total = state_guard
+                    .message_manager
+                    .comprehensive_stats()
+                    .total_processed;
+                let stats = state_guard.message_manager.comprehensive_stats();
+
+                tracing::info!(
+                    "📝 [STATE_MGR] Message added in {:?}: Buffer {} → {} (total {} → {}), dropped: {}, memory: {} bytes",
+                    add_duration,
+                    before_count,
+                    after_count,
+                    before_total,
+                    after_total,
+                    stats.dropped_count,
+                    stats.memory_stats.used_memory
+                );
+
+                // メッセージバッファが期待通りに増加していない場合の警告
+                if after_count != before_count + 1 && after_count != before_count {
+                    tracing::warn!(
+                        "⚠️ [STATE_MGR] Unexpected buffer size change: {} → {} (expected {} or {})",
+                        before_count,
+                        after_count,
+                        before_count + 1,
+                        before_count // 循環バッファによる削除の可能性
+                    );
+                }
+
+                // 統計情報を更新
+                let stats_start = std::time::Instant::now();
                 Self::update_stats_static(&mut state_guard);
+                let stats_duration = stats_start.elapsed();
+
+                tracing::debug!(
+                    "📊 [STATE_MGR] Stats updated in {:?}: {} total messages, uptime: {}s",
+                    stats_duration,
+                    state_guard.stats.total_messages,
+                    state_guard.stats.uptime_seconds
+                );
             }
 
             AppEvent::MessagesAdded(messages) => {
@@ -307,7 +396,7 @@ impl StateManager {
     /// 統計情報を更新（静的メソッド）- メモリ最適化版
     fn update_stats_static(state: &mut AppState) {
         let comprehensive_stats = state.message_manager.comprehensive_stats();
-        
+
         state.stats.total_messages = comprehensive_stats.total_processed;
         state.stats.last_message_time = Some(chrono::Utc::now());
 
@@ -352,8 +441,10 @@ static STATE_MANAGER: OnceLock<StateManager> = OnceLock::new();
 /// グローバル状態マネージャーを取得（遅延初期化）
 pub fn get_state_manager() -> &'static StateManager {
     STATE_MANAGER.get_or_init(|| {
-        tracing::debug!("🏗️ Creating global state manager (lazy init)");
-        StateManager::new()
+        tracing::info!("Creating global StateManager");
+        let manager = StateManager::new();
+        tracing::info!("Global StateManager ready");
+        manager
     })
 }
 

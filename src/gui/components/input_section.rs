@@ -42,7 +42,285 @@ fn get_url_validation_message(url: &str) -> Option<String> {
     None
 }
 
-/// 入力セクションコンポーネント
+/// 配信用コンパクト入力セクション
+/// 上部パネル用に最適化されたレイアウト
+#[component]
+pub fn CompactInputSection(live_chat_handle: LiveChatHandle) -> Element {
+    // AppStateにアクセスして設定を同期
+    let mut app_state = use_context::<Signal<crate::gui::models::AppState>>();
+    let mut url_input = use_signal(|| app_state.read().url.clone());
+    let auto_save_enabled = use_signal(|| app_state.read().auto_save_enabled);
+
+    let state = live_chat_handle.state;
+    let is_stopping = live_chat_handle.is_stopping;
+
+    // URL入力欄の制御
+    let should_disable_url_input = use_signal(move || match *state.read() {
+        crate::gui::services::ServiceState::Connected
+        | crate::gui::services::ServiceState::Connecting => true,
+        _ => false,
+    });
+
+    let url_validation_message = get_url_validation_message(&url_input.read());
+    let is_url_valid = url_validation_message.is_none() && !url_input.read().trim().is_empty();
+
+    rsx! {
+        div {
+            style: "
+                background: white;
+                border-radius: 12px;
+                padding: 12px;
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+                border: 2px solid rgba(102, 126, 234, 0.2);
+                height: 100%;
+                display: flex;
+                flex-direction: column;
+            ",
+
+            // ヘッダー（統合型）
+            div {
+                style: "
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    margin-bottom: 6px;
+                    padding: 6px 8px;
+                    background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+                    border-radius: 8px;
+                ",
+                h3 {
+                    style: "
+                        font-size: 16px;
+                        color: #333;
+                        margin: 0;
+                        display: flex;
+                        align-items: center;
+                        gap: 6px;
+                    ",
+                    "🔗 接続設定"
+                }
+
+                // 状態 + 自動保存インジケーター
+                div {
+                    style: "display: flex; align-items: center; gap: 6px;",
+
+                    // 状態バッジ
+                    div {
+                        style: {
+                            let (bg_color, text_color) = match *state.read() {
+                                crate::gui::services::ServiceState::Connected => ("#dcfce7", "#16a34a"),
+                                crate::gui::services::ServiceState::Connecting => ("#fef3c7", "#d97706"),
+                                crate::gui::services::ServiceState::Paused => ("#e0e7ff", "#4338ca"),
+                                crate::gui::services::ServiceState::Error(_) => ("#fecaca", "#dc2626"),
+                                crate::gui::services::ServiceState::Idle => ("#f3f4f6", "#6b7280"),
+                            };
+                            format!(
+                                "
+                                    padding: 3px 6px;
+                                    border-radius: 4px;
+                                    font-size: 10px;
+                                    font-weight: 600;
+                                    background: {};
+                                    color: {};
+                                ",
+                                bg_color, text_color
+                            )
+                        },
+                        match *state.read() {
+                            crate::gui::services::ServiceState::Connected => "🟢 接続中",
+                            crate::gui::services::ServiceState::Connecting => "🟡 接続中",
+                            crate::gui::services::ServiceState::Paused => "🔵 一時停止",
+                            crate::gui::services::ServiceState::Error(_) => "🔴 エラー",
+                            crate::gui::services::ServiceState::Idle => "⚪ 待機中",
+                        }
+                    }
+
+                    // 自動保存インジケーター
+                    div {
+                        style: format!(
+                            "
+                                padding: 3px 6px;
+                                border-radius: 4px;
+                                font-size: 10px;
+                                font-weight: 600;
+                                background: {};
+                                color: {};
+                            ",
+                            if auto_save_enabled() { "#dcfce7" } else { "#fff3cd" },
+                            if auto_save_enabled() { "#16a34a" } else { "#d97706" }
+                        ),
+                        if auto_save_enabled() { "💾 ON" } else { "💾 OFF" }
+                    }
+                }
+            }
+
+                        // URL入力 + ボタン群（同一行）
+            div {
+                style: "
+                    display: flex;
+                    gap: 6px;
+                    margin-bottom: 6px;
+                    align-items: center;
+                ",
+
+                input {
+                    style: {
+                        let border_color = if url_validation_message.is_some() {
+                            "#ef4444"
+                        } else if is_url_valid {
+                            "#22c55e"
+                        } else {
+                            "#d1d5db"
+                        };
+                        format!(
+                            "
+                                flex: 1;
+                                padding: 8px 12px;
+                                border: 2px solid {};
+                                border-radius: 8px;
+                                font-size: 14px;
+                                background: {};
+                            ",
+                            border_color,
+                            if *should_disable_url_input.read() { "#f9fafb" } else { "white" }
+                        )
+                    },
+                    r#type: "text",
+                    placeholder: "https://www.youtube.com/watch?v=...",
+                    value: "{url_input}",
+                    readonly: *should_disable_url_input.read(),
+                    oninput: move |event| {
+                        let new_url = event.value();
+                        let current_state = state.read().clone();
+
+                        if matches!(current_state, crate::gui::services::ServiceState::Paused) {
+                            use crate::gui::state_management::{get_state_manager, AppEvent};
+                            let state_manager = get_state_manager();
+                            if !new_url.trim().is_empty() {
+                                let _ = state_manager.send_event(AppEvent::CurrentUrlUpdated(Some(new_url.clone())));
+                            }
+                            let _ = state_manager.send_event(AppEvent::ServiceStateChanged(crate::gui::services::ServiceState::Idle));
+                        }
+
+                        url_input.set(new_url.clone());
+                        let mut state = app_state.write();
+                        state.url = new_url;
+                        use crate::gui::config_manager::save_app_state_async;
+                        save_app_state_async(state.clone());
+                    },
+                }
+
+                // メインボタン
+                button {
+                    style: {
+                        let (bg_color, text_color) = match *state.read() {
+                            crate::gui::services::ServiceState::Connecting => ("#fbbf24", "white"),
+                            crate::gui::services::ServiceState::Connected => ("#ef4444", "white"),
+                            crate::gui::services::ServiceState::Paused => ("#22c55e", "white"),
+                            _ => if is_url_valid { ("#3b82f6", "white") } else { ("#9ca3af", "white") },
+                        };
+                        format!(
+                            "
+                                padding: 8px 16px;
+                                border: none;
+                                border-radius: 8px;
+                                font-size: 13px;
+                                font-weight: 600;
+                                background: {};
+                                color: {};
+                                cursor: pointer;
+                                transition: all 0.2s ease;
+                                min-width: 70px;
+                            ",
+                            bg_color, text_color
+                        )
+                    },
+                    disabled: {
+                        match *state.read() {
+                            crate::gui::services::ServiceState::Connecting => true,
+                            crate::gui::services::ServiceState::Connected => *is_stopping.read(),
+                            crate::gui::services::ServiceState::Paused => false,
+                            _ => !is_url_valid || *is_stopping.read(),
+                        }
+                    },
+                    onclick: {
+                        let handle = live_chat_handle.clone();
+                        let url = url_input.read().clone();
+                        move |_| {
+                            if *handle.is_stopping.read() { return; }
+                            let current_state = handle.state.read().clone();
+                            match current_state {
+                                crate::gui::services::ServiceState::Connected => handle.pause_monitoring(),
+                                crate::gui::services::ServiceState::Paused => handle.resume_monitoring(None),
+                                _ => {
+                                    use crate::gui::state_management::{get_state_manager, AppEvent};
+                                    let state_manager = get_state_manager();
+                                    let _ = state_manager.send_event(AppEvent::CurrentUrlUpdated(Some(url.clone())));
+                                    handle.start_monitoring(url.clone(), None);
+                                }
+                            }
+                        }
+                    },
+                    match *state.read() {
+                        crate::gui::services::ServiceState::Connecting => "接続中",
+                        crate::gui::services::ServiceState::Connected => if *is_stopping.read() { "停止中" } else { "停止" },
+                        crate::gui::services::ServiceState::Paused => "再開",
+                        _ => "開始",
+                    }
+                }
+
+                // クリアボタン（常時表示）
+                button {
+                    style: {
+                        let is_empty = live_chat_handle.messages.read().is_empty();
+                        format!(
+                            "
+                                padding: 8px 12px;
+                                border: 2px solid #e5e7eb;
+                                border-radius: 8px;
+                                font-size: 13px;
+                                background: {};
+                                color: {};
+                                cursor: {};
+                                transition: all 0.2s ease;
+                                min-width: 50px;
+                                opacity: {};
+                            ",
+                            if is_empty { "#f9fafb" } else { "white" },
+                            if is_empty { "#9ca3af" } else { "#6b7280" },
+                            if is_empty { "not-allowed" } else { "pointer" },
+                            if is_empty { "0.5" } else { "1.0" }
+                        )
+                    },
+                    disabled: live_chat_handle.messages.read().is_empty(),
+                    onclick: {
+                        let handle = live_chat_handle.clone();
+                        move |_| {
+                            if !handle.messages.read().is_empty() {
+                                handle.clear_messages()
+                            }
+                        }
+                    },
+                    "🗑️"
+                }
+            }
+
+            // バリデーションメッセージ（1行）
+            if let Some(ref validation_msg) = url_validation_message {
+                div {
+                    style: "
+                        color: #ef4444;
+                        font-size: 11px;
+                        margin-bottom: 4px;
+                    ",
+                    "⚠️ {validation_msg}"
+                }
+            }
+        }
+    }
+}
+
+/// 通常の入力セクションコンポーネント（既存）
 /// YouTube URL入力と設定を管理
 /// Phase 3: LiveChatServiceとの統合完了
 /// Phase 4: CSSクラスベースのスタイリング

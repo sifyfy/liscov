@@ -2,6 +2,13 @@
 
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+// use serde::{Deserialize, Serialize}; // 現在未使用のため一時的にコメントアウト
+use chrono::Local;
+use directories::ProjectDirs;
+use glob::glob;
+use rand::Rng;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 /// URLバリデーション
 pub fn validate_youtube_url(url: &str) -> bool {
@@ -65,7 +72,163 @@ impl DebugLevel {
     }
 }
 
-/// 強化されたログ初期化
+/// XDGディレクトリからログディレクトリを取得
+pub fn get_default_log_dir() -> anyhow::Result<PathBuf> {
+    let project_dirs = ProjectDirs::from("dev", "sifyfy", "liscov")
+        .ok_or_else(|| anyhow::anyhow!("Failed to get project directories"))?;
+
+    let log_dir = project_dirs.data_dir().join("logs");
+    Ok(log_dir)
+}
+
+/// ログファイル名を生成（衝突回避付き）
+pub fn generate_log_filename() -> String {
+    let timestamp = Local::now().format("%Y-%m-%d_%H-%M-%S");
+    let random_id: u32 = rand::thread_rng().gen();
+    format!("liscov_{}_{:08x}.log", timestamp, random_id)
+}
+
+/// 古いログファイルをクリーンアップ
+pub fn cleanup_old_log_files(log_dir: &Path, max_files: u32, pattern: &str) -> anyhow::Result<()> {
+    if !log_dir.exists() {
+        return Ok(());
+    }
+
+    let pattern_path = log_dir.join(pattern);
+    let pattern_str = pattern_path.to_string_lossy();
+
+    let mut log_files: Vec<_> = glob(&pattern_str)?
+        .filter_map(|entry| entry.ok())
+        .filter(|path| {
+            // liscov_YYYY-MM-DD_HH-MM-SS_[a-f0-9]{8}.logパターンをチェック
+            if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
+                let re = regex::Regex::new(
+                    r"^liscov_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_[a-f0-9]{8}\.log$",
+                )
+                .unwrap();
+                re.is_match(filename)
+            } else {
+                false
+            }
+        })
+        .filter_map(|path| {
+            // ファイルのメタデータを取得
+            if let Ok(metadata) = fs::metadata(&path) {
+                if let Ok(created) = metadata.created() {
+                    Some((path, created))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // 作成日時でソート（新しいものが最初）
+    log_files.sort_by(|a, b| b.1.cmp(&a.1));
+
+    // max_files を超える古いファイルを削除
+    if log_files.len() > max_files as usize {
+        let files_to_delete = &log_files[max_files as usize..];
+
+        for (file_path, _) in files_to_delete {
+            if let Err(e) = fs::remove_file(file_path) {
+                warn!(
+                    "古いログファイルの削除に失敗: {} - {}",
+                    file_path.display(),
+                    e
+                );
+            } else {
+                debug!("古いログファイルを削除: {}", file_path.display());
+            }
+        }
+
+        info!(
+            "{}個の古いログファイルをクリーンアップしました",
+            files_to_delete.len()
+        );
+    }
+
+    Ok(())
+}
+
+/// 強化されたログ初期化（設定とディレクトリ指定対応）
+pub fn init_logging_with_config(
+    log_config: &crate::gui::config_manager::LogConfig,
+    custom_log_dir: Option<PathBuf>,
+) -> anyhow::Result<()> {
+    if !log_config.enable_file_logging {
+        // ファイル出力無効の場合は従来通り
+        return init_logging();
+    }
+
+    // ログディレクトリを決定（優先度順）
+    let log_dir = if let Some(custom_dir) = custom_log_dir {
+        custom_dir
+    } else if let Some(config_dir) = &log_config.log_dir {
+        config_dir.clone()
+    } else {
+        get_default_log_dir()?
+    };
+
+    // ログディレクトリを作成
+    fs::create_dir_all(&log_dir)?;
+
+    // 古いログファイルをクリーンアップ（同期実行）
+    if log_config.auto_cleanup_enabled {
+        if let Err(e) = cleanup_old_log_files(
+            &log_dir,
+            log_config.max_log_files,
+            &log_config.log_filename_pattern,
+        ) {
+            warn!("ログファイルクリーンアップエラー: {}", e);
+        }
+    }
+
+    // ログファイル名を生成
+    let log_filename = generate_log_filename();
+    let log_file_path = log_dir.join(log_filename);
+
+    // ログレベルフィルターを設定
+    let env_filter = EnvFilter::try_from_default_env()
+        .or_else(|_| EnvFilter::try_new(&log_config.log_level))
+        .unwrap_or_else(|_| EnvFilter::new("info"));
+
+    // ファイル出力用のappenderを作成
+    let file_appender =
+        tracing_appender::rolling::never(&log_dir, log_file_path.file_name().unwrap());
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
+    // コンソール出力とファイル出力の両方を設定
+    let subscriber = tracing_subscriber::registry()
+        .with(env_filter)
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_target(false)
+                .with_thread_ids(false)
+                .with_file(false)
+                .with_line_number(false)
+                .compact(),
+        )
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(non_blocking)
+                .with_target(true)
+                .with_thread_ids(true)
+                .with_file(true)
+                .with_line_number(true)
+                .json(),
+        );
+
+    subscriber.try_init()?;
+
+    info!("ログファイル出力開始: {}", log_file_path.display());
+
+    Ok(())
+}
+
+/// 強化されたログ初期化（後方互換性用）
 pub fn init_logging() -> anyhow::Result<()> {
     let env_filter = EnvFilter::try_from_default_env()
         .or_else(|_| EnvFilter::try_new("info"))
@@ -282,10 +445,10 @@ pub fn validate_window_bounds(config: &mut crate::gui::config_manager::WindowCon
 
         // ウィンドウサイズがスクリーンより大きい場合は調整
         if config.width > screen_width {
-            config.width = screen_width.min(1200);
+            config.width = screen_width.min(900);
         }
         if config.height > screen_height {
-            config.height = screen_height.min(800);
+            config.height = screen_height.min(1080);
         }
 
         debug!(
