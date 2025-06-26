@@ -8,6 +8,10 @@ use crate::gui::signal_optimizer::{record_signal_update, register_signal, Signal
 use crate::gui::styles::theme::{get_connection_status_class, CssClasses};
 use crate::gui::timer_service::cancel_highlight_clear_tasks; // Phase 3.3
 
+// Message streaming integration
+use crate::gui::message_stream::{DisplayLimit, MessageStream, MessageStreamConfig};
+use crate::gui::models::GuiChatMessage;
+
 // Phase 4.3: クロージャ最適化
 use crate::gui::closure_optimizer::{
     create_weak_signal_connection, get_closure_optimizer, get_optimized_signal_handler,
@@ -31,6 +35,22 @@ pub fn ChatDisplay(
     let app_state = use_context::<Signal<crate::gui::models::AppState>>();
     let chat_config = app_state.read().chat_display_config.clone();
 
+    // MessageStream初期化（新規追加）
+    let mut message_stream = use_signal(|| {
+        let config = MessageStreamConfig {
+            display_limit: DisplayLimit::Fixed(100), // デフォルト100件制限
+            max_display_count: 100,
+            enable_virtual_scroll: true,
+            target_fps: 60,
+            enable_archive: true,
+            archive_search_enabled: true,
+        };
+        MessageStream::new(config)
+    });
+
+    // MessageStream統計表示用
+    let stream_stats = use_signal(|| message_stream.read().stats());
+
     // 基本状態の初期化
     let user_has_scrolled = use_signal(|| false);
     let mut show_filter_panel = use_signal(|| false);
@@ -46,6 +66,58 @@ pub fn ChatDisplay(
     let show_timestamps = use_memo(move || chat_config.read().show_timestamps);
     let highlight_enabled = use_memo(move || chat_config.read().highlight_enabled);
     let message_font_size = use_memo(move || chat_config.read().message_font_size);
+
+    // MessageStreamへのメッセージ同期（新規追加）
+    use_effect({
+        let live_chat_handle = live_chat_handle.clone();
+        let mut message_stream = message_stream.clone();
+        let mut stream_stats = stream_stats.clone();
+
+        move || {
+            let current_messages = live_chat_handle.messages.read();
+            let current_count = current_messages.len();
+            let stream_total = message_stream.read().total_count();
+
+            // 新しいメッセージがある場合にMessageStreamに追加
+            if current_count > stream_total {
+                let new_messages: Vec<GuiChatMessage> = current_messages
+                    .iter()
+                    .skip(stream_total)
+                    .cloned()
+                    .collect();
+
+                if !new_messages.is_empty() {
+                    message_stream.with_mut(|stream| {
+                        stream.push_messages(new_messages.clone());
+                    });
+
+                    // 統計更新
+                    stream_stats.set(message_stream.read().stats());
+
+                    tracing::debug!(
+                        "📦 [MessageStream] Added {} messages, display: {}, archived: {}",
+                        new_messages.len(),
+                        message_stream.read().display_count(),
+                        message_stream.read().archived_count()
+                    );
+                }
+            }
+        }
+    });
+
+    // **メッセージフィルタリング処理**（MessageStreamベース）
+    let filtered_messages = use_memo({
+        let message_stream = message_stream.clone();
+        let global_filter = global_filter.clone();
+        let stream_stats = stream_stats.clone(); // 統計変更を依存関係に追加
+        move || {
+            // stream_statsを読み取って依存関係を強制的に登録
+            let _stats = stream_stats.read();
+            let display_messages = message_stream.read().display_messages();
+            let filter = global_filter.read();
+            filter.filter_messages(&display_messages)
+        }
+    });
 
     // 初期設定の読み込み
     use_effect({
@@ -154,19 +226,6 @@ pub fn ChatDisplay(
             );
         }
     });
-
-    // **メッセージフィルタリング処理**（メモ化）
-    let filtered_messages = use_memo({
-        let live_chat_handle = live_chat_handle.clone();
-        let global_filter = global_filter.clone();
-        move || {
-            let messages = live_chat_handle.messages.read();
-            let filter = global_filter.read();
-            filter.filter_messages(&messages)
-        }
-    });
-
-    // シンプル版：メッセージレンダリング（段階的最適化のため一旦元に戻す）
 
     // 修正版：正しい依存関係設定でuse_effectを実行
     use_effect(move || {
@@ -505,7 +564,7 @@ pub fn ChatDisplay(
                         "タイムスタンプ"
                     }
 
-                    // ハイライト切り替え
+                                        // ハイライト切り替え
                     label {
                         class: CssClasses::CHECKBOX_LABEL,
                         style: "
@@ -534,15 +593,127 @@ pub fn ChatDisplay(
                                     queue_batch_update("chat_highlight_enabled", BatchUpdateType::Normal);
                                     record_performance_event(PerformanceEventType::SignalUpdate, "ChatDisplay");
 
-                                // 軽量版: ハイライト無効化時の処理
+                                    // 軽量版: ハイライト無効化時の処理
                                     if !enabled {
-                                    tracing::debug!("🎯 [HIGHLIGHT] Highlight disabled by user");
+                                        tracing::debug!("🎯 [HIGHLIGHT] Highlight disabled by user");
                                     }
                                 }
                             },
                             style: "width: 14px; height: 14px;",
                         }
                         "ハイライト"
+                    }
+
+                    // 表示件数設定（MessageStream）
+                    div {
+                        style: "
+                            display: flex;
+                            align-items: center;
+                            gap: 4px !important;
+                            font-size: 12px !important;
+                            color: #4a5568;
+                        ",
+                        span { "表示:" }
+                        select {
+                            style: "
+                                font-size: 11px;
+                                padding: 2px 4px;
+                                border: 1px solid #cbd5e0;
+                                border-radius: 3px;
+                                background: white;
+                            ",
+                            value: {
+                                match message_stream.read().config().display_limit {
+                                    DisplayLimit::Fixed(count) => count.to_string(),
+                                    DisplayLimit::Unlimited => "999999".to_string(),
+                                    _ => "100".to_string(),
+                                }
+                            },
+                            onchange: {
+                                let mut message_stream = message_stream.clone();
+                                let mut stream_stats = stream_stats.clone();
+
+                                move |event: dioxus::events::FormEvent| {
+                                    if let Ok(count) = event.value().parse::<usize>() {
+                                        tracing::info!(
+                                            "🔧 [MessageStream] Changing display limit from {} to {} messages",
+                                            message_stream.read().display_count(),
+                                            count
+                                        );
+
+                                        let new_config = MessageStreamConfig {
+                                            display_limit: if count >= 999999 {
+                                                DisplayLimit::Unlimited
+                                            } else {
+                                                DisplayLimit::Fixed(count)
+                                            },
+                                            max_display_count: count,
+                                            enable_virtual_scroll: true,
+                                            target_fps: 60,
+                                            enable_archive: true,
+                                            archive_search_enabled: true,
+                                        };
+
+                                        // MessageStreamの設定更新
+                                        message_stream.with_mut(|stream| {
+                                            stream.update_config(new_config);
+                                        });
+
+                                        // 統計強制更新（Signal変更を確実に検出させる）
+                                        let new_stats = message_stream.read().stats();
+                                        stream_stats.set(new_stats);
+
+                                        tracing::info!(
+                                            "✅ [MessageStream] Display limit updated: display={}, archived={}, reduction={}%",
+                                            message_stream.read().display_count(),
+                                            message_stream.read().archived_count(),
+                                            message_stream.read().stats().effective_reduction_percent
+                                        );
+
+                                        // Signal更新記録
+                                        record_signal_update("message_stream_config");
+                                        queue_batch_update("message_stream_display_limit", BatchUpdateType::HighPriority);
+                                    } else {
+                                        tracing::warn!("🚨 [MessageStream] Invalid display count: {}", event.value());
+                                    }
+                                }
+                            },
+                            {
+                                let current_limit = match message_stream.read().config().display_limit {
+                                    DisplayLimit::Fixed(count) => count,
+                                    DisplayLimit::Unlimited => 999999,
+                                    _ => 100,
+                                };
+
+                                rsx! {
+                                    option {
+                                        value: "50",
+                                        selected: current_limit == 50,
+                                        "50件"
+                                    }
+                                    option {
+                                        value: "100",
+                                        selected: current_limit == 100,
+                                        "100件"
+                                    }
+                                    option {
+                                        value: "200",
+                                        selected: current_limit == 200,
+                                        "200件"
+                                    }
+                                    option {
+                                        value: "500",
+                                        selected: current_limit == 500,
+                                        "500件"
+                                    }
+                                    option {
+                                        value: "999999",
+                                        selected: current_limit >= 999999,
+                                        "無制限"
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -557,7 +728,7 @@ pub fn ChatDisplay(
                 }
             }
 
-            // メッセージ統計
+            // メッセージ統計（MessageStream版）
             div {
                 class: CssClasses::STATUS_PANEL,
                 style: "
@@ -569,10 +740,29 @@ pub fn ChatDisplay(
                     color: #64748b;
                     display: flex;
                     justify-content: space-between;
+                    flex-wrap: wrap;
+                    gap: 8px;
                 ",
+
                 span {
-                    "📊 メッセージ: {filtered_messages.read().len()} / {live_chat_handle.messages.read().len()}"
+                    "📊 フィルタ後: {filtered_messages.read().len()} / 表示枠: {stream_stats.read().display_count}"
                 }
+
+                span {
+                    "📦 アーカイブ: {stream_stats.read().archived_count}"
+                }
+
+                span {
+                    "💾 メモリ: {stream_stats.read().display_memory_mb():.1}MB"
+                }
+
+                if stream_stats.read().effective_reduction_percent > 0 {
+                    span {
+                        style: "color: #059669; font-weight: 600;",
+                        "📉 削減: {stream_stats.read().effective_reduction_percent}%"
+                    }
+                }
+
                 if highlight_enabled() {
                     span {
                         "🎯 ハイライト: {highlighted_message_ids.read().len()}"
@@ -592,7 +782,7 @@ pub fn ChatDisplay(
                     scroll-behavior: smooth;
                 ",
 
-                            // メッセージ表示（修復版） - 一時的にコメントアウト
+                                // メッセージ表示（修復版） - 一時的にコメントアウト
                 /*
                 for message in filtered_messages.read().iter() {
                     rsx! {

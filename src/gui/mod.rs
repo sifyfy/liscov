@@ -2,6 +2,7 @@
 pub mod config_manager;
 pub mod memory_optimized; // メモリ効率最適化
 pub mod message_processor; // メッセージ処理パイプライン
+pub mod message_stream; // メッセージストリーミングシステム
 pub mod models; // 既存のデータ構造は継続使用
 pub mod plugin_system; // プラグインアーキテクチャ
 pub mod plugins; // サンプルプラグイン
@@ -27,6 +28,9 @@ pub mod closure_optimizer;
 // Core functionality exports - specific imports to avoid ambiguous glob re-exports
 pub use models::{ActiveTab, GuiChatMessage, MessageType};
 pub use services::*;
+
+// Message streaming exports
+pub use message_stream::{DisplayLimit, MessageStream, MessageStreamConfig, MessageStreamStats};
 
 // New state management modules
 pub mod live_chat_service;
