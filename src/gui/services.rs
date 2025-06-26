@@ -6,6 +6,7 @@ use std::sync::{Arc, OnceLock};
 use tokio::sync::{mpsc, Mutex as TokioMutex};
 
 use super::models::GuiChatMessage;
+use super::stream_end_detector::{DetectionResult, StreamEndDetector};
 use crate::api::innertube::{
     fetch_live_chat_messages, fetch_live_chat_page, get_next_continuation, InnerTube,
 };
@@ -35,6 +36,7 @@ pub struct LiveChatService {
     shutdown_sender: Option<mpsc::UnboundedSender<()>>,
     output_file: Arc<TokioMutex<Option<String>>>,
     response_saver: Arc<TokioMutex<RawResponseSaver>>,
+    stream_end_detector: Arc<TokioMutex<StreamEndDetector>>,
     last_url: Option<String>,
 }
 
@@ -48,6 +50,7 @@ impl LiveChatService {
             response_saver: Arc::new(TokioMutex::new(
                 RawResponseSaver::new(SaveConfig::default()),
             )),
+            stream_end_detector: Arc::new(TokioMutex::new(StreamEndDetector::new())),
             last_url: None,
         }
     }
@@ -251,34 +254,30 @@ impl LiveChatService {
 
     /// レスポンス保存設定を更新
     pub async fn update_save_config(&self, config: SaveConfig) {
+        tracing::info!(
+            "🔧 Updating save config: enabled={}, file_path={}, max_size_mb={}",
+            config.enabled,
+            config.file_path,
+            config.max_file_size_mb
+        );
+
         let mut saver = self.response_saver.lock().await;
         let old_config = saver.get_config().clone();
-
-        // 設定が実際に変わった場合のみログ出力
-        if old_config.enabled != config.enabled || old_config.file_path != config.file_path {
-            tracing::info!(
-                "✅ Raw response save config updated: {} -> {} (file: {})",
-                if old_config.enabled {
-                    "enabled"
-                } else {
-                    "disabled"
-                },
-                if config.enabled {
-                    "enabled"
-                } else {
-                    "disabled"
-                },
-                config.file_path
-            );
-        } else {
-            tracing::debug!(
-                "🔧 Save config unchanged: enabled={}, file_path={}",
-                config.enabled,
-                config.file_path
-            );
-        }
-
         saver.update_config(config.clone());
+
+        tracing::info!(
+            "✅ Raw response save config updated: {} -> {}",
+            if old_config.enabled {
+                "enabled"
+            } else {
+                "disabled"
+            },
+            if config.enabled {
+                "enabled"
+            } else {
+                "disabled"
+            }
+        );
     }
 
     /// 現在の保存設定を取得
@@ -302,6 +301,7 @@ impl LiveChatService {
         let state = Arc::clone(&self.state);
         let output_file = Arc::clone(&self.output_file);
         let response_saver = Arc::clone(&self.response_saver);
+        let stream_end_detector = Arc::clone(&self.stream_end_detector);
 
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(2));
@@ -309,7 +309,6 @@ impl LiveChatService {
             let mut consecutive_errors = 0;
             let mut last_successful_request = std::time::Instant::now();
             let _start_time = std::time::Instant::now();
-            const MAX_CONSECUTIVE_ERRORS: usize = 5;
             const HEALTH_CHECK_INTERVAL_SECS: u64 = 30;
 
             tracing::info!("🚀 Message receiver task started");
@@ -360,6 +359,12 @@ impl LiveChatService {
                                     consecutive_errors = 0;
                                     last_successful_request = std::time::Instant::now();
                                     let request_duration = request_start.elapsed();
+
+                                    // StreamEndDetectorに成功を通知
+                                    {
+                                        let mut detector = stream_end_detector.lock().await;
+                                        detector.on_success();
+                                    }
 
                                     let _api_response_time = std::time::Instant::now();
 
@@ -509,15 +514,21 @@ impl LiveChatService {
                                     let is_enabled = saver.is_enabled();
                                     let config = saver.get_config();
 
+                                    // 保存処理のログは常に出力（デバッグ用）
+                                    tracing::info!("💾 Raw response save attempt: enabled={}, file_path={}", is_enabled, config.file_path);
+
                                     if let Err(e) = saver.save_response(&response).await {
                                         tracing::warn!("❌ Failed to save raw response: {}", e);
                                     } else if is_enabled {
                                         tracing::info!("💾 Raw response saved successfully to: {}", config.file_path);
+                                    } else {
+                                        tracing::debug!("💾 Raw response save skipped (disabled)");
                                     }
                                 }
                                 Ok(Err(e)) => {
                                     consecutive_errors += 1;
                                     let request_duration = request_start.elapsed();
+                                    let error_str = e.to_string();
 
                                     // エラーは必ずログ出力
                                     tracing::error!(
@@ -532,41 +543,47 @@ impl LiveChatService {
                                         tracing::error!("🔍 Error details: {:?}", e);
                                     }
 
-                                    // 連続エラーが多い場合の特別処理
-                                    if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
-                                        tracing::error!(
-                                            "🚨 [API_SERVICE] Too many consecutive errors ({}). This may indicate:",
-                                            consecutive_errors
-                                        );
-                                        tracing::error!("   - Stream has ended");
-                                        tracing::error!("   - Network connectivity issues");
-                                        tracing::error!("   - YouTube API rate limits");
-                                        tracing::error!("   - Invalid continuation token");
+                                    // StreamEndDetectorでエラーを分析
+                                    let detection_result = {
+                                        let mut detector = stream_end_detector.lock().await;
+                                        detector.on_error(&error_str)
+                                    };
 
-                                        // エラー情報をより詳細に記録
-                                        let error_str = e.to_string();
-                                        if error_str.contains("404") || error_str.contains("Not Found") {
-                                            tracing::error!("💡 [DIAGNOSIS] Likely cause: Stream ended or chat disabled");
-                                        } else if error_str.contains("403") || error_str.contains("Forbidden") {
-                                            tracing::error!("💡 [DIAGNOSIS] Likely cause: API access denied or rate limited");
-                                        } else if error_str.contains("timeout") || error_str.contains("Timeout") {
-                                            tracing::error!("💡 [DIAGNOSIS] Likely cause: Network timeout or slow connection");
-                                        } else if error_str.contains("connection") {
-                                            tracing::error!("💡 [DIAGNOSIS] Likely cause: Network connectivity problem");
+                                    match detection_result {
+                                        DetectionResult::StreamEnded => {
+                                            tracing::info!("🔴 [API_SERVICE] Stream end detected - stopping task");
+                                            {
+                                                let mut state_guard = state.lock().await;
+                                                *state_guard = ServiceState::Idle;
+                                            }
+                                            break; // ループを終了
+                                        }
+                                        DetectionResult::AlreadyEnded => {
+                                            tracing::info!("🔴 [API_SERVICE] Stream already ended - stopping task");
+                                            break; // ループを終了
+                                        }
+                                        DetectionResult::Warning | DetectionResult::Continue => {
+                                            // 警告レベルまたは継続 - 従来通りの処理
+                                            let mut state_guard = state.lock().await;
+                                            *state_guard = ServiceState::Error(format!("API Error ({}): {}", consecutive_errors, e));
+
+                                            // エラー種別に応じた待機時間
+                                            let wait_duration = if error_str.contains("403") || error_str.contains("Forbidden") {
+                                                // 403エラーは長めに待機
+                                                std::cmp::min(consecutive_errors * 3, 30)
+                                            } else {
+                                                // その他のエラーは短めに待機
+                                                std::cmp::min(consecutive_errors * 2, 20)
+                                            };
+
+                                            if consecutive_errors >= 3 {
+                                                tracing::warn!("⏳ [API_SERVICE] Waiting {} seconds before next attempt", wait_duration);
+                                                tokio::time::sleep(tokio::time::Duration::from_secs(wait_duration as u64)).await;
+                                            }
+
+                                            tracing::warn!("⚠️ [API_SERVICE] Continuing despite error - this might be temporary (attempt {})", consecutive_errors);
                                         }
                                     }
-
-                                    let mut state_guard = state.lock().await;
-                                    *state_guard = ServiceState::Error(format!("API Error ({}): {}", consecutive_errors, e));
-
-                                    // 多連続エラー時は少し待機してから継続
-                                    if consecutive_errors >= 3 {
-                                        let wait_duration = std::cmp::min(consecutive_errors * 2, 30);
-                                        tracing::warn!("⏳ [API_SERVICE] Waiting {} seconds before next attempt", wait_duration);
-                                        tokio::time::sleep(tokio::time::Duration::from_secs(wait_duration as u64)).await;
-                                    }
-
-                                    tracing::warn!("⚠️ [API_SERVICE] Continuing despite error - this might be temporary (attempt {}/{})", consecutive_errors, MAX_CONSECUTIVE_ERRORS);
                                 }
                                 Err(_timeout_error) => {
                                     consecutive_errors += 1;
@@ -579,24 +596,35 @@ impl LiveChatService {
                                         consecutive_errors
                                     );
 
-                                    if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
-                                        tracing::error!("🚨 [TIMEOUT] Multiple consecutive timeouts detected. This may indicate:");
-                                        tracing::error!("   - Slow network connection");
-                                        tracing::error!("   - YouTube API server issues");
-                                        tracing::error!("   - Local firewall/proxy problems");
+                                    // StreamEndDetectorでタイムアウトエラーを分析
+                                    let detection_result = {
+                                        let mut detector = stream_end_detector.lock().await;
+                                        detector.on_error("timeout")
+                                    };
+
+                                    match detection_result {
+                                        DetectionResult::StreamEnded | DetectionResult::AlreadyEnded => {
+                                            tracing::info!("🔴 [API_SERVICE] Stream end detected due to timeouts - stopping task");
+                                            {
+                                                let mut state_guard = state.lock().await;
+                                                *state_guard = ServiceState::Idle;
+                                            }
+                                            break; // ループを終了
+                                        }
+                                        DetectionResult::Warning | DetectionResult::Continue => {
+                                            let mut state_guard = state.lock().await;
+                                            *state_guard = ServiceState::Error(format!("Timeout ({})", consecutive_errors));
+
+                                            // タイムアウト時は短めに待機
+                                            if consecutive_errors >= 3 {
+                                                let wait_duration = std::cmp::min(consecutive_errors * 2, 20);
+                                                tracing::warn!("⏳ [TIMEOUT] Waiting {} seconds before next attempt", wait_duration);
+                                                tokio::time::sleep(tokio::time::Duration::from_secs(wait_duration as u64)).await;
+                                            }
+
+                                            tracing::warn!("⚠️ [TIMEOUT] Continuing despite timeout - this might be temporary");
+                                        }
                                     }
-
-                                    let mut state_guard = state.lock().await;
-                                    *state_guard = ServiceState::Error(format!("Timeout ({})", consecutive_errors));
-
-                                    // タイムアウト時も少し待機
-                                    if consecutive_errors >= 3 {
-                                        let wait_duration = std::cmp::min(consecutive_errors * 2, 30);
-                                        tracing::warn!("⏳ [TIMEOUT] Waiting {} seconds before next attempt", wait_duration);
-                                        tokio::time::sleep(tokio::time::Duration::from_secs(wait_duration as u64)).await;
-                                    }
-
-                                    tracing::warn!("⚠️ [TIMEOUT] Continuing despite timeout - this might be temporary");
                                 }
                             }
                         } else {

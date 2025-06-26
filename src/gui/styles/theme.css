@@ -492,8 +492,64 @@ html {
     background: #667eea;
 }
 
+/* メンバー専用のスタイル */
+.chat-message.member {
+    background: #f0f9f0;
+    /* 薄緑の背景 */
+    border: 1px solid #4ade80;
+    /* 普通くらいの緑の枠 */
+}
+
+.chat-message.member::before {
+    background: #16a34a;
+    /* 普通くらいの緑 */
+}
+
+.chat-message.member .message-author {
+    color: #15803d;
+    /* 濃いめの緑 */
+}
+
 .chat-message.system::before {
     background: #4299e1;
+}
+
+/* 配信終了システムメッセージ専用スタイル */
+.chat-message.system.stream-ended {
+    background: #fffbf0;
+    border: 1px solid #f6ad55;
+    box-shadow: 0 2px 8px rgba(246, 173, 85, 0.15);
+}
+
+.chat-message.system.stream-ended::before {
+    background: #ed8936;
+}
+
+.chat-message.system.stream-ended .message-content {
+    font-style: italic;
+    color: #744210;
+    font-weight: 500;
+}
+
+.chat-message.system.stream-ended .message-author {
+    color: #ed8936;
+    font-weight: 600;
+}
+
+/* エラー警告システムメッセージ */
+.chat-message.system.error-warning {
+    background: #fff3cd;
+    border: 1px solid #ffc107;
+    box-shadow: 0 2px 8px rgba(255, 193, 7, 0.15);
+}
+
+.chat-message.system.error-warning::before {
+    background: #ff6b6b;
+}
+
+.chat-message.system.error-warning .message-content {
+    font-weight: 500;
+    color: #856404;
 }
 
 .chat-message.superchat::before {
@@ -751,38 +807,21 @@ html {
    新着メッセージアニメーション
    ======================================== */
 
-/* 新着メッセージのフェードイン+スライドイン */
-@keyframes newMessageSlideIn {
+/* 新着メッセージのシンプルハイライト */
+@keyframes newMessageHighlightSimple {
     0% {
-        opacity: 0;
-        transform: translateX(-20px) scale(0.95);
-        background: #e0f2fe;
-        border-left-color: #0096c7;
+        background: #f0f8ff;
+        border-color: #93c5fd;
     }
 
-    25% {
-        opacity: 0.7;
-        transform: translateX(-5px) scale(0.98);
-        background: #b3e5fc;
-    }
-
-    50% {
-        opacity: 0.9;
-        transform: translateX(2px) scale(1.02);
-        background: #81d4fa;
-    }
-
-    75% {
-        opacity: 1;
-        transform: translateX(-1px) scale(1.01);
-        background: #4fc3f7;
+    15% {
+        background: #e6f3ff;
+        border-color: #60a5fa;
     }
 
     100% {
-        opacity: 1;
-        transform: translateX(0) scale(1);
-        background: #ffffff;
-        border-left-color: #10b981;
+        background: transparent;
+        border-color: inherit;
     }
 }
 
@@ -854,23 +893,40 @@ html {
     }
 }
 
-/* 新着メッセージクラス */
+/* 新着メッセージクラス（シンプル版） */
 .message-item.new-message {
-    animation: newMessageSlideIn 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    animation: newMessageHighlightSimple ease-out;
+    animation-duration: var(--highlight-duration, 6s);
+    animation-fill-mode: forwards;
 }
 
-/* 重要メッセージ（SuperChat）のアニメーション */
+/* 長時間稼働モード用の軽量アニメーション */
+.message-item.new-message.long-term-mode {
+    animation: newMessageHighlightSimple ease-out;
+    animation-duration: var(--highlight-duration-fast, 3s);
+    animation-fill-mode: forwards;
+}
+
+/* 重要メッセージ（SuperChat）のアニメーション - シンプル版 */
 .message-item.new-message.superchat {
-    animation:
-        newMessageSlideIn 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94),
-        importantMessagePulse 2s ease-in-out 0.5s;
+    animation: newMessageHighlightSimple ease-out;
+    animation-duration: var(--highlight-duration, 8s);
+    animation-fill-mode: forwards;
 }
 
-/* システムメッセージのアニメーション */
+/* システムメッセージのアニメーション - シンプル版 */
 .message-item.new-message.system {
-    animation:
-        newMessageSlideIn 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94),
-        systemMessageGlow 3s ease-in-out 0.8s;
+    animation: newMessageHighlightSimple ease-out;
+    animation-duration: var(--highlight-duration, 6s);
+    animation-fill-mode: forwards;
+}
+
+/* 動的CSS変数の設定（デフォルト値） */
+:root {
+    --highlight-duration: 6s;
+    --highlight-duration-fast: 3s;
+    --highlight-color-start: #f0f8ff;
+    --highlight-color-end: transparent;
 }
 
 /* 新着メッセージカウンターのアニメーション */
@@ -954,12 +1010,10 @@ html {
     .message-item.new-message,
     .message-item.new-message.superchat,
     .message-item.new-message.system,
-    .message-item.new-message.fast-mode {
+    .message-item.new-message.long-term-mode {
         animation: none;
-        transition: background-color 0.3s ease;
-    }
-
-    .message-item.new-message {
-        background: #f0f9ff !important;
+        background: #f0f8ff !important;
+        border-color: #93c5fd !important;
+        transition: background-color 3s ease, border-color 3s ease;
     }
 }

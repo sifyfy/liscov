@@ -16,39 +16,39 @@ pub enum LiscovError {
     /// API関連エラー（YouTube、InnerTube）
     #[error("API error: {0}")]
     Api(#[from] ApiError),
-    
+
     /// データベース操作エラー
     #[error("Database error: {0}")]
     Database(#[from] DatabaseError),
-    
+
     /// ファイルI/O・データ処理エラー
     #[error("I/O error: {0}")]
     Io(#[from] IoError),
-    
+
     /// GUI・設定関連エラー
     #[error("GUI error: {0}")]
     Gui(#[from] GuiError),
-    
+
     /// アナリティクス・エクスポート関連エラー
     #[error("Analytics error: {0}")]
     Analytics(#[from] AnalyticsError),
-    
+
     /// ネットワーク・HTTP関連エラー
     #[error("Network error: {0}")]
     Network(#[from] reqwest::Error),
-    
+
     /// JSON処理エラー
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
-    
+
     /// 標準I/Oエラー
     #[error("IO error: {0}")]
     StdIo(#[from] std::io::Error),
-    
+
     /// 設定関連エラー
     #[error("Configuration error: {0}")]
     Config(String),
-    
+
     /// 汎用エラー（既存のanyhowエラーをラップ）
     #[error("General error: {0}")]
     General(#[from] anyhow::Error),
@@ -59,19 +59,19 @@ pub enum LiscovError {
 pub enum ApiError {
     #[error("Request failed: {0}")]
     Request(#[source] reqwest::Error),
-    
+
     #[error("JSON parsing failed: {0}")]
     JsonParse(#[source] serde_json::Error),
-    
+
     #[error("Resource not found")]
     NotFound,
-    
+
     #[error("Authentication failed")]
     Authentication,
-    
+
     #[error("Rate limit exceeded")]
     RateLimit,
-    
+
     #[error("Invalid response format")]
     InvalidFormat,
 }
@@ -81,16 +81,16 @@ pub enum ApiError {
 pub enum DatabaseError {
     #[error("Connection failed: {0}")]
     Connection(String),
-    
+
     #[error("Query execution failed: {0}")]
     Query(String),
-    
+
     #[error("Migration failed: {0}")]
     Migration(String),
-    
+
     #[error("Transaction failed: {0}")]
     Transaction(String),
-    
+
     #[error("SQLite error: {0}")]
     Sqlite(#[from] rusqlite::Error),
 }
@@ -100,16 +100,16 @@ pub enum DatabaseError {
 pub enum IoError {
     #[error("File read error: {0}")]
     FileRead(String),
-    
+
     #[error("File write error: {0}")]
     FileWrite(String),
-    
+
     #[error("Parse error at line {line}: {message}")]
     Parse { line: usize, message: String },
-    
+
     #[error("Invalid file format: {0}")]
     InvalidFormat(String),
-    
+
     #[error("Path error: {0}")]
     Path(String),
 }
@@ -119,19 +119,19 @@ pub enum IoError {
 pub enum GuiError {
     #[error("Component initialization failed: {0}")]
     ComponentInit(String),
-    
+
     #[error("State management error: {0}")]
     StateManagement(String),
-    
+
     #[error("Configuration error: {0}")]
     Configuration(String),
-    
+
     #[error("Window operation failed: {0}")]
     WindowOperation(String),
-    
+
     #[error("Plugin error: {0}")]
     PluginError(String),
-    
+
     #[error("Service error: {0}")]
     Service(String),
 }
@@ -141,10 +141,10 @@ pub enum GuiError {
 pub enum AnalyticsError {
     #[error("Export failed: {0}")]
     Export(String),
-    
+
     #[error("Data processing error: {0}")]
     DataProcessing(String),
-    
+
     #[error("Format conversion error: {0}")]
     FormatConversion(String),
 }
@@ -176,33 +176,33 @@ impl From<io::ndjson::LiveChatError> for LiscovError {
         match err {
             io::ndjson::LiveChatError::Io(e) => LiscovError::StdIo(e),
             io::ndjson::LiveChatError::JsonParse { line, source } => {
-                LiscovError::Io(IoError::Parse { 
-                    line, 
-                    message: source.to_string() 
+                LiscovError::Io(IoError::Parse {
+                    line,
+                    message: source.to_string(),
                 })
-            },
+            }
             io::ndjson::LiveChatError::InvalidFormat { reason } => {
                 LiscovError::Io(IoError::InvalidFormat(reason))
-            },
+            }
             io::ndjson::LiveChatError::NoData { context } => {
                 LiscovError::Io(IoError::InvalidFormat(context))
-            },
-            io::ndjson::LiveChatError::MissingField { field, structure } => {
-                LiscovError::Io(IoError::InvalidFormat(format!("Missing field '{}' in {}", field, structure)))
-            },
-            io::ndjson::LiveChatError::InvalidContinuation { token } => {
-                LiscovError::Io(IoError::InvalidFormat(format!("Invalid continuation: {}", token)))
-            },
-            io::ndjson::LiveChatError::UnsupportedMessageType { message_type } => {
-                LiscovError::Io(IoError::InvalidFormat(format!("Unsupported message type: {}", message_type)))
-            },
+            }
+            io::ndjson::LiveChatError::MissingField { field, structure } => LiscovError::Io(
+                IoError::InvalidFormat(format!("Missing field '{}' in {}", field, structure)),
+            ),
+            io::ndjson::LiveChatError::InvalidContinuation { token } => LiscovError::Io(
+                IoError::InvalidFormat(format!("Invalid continuation: {}", token)),
+            ),
+            io::ndjson::LiveChatError::UnsupportedMessageType { message_type } => LiscovError::Io(
+                IoError::InvalidFormat(format!("Unsupported message type: {}", message_type)),
+            ),
             io::ndjson::LiveChatError::Network(e) => LiscovError::Network(e),
-            io::ndjson::LiveChatError::RateLimit { retry_after_seconds: _ } => {
-                LiscovError::Api(ApiError::RateLimit)
-            },
+            io::ndjson::LiveChatError::RateLimit {
+                retry_after_seconds: _,
+            } => LiscovError::Api(ApiError::RateLimit),
             io::ndjson::LiveChatError::Generic { context, message } => {
                 LiscovError::Io(IoError::InvalidFormat(format!("{}: {}", context, message)))
-            },
+            }
         }
     }
 }
@@ -234,6 +234,13 @@ pub use analytics::{ContributorInfo, HourlyRevenue, RevenueAnalytics, RevenueSum
 
 // Re-export database modules
 pub use database::{LiscovDatabase, Question, Session, ViewerProfile};
+
+// 安定性テストモジュールを公開（Phase 5.3）
+pub mod stability_tests {
+    pub mod long_running_stability_tests {
+        include!("../tests/long_running_stability_tests.rs");
+    }
+}
 
 #[cfg(test)]
 mod tests {

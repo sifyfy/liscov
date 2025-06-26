@@ -310,11 +310,13 @@ mod memory_optimization_tests {
             timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
             message_type: MessageType::Text,
             author: author.to_string(),
+            author_icon_url: None,
             channel_id: "test_channel".to_string(),
             content: content.to_string(),
             runs: Vec::new(),
             metadata: None,
             is_member: false,
+            comment_count: None,
         }
     }
 

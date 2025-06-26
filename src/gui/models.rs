@@ -6,11 +6,13 @@ pub struct GuiChatMessage {
     pub timestamp: String,
     pub message_type: MessageType,
     pub author: String,
+    pub author_icon_url: Option<String>, // 投稿者のアイコンURL
     pub channel_id: String,
     pub content: String,
     pub runs: Vec<MessageRun>, // テキストとスタンプを分離したparts
     pub metadata: Option<MessageMetadata>,
-    pub is_member: bool, // メンバーかどうかの判定フラグ
+    pub is_member: bool,            // メンバーかどうかの判定フラグ
+    pub comment_count: Option<u32>, // この配信での投稿者のコメント回数
 }
 
 /// メッセージの一部（テキストまたはスタンプ）
@@ -61,11 +63,19 @@ impl MessageType {
     }
 }
 
+/// バッジ情報
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct BadgeInfo {
+    pub tooltip: String,
+    pub image_url: Option<String>, // バッジ画像URL
+}
+
 /// メッセージメタデータ
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct MessageMetadata {
     pub amount: Option<String>,
-    pub badges: Vec<String>,
+    pub badges: Vec<String>,        // 後方互換性のため残す
+    pub badge_info: Vec<BadgeInfo>, // 新しいバッジ情報
     pub color: Option<String>,
     pub is_moderator: bool, // モデレーターかどうか
     pub is_verified: bool,  // 認証済みかどうか
@@ -111,29 +121,46 @@ impl From<crate::get_live_chat::ChatItem> for GuiChatMessage {
                     }
                 }
 
-                let (badges, is_member, is_moderator, is_verified) =
+                let (badges, badge_info, is_member, is_moderator, is_verified) =
                     extract_badge_info(&renderer.author_badges);
+
+                // アイコンURL抽出
+                let author_icon_url = renderer
+                    .author_photo
+                    .thumbnails
+                    .first()
+                    .map(|thumbnail| thumbnail.url.clone());
 
                 Self {
                     timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
                     message_type: MessageType::Text,
                     author: renderer.author_name.simple_text.clone(),
+                    author_icon_url,
                     channel_id: renderer.author_external_channel_id.clone(),
                     content: content_parts.join(""),
                     runs,
                     metadata: Some(MessageMetadata {
                         amount: None,
                         badges,
+                        badge_info,
                         color: None,
                         is_moderator,
                         is_verified,
                     }),
                     is_member,
+                    comment_count: None, // StateManagerで後から設定される
                 }
             }
             crate::get_live_chat::ChatItem::PaidMessage { renderer } => {
-                let (badges, is_member, is_moderator, is_verified) =
+                let (badges, badge_info, is_member, is_moderator, is_verified) =
                     extract_badge_info(&renderer.author_badges);
+
+                // アイコンURL抽出
+                let author_icon_url = renderer
+                    .author_photo
+                    .thumbnails
+                    .first()
+                    .map(|thumbnail| thumbnail.url.clone());
 
                 Self {
                     timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
@@ -141,6 +168,7 @@ impl From<crate::get_live_chat::ChatItem> for GuiChatMessage {
                         amount: renderer.purchase_amount_text.simple_text.clone(),
                     },
                     author: renderer.author_name.simple_text.clone(),
+                    author_icon_url,
                     channel_id: renderer.author_external_channel_id.clone(),
                     content: renderer
                         .message
@@ -157,16 +185,25 @@ impl From<crate::get_live_chat::ChatItem> for GuiChatMessage {
                     metadata: Some(MessageMetadata {
                         amount: Some(renderer.purchase_amount_text.simple_text.clone()),
                         badges,
+                        badge_info,
                         color: None,
                         is_moderator,
                         is_verified,
                     }),
                     is_member,
+                    comment_count: None, // StateManagerで後から設定される
                 }
             }
             crate::get_live_chat::ChatItem::PaidSticker { renderer } => {
-                let (badges, is_member, is_moderator, is_verified) =
+                let (badges, badge_info, is_member, is_moderator, is_verified) =
                     extract_badge_info(&renderer.author_badges);
+
+                // アイコンURL抽出
+                let author_icon_url = renderer
+                    .author_photo
+                    .thumbnails
+                    .first()
+                    .map(|thumbnail| thumbnail.url.clone());
 
                 Self {
                     timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
@@ -174,6 +211,7 @@ impl From<crate::get_live_chat::ChatItem> for GuiChatMessage {
                         amount: renderer.purchase_amount_text.simple_text.clone(),
                     },
                     author: renderer.author_name.simple_text.clone(),
+                    author_icon_url,
                     channel_id: renderer.author_external_channel_id.clone(),
                     content: format!(
                         "Super Sticker ({})",
@@ -183,43 +221,57 @@ impl From<crate::get_live_chat::ChatItem> for GuiChatMessage {
                     metadata: Some(MessageMetadata {
                         amount: Some(renderer.purchase_amount_text.simple_text.clone()),
                         badges,
+                        badge_info,
                         color: None,
                         is_moderator,
                         is_verified,
                     }),
                     is_member,
+                    comment_count: None, // StateManagerで後から設定される
                 }
             }
             crate::get_live_chat::ChatItem::MembershipItem { renderer } => {
-                let (badges, _is_member, is_moderator, is_verified) =
+                let (badges, badge_info, _is_member, is_moderator, is_verified) =
                     extract_badge_info(&renderer.author_badges);
+
+                // アイコンURL抽出
+                let author_icon_url = renderer
+                    .author_photo
+                    .thumbnails
+                    .first()
+                    .map(|thumbnail| thumbnail.url.clone());
 
                 Self {
                     timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
                     message_type: MessageType::Membership,
                     author: renderer.author_name.simple_text.clone(),
+                    author_icon_url,
                     channel_id: renderer.author_external_channel_id.clone(),
                     content: "New member!".to_string(),
                     runs: Vec::new(), // Membershipは固定テキスト
                     metadata: Some(MessageMetadata {
                         amount: None,
                         badges,
+                        badge_info,
                         color: None,
                         is_moderator,
                         is_verified,
                     }),
-                    is_member: true, // メンバーシップアイテムは常にメンバー
+                    is_member: true,     // メンバーシップアイテムは常にメンバー
+                    comment_count: None, // StateManagerで後から設定される
                 }
             }
             _ => Self {
                 timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
                 message_type: MessageType::System,
                 author: "System".to_string(),
+                author_icon_url: None, // Systemメッセージにはアイコンなし
                 channel_id: "".to_string(),
                 content: "Unknown message type".to_string(),
                 runs: Vec::new(), // Systemメッセージは固定テキスト
                 metadata: None,
                 is_member: false,
+                comment_count: None, // Systemメッセージにはカウントなし
             },
         }
     }
@@ -228,8 +280,9 @@ impl From<crate::get_live_chat::ChatItem> for GuiChatMessage {
 /// バッジ情報からメンバーシップ・モデレーター・認証情報を抽出
 fn extract_badge_info(
     author_badges: &[crate::get_live_chat::AuthorBadge],
-) -> (Vec<String>, bool, bool, bool) {
+) -> (Vec<String>, Vec<BadgeInfo>, bool, bool, bool) {
     let mut badges = Vec::new();
+    let mut badge_info = Vec::new();
     let mut is_member = false;
     let mut is_moderator = false;
     let mut is_verified = false;
@@ -239,6 +292,19 @@ fn extract_badge_info(
         let accessibility_label = &badge.renderer.accessibility.accessibility_data.label;
 
         badges.push(tooltip.clone());
+
+        // バッジ画像URLを抽出
+        let image_url = badge
+            .renderer
+            .custom_thumbnail
+            .as_ref()
+            .and_then(|image| image.thumbnails.first())
+            .map(|thumbnail| thumbnail.url.clone());
+
+        badge_info.push(BadgeInfo {
+            tooltip: tooltip.clone(),
+            image_url,
+        });
 
         // メンバーシップバッジの判定（複数パターン）
         if tooltip.contains("メンバー")
@@ -270,7 +336,7 @@ fn extract_badge_info(
         }
     }
 
-    (badges, is_member, is_moderator, is_verified)
+    (badges, badge_info, is_member, is_moderator, is_verified)
 }
 
 /// アプリケーション状態
@@ -285,14 +351,17 @@ pub struct AppState {
     pub messages: Vec<GuiChatMessage>,
     pub active_tab: ActiveTab,
 
+    /// チャット表示設定
+    pub chat_display_config: crate::gui::unified_config::ChatDisplayConfig,
+
+    /// ウィンドウ設定
+    pub window: crate::gui::config_manager::WindowConfig,
+
     // 新しい保存設定
     pub save_raw_responses: bool,
     pub raw_response_file: String,
     pub max_raw_file_size_mb: u64,
     pub enable_file_rotation: bool,
-
-    // ウィンドウ設定
-    pub window: crate::gui::config_manager::WindowConfig,
 }
 
 impl Default for AppState {
@@ -306,17 +375,25 @@ impl Default for AppState {
             request_count: 0,
             messages: Vec::new(),
             active_tab: ActiveTab::default(),
+            chat_display_config: crate::gui::unified_config::ChatDisplayConfig::default(),
+            window: crate::gui::config_manager::WindowConfig::default(),
             save_raw_responses: false,
             raw_response_file: "raw_responses.ndjson".to_string(),
             max_raw_file_size_mb: 100,
             enable_file_rotation: true,
-            window: crate::gui::config_manager::WindowConfig::default(),
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ActiveTab {
+    Chat,
+    Export,
+    Raw,
+    Revenue,
+    SignalAnalysis, // Phase 4.1: Signal分析タブ
+
+    // Phase 4.3: 追加バリアント（互換性のため）
     ChatMonitor,
     RevenueAnalytics,
     DataExport,
@@ -325,22 +402,36 @@ pub enum ActiveTab {
 
 impl Default for ActiveTab {
     fn default() -> Self {
-        Self::ChatMonitor
+        Self::Chat
     }
 }
 
 impl ActiveTab {
     pub fn to_string(&self) -> &'static str {
         match self {
-            ActiveTab::ChatMonitor => "Chat Monitor",
-            ActiveTab::RevenueAnalytics => "Revenue Analytics",
-            ActiveTab::DataExport => "Data Export",
+            ActiveTab::Chat => "Chat",
+            ActiveTab::Export => "Export",
+            ActiveTab::Raw => "Raw",
+            ActiveTab::Revenue => "Revenue",
+            ActiveTab::SignalAnalysis => "Signal Analysis",
+
+            // Phase 4.3: 追加バリアント（互換性マッピング）
+            ActiveTab::ChatMonitor => "Chat",
+            ActiveTab::RevenueAnalytics => "Revenue",
+            ActiveTab::DataExport => "Export",
             ActiveTab::Settings => "Settings",
         }
     }
 
     pub fn icon(&self) -> &'static str {
         match self {
+            ActiveTab::Chat => "💬",
+            ActiveTab::Export => "📥",
+            ActiveTab::Raw => "📄",
+            ActiveTab::Revenue => "💰",
+            ActiveTab::SignalAnalysis => "📊",
+
+            // Phase 4.3: 追加バリアント（互換性マッピング）
             ActiveTab::ChatMonitor => "💬",
             ActiveTab::RevenueAnalytics => "💰",
             ActiveTab::DataExport => "📥",
@@ -350,10 +441,17 @@ impl ActiveTab {
 
     pub fn description(&self) -> &'static str {
         match self {
+            ActiveTab::Chat => "Monitor real-time YouTube live chat messages",
+            ActiveTab::Export => "Export and save chat data in various formats",
+            ActiveTab::Raw => "Save raw responses from YouTube",
+            ActiveTab::Revenue => "Track SuperChat revenue and membership earnings",
+            ActiveTab::SignalAnalysis => "Analyze chat data for patterns and insights",
+
+            // Phase 4.3: 追加バリアント（互換性マッピング）
             ActiveTab::ChatMonitor => "Monitor real-time YouTube live chat messages",
             ActiveTab::RevenueAnalytics => "Track SuperChat revenue and membership earnings",
             ActiveTab::DataExport => "Export and save chat data in various formats",
-            ActiveTab::Settings => "Configure application settings and preferences",
+            ActiveTab::Settings => "Application settings and configuration",
         }
     }
 }

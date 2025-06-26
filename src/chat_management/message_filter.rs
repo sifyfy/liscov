@@ -465,17 +465,20 @@ mod tests {
             timestamp: "12:00:00".to_string(),
             message_type,
             author: author.to_string(),
+            author_icon_url: None,
             channel_id: "test_channel".to_string(),
             content: content.to_string(),
             runs: Vec::new(),
             metadata: amount.map(|amt| MessageMetadata {
                 amount: Some(amt.to_string()),
                 badges: vec![],
+                badge_info: Vec::new(),
                 color: None,
                 is_moderator: false,
                 is_verified: false,
             }),
             is_member: false,
+            comment_count: None,
         }
     }
 
@@ -486,17 +489,20 @@ mod tests {
             timestamp: "12:00:00".to_string(),
             message_type: MessageType::Membership,
             author: author.to_string(),
+            author_icon_url: None,
             channel_id: "test_channel".to_string(),
             content: content.to_string(),
             runs: Vec::new(),
             metadata: Some(MessageMetadata {
                 amount: None,
                 badges: vec![],
+                badge_info: Vec::new(),
                 color: None,
                 is_moderator: false,
                 is_verified: false,
             }),
             is_member: true,
+            comment_count: None,
         }
     }
 
@@ -507,17 +513,20 @@ mod tests {
             timestamp: "12:00:00".to_string(),
             message_type: MessageType::Text,
             author: author.to_string(),
+            author_icon_url: None,
             channel_id: "test_channel".to_string(),
             content: content.to_string(),
             runs: Vec::new(),
             metadata: Some(MessageMetadata {
                 amount: None,
                 badges: vec!["メンバー（1年）".to_string()],
+                badge_info: Vec::new(),
                 color: None,
                 is_moderator: false,
                 is_verified: false,
             }),
             is_member: true,
+            comment_count: None,
         }
     }
 
@@ -924,17 +933,20 @@ mod tests {
                 amount: "¥300".to_string(),
             },
             author: "User".to_string(),
+            author_icon_url: None,
             channel_id: "test".to_string(),
             content: "Thanks!".to_string(),
             runs: Vec::new(),
             metadata: Some(crate::gui::models::MessageMetadata {
                 amount: Some("¥300".to_string()),
                 badges: vec![],
+                badge_info: Vec::new(),
                 color: None,
                 is_moderator: false,
                 is_verified: false,
             }),
             is_member: false,
+            comment_count: None,
         };
 
         let msg_dollar = GuiChatMessage {
@@ -943,17 +955,20 @@ mod tests {
                 amount: "$200".to_string(),
             },
             author: "User".to_string(),
+            author_icon_url: None,
             channel_id: "test".to_string(),
             content: "Thanks!".to_string(),
             runs: Vec::new(),
             metadata: Some(crate::gui::models::MessageMetadata {
                 amount: Some("$200".to_string()),
                 badges: vec![],
+                badge_info: Vec::new(),
                 color: None,
                 is_moderator: false,
                 is_verified: false,
             }),
             is_member: false,
+            comment_count: None,
         };
 
         assert!(filter.matches(&msg_yen)); // ¥300は範囲内

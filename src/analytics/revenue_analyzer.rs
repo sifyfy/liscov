@@ -413,11 +413,13 @@ mod tests {
                 amount: "¥100".to_string(),
             },
             author: "TestUser".to_string(),
+            author_icon_url: None,
             channel_id: "test123".to_string(),
             content: "Thank you!".to_string(),
             runs: Vec::new(),
             metadata: None,
             is_member: false,
+            comment_count: None,
         };
 
         analytics.update_from_message(&super_chat_msg);
@@ -436,11 +438,13 @@ mod tests {
                 amount: "¥100".to_string(),
             },
             author: "User1".to_string(),
+            author_icon_url: None,
             channel_id: "user1".to_string(),
             content: "Thanks!".to_string(),
             runs: Vec::new(),
             metadata: None,
             is_member: false,
+            comment_count: None,
         };
 
         let msg2 = GuiChatMessage {
@@ -449,11 +453,13 @@ mod tests {
                 amount: "¥50".to_string(),
             },
             author: "User2".to_string(),
+            author_icon_url: None,
             channel_id: "user2".to_string(),
             content: "Great stream!".to_string(),
             runs: Vec::new(),
             metadata: None,
             is_member: false,
+            comment_count: None,
         };
 
         analytics.update_from_message(&msg1);
@@ -473,11 +479,13 @@ mod tests {
             timestamp: "12:00:00".to_string(),
             message_type: MessageType::Membership,
             author: "NewMember".to_string(),
+            author_icon_url: None,
             channel_id: "member123".to_string(),
             content: "New member!".to_string(),
             runs: Vec::new(),
             metadata: None,
             is_member: true,
+            comment_count: None,
         };
 
         analytics.update_from_message(&membership_msg);
@@ -495,11 +503,13 @@ mod tests {
                 amount: "¥500".to_string(),
             },
             author: "TestUser".to_string(),
+            author_icon_url: None,
             channel_id: "test123".to_string(),
             content: "Thank you!".to_string(),
             runs: Vec::new(),
             metadata: None,
             is_member: false,
+            comment_count: None,
         };
 
         analytics.update_from_message(&super_chat_msg);

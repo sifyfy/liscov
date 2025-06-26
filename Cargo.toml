@@ -17,6 +17,11 @@ name = "generate_test_data"
 path = "src/bin/generate_test_data.rs"
 doc = false
 
+[[bin]]
+name = "run_benchmarks"
+path = "src/bin/run_benchmarks.rs"
+doc = false
+
 [dependencies]
 # Dioxus 0.6.3 dependencies for migration
 dioxus = { version = "0.6.3", features = ["signals", "desktop"] }
@@ -99,6 +104,8 @@ debug-full = ["debug-tokio"]
 # UI機能
 desktop = ["dioxus/desktop"]
 web = ["dioxus/web"]
+# テスト機能
+testing = []
 
 # 開発用プロファイル
 [profile.dev]

@@ -9,6 +9,7 @@ pub mod input_section;
 pub mod main_window;
 pub mod raw_response_settings;
 pub mod revenue_dashboard;
+pub mod signal_analyzer; // Phase 4.1: Signal分析パネル
 pub mod status_panel;
 pub mod tab_navigation;
 

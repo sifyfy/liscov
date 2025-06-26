@@ -328,11 +328,13 @@ impl LiveChatHandle {
             timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
             message_type,
             author: author.to_string(),
+            author_icon_url: None, // テストメッセージにはアイコンなし
             channel_id: "test_channel".to_string(),
             content: content.to_string(),
             runs: Vec::new(), // テストメッセージは通常テキストのみ
             metadata: None,
             is_member: false,
+            comment_count: None, // テストメッセージには回数なし
         };
 
         tracing::info!(
@@ -414,12 +416,12 @@ pub fn use_live_chat() -> LiveChatHandle {
             let mut last_stopping = false;
             let mut sync_cycle_count = 0;
 
-            // 同期間隔を短縮（200ms間隔で応答性向上）
-            let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(200));
+            // 同期間隔を調整（500ms間隔に変更して負荷軽減）
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(500));
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
             tracing::info!(
-                "🔄 [UI_SYNC] Starting responsive UI sync (200ms interval) - Enhanced Debug Mode"
+                "🔄 [UI_SYNC] Starting optimized UI sync (500ms interval) - Stability Mode"
             );
 
             loop {
@@ -438,7 +440,7 @@ pub fn use_live_chat() -> LiveChatHandle {
 
                 // 10サイクルごとに詳細ログを出力（デバッグ用）
                 if sync_cycle_count % 50 == 0 {
-                    // 50 * 200ms = 10秒ごと
+                    // 50 * 500ms = 25秒ごと
                     tracing::info!(
                         "🔄 [UI_SYNC] Cycle #{}: StateManager fetch took {:?}, {} messages in buffer, {} total processed, memory usage: {} bytes",
                         sync_cycle_count,

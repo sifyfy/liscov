@@ -263,11 +263,13 @@ impl LiscovDatabase {
             timestamp: row.get("timestamp")?,
             message_type,
             author: row.get("author")?,
+            author_icon_url: None, // データベースにはアイコンURLは保存されない
             channel_id: row.get("channel_id")?,
             content: row.get("content")?,
             runs: Vec::new(),
             metadata,
             is_member: false,
+            comment_count: None, // データベースからは回数情報は取得されない
         })
     }
 
@@ -470,11 +472,13 @@ mod tests {
                 amount: "¥100".to_string(),
             },
             author: "TestUser".to_string(),
+            author_icon_url: None,
             channel_id: "test123".to_string(),
             content: "Thank you!".to_string(),
             runs: Vec::new(),
             metadata: None,
             is_member: false,
+            comment_count: None,
         };
 
         let message_id = db.save_message(&session_id, &message)?;
@@ -531,11 +535,13 @@ mod tests {
             timestamp: "12:00:00".to_string(),
             message_type: crate::gui::models::MessageType::Text,
             author: "TestUser".to_string(),
+            author_icon_url: None,
             channel_id: "test123".to_string(),
             content: "".to_string(), // 空のコンテンツ
             runs: Vec::new(),
             metadata: None,
             is_member: false,
+            comment_count: None,
         };
 
         let empty_msg_id = db.save_message(&session_id, &empty_message)?;
@@ -547,11 +553,13 @@ mod tests {
             timestamp: "12:01:00".to_string(),
             message_type: crate::gui::models::MessageType::Text,
             author: "TestUser".to_string(),
+            author_icon_url: None,
             channel_id: "test123".to_string(),
             content: long_content.clone(),
             runs: Vec::new(),
             metadata: None,
             is_member: false,
+            comment_count: None,
         };
 
         let long_msg_id = db.save_message(&session_id, &long_message)?;
@@ -564,17 +572,20 @@ mod tests {
                 amount: "¥1000".to_string(),
             },
             author: "テストユーザー🎮".to_string(),
+            author_icon_url: None,
             channel_id: "test123".to_string(),
             content: "🔥日本語メッセージ with special chars: \\n\\t\"'".to_string(),
             runs: Vec::new(),
             metadata: Some(crate::gui::models::MessageMetadata {
                 amount: Some("¥1000".to_string()),
                 badges: vec!["SuperChat".to_string()],
+                badge_info: Vec::new(),
                 color: Some("#ff0000".to_string()),
                 is_moderator: false,
                 is_verified: false,
             }),
             is_member: true,
+            comment_count: None,
         };
 
         let special_msg_id = db.save_message(&session_id, &special_message)?;
@@ -603,11 +614,13 @@ mod tests {
             timestamp: "12:00:00".to_string(),
             message_type: crate::gui::models::MessageType::Text,
             author: "TestUser".to_string(),
+            author_icon_url: None,
             channel_id: "test123".to_string(),
             content: "Test message".to_string(),
             runs: Vec::new(),
             metadata: None,
             is_member: false,
+            comment_count: None,
         };
 
         // 存在しないセッションへのメッセージ保存
@@ -665,6 +678,7 @@ mod tests {
                     crate::gui::models::MessageType::Text
                 },
                 author: format!("User{}", i),
+                author_icon_url: None,
                 channel_id: format!("channel{}", i % 100),
                 content: format!("Test message number {}", i),
                 runs: Vec::new(),
@@ -672,6 +686,7 @@ mod tests {
                     Some(crate::gui::models::MessageMetadata {
                         amount: Some(format!("¥{}", i * 10)),
                         badges: vec![format!("Badge{}", i)],
+                        badge_info: Vec::new(),
                         color: Some("#0000ff".to_string()),
                         is_moderator: false,
                         is_verified: false,
@@ -680,6 +695,7 @@ mod tests {
                     None
                 },
                 is_member: i % 20 == 0,
+                comment_count: None,
             };
 
             db.save_message(&session_id, &message)?;
@@ -735,11 +751,13 @@ mod tests {
                     timestamp: format!("12:00:{:02}", i),
                     message_type: crate::gui::models::MessageType::Text,
                     author: format!("ThreadUser{}", i),
+                    author_icon_url: None,
                     channel_id: "thread_test".to_string(),
                     content: format!("Thread message {}", i),
                     runs: Vec::new(),
                     metadata: None,
                     is_member: false,
+                    comment_count: None,
                 };
 
                 db_guard.save_message(&session_id_clone, &message).unwrap();
@@ -754,11 +772,13 @@ mod tests {
                     timestamp: format!("12:00:{:02}", i),
                     message_type: crate::gui::models::MessageType::Text,
                     author: format!("MainUser{}", i),
+                    author_icon_url: None,
                     channel_id: "main_test".to_string(),
                     content: format!("Main message {}", i),
                     runs: Vec::new(),
                     metadata: None,
                     is_member: false,
+                    comment_count: None,
                 };
 
                 db_guard.save_message(&session_id, &message)?;

@@ -1,8 +1,8 @@
 use dioxus::prelude::*;
 
 use crate::gui::{
-    components::TabContent, hooks::use_live_chat, models::ActiveTab,
-    styles::theme::get_embedded_css,
+    components::signal_analyzer::SignalAnalyzer, components::TabContent, hooks::use_live_chat,
+    models::ActiveTab, styles::theme::get_embedded_css,
 };
 
 /// 統合ヘッダー・タブナビゲーションコンポーネント
@@ -14,6 +14,7 @@ fn IntegratedHeaderTabs(active_tab: ActiveTab, on_tab_change: EventHandler<Activ
         ActiveTab::RevenueAnalytics,
         ActiveTab::DataExport,
         ActiveTab::Settings,
+        ActiveTab::SignalAnalysis,
     ];
 
     rsx! {

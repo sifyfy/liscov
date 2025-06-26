@@ -15,7 +15,7 @@ use super::traits::{ConfigError, ConfigurationManager};
 use crate::io::SaveConfig;
 
 /// ハイライト設定
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct HighlightConfig {
     /// ハイライト機能の有効/無効
     pub enabled: bool,
@@ -23,6 +23,10 @@ pub struct HighlightConfig {
     pub duration_seconds: u64,
     /// 同時ハイライト最大メッセージ数
     pub max_messages: usize,
+    /// 長時間稼働モード（負荷軽減設定）
+    pub long_term_mode: bool,
+    /// 統一処理間隔（ミリ秒）
+    pub update_interval_ms: u64,
 }
 
 impl Default for HighlightConfig {
@@ -31,6 +35,8 @@ impl Default for HighlightConfig {
             enabled: true, // デフォルトは有効
             duration_seconds: 8,
             max_messages: 20,
+            long_term_mode: false,   // デフォルトは通常モード
+            update_interval_ms: 300, // デフォルト300ms
         }
     }
 }
@@ -41,9 +47,70 @@ impl HighlightConfig {
         ((self.max_messages as f32) * 0.5).ceil() as usize
     }
 
+    /// 統一処理間隔を取得（長時間稼働モードに応じて調整）
+    pub fn get_update_interval_ms(&self) -> u64 {
+        if self.long_term_mode {
+            // 長時間稼働モードでは間隔を延長
+            self.update_interval_ms.max(500)
+        } else {
+            self.update_interval_ms
+        }
+    }
+
+    /// 長時間稼働モード用の最大ハイライト数制限
+    pub fn get_effective_max_messages(&self) -> usize {
+        if self.long_term_mode {
+            // 長時間稼働モードでは上限を制限
+            self.max_messages.min(10)
+        } else {
+            self.max_messages
+        }
+    }
+
     /// 補完チェック間隔を取得（固定値500ms）
     pub fn get_backup_check_interval_ms(&self) -> u64 {
         500
+    }
+}
+
+/// チャット表示設定
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ChatDisplayConfig {
+    /// メッセージ文字サイズ（px）
+    pub message_font_size: u8,
+    /// タイムスタンプの表示
+    pub show_timestamps: bool,
+    /// 自動スクロール有効
+    pub auto_scroll_enabled: bool,
+    /// ハイライト機能有効
+    pub highlight_enabled: bool,
+}
+
+impl Default for ChatDisplayConfig {
+    fn default() -> Self {
+        Self {
+            message_font_size: 13, // デフォルトサイズ13px
+            show_timestamps: true,
+            auto_scroll_enabled: true,
+            highlight_enabled: true,
+        }
+    }
+}
+
+impl ChatDisplayConfig {
+    /// 文字サイズの最小値
+    pub const MIN_FONT_SIZE: u8 = 8;
+    /// 文字サイズの最大値
+    pub const MAX_FONT_SIZE: u8 = 24;
+
+    /// 文字サイズを安全に設定
+    pub fn set_font_size(&mut self, size: u8) {
+        self.message_font_size = size.max(Self::MIN_FONT_SIZE).min(Self::MAX_FONT_SIZE);
+    }
+
+    /// 文字サイズを取得（CSS用文字列）
+    pub fn get_font_size_css(&self) -> String {
+        format!("{}px", self.message_font_size)
     }
 }
 

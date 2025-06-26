@@ -52,6 +52,8 @@ pub struct AppState {
     pub stats: ChatStats,
     pub continuation_token: Option<String>,
     pub current_url: Option<String>,
+    /// 投稿者ごとのコメント回数（この配信で何回目かをカウント）
+    pub author_comment_counts: std::collections::HashMap<String, u32>,
 }
 
 impl Clone for AppState {
@@ -73,6 +75,7 @@ impl Clone for AppState {
             stats: self.stats.clone(),
             continuation_token: self.continuation_token.clone(),
             current_url: self.current_url.clone(),
+            author_comment_counts: self.author_comment_counts.clone(),
         }
     }
 }
@@ -121,6 +124,7 @@ impl Default for AppState {
             stats: ChatStats::default(),
             continuation_token: None,
             current_url: None,
+            author_comment_counts: std::collections::HashMap::new(),
         }
     }
 }
@@ -253,7 +257,7 @@ impl StateManager {
         };
 
         match event {
-            AppEvent::MessageAdded(message) => {
+            AppEvent::MessageAdded(mut message) => {
                 // メッセージ追加処理の詳細ログ（デバッグ強化版）
                 let before_count = state_guard.message_manager.len();
                 let before_total = state_guard
@@ -261,10 +265,24 @@ impl StateManager {
                     .comprehensive_stats()
                     .total_processed;
 
+                // 投稿者のコメント回数を更新
+                let comment_count = {
+                    let count = state_guard
+                        .author_comment_counts
+                        .entry(message.author.clone())
+                        .or_insert(0);
+                    *count += 1;
+                    *count
+                };
+
+                // メッセージにコメント回数を設定
+                message.comment_count = Some(comment_count);
+
                 tracing::info!(
-                    "📝 [STATE_MGR] Received new message: {} - '{}' (Before: {} in buffer, {} total)",
+                    "📝 [STATE_MGR] Received new message: {} - '{}' (#{}, Before: {} in buffer, {} total)",
                     message.author,
                     message.content.chars().take(50).collect::<String>(),
+                    comment_count,
                     before_count,
                     before_total
                 );
@@ -360,6 +378,9 @@ impl StateManager {
                 tracing::info!("🗑️ Messages cleared");
                 state_guard.message_manager.clear_all();
                 state_guard.stats = ChatStats::default();
+                // コメント回数もリセット
+                state_guard.author_comment_counts.clear();
+                tracing::debug!("🔄 Author comment counts reset");
             }
 
             AppEvent::ContinuationTokenUpdated(token) => {
@@ -373,6 +394,9 @@ impl StateManager {
                 // URL変更時は継続トークンをクリア（新しい配信のため）
                 if state_guard.current_url.is_some() {
                     state_guard.continuation_token = None;
+                    // 新しい配信なのでコメント回数もリセット
+                    state_guard.author_comment_counts.clear();
+                    tracing::debug!("🔄 Author comment counts reset for new stream");
                 }
             }
 
