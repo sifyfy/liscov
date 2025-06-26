@@ -117,7 +117,7 @@ impl BatchUpdateManager {
         );
     }
 
-    /// Batch処理を実行
+    /// Batch処理を実行 - タイムアウト保護付き
     pub async fn process_batch(&mut self) -> Result<usize, String> {
         if self.processing || self.queue.is_empty() {
             return Ok(0);
@@ -129,8 +129,25 @@ impl BatchUpdateManager {
 
         tracing::info!("🚀 [BATCH] Processing batch of {} updates", batch_size);
 
-        // requestAnimationFrameベースの処理
-        let processed = self.process_with_animation_frame().await?;
+        // 100msタイムアウト保護
+        let processed = match tokio::time::timeout(
+            tokio::time::Duration::from_millis(100),
+            self.process_with_animation_frame(),
+        )
+        .await
+        {
+            Ok(result) => result?,
+            Err(_) => {
+                tracing::warn!(
+                    "⚠️ [BATCH] Processing timeout (>100ms), processed some items and stopping. Queue size: {}",
+                    self.queue.len()
+                );
+                // タイムアウト時は残りのキューをクリアしてデッドロック防止
+                let remaining = self.queue.len();
+                self.queue.clear();
+                batch_size - remaining
+            }
+        };
 
         // 統計更新
         self.stats.average_batch_size = (self.stats.average_batch_size + batch_size as f32) / 2.0;
@@ -239,17 +256,32 @@ impl BatchUpdateManager {
                     .await;
                 }
                 "highlight_update" => {
-                    // ハイライト処理のbatch化
+                    // ハイライト処理のbatch化 - 強化版（エラーハンドリング・タイムアウト付き）
                     let _ = dioxus::document::eval(r#"
                         if (!window.liscovBatchHighlightPending) {
                             window.liscovBatchHighlightPending = true;
-                            requestAnimationFrame(() => {
-                                // ハイライト処理をbatch実行
-                                const highlighted = document.querySelectorAll('.liscov-highlight-animation');
-                                highlighted.forEach(el => {
-                                    el.style.animation = 'highlight-pulse 2s ease-in-out';
-                                });
+                            
+                            // タイムアウト保護（100ms以内に完了）
+                            const timeout = setTimeout(() => {
+                                console.warn('🚨 [BATCH] Highlight update timeout, resetting flag');
                                 window.liscovBatchHighlightPending = false;
+                            }, 100);
+                            
+                            requestAnimationFrame(() => {
+                                try {
+                                    // ハイライト処理をbatch実行
+                                    const highlighted = document.querySelectorAll('.liscov-highlight-animation');
+                                    if (highlighted.length > 0) {
+                                        highlighted.forEach(el => {
+                                            el.style.animation = 'highlight-pulse 2s ease-in-out';
+                                        });
+                                    }
+                                } catch (error) {
+                                    console.error('🚨 [BATCH] Highlight update error:', error);
+                                } finally {
+                                    clearTimeout(timeout);
+                                    window.liscovBatchHighlightPending = false;
+                                }
                             });
                         }
                     "#).await;
