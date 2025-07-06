@@ -3,6 +3,7 @@
 
 // 一時的に無効化 - 依存関係問題を解決後に段階的に有効化
 pub mod chat_display;
+pub mod chat_header;
 pub mod export_panel;
 pub mod filter_panel;
 pub mod input_section;
@@ -15,6 +16,7 @@ pub mod tab_navigation;
 
 // Re-exports for convenience - 新アーキテクチャのみ
 pub use chat_display::ChatDisplay;
+pub use chat_header::ChatHeader;
 pub use export_panel::ExportPanel;
 pub use filter_panel::FilterPanel;
 pub use input_section::{CompactInputSection, InputSection};

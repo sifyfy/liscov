@@ -1,5 +1,5 @@
 use crate::chat_management::MessageFilter;
-use crate::gui::components::filter_panel::FilterPanel;
+use crate::gui::components::{ChatHeader, FilterPanel};
 use crate::gui::dom_controller::utils::create_chat_controller; // Phase 3.2
 use crate::gui::hooks::use_live_chat::LiveChatHandle;
 use crate::gui::performance_monitor::{record_performance_event, PerformanceEventType}; // Phase 5.2
@@ -20,6 +20,15 @@ use crate::gui::closure_optimizer::{
 
 use dioxus::prelude::*;
 
+/// アーカイブ検索の種類
+#[derive(Debug, Clone, PartialEq)]
+pub enum ArchiveSearchType {
+    /// 内容で検索
+    Content,
+    /// 投稿者で検索
+    Author,
+}
+
 /// メッセージ表示エリア
 ///
 /// Phase 4.1実装: Signal最適化統合
@@ -33,10 +42,10 @@ pub fn ChatDisplay(
 ) -> Element {
     // AppStateからチャット表示設定を取得
     let app_state = use_context::<Signal<crate::gui::models::AppState>>();
-    let chat_config = app_state.read().chat_display_config.clone();
+    let _chat_config = app_state.read().chat_display_config.clone();
 
     // MessageStream初期化（新規追加）
-    let mut message_stream = use_signal(|| {
+    let message_stream = use_signal(|| {
         let config = MessageStreamConfig {
             display_limit: DisplayLimit::Fixed(100), // デフォルト100件制限
             max_display_count: 100,
@@ -55,8 +64,15 @@ pub fn ChatDisplay(
     let user_has_scrolled = use_signal(|| false);
     let mut show_filter_panel = use_signal(|| false);
     let highlighted_message_ids = use_signal(|| std::collections::HashSet::<String>::new());
-    let last_message_count = use_signal(|| 0usize);
-    let mut last_effect_time = use_signal(|| std::time::Instant::now()); // デバウンス用
+    let mut last_message_count = use_signal(|| 0usize);
+    let _last_effect_time = use_signal(|| std::time::Instant::now()); // 未使用
+
+    // MessageStream連携：アーカイブ検索機能の追加
+    let show_archive_search = use_signal(|| false);
+    let mut search_query = use_signal(|| String::new());
+    let mut search_type = use_signal(|| ArchiveSearchType::Content);
+    let search_results = use_signal(|| Vec::<GuiChatMessage>::new());
+    let is_searching = use_signal(|| false);
 
     // 最適化版：統合設定Signalで4回のAppStateアクセスを1回に削減
     let chat_config = use_memo(move || app_state.read().chat_display_config.clone());
@@ -67,11 +83,12 @@ pub fn ChatDisplay(
     let highlight_enabled = use_memo(move || chat_config.read().highlight_enabled);
     let message_font_size = use_memo(move || chat_config.read().message_font_size);
 
-    // MessageStreamへのメッセージ同期（新規追加）
+    // MessageStreamへのメッセージ同期（ハイライト統合版）
     use_effect({
         let live_chat_handle = live_chat_handle.clone();
         let mut message_stream = message_stream.clone();
         let mut stream_stats = stream_stats.clone();
+        let mut highlighted_message_ids = highlighted_message_ids.clone();
 
         move || {
             let current_messages = live_chat_handle.messages.read();
@@ -94,25 +111,69 @@ pub fn ChatDisplay(
                     // 統計更新
                     stream_stats.set(message_stream.read().stats());
 
+                    // 新着メッセージハイライト処理（修正版）
+                    if highlight_enabled() {
+                        let display_messages = message_stream.read().display_messages();
+                        let new_count = new_messages.len();
+
+                        if !display_messages.is_empty() && new_count > 0 {
+                            let max_highlight = new_count.min(5).min(display_messages.len());
+                            let start_index = display_messages.len().saturating_sub(max_highlight);
+
+                            let new_ids: std::collections::HashSet<String> = display_messages
+                                .iter()
+                                .skip(start_index)
+                                .take(max_highlight)
+                                .map(|message| {
+                                    format!(
+                                        "{}:{}:{}",
+                                        message.timestamp,
+                                        message.author,
+                                        message.content.chars().take(20).collect::<String>()
+                                    )
+                                })
+                                .collect();
+
+                            tracing::info!(
+                                "🎯 [HIGHLIGHT] Applied to {} messages (new_count: {}, total: {}, display: {}), IDs: {:?}",
+                                new_ids.len(),
+                                new_count,
+                                current_count,
+                                display_messages.len(),
+                                new_ids.iter().collect::<Vec<_>>()
+                            );
+
+                            highlighted_message_ids.set(new_ids);
+                            record_signal_update("chat_highlighted_message_ids");
+
+                            // ハイライト自動クリア
+                            let mut highlighted_message_ids_clear = highlighted_message_ids.clone();
+                            spawn(async move {
+                                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                                highlighted_message_ids_clear.set(std::collections::HashSet::new());
+                                tracing::debug!("🎯 [HIGHLIGHT] Auto-cleared after 5s");
+                            });
+                        }
+                    }
+
                     tracing::debug!(
-                        "📦 [MessageStream] Added {} messages, display: {}, archived: {}",
+                        "📦 [MessageStream] Added {} messages, display: {}, archived: {}, total: {}",
                         new_messages.len(),
                         message_stream.read().display_count(),
-                        message_stream.read().archived_count()
+                        message_stream.read().archived_count(),
+                        current_count
                     );
                 }
             }
         }
     });
 
-    // **メッセージフィルタリング処理**（MessageStreamベース）
+    // **メッセージフィルタリング処理**（MessageStreamベース・ちらつき修正版）
     let filtered_messages = use_memo({
         let message_stream = message_stream.clone();
         let global_filter = global_filter.clone();
-        let stream_stats = stream_stats.clone(); // 統計変更を依存関係に追加
         move || {
-            // stream_statsを読み取って依存関係を強制的に登録
-            let _stats = stream_stats.read();
+            // stream_statsの依存関係を削除してちらつきを防止
             let display_messages = message_stream.read().display_messages();
             let filter = global_filter.read();
             filter.filter_messages(&display_messages)
@@ -147,6 +208,57 @@ pub fn ChatDisplay(
                     );
                 }
             });
+        }
+    });
+
+    // アーカイブ検索機能
+    use_effect({
+        let message_stream = message_stream.clone();
+        let search_query = search_query.clone();
+        let search_type = search_type.clone();
+        let mut search_results = search_results.clone();
+        let mut is_searching = is_searching.clone();
+
+        move || {
+            let query = search_query.read().clone();
+            let search_type_val = search_type.read().clone();
+
+            if query.len() >= 2 && message_stream.read().config().archive_search_enabled {
+                is_searching.set(true);
+
+                spawn(async move {
+                    // 検索実行（非同期）
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+                    let results: Vec<GuiChatMessage> = {
+                        let stream = message_stream.read();
+                        match search_type_val {
+                            ArchiveSearchType::Content => stream
+                                .search_by_content(&query)
+                                .into_iter()
+                                .cloned()
+                                .collect(),
+                            ArchiveSearchType::Author => stream
+                                .search_by_author(&query)
+                                .into_iter()
+                                .cloned()
+                                .collect(),
+                        }
+                    };
+
+                    search_results.set(results.clone());
+                    is_searching.set(false);
+
+                    tracing::info!(
+                        "🔍 [ARCHIVE SEARCH] Found {} results for '{query}' (type: {:?})",
+                        results.len(),
+                        search_type_val
+                    );
+                });
+            } else if query.is_empty() {
+                search_results.set(Vec::new());
+                is_searching.set(false);
+            }
         }
     });
 
@@ -227,98 +339,26 @@ pub fn ChatDisplay(
         }
     });
 
-    // 修正版：正しい依存関係設定でuse_effectを実行
+    // 修正版：スクロール処理のみ（ハイライトは同期処理に統合済み）
     use_effect(move || {
-        // 重要：filtered_messagesを最初に読み取って依存関係を登録
         let current_count = filtered_messages.read().len();
-
-        let current_time = std::time::Instant::now();
-        let last_time = *last_effect_time.read();
-
-        // デバウンス処理: 50ms以内の連続実行を制限
-        if current_time.duration_since(last_time).as_millis() < 50 {
-            tracing::debug!("⏭️ [DEBOUNCE] Skipping use_effect execution (too frequent)");
-            return;
-        }
-
-        last_effect_time.set(current_time);
-
         let previous_count = *last_message_count.read();
 
         if current_count > previous_count {
             let new_count = current_count - previous_count;
+            last_message_count.set(current_count);
 
-            // Phase 4.3: 最適化されたSignal更新
-            let optimized_handler =
-                get_optimized_signal_handler("chat_last_message_count", "ChatDisplay");
-            {
-                let mut last_count = last_message_count.clone();
-                last_count.set(current_count);
-                optimized_handler(); // 統合処理を実行
-            }
-
-            tracing::info!(
-                "📨 [ChatDisplay] New messages: {} (+{})",
+            tracing::debug!(
+                "📨 [ChatDisplay] Display messages: {} (+{})",
                 current_count,
                 new_count
             );
 
-            // ハイライト処理（軽量版） - DOM操作なし、Signalのみ
-            if highlight_enabled() && new_count > 0 {
-                let messages = filtered_messages.read();
-                let max_highlight = new_count.min(5); // 最大5個
-                let start_index = messages.len() - max_highlight;
-
-                let new_ids: std::collections::HashSet<String> = messages
-                    .iter()
-                    .skip(start_index)
-                    .take(max_highlight)
-                    .map(|message| {
-                        format!(
-                            "{}:{}:{}",
-                            message.timestamp,
-                            message.author,
-                            message.content.chars().take(20).collect::<String>()
-                        )
-                    })
-                    .collect();
-
-                {
-                    let mut highlight_ids = highlighted_message_ids.clone();
-                    highlight_ids.set(new_ids.clone());
-
-                    // 軽量版: Signal更新のみ、DOM操作なし
-                    record_signal_update("chat_highlighted_message_ids");
-
-                    tracing::debug!(
-                        "🎯 [HIGHLIGHT] Lightweight highlight applied to {} messages",
-                        new_ids.len()
-                    );
-                }
-
-                // 軽量版: シンプルなタイマーによる自動クリア
-                {
-                    let highlighted_message_ids_clear = highlighted_message_ids.clone();
-                    spawn(async move {
-                        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-
-                        // Signal操作のみ、タイマーサービス不使用
-                        let mut highlight_clear = highlighted_message_ids_clear.clone();
-                        highlight_clear.set(std::collections::HashSet::new());
-
-                        tracing::debug!("🎯 [HIGHLIGHT] Lightweight clear after 5s");
-                    });
-                }
-            }
-
             // Phase 4.2: 新着メッセージ時のBatch処理スクロール
             if auto_scroll_enabled() && !*user_has_scrolled.read() {
-                // Phase 4.2: スクロールをBatch処理キューに追加
                 queue_batch_update("chat_scroll", BatchUpdateType::DomUpdate);
 
-                // バックグラウンドでBatch処理を実行
                 spawn(async move {
-                    // Phase 5.2: Batch処理パフォーマンス監視
                     record_performance_event(PerformanceEventType::BatchProcessing, "ChatDisplay");
 
                     let processed = process_batch_updates().await;
@@ -329,10 +369,8 @@ pub fn ChatDisplay(
                         );
                     }
 
-                    // Phase 5.2: DOM操作パフォーマンス監視
                     record_performance_event(PerformanceEventType::DomOperation, "ChatDisplay");
 
-                    // フォールバック：Batch処理が失敗した場合の直接スクロール
                     let controller = create_chat_controller("liscov-message-list");
                     if let Err(e) = controller.scroll_to_bottom(false).await {
                         tracing::debug!("📜 [DOM] Fallback scroll skipped: {}", e);
@@ -391,42 +429,14 @@ pub fn ChatDisplay(
                 overflow: hidden;
             ",
 
-            // チャットヘッダー
+            // チャットヘッダー（コンポーネント化）
+            ChatHeader {
+                live_chat_handle: live_chat_handle.clone(),
+                is_connecting: is_connecting,
+            }
+
+            // チャット制御
             div {
-                class: CssClasses::CHAT_HEADER,
-                style: "
-                    flex-shrink: 0;
-                    padding: 4px 8px !important;
-                    background: #f7fafc;
-                    border-bottom: 1px solid #e2e8f0;
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                ",
-
-                // 接続状態表示
-                div {
-                    class: get_connection_status_class(*live_chat_handle.is_connected.read(), is_connecting),
-                    style: "
-                        font-weight: 600;
-                        padding: 4px 10px !important;
-                        border-radius: 16px;
-                        font-size: 12px !important;
-                        display: flex;
-                        align-items: center;
-                        gap: 6px;
-                    ",
-                    match *live_chat_handle.state.read() {
-                        crate::gui::services::ServiceState::Connected => "🟢 接続中",
-                        crate::gui::services::ServiceState::Connecting => "🟡 接続中...",
-                        crate::gui::services::ServiceState::Paused => "⏸️ 一時停止",
-                        crate::gui::services::ServiceState::Idle => "⚪ 待機中",
-                        crate::gui::services::ServiceState::Error(_) => "🔴 エラー",
-                    }
-                }
-
-                // チャット制御
-                div {
                     class: CssClasses::CHAT_CONTROLS,
                     style: "
                         display: flex;
@@ -465,6 +475,33 @@ pub fn ChatDisplay(
                             "🔍 フィルター ({global_filter.read().active_filter_count()})"
                         } else {
                             "🔍 フィルター"
+                        }
+                    }
+
+                    // アーカイブ検索ボタン（MessageStream機能）
+                    if message_stream.read().config().archive_search_enabled && message_stream.read().archived_count() > 0 {
+                        button {
+                            class: if *show_archive_search.read() {
+                                "px-2 py-1 bg-purple-600 text-white rounded text-xs"
+                            } else {
+                                "px-2 py-1 bg-purple-500 hover:bg-purple-600 text-white rounded text-xs"
+                            },
+                            style: "font-size: 11px; min-height: 26px;",
+                            onclick: {
+                                let mut show_archive_search = show_archive_search.clone();
+                                move |_| {
+                                    let current_value = *show_archive_search.read();
+                                    show_archive_search.set(!current_value);
+
+                                    record_signal_update("chat_show_archive_search");
+                                    queue_batch_update("chat_show_archive_search", BatchUpdateType::Normal);
+                                }
+                            },
+                            if search_results.read().is_empty() {
+                                "📚 アーカイブ検索"
+                            } else {
+                                "📚 検索 ({search_results.read().len()})"
+                            }
                         }
                     }
 
@@ -604,119 +641,152 @@ pub fn ChatDisplay(
                         "ハイライト"
                     }
 
-                    // 表示件数設定（MessageStream）
+                    // MessageStream設定グループ
                     div {
                         style: "
                             display: flex;
                             align-items: center;
-                            gap: 4px !important;
+                            gap: 8px !important;
                             font-size: 12px !important;
                             color: #4a5568;
+                            background: #f0f9ff;
+                            padding: 4px 8px;
+                            border-radius: 4px;
+                            border: 1px solid #bae6fd;
                         ",
-                        span { "表示:" }
-                        select {
+
+                        // 表示件数設定
+                        div {
                             style: "
-                                font-size: 11px;
-                                padding: 2px 4px;
-                                border: 1px solid #cbd5e0;
-                                border-radius: 3px;
-                                background: white;
+                                display: flex;
+                                align-items: center;
+                                gap: 4px !important;
                             ",
-                            value: {
-                                match message_stream.read().config().display_limit {
-                                    DisplayLimit::Fixed(count) => count.to_string(),
-                                    DisplayLimit::Unlimited => "999999".to_string(),
-                                    _ => "100".to_string(),
-                                }
-                            },
-                            onchange: {
-                                let mut message_stream = message_stream.clone();
-                                let mut stream_stats = stream_stats.clone();
+                            span { "表示:" }
+                            select {
+                                style: "
+                                    font-size: 11px;
+                                    padding: 2px 4px;
+                                    border: 1px solid #cbd5e0;
+                                    border-radius: 3px;
+                                    background: white;
+                                ",
+                                value: {
+                                    match message_stream.read().config().display_limit {
+                                        DisplayLimit::Fixed(count) => count.to_string(),
+                                        DisplayLimit::Unlimited => "999999".to_string(),
+                                        _ => "100".to_string(),
+                                    }
+                                },
+                                onchange: {
+                                    let mut message_stream = message_stream.clone();
+                                    let mut stream_stats = stream_stats.clone();
 
-                                move |event: dioxus::events::FormEvent| {
-                                    if let Ok(count) = event.value().parse::<usize>() {
-                                        tracing::info!(
-                                            "🔧 [MessageStream] Changing display limit from {} to {} messages",
-                                            message_stream.read().display_count(),
-                                            count
-                                        );
+                                    move |event: dioxus::events::FormEvent| {
+                                        if let Ok(count) = event.value().parse::<usize>() {
+                                            tracing::info!(
+                                                "🔧 [MessageStream] Changing display limit from {} to {} messages",
+                                                message_stream.read().display_count(),
+                                                count
+                                            );
 
-                                        let new_config = MessageStreamConfig {
-                                            display_limit: if count >= 999999 {
+                                            let mut current_config = message_stream.read().config().clone();
+                                            current_config.display_limit = if count >= 999999 {
                                                 DisplayLimit::Unlimited
                                             } else {
                                                 DisplayLimit::Fixed(count)
-                                            },
-                                            max_display_count: count,
-                                            enable_virtual_scroll: true,
-                                            target_fps: 60,
-                                            enable_archive: true,
-                                            archive_search_enabled: true,
-                                        };
+                                            };
+                                            current_config.max_display_count = count;
 
-                                        // MessageStreamの設定更新
-                                        message_stream.with_mut(|stream| {
-                                            stream.update_config(new_config);
-                                        });
+                                            // MessageStreamの設定更新
+                                            message_stream.with_mut(|stream| {
+                                                stream.update_config(current_config);
+                                            });
 
-                                        // 統計強制更新（Signal変更を確実に検出させる）
-                                        let new_stats = message_stream.read().stats();
-                                        stream_stats.set(new_stats);
+                                            // 統計強制更新（Signal変更を確実に検出させる）
+                                            let new_stats = message_stream.read().stats();
+                                            stream_stats.set(new_stats);
 
-                                        tracing::info!(
-                                            "✅ [MessageStream] Display limit updated: display={}, archived={}, reduction={}%",
-                                            message_stream.read().display_count(),
-                                            message_stream.read().archived_count(),
-                                            message_stream.read().stats().effective_reduction_percent
-                                        );
+                                            tracing::info!(
+                                                "✅ [MessageStream] Display limit updated: display={}, archived={}, reduction={}%",
+                                                message_stream.read().display_count(),
+                                                message_stream.read().archived_count(),
+                                                message_stream.read().stats().effective_reduction_percent
+                                            );
 
-                                        // Signal更新記録
-                                        record_signal_update("message_stream_config");
-                                        queue_batch_update("message_stream_display_limit", BatchUpdateType::HighPriority);
-                                    } else {
-                                        tracing::warn!("🚨 [MessageStream] Invalid display count: {}", event.value());
+                                            // Signal更新記録
+                                            record_signal_update("message_stream_config");
+                                            queue_batch_update("message_stream_display_limit", BatchUpdateType::HighPriority);
+                                        } else {
+                                            tracing::warn!("🚨 [MessageStream] Invalid display count: {}", event.value());
+                                        }
                                     }
-                                }
-                            },
-                            {
-                                let current_limit = match message_stream.read().config().display_limit {
-                                    DisplayLimit::Fixed(count) => count,
-                                    DisplayLimit::Unlimited => 999999,
-                                    _ => 100,
-                                };
-
-                                rsx! {
-                                    option {
-                                        value: "50",
-                                        selected: current_limit == 50,
-                                        "50件"
-                                    }
-                                    option {
-                                        value: "100",
-                                        selected: current_limit == 100,
-                                        "100件"
-                                    }
-                                    option {
-                                        value: "200",
-                                        selected: current_limit == 200,
-                                        "200件"
-                                    }
-                                    option {
-                                        value: "500",
-                                        selected: current_limit == 500,
-                                        "500件"
-                                    }
-                                    option {
-                                        value: "999999",
-                                        selected: current_limit >= 999999,
-                                        "無制限"
-                                    }
-                                }
+                                },
+                            
+                            option {
+                                value: "50",
+                                selected: {
+                                    let current_limit = match message_stream.read().config().display_limit {
+                                        DisplayLimit::Fixed(count) => count,
+                                        DisplayLimit::Unlimited => 999999,
+                                        _ => 100,
+                                    };
+                                    current_limit == 50
+                                },
+                                "50件"
+                            }
+                            option {
+                                value: "100",
+                                selected: {
+                                    let current_limit = match message_stream.read().config().display_limit {
+                                        DisplayLimit::Fixed(count) => count,
+                                        DisplayLimit::Unlimited => 999999,
+                                        _ => 100,
+                                    };
+                                    current_limit == 100
+                                },
+                                "100件"
+                            }
+                            option {
+                                value: "200",
+                                selected: {
+                                    let current_limit = match message_stream.read().config().display_limit {
+                                        DisplayLimit::Fixed(count) => count,
+                                        DisplayLimit::Unlimited => 999999,
+                                        _ => 100,
+                                    };
+                                    current_limit == 200
+                                },
+                                "200件"
+                            }
+                            option {
+                                value: "500",
+                                selected: {
+                                    let current_limit = match message_stream.read().config().display_limit {
+                                        DisplayLimit::Fixed(count) => count,
+                                        DisplayLimit::Unlimited => 999999,
+                                        _ => 100,
+                                    };
+                                    current_limit == 500
+                                },
+                                "500件"
+                            }
+                            option {
+                                value: "999999",
+                                selected: {
+                                    let current_limit = match message_stream.read().config().display_limit {
+                                        DisplayLimit::Fixed(count) => count,
+                                        DisplayLimit::Unlimited => 999999,
+                                        _ => 100,
+                                    };
+                                    current_limit >= 999999
+                                },
+                                "無制限"
+                            }
                             }
                         }
                     }
                 }
-            }
 
             // フィルターパネル
             if *show_filter_panel.read() {
@@ -724,7 +794,236 @@ pub fn ChatDisplay(
                     filter: global_filter,
                     on_filter_change: move |new_filter: MessageFilter| {
                         global_filter.set(new_filter);
-                    },
+                    }
+                }
+            }
+
+            // アーカイブ検索パネル（MessageStream連携）
+            if *show_archive_search.read() {
+                div {
+                    style: "
+                        background: #f8f4ff;
+                        border: 1px solid #d8b4fe;
+                        border-radius: 8px;
+                        padding: 16px;
+                        margin: 8px;
+                        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                    ",
+
+                    h3 {
+                        style: "
+                            color: #6b46c1;
+                            margin: 0 0 12px 0;
+                            font-size: 1.1rem;
+                            display: flex;
+                            align-items: center;
+                            gap: 8px;
+                        ",
+                        "📚 アーカイブ検索"
+                        span {
+                            style: "
+                                font-size: 0.8rem;
+                                color: #9ca3af;
+                                font-weight: normal;
+                            ",
+                            "({message_stream.read().archived_count()}件)"
+                        }
+                    }
+
+                    div {
+                        style: "
+                            display: flex;
+                            flex-direction: column;
+                            gap: 12px;
+                        ",
+
+                        // 検索設定
+                        div {
+                            style: "
+                                display: flex;
+                                gap: 12px;
+                                align-items: center;
+                                flex-wrap: wrap;
+                            ",
+
+                            // 検索タイプ選択
+                            div {
+                                style: "display: flex; gap: 8px; align-items: center;",
+
+                                label {
+                                    style: "
+                                        display: flex;
+                                        align-items: center;
+                                        gap: 4px;
+                                        cursor: pointer;
+                                        font-size: 0.9rem;
+                                    ",
+                                    input {
+                                        r#type: "radio",
+                                        name: "search_type",
+                                        checked: matches!(search_type(), ArchiveSearchType::Content),
+                                        onchange: move |_| search_type.set(ArchiveSearchType::Content),
+                                    }
+                                    "内容検索"
+                                }
+
+                                label {
+                                    style: "
+                                        display: flex;
+                                        align-items: center;
+                                        gap: 4px;
+                                        cursor: pointer;
+                                        font-size: 0.9rem;
+                                    ",
+                                    input {
+                                        r#type: "radio",
+                                        name: "search_type",
+                                        checked: matches!(search_type(), ArchiveSearchType::Author),
+                                        onchange: move |_| search_type.set(ArchiveSearchType::Author),
+                                    }
+                                    "投稿者検索"
+                                }
+                            }
+
+                            // 検索入力
+                            div {
+                                style: "flex: 1; min-width: 200px;",
+
+                                input {
+                                    r#type: "text",
+                                    placeholder: match search_type() {
+                                        ArchiveSearchType::Content => "メッセージ内容を検索...",
+                                        ArchiveSearchType::Author => "投稿者名を検索...",
+                                    },
+                                    value: search_query(),
+                                    style: "
+                                        width: 100%;
+                                        padding: 8px 12px;
+                                        border: 1px solid #d1d5db;
+                                        border-radius: 6px;
+                                        font-size: 0.9rem;
+                                        background: white;
+                                    ",
+                                    oninput: move |event| {
+                                        search_query.set(event.value());
+                                    },
+                                }
+                            }
+
+                            // 検索状態表示
+                            if *is_searching.read() {
+                                span {
+                                    style: "
+                                        color: #6b46c1;
+                                        font-size: 0.8rem;
+                                        display: flex;
+                                        align-items: center;
+                                        gap: 4px;
+                                    ",
+                                    "🔍 検索中..."
+                                }
+                            }
+                        }
+
+                        // 検索結果表示
+                        if !search_results.read().is_empty() {
+                            div {
+                                style: "
+                                    border-top: 1px solid #e5e7eb;
+                                    padding-top: 12px;
+                                ",
+
+                                div {
+                                    style: "
+                                        font-size: 0.9rem;
+                                        color: #6b46c1;
+                                        margin-bottom: 8px;
+                                        font-weight: 600;
+                                    ",
+                                    "検索結果: {search_results.read().len()}件"
+                                }
+
+                                div {
+                                    style: "
+                                        max-height: 200px;
+                                        overflow-y: auto;
+                                        border: 1px solid #e5e7eb;
+                                        border-radius: 4px;
+                                        background: white;
+                                    ",
+
+                                    for (index, result) in search_results.read().iter().enumerate() {
+                                        div {
+                                            key: "{result.timestamp}-{result.author}-{index}",
+                                            style: "
+                                                padding: 8px 12px;
+                                                border-bottom: 1px solid #f3f4f6;
+                                                cursor: pointer;
+                                                transition: background-color 0.2s;
+                                            ",
+                                            onmouseenter: move |_| {
+                                                // ホバー効果（簡易実装）
+                                            },
+                                            onclick: {
+                                                let result = result.clone();
+                                                move |_| {
+                                                    tracing::info!(
+                                                        "🔍 [ARCHIVE SEARCH] Selected result: {} - {}",
+                                                        result.author,
+                                                        result.content.chars().take(50).collect::<String>()
+                                                    );
+                                                    // 将来的に、選択したメッセージを表示エリアに復帰する機能を実装
+                                                }
+                                            },
+
+                                            // 検索結果の表示
+                                            div {
+                                                style: "
+                                                    display: flex;
+                                                    align-items: center;
+                                                    gap: 8px;
+                                                    margin-bottom: 4px;
+                                                    font-size: 0.8rem;
+                                                ",
+
+                                                span {
+                                                    style: "color: #6b7280; font-size: 0.75rem;",
+                                                    "{result.timestamp}"
+                                                }
+
+                                                span {
+                                                    style: "color: #374151; font-weight: 600;",
+                                                    "{result.author}"
+                                                }
+                                            }
+
+                                            div {
+                                                style: "
+                                                    color: #1f2937;
+                                                    font-size: 0.85rem;
+                                                    line-height: 1.3;
+                                                    word-wrap: break-word;
+                                                ",
+                                                "{result.content}"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else if !search_query.read().is_empty() && !*is_searching.read() {
+                            div {
+                                style: "
+                                    text-align: center;
+                                    color: #6b7280;
+                                    font-size: 0.9rem;
+                                    padding: 16px;
+                                    border: 1px dashed #d1d5db;
+                                    border-radius: 4px;
+                                ",
+                                "検索結果が見つかりませんでした"
+                            }
+                        }
+                    }
                 }
             }
 

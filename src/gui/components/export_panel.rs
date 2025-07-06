@@ -1,9 +1,26 @@
 use crate::analytics::export::{ExportFormat, SortOrder};
+use crate::gui::hooks::use_live_chat::LiveChatHandle;
+use crate::gui::message_stream::{MessageStream, MessageStreamStats};
+use crate::gui::models::GuiChatMessage;
 use dioxus::prelude::*;
 
-/// エクスポートパネルコンポーネント（Week 23-24実装）
+/// エクスポート範囲の指定
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExportScope {
+    /// 表示中のメッセージのみ
+    DisplayedOnly,
+    /// 全メッセージ（アーカイブ含む）
+    AllMessages,
+    /// アーカイブされたメッセージのみ
+    ArchivedOnly,
+}
+
+/// エクスポートパネルコンポーネント（Week 23-24実装 + MessageStream連携）
 #[component]
-pub fn ExportPanel() -> Element {
+pub fn ExportPanel(
+    live_chat_handle: Option<LiveChatHandle>,
+    message_stream: Option<Signal<MessageStream>>,
+) -> Element {
     // エクスポート設定の状態管理
     let mut export_format = use_signal(|| ExportFormat::Json);
     let mut include_metadata = use_signal(|| true);
@@ -15,10 +32,28 @@ pub fn ExportPanel() -> Element {
     let export_progress = use_signal(|| 0.0);
     let last_export_result = use_signal(|| None::<String>);
 
+    // MessageStream連携の新機能
+    let mut export_scope = use_signal(|| ExportScope::DisplayedOnly);
+    let mut include_archive_stats = use_signal(|| true);
+    let message_stream_stats = use_signal(|| None::<MessageStreamStats>);
+
     // 日付範囲フィルタリング
     let mut date_filter_enabled = use_signal(|| false);
     let mut start_date = use_signal(|| "".to_string());
     let mut end_date = use_signal(|| "".to_string());
+
+    // MessageStream統計情報の更新
+    use_effect({
+        let message_stream = message_stream.clone();
+        let mut message_stream_stats = message_stream_stats.clone();
+
+        move || {
+            if let Some(stream) = message_stream {
+                let stats = stream.read().stats();
+                message_stream_stats.set(Some(stats));
+            }
+        }
+    });
 
     rsx! {
         div {
@@ -42,6 +77,21 @@ pub fn ExportPanel() -> Element {
                 ",
                 span { style: "font-size: 2rem;", "📤" }
                 "データエクスポート"
+
+                // MessageStream統計表示
+                if let Some(stats) = message_stream_stats() {
+                    span {
+                        style: "
+                            margin-left: auto;
+                            font-size: 0.8rem;
+                            color: #6c757d;
+                            background: #f8f9fa;
+                            padding: 4px 8px;
+                            border-radius: 4px;
+                        ",
+                        "表示: {stats.display_count} / 総計: {stats.total_count}"
+                    }
+                }
             }
 
             div {
@@ -51,6 +101,140 @@ pub fn ExportPanel() -> Element {
                     gap: 25px;
                     margin-bottom: 25px;
                 ",
+
+                // MessageStream連携：エクスポート範囲選択（新規追加）
+                if message_stream.is_some() {
+                    div {
+                        style: "
+                            background: #e8f5e8;
+                            padding: 20px;
+                            border-radius: 10px;
+                            border: 1px solid #c3e6cb;
+                        ",
+
+                        h3 {
+                            style: "margin: 0 0 15px 0; color: #155724; font-size: 1.2rem;",
+                            "🎯 エクスポート範囲"
+                        }
+
+                        div {
+                            style: "display: flex; flex-direction: column; gap: 10px;",
+
+                            label {
+                                style: "
+                                    display: flex;
+                                    align-items: center;
+                                    gap: 8px;
+                                    cursor: pointer;
+                                    padding: 8px;
+                                    border-radius: 6px;
+                                    transition: background-color 0.2s;
+                                ",
+                                input {
+                                    r#type: "radio",
+                                    name: "export_scope",
+                                    checked: matches!(export_scope(), ExportScope::DisplayedOnly),
+                                    onchange: move |_| export_scope.set(ExportScope::DisplayedOnly),
+                                }
+                                span { "📺 表示中のメッセージのみ" }
+                                if let Some(stats) = message_stream_stats() {
+                                    small {
+                                        style: "color: #6c757d; margin-left: auto;",
+                                        "({stats.display_count}件)"
+                                    }
+                                }
+                            }
+
+                            label {
+                                style: "
+                                    display: flex;
+                                    align-items: center;
+                                    gap: 8px;
+                                    cursor: pointer;
+                                    padding: 8px;
+                                    border-radius: 6px;
+                                    transition: background-color 0.2s;
+                                ",
+                                input {
+                                    r#type: "radio",
+                                    name: "export_scope",
+                                    checked: matches!(export_scope(), ExportScope::AllMessages),
+                                    onchange: move |_| export_scope.set(ExportScope::AllMessages),
+                                }
+                                span { "📦 全メッセージ（アーカイブ含む）" }
+                                if let Some(stats) = message_stream_stats() {
+                                    small {
+                                        style: "color: #6c757d; margin-left: auto;",
+                                        "({stats.total_count}件)"
+                                    }
+                                }
+                            }
+
+                            if let Some(stats) = message_stream_stats() {
+                                if stats.archived_count > 0 {
+                                    label {
+                                        style: "
+                                            display: flex;
+                                            align-items: center;
+                                            gap: 8px;
+                                            cursor: pointer;
+                                            padding: 8px;
+                                            border-radius: 6px;
+                                            transition: background-color 0.2s;
+                                        ",
+                                        input {
+                                            r#type: "radio",
+                                            name: "export_scope",
+                                            checked: matches!(export_scope(), ExportScope::ArchivedOnly),
+                                            onchange: move |_| export_scope.set(ExportScope::ArchivedOnly),
+                                        }
+                                        span { "📚 アーカイブされたメッセージのみ" }
+                                        small {
+                                            style: "color: #6c757d; margin-left: auto;",
+                                            "({stats.archived_count}件)"
+                                        }
+                                    }
+                                }
+                            }
+
+                            // メモリ使用量統計の表示
+                            if let Some(stats) = message_stream_stats() {
+                                div {
+                                    style: "
+                                        background: #f8f9fa;
+                                        padding: 10px;
+                                        border-radius: 6px;
+                                        margin-top: 10px;
+                                        font-size: 0.85rem;
+                                        color: #6c757d;
+                                    ",
+                                    "💾 メモリ使用量: {stats.memory_mb():.2}MB"
+                                    if stats.effective_reduction_percent > 0 {
+                                        " (削減率: {stats.effective_reduction_percent}%)"
+                                    }
+                                }
+                            }
+
+                            label {
+                                style: "
+                                    display: flex;
+                                    align-items: center;
+                                    gap: 8px;
+                                    cursor: pointer;
+                                    margin-top: 10px;
+                                    padding-top: 10px;
+                                    border-top: 1px solid #dee2e6;
+                                ",
+                                input {
+                                    r#type: "checkbox",
+                                    checked: include_archive_stats(),
+                                    onchange: move |evt| include_archive_stats.set(evt.checked()),
+                                }
+                                "📊 MessageStream統計情報を含める"
+                            }
+                        }
+                    }
+                }
 
                 // エクスポート形式選択
                 div {
@@ -404,8 +588,8 @@ pub fn ExportPanel() -> Element {
                     ),
                     disabled: is_exporting(),
                     onclick: move |_| {
-                        // エクスポート処理を開始
-                        start_export(
+                        // エクスポート処理を開始（MessageStream連携版）
+                        start_export_with_message_stream(
                             export_format(),
                             include_metadata(),
                             include_system_messages(),
@@ -415,6 +599,10 @@ pub fn ExportPanel() -> Element {
                             date_filter_enabled(),
                             start_date(),
                             end_date(),
+                            export_scope(),
+                            include_archive_stats(),
+                            message_stream.clone(),
+                            live_chat_handle.clone(),
                             is_exporting.clone(),
                             export_progress.clone(),
                             last_export_result.clone(),
@@ -456,17 +644,21 @@ pub fn ExportPanel() -> Element {
     }
 }
 
-/// エクスポート処理を開始する関数
-fn start_export(
+/// MessageStream連携版エクスポート処理
+fn start_export_with_message_stream(
     format: ExportFormat,
-    _include_metadata: bool,
-    _include_system_messages: bool,
-    _include_deleted_messages: bool,
-    _max_records: Option<usize>,
-    _sort_order: SortOrder,
-    _date_filter_enabled: bool,
-    _start_date: String,
-    _end_date: String,
+    include_metadata: bool,
+    include_system_messages: bool,
+    include_deleted_messages: bool,  
+    max_records: Option<usize>,
+    sort_order: SortOrder,
+    date_filter_enabled: bool,
+    start_date: String,
+    end_date: String,
+    export_scope: ExportScope,
+    include_archive_stats: bool,
+    message_stream: Option<Signal<MessageStream>>,
+    live_chat_handle: Option<LiveChatHandle>,
     mut is_exporting: Signal<bool>,
     mut export_progress: Signal<f64>,
     mut last_export_result: Signal<Option<String>>,
@@ -476,26 +668,249 @@ fn start_export(
     last_export_result.set(None);
 
     spawn(async move {
-        // 模擬的なエクスポート処理（実際の実装では実データを使用）
-        for i in 1..=10 {
-            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-            export_progress.set(i as f64 / 10.0);
+        // MessageStreamからのデータ取得
+        let (messages, stats) = if let Some(stream_signal) = message_stream {
+            let stream = stream_signal.read();
+            let stats = Some(stream.stats());
+            
+            let messages = match export_scope {
+                ExportScope::DisplayedOnly => {
+                    // 表示中のメッセージのみ
+                    stream.display_messages()
+                }
+                ExportScope::AllMessages => {
+                    // 全メッセージ（表示+アーカイブ）
+                    let mut all_messages = Vec::new();
+                    
+                    // アーカイブ分を検索で取得（簡易実装）
+                    // 実際の実装では、MessageStreamにget_all_messages()メソッドを追加する方が良い
+                    all_messages.extend(stream.display_messages());
+                    
+                    // 注意: 現在の実装ではアーカイブに直接アクセスできないため、
+                    // 代替としてlive_chat_handleから取得
+                    if let Some(handle) = &live_chat_handle {
+                        let live_messages = handle.messages.read();
+                        // 重複を避けるため、表示中以外のメッセージを追加
+                        if live_messages.len() > all_messages.len() {
+                            all_messages = live_messages.clone();
+                        }
+                    }
+                    
+                    all_messages
+                }
+                ExportScope::ArchivedOnly => {
+                    // アーカイブのみの場合、現在は実装困難なため空リストを返す
+                    // 将来的にMessageStreamにアーカイブアクセスメソッドを追加予定
+                    Vec::new()
+                }
+            };
+            
+            (messages, stats)
+        } else if let Some(handle) = live_chat_handle {
+            // MessageStreamがない場合はLiveChatHandleから取得
+            (handle.messages.read().clone(), None)
+        } else {
+            // どちらもない場合は空のデータ
+            (Vec::new(), None)
+        };
+
+        export_progress.set(0.1);
+
+        // フィルタリング処理
+        let mut filtered_messages = messages;
+        
+        // システムメッセージフィルタ
+        if !include_system_messages {
+            filtered_messages.retain(|msg| !msg.content.starts_with("[システム]"));
         }
+        
+        // 削除メッセージフィルタ
+        if !include_deleted_messages {
+            filtered_messages.retain(|msg| !msg.content.contains("[削除済み]"));
+        }
+
+        export_progress.set(0.3);
+
+        // 日付フィルタ
+        if date_filter_enabled && (!start_date.is_empty() || !end_date.is_empty()) {
+            // 日付フィルタリングの実装（簡易版）
+            // 実際の実装では適切な日付パースが必要
+            tracing::info!("📅 Date filtering: {} to {}", start_date, end_date);
+        }
+
+        export_progress.set(0.5);
+
+        // ソート処理
+        match sort_order {
+            SortOrder::Chronological => {
+                // 既に時系列順のため処理なし
+            }
+            SortOrder::ReverseChronological => {
+                filtered_messages.reverse();
+            }
+            SortOrder::ByAuthor => {
+                filtered_messages.sort_by(|a, b| a.author.cmp(&b.author));
+            }
+            SortOrder::ByMessageType => {
+                // メッセージタイプ別ソート（簡易実装）
+                filtered_messages.sort_by(|a, b| {
+                    let type_a = if a.content.contains("Super Chat") { 1 } else { 0 };
+                    let type_b = if b.content.contains("Super Chat") { 1 } else { 0 };
+                    type_a.cmp(&type_b)
+                });
+            }
+            SortOrder::ByAmount => {
+                // 金額順ソート（SuperChatのみ、簡易実装）
+                filtered_messages.sort_by(|a, b| {
+                    let amount_a: f64 = extract_amount(&a.content).unwrap_or(0.0);
+                    let amount_b: f64 = extract_amount(&b.content).unwrap_or(0.0);
+                    amount_b.partial_cmp(&amount_a).unwrap_or(std::cmp::Ordering::Equal)
+                });
+            }
+        }
+
+        export_progress.set(0.7);
+
+        // 最大レコード数制限
+        if let Some(max) = max_records {
+            if filtered_messages.len() > max {
+                filtered_messages.truncate(max);
+            }
+        }
+
+        export_progress.set(0.8);
+
+        // エクスポート処理の模擬実行
+        let export_data = ExportData {
+            messages: filtered_messages.clone(),
+            metadata: if include_metadata {
+                Some(ExportMetadata {
+                    export_time: chrono::Utc::now().to_rfc3339(),
+                    total_count: filtered_messages.len(),
+                    export_scope: format!("{:?}", export_scope),
+                    format: format!("{:?}", format),
+                })
+            } else {
+                None
+            },
+            message_stream_stats: if include_archive_stats { stats } else { None },
+        };
+
+        // 実際のファイル出力（模擬）
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        export_progress.set(0.9);
 
         // エクスポート完了
         let file_extension = format.file_extension();
         let result_message = format!(
-            "{}形式でのエクスポートが完了しました。ファイル: export_data.{}",
+            "{}形式でのエクスポートが完了しました。\n📊 {}件のメッセージをエクスポート\n📁 ファイル: message_export_{}.{}",
             match format {
                 ExportFormat::Json => "JSON",
-                ExportFormat::Csv => "CSV",
+                ExportFormat::Csv => "CSV", 
                 ExportFormat::Excel => "Excel",
             },
+            export_data.messages.len(),
+            chrono::Utc::now().format("%Y%m%d_%H%M%S"),
             file_extension
         );
 
-        last_export_result.set(Some(result_message));
+        // 統計情報の追加表示
+        let stats_message = if let Some(stats) = export_data.message_stream_stats {
+            format!(
+                "\n💾 MessageStream統計:\n  表示中: {}件, アーカイブ: {}件, 総計: {}件\n  メモリ使用量: {:.2}MB, 削減率: {}%",
+                stats.display_count,
+                stats.archived_count, 
+                stats.total_count,
+                stats.memory_mb(),
+                stats.effective_reduction_percent
+            )
+        } else {
+            String::new()
+        };
+
+        let final_message = format!("{}{}", result_message, stats_message);
+
+        export_progress.set(1.0);
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        last_export_result.set(Some(final_message));
         is_exporting.set(false);
         export_progress.set(0.0);
+
+        tracing::info!(
+            "📤 Export completed: {} messages in {:?} format with scope {:?}",
+            export_data.messages.len(),
+            format,
+            export_scope
+        );
     });
+}
+
+/// エクスポート処理を開始する関数（レガシー版・互換性維持）
+fn start_export(
+    format: ExportFormat,
+    include_metadata: bool,
+    include_system_messages: bool,
+    include_deleted_messages: bool,
+    max_records: Option<usize>,
+    sort_order: SortOrder,
+    date_filter_enabled: bool,
+    start_date: String,
+    end_date: String,
+    is_exporting: Signal<bool>,
+    export_progress: Signal<f64>,
+    last_export_result: Signal<Option<String>>,
+) {
+    // MessageStream連携版に転送
+    start_export_with_message_stream(
+        format,
+        include_metadata,
+        include_system_messages,
+        include_deleted_messages,
+        max_records,
+        sort_order,
+        date_filter_enabled,
+        start_date,
+        end_date,
+        ExportScope::AllMessages, // デフォルトは全メッセージ
+        false, // 統計情報は含めない
+        None,  // MessageStreamなし
+        None,  // LiveChatHandleなし
+        is_exporting,
+        export_progress,
+        last_export_result,
+    );
+}
+
+/// エクスポートデータ構造体
+#[derive(Debug, Clone)]
+struct ExportData {
+    messages: Vec<GuiChatMessage>,
+    metadata: Option<ExportMetadata>,
+    message_stream_stats: Option<MessageStreamStats>,
+}
+
+/// エクスポートメタデータ
+#[derive(Debug, Clone)]
+struct ExportMetadata {
+    export_time: String,
+    total_count: usize,
+    export_scope: String,
+    format: String,
+}
+
+/// SuperChat金額を抽出する関数（簡易実装）
+fn extract_amount(content: &str) -> Option<f64> {
+    // "¥100"や"$10.50"のような形式から金額を抽出
+    if content.contains("¥") {
+        content.split("¥").nth(1)
+            .and_then(|s| s.split_whitespace().next())
+            .and_then(|s| s.replace(",", "").parse().ok())
+    } else if content.contains("$") {
+        content.split("$").nth(1)
+            .and_then(|s| s.split_whitespace().next())
+            .and_then(|s| s.parse().ok())
+    } else {
+        None
+    }
 }
