@@ -62,6 +62,10 @@ pub struct MessageStream {
     display_window: VecDeque<GuiChatMessage>,
     /// アーカイブされたメッセージ
     archive: Vec<GuiChatMessage>,
+    /// 🚀 IDベース更新システム: メッセージID → インデックスマッピング
+    message_id_map: HashMap<String, usize>,
+    /// 🚀 メッセージIDの順序リスト（効率的な順序管理）
+    message_id_order: VecDeque<String>,
     /// 設定
     config: MessageStreamConfig,
     /// 総メッセージ数（削除されたものを含む）
@@ -87,6 +91,8 @@ impl MessageStream {
         Self {
             display_window: VecDeque::with_capacity(capacity),
             archive: Vec::new(),
+            message_id_map: HashMap::new(),              // 🚀 IDマッピング初期化
+            message_id_order: VecDeque::new(),           // 🚀 ID順序リスト初期化
             config,
             total_count: 0,
             archived_count: 0,
@@ -111,7 +117,21 @@ impl MessageStream {
 
     /// メッセージを追加
     pub fn push_message(&mut self, message: GuiChatMessage) {
+        // 🚀 IDベース更新システム: ユニークIDを生成
+        let message_id = self.generate_message_id(&message);
+        
+        // 重複チェック（O(1)）
+        if self.message_id_map.contains_key(&message_id) {
+            // 既存メッセージの場合は更新をスキップ
+            return;
+        }
+
         self.total_count += 1;
+        let index = self.display_window.len();
+
+        // 🚀 IDマッピングを更新（O(1)アクセス用）
+        self.message_id_map.insert(message_id.clone(), index);
+        self.message_id_order.push_back(message_id);
 
         // 表示ウィンドウに追加
         self.display_window.push_back(message);
@@ -123,6 +143,19 @@ impl MessageStream {
         if self.last_cleanup.elapsed().as_secs() > 60 {
             self.cleanup();
         }
+    }
+
+    /// 🚀 メッセージのユニークIDを生成
+    fn generate_message_id(&self, message: &GuiChatMessage) -> String {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        
+        let mut hasher = DefaultHasher::new();
+        message.timestamp.hash(&mut hasher);
+        message.author.hash(&mut hasher);
+        message.content.hash(&mut hasher);
+        
+        format!("msg_{:x}", hasher.finish())
     }
 
     /// 複数メッセージをバッチ追加

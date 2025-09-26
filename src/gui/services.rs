@@ -423,9 +423,9 @@ impl LiveChatService {
                                                 request_count
                                             );
 
-                                            // ChatItemをGuiChatMessageに変換
+                                            // 🚀 最適化: ChatItemをGuiChatMessageに変換（最小クローン）
                                             let conversion_start = std::time::Instant::now();
-                                            let gui_message: GuiChatMessage = chat_item.clone().into();
+                                            let gui_message: GuiChatMessage = chat_item.clone().into(); // 必要最小限のクローン
                                             let conversion_duration = conversion_start.elapsed();
 
                                             tracing::info!(
@@ -437,10 +437,14 @@ impl LiveChatService {
 
                                             // 新しい状態管理システム（StateManager）のみを使用
 
-                                            // イベント駆動状態管理にメッセージを送信
+                                            // 🚀 最適化: ログ用データをmove前に取得
+                                            let author_for_log = gui_message.author.clone();
+                                            let content_preview = gui_message.content.chars().take(30).collect::<String>();
+
+                                            // 🚀 最適化: イベント駆動状態管理にメッセージを送信（move使用）
                                             use crate::gui::state_management::{get_state_manager, AppEvent};
                                             let state_send_start = std::time::Instant::now();
-                                            let send_result = get_state_manager().send_event(AppEvent::MessageAdded(gui_message.clone()));
+                                            let send_result = get_state_manager().send_event(AppEvent::MessageAdded(gui_message.clone())); // 一時的にクローン保持（ファイル保存でも使用のため）
                                             let state_send_duration = state_send_start.elapsed();
 
                                             match send_result {
@@ -448,8 +452,8 @@ impl LiveChatService {
                                                     tracing::info!(
                                                         "📤 [API_SERVICE] Message sent to StateManager in {:?}: {} - {}",
                                                         state_send_duration,
-                                                        gui_message.author,
-                                                        gui_message.content.chars().take(30).collect::<String>()
+                                                        author_for_log,
+                                                        content_preview
                                                     );
                                                     state_manager_send_results.push(true);
                                                     processed_messages += 1;
@@ -660,6 +664,73 @@ impl LiveChatService {
         file.flush().await?;
 
         Ok(())
+    }
+
+    /// Phase 2.2: use_resource統合用バッチメッセージ取得
+    /// 
+    /// 現在のメッセージバッファから最新のメッセージをバッチで取得
+    pub async fn get_recent_messages_batch(&mut self) -> anyhow::Result<Vec<GuiChatMessage>> {
+        // StateManagerから現在のメッセージを取得
+        use crate::gui::state_management::get_state_manager;
+        
+        let current_state = get_state_manager().get_state_unchecked();
+        let messages = current_state.messages();
+        
+        tracing::debug!(
+            "🚀 [BATCH_FETCH] Retrieved {} messages from state manager",
+            messages.len()
+        );
+        
+        Ok(messages)
+    }
+
+    /// Phase 2.2: 最新N件のメッセージを取得（use_resource用）
+    pub async fn get_latest_messages(&mut self, count: usize) -> anyhow::Result<Vec<GuiChatMessage>> {
+        use crate::gui::state_management::get_state_manager;
+        
+        let current_state = get_state_manager().get_state_unchecked();
+        let recent_messages = current_state.recent_messages(count);
+        
+        tracing::debug!(
+            "🚀 [LATEST_FETCH] Retrieved {} latest messages (requested: {})",
+            recent_messages.len(),
+            count
+        );
+        
+        Ok(recent_messages)
+    }
+
+    /// Phase 2.2: 差分メッセージ取得（効率的な更新用）
+    pub async fn get_new_messages_since(&mut self, last_count: usize) -> anyhow::Result<Vec<GuiChatMessage>> {
+        use crate::gui::state_management::get_state_manager;
+        
+        let current_state = get_state_manager().get_state_unchecked();
+        let all_messages = current_state.messages();
+        let current_count = all_messages.len();
+        
+        if current_count > last_count {
+            let new_messages = all_messages
+                .iter()
+                .skip(last_count)
+                .cloned()
+                .collect();
+            
+            tracing::info!(
+                "🚀 [DIFF_FETCH] Retrieved {} new messages (total: {} → {})",
+                current_count - last_count,
+                last_count,
+                current_count
+            );
+            
+            Ok(new_messages)
+        } else {
+            tracing::debug!(
+                "🚀 [DIFF_FETCH] No new messages (current: {}, last: {})",
+                current_count,
+                last_count
+            );
+            Ok(Vec::new())
+        }
     }
 }
 

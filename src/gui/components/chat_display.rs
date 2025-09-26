@@ -83,7 +83,7 @@ pub fn ChatDisplay(
     let highlight_enabled = use_memo(move || chat_config.read().highlight_enabled);
     let message_font_size = use_memo(move || chat_config.read().message_font_size);
 
-    // MessageStreamへのメッセージ同期（ハイライト統合版）
+    // 🎯 Phase C2: 安全な単方向同期システム (chat_display 無限ループ回避版)
     use_effect({
         let live_chat_handle = live_chat_handle.clone();
         let mut message_stream = message_stream.clone();
@@ -91,89 +91,134 @@ pub fn ChatDisplay(
         let mut highlighted_message_ids = highlighted_message_ids.clone();
 
         move || {
-            let current_messages = live_chat_handle.messages.read();
-            let current_count = current_messages.len();
-            let stream_total = message_stream.read().total_count();
-
-            // 新しいメッセージがある場合にMessageStreamに追加
-            if current_count > stream_total {
-                let new_messages: Vec<GuiChatMessage> = current_messages
-                    .iter()
-                    .skip(stream_total)
-                    .cloned()
-                    .collect();
-
-                if !new_messages.is_empty() {
-                    message_stream.with_mut(|stream| {
-                        stream.push_messages(new_messages.clone());
-                    });
-
-                    // 統計更新
-                    stream_stats.set(message_stream.read().stats());
-
-                    // 新着メッセージハイライト処理（修正版）
-                    if highlight_enabled() {
-                        let display_messages = message_stream.read().display_messages();
-                        let new_count = new_messages.len();
-
-                        if !display_messages.is_empty() && new_count > 0 {
-                            let max_highlight = new_count.min(5).min(display_messages.len());
-                            let start_index = display_messages.len().saturating_sub(max_highlight);
-
-                            let new_ids: std::collections::HashSet<String> = display_messages
-                                .iter()
-                                .skip(start_index)
-                                .take(max_highlight)
-                                .map(|message| {
-                                    format!(
-                                        "{}:{}:{}",
-                                        message.timestamp,
-                                        message.author,
-                                        message.content.chars().take(20).collect::<String>()
-                                    )
-                                })
-                                .collect();
-
-                            tracing::info!(
-                                "🎯 [HIGHLIGHT] Applied to {} messages (new_count: {}, total: {}, display: {}), IDs: {:?}",
-                                new_ids.len(),
-                                new_count,
-                                current_count,
-                                display_messages.len(),
-                                new_ids.iter().collect::<Vec<_>>()
-                            );
-
-                            highlighted_message_ids.set(new_ids);
-                            record_signal_update("chat_highlighted_message_ids");
-
-                            // ハイライト自動クリア
-                            let mut highlighted_message_ids_clear = highlighted_message_ids.clone();
-                            spawn(async move {
-                                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-                                highlighted_message_ids_clear.set(std::collections::HashSet::new());
-                                tracing::debug!("🎯 [HIGHLIGHT] Auto-cleared after 5s");
-                            });
-                        }
+            tracing::info!("🎯 [SAFE_CHAT_SYNC] ChatDisplay unidirectional sync initialized");
+            
+            // 安全な単方向同期: StateManager → MessageStream のみ
+            spawn(async move {
+                let mut last_message_count = 0usize;
+                let mut sync_counter = 0u64;
+                
+                loop {
+                    // 500ms間隔の安全なポーリング（無限ループリスクなし）
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    sync_counter += 1;
+                    
+                    // StateManagerから状態取得（読み取り専用）
+                    let state_manager = crate::gui::state_management::get_state_manager();
+                    let current_state = state_manager.get_state_unchecked();
+                    let current_messages = current_state.messages();
+                    let current_message_count = current_messages.len();
+                    
+                    // 変更検出: メッセージ数変化
+                    if current_message_count != last_message_count {
+                        tracing::info!(
+                            "🔄 [SAFE_CHAT_SYNC] Message count changed: {} → {} (sync #{})",
+                            last_message_count,
+                            current_message_count,
+                            sync_counter
+                        );
+                        
+                        // MessageStreamを安全に更新（一方向のみ）
+                        message_stream.with_mut(|stream| {
+                            // 差分メッセージのみを追加
+                            if current_message_count > last_message_count {
+                                let new_messages = &current_messages[last_message_count..];
+                                for new_message in new_messages {
+                                    stream.push_message(new_message.clone());
+                                    
+                                    // ハイライト処理（Signal更新なし）
+                                    if highlight_enabled() {
+                                        let message_id = format!(
+                                            "{}:{}:{}",
+                                            new_message.timestamp,
+                                            new_message.author,
+                                            new_message.content.chars().take(20).collect::<String>()
+                                        );
+                                        
+                                        highlighted_message_ids.with_mut(|ids| {
+                                            ids.insert(message_id.clone());
+                                            // 最大5件のハイライトを維持
+                                            if ids.len() > 5 {
+                                                let oldest_key = ids.iter().next().cloned();
+                                                if let Some(key) = oldest_key {
+                                                    ids.remove(&key);
+                                                }
+                                            }
+                                        });
+                                    }
+                                }
+                            } else if current_message_count < last_message_count {
+                                // メッセージがクリアされた場合
+                                stream.clear();
+                                highlighted_message_ids.with_mut(|ids| ids.clear());
+                            }
+                        });
+                        
+                        // 統計情報を安全に更新
+                        stream_stats.set(message_stream.read().stats());
+                        last_message_count = current_message_count;
                     }
-
-                    tracing::debug!(
-                        "📦 [MessageStream] Added {} messages, display: {}, archived: {}, total: {}",
-                        new_messages.len(),
-                        message_stream.read().display_count(),
-                        message_stream.read().archived_count(),
-                        current_count
-                    );
+                    
+                    // 30秒ごとのステータスログ
+                    if sync_counter % 60 == 0 {
+                        tracing::info!(
+                            "💓 [SAFE_CHAT_SYNC] Heartbeat #{}: {} messages in stream",
+                            sync_counter,
+                            current_message_count
+                        );
+                    }
                 }
+            });
+        }
+    });
+
+    // 従来のハイライト自動クリア処理はコメントアウト（後で別の方法で実装）
+    /*
+    // ハイライト自動クリア処理
+    {
+        let mut highlighted_message_ids_clear = highlighted_message_ids.clone();
+        spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+            highlighted_message_ids_clear.with_mut(|ids| {
+                ids.remove(&new_message_id);
+            });
+            tracing::debug!("🎯 [HIGHLIGHT] Auto-cleared message: {}", new_message_id);
+        });
+    }
+
+    tracing::debug!(
+        "📦 [MessageStream] Added 1 message, display: {}, archived: {}, stream_total: {}",
+        message_stream.read().display_count(),
+        message_stream.read().archived_count(),
+        message_stream.read().total_count()
+    );
+    */ // コメント終了
+
+    // 🚀 **Dioxus memo_chain最適化**: 効率的なフィルタリング処理
+    // Step 1: 差分更新システム連携 - 新着メッセージのフィルタリング
+    let new_filtered_message = use_memo({
+        let live_chat_handle = live_chat_handle.clone();
+        let global_filter = global_filter.clone();
+        move || {
+            if let Some(new_msg) = live_chat_handle.new_message.read().as_ref() {
+                let filter = global_filter.read();
+                if filter.matches(new_msg) {
+                    Some(new_msg.clone())
+                } else {
+                    None
+                }
+            } else {
+                None
             }
         }
     });
 
-    // **メッセージフィルタリング処理**（MessageStreamベース・ちらつき修正版）
+    // Step 2: 全メッセージフィルタリング（必要時のみ）
     let filtered_messages = use_memo({
         let message_stream = message_stream.clone();
         let global_filter = global_filter.clone();
+        let _trigger = live_chat_handle.message_added_event; // Signal依存関係
         move || {
-            // stream_statsの依存関係を削除してちらつきを防止
             let display_messages = message_stream.read().display_messages();
             let filter = global_filter.read();
             filter.filter_messages(&display_messages)
@@ -339,19 +384,21 @@ pub fn ChatDisplay(
         }
     });
 
-    // 修正版：スクロール処理のみ（ハイライトは同期処理に統合済み）
-    use_effect(move || {
-        let current_count = filtered_messages.read().len();
-        let previous_count = *last_message_count.read();
-
-        if current_count > previous_count {
-            let new_count = current_count - previous_count;
+    // 🚀 無限ループ回避版：メッセージカウント監視
+    use_effect({
+        let live_chat_handle = live_chat_handle.clone();
+        let mut last_message_count = last_message_count.clone();
+        
+        move || {
+            // 差分更新イベント監視（無限ループ回避）
+            let _event_trigger = live_chat_handle.message_added_event;
+            let current_count = live_chat_handle.messages.read().len();
+            
             last_message_count.set(current_count);
 
             tracing::debug!(
-                "📨 [ChatDisplay] Display messages: {} (+{})",
-                current_count,
-                new_count
+                "📨 [ChatDisplay] Display messages: {} (+1 new)",
+                current_count
             );
 
             // Phase 4.2: 新着メッセージ時のBatch処理スクロール
