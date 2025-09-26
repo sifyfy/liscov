@@ -3,7 +3,16 @@
 //! Phase 4で実装したSignal最適化・Batch処理機能の単体テストと統合テスト
 
 use liscov::gui::signal_optimizer::*;
-use std::time::Duration;
+use std::sync::{Mutex, OnceLock};
+
+fn optimizer_test_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+fn reset_optimizer_state_for_tests() {
+    reset_signal_optimizer_state();
+}
 
 /// Phase 4.1: Signal最適化システムテスト
 #[cfg(test)]
@@ -221,17 +230,29 @@ mod signal_optimization_tests {
 
     #[test]
     fn test_global_signal_tracking() {
+        let _lock = optimizer_test_lock().lock().unwrap();
+        reset_optimizer_state_for_tests();
         // グローバル関数のテスト
         register_signal("global_test", SignalType::FilteredMessage, "GlobalTest");
         record_signal_update("global_test");
         record_signal_update("global_test");
 
         let report = generate_signal_analysis_report();
-        assert!(report.contains("global_test"));
+        assert!(report.contains("Total Signals"));
+
+        {
+            let graph = get_signal_graph();
+            let graph = graph.lock().expect("lock signal graph");
+            assert_eq!(graph.get_stats().total_signals, 1);
+            assert!(graph.contains_signal("global_test"));
+        }
 
         let recommendations = get_optimization_recommendations();
-        // グローバル状態に応じた推奨事項が生成される
-        assert!(recommendations.len() >= 0); // エラーがないことを確認
+        assert!(recommendations
+            .iter()
+            .all(|rec| rec.expected_improvement >= 0.0));
+
+        reset_optimizer_state_for_tests();
     }
 }
 
@@ -331,21 +352,22 @@ mod batch_processing_tests {
         assert_eq!(stats.dom_update_count, 1);
     }
 
-    #[async_test]
-    async fn test_global_batch_manager() {
+    #[test]
+    fn test_global_batch_manager() {
+        let _lock = optimizer_test_lock().lock().unwrap();
+        reset_optimizer_state_for_tests();
         // グローバルBatch管理のテスト
         queue_batch_update("global_test1", BatchUpdateType::Normal);
         queue_batch_update("global_test2", BatchUpdateType::HighPriority);
 
-        let processed = process_batch_updates().await;
-        assert!(processed >= 0); // エラーがないことを確認
+        let processed = tokio::runtime::Runtime::new()
+            .expect("create runtime")
+            .block_on(async { process_batch_updates().await });
+        let stats = get_batch_stats().expect("batch stats should exist");
+        assert!(stats.total_batched >= 2);
+        assert_eq!(processed as u64, stats.total_batched);
 
-        let stats = get_batch_stats();
-        assert!(stats.is_some());
-
-        if let Some(stats) = stats {
-            assert!(stats.total_batched >= 2);
-        }
+        reset_optimizer_state_for_tests();
     }
 
     #[test]
@@ -558,8 +580,10 @@ mod integration_tests {
     use super::*;
     use tokio::test as async_test;
 
-    #[async_test]
-    async fn test_signal_and_batch_integration() {
+    #[test]
+    fn test_signal_and_batch_integration() {
+        let _lock = optimizer_test_lock().lock().unwrap();
+        reset_optimizer_state_for_tests();
         // Signal最適化とBatch処理の統合テスト
 
         // Signalを登録
@@ -584,18 +608,24 @@ mod integration_tests {
 
         // 両システムの動作確認
         let signal_report = generate_signal_analysis_report();
-        let batch_processed = process_batch_updates().await;
-        let batch_stats = get_batch_stats();
+        let batch_processed = tokio::runtime::Runtime::new()
+            .expect("create runtime")
+            .block_on(async { process_batch_updates().await });
+        let batch_stats = get_batch_stats().expect("batch stats should exist");
 
         // 結果検証
-        assert!(signal_report.contains("integration_test_1"));
-        assert!(signal_report.contains("integration_test_2"));
-        assert!(batch_processed >= 0);
-        assert!(batch_stats.is_some());
-
-        if let Some(stats) = batch_stats {
-            assert!(stats.total_batched >= 2);
+        assert!(signal_report.contains("Total Signals"));
+        {
+            let graph = get_signal_graph();
+            let graph = graph.lock().expect("lock signal graph");
+            assert_eq!(graph.get_stats().total_signals, 2);
+            assert!(graph.contains_signal("integration_test_1"));
+            assert!(graph.contains_signal("integration_test_2"));
         }
+        assert!(batch_stats.total_batched >= 2);
+        assert_eq!(batch_processed as u64, batch_stats.total_batched);
+
+        reset_optimizer_state_for_tests();
     }
 
     #[test]

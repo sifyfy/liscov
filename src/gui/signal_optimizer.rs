@@ -58,20 +58,33 @@ pub struct BatchStats {
     pub last_batch_time: Option<Instant>,
 }
 
+impl Default for BatchStats {
+    fn default() -> Self {
+        Self {
+            total_batched: 0,
+            high_priority_count: 0,
+            dom_update_count: 0,
+            average_batch_size: 0.0,
+            last_batch_time: None,
+        }
+    }
+}
+
 impl BatchUpdateManager {
     /// 新しいBatch更新管理を作成
     pub fn new() -> Self {
         Self {
             queue: VecDeque::new(),
             processing: false,
-            stats: BatchStats {
-                total_batched: 0,
-                high_priority_count: 0,
-                dom_update_count: 0,
-                average_batch_size: 0.0,
-                last_batch_time: None,
-            },
+            stats: BatchStats::default(),
         }
+    }
+
+    /// グローバルテスト用に状態を初期化
+    pub fn reset(&mut self) {
+        self.queue.clear();
+        self.processing = false;
+        self.stats = BatchStats::default();
     }
 
     /// 更新をキューに追加
@@ -387,6 +400,22 @@ pub fn get_batch_stats() -> Option<BatchStats> {
 }
 
 /// Signalの種類
+/// テストや開発用にグローバル状態をリセット
+pub fn reset_signal_optimizer_state() {
+    if let Some(graph) = GLOBAL_SIGNAL_GRAPH.get() {
+        if let Ok(mut graph_guard) = graph.lock() {
+            graph_guard.clear();
+        }
+    }
+
+    if let Some(manager) = GLOBAL_BATCH_MANAGER.get() {
+        if let Ok(mut manager_guard) = manager.lock() {
+            manager_guard.reset();
+        }
+    }
+}
+
+/// Signalの種類
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SignalType {
     // チャット表示関連
@@ -466,20 +495,36 @@ pub struct GraphStats {
     pub memory_usage: usize,
     pub last_analyzed: Instant,
 }
+impl Default for GraphStats {
+    fn default() -> Self {
+        Self {
+            total_signals: 0,
+            duplicate_signals: 0,
+            unused_signals: 0,
+            memory_usage: 0,
+            last_analyzed: Instant::now(),
+        }
+    }
+}
 
 impl SignalDependencyGraph {
     /// 新しい依存関係グラフを作成
     pub fn new() -> Self {
         Self {
             signals: HashMap::new(),
-            stats: GraphStats {
-                total_signals: 0,
-                duplicate_signals: 0,
-                unused_signals: 0,
-                memory_usage: 0,
-                last_analyzed: Instant::now(),
-            },
+            stats: GraphStats::default(),
         }
+    }
+
+    /// グラフをリセットして統計情報を初期状態に戻す
+    pub fn clear(&mut self) {
+        self.signals.clear();
+        self.stats = GraphStats::default();
+    }
+
+    /// 指定したSignalが登録済みか確認
+    pub fn contains_signal(&self, id: &str) -> bool {
+        self.signals.contains_key(id)
     }
 
     /// Signalを登録
