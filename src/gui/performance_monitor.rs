@@ -83,7 +83,6 @@ pub struct PerformanceMonitor {
     /// 最大履歴サイズ
     max_history_size: usize,
     /// サンプリング間隔
-    #[allow(dead_code)] // 設定UI整備後に利用予定のインターバルなのだ
     sampling_interval: Duration,
     /// 統計情報
     stats: PerformanceStats,
@@ -265,6 +264,12 @@ impl PerformanceMonitor {
 
     /// 履歴エントリを追加
     fn add_history_entry(&mut self, entry: PerformanceHistoryEntry) {
+        if let Some(last) = self.history.back() {
+            if entry.timestamp.duration_since(last.timestamp) < self.sampling_interval {
+                return;
+            }
+        }
+
         if self.history.len() >= self.max_history_size {
             self.history.pop_front();
         }

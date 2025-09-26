@@ -137,10 +137,6 @@ pub struct BlockingProcessor {
     /// タスク送信チャネル
     task_sender: mpsc::UnboundedSender<BlockingTask>,
 
-    /// 結果受信チャネル
-    #[allow(dead_code)] // レガシーAPI互換のためキューを保持しているのだ
-    result_receiver: Arc<Mutex<Option<mpsc::UnboundedReceiver<BlockingTaskResult>>>>,
-
     /// コールバック管理
     callbacks: Arc<
         Mutex<std::collections::HashMap<String, Box<dyn Fn(BlockingTaskResult) + Send + Sync>>>,
@@ -157,6 +153,7 @@ impl BlockingProcessor {
     /// 新しい重処理システムを作成
     pub fn new() -> Self {
         let (task_sender, mut task_receiver) = mpsc::unbounded_channel::<BlockingTask>();
+
         let (result_sender, mut result_receiver) = mpsc::unbounded_channel::<BlockingTaskResult>();
 
         let callbacks = Arc::new(Mutex::new(std::collections::HashMap::<
@@ -258,7 +255,6 @@ impl BlockingProcessor {
 
         Self {
             task_sender,
-            result_receiver: Arc::new(Mutex::new(None)), // バックグラウンドタスクで消費済み
             callbacks,
             stats,
             active_workers,
@@ -679,6 +675,54 @@ mod tests {
         let processor = BlockingProcessor::new();
         let stats = processor.get_stats().unwrap();
         assert_eq!(stats.total_tasks, 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_submit_task_dispatches_callback() {
+        let processor = BlockingProcessor::new();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let sender = Arc::new(std::sync::Mutex::new(Some(tx)));
+
+        let callback_id = format!("test_callback_{}", uuid::Uuid::new_v4());
+        let messages = vec![GuiChatMessage {
+            author: "tester".to_string(),
+            channel_id: "channel".to_string(),
+            content: "hello".to_string(),
+            ..GuiChatMessage::default()
+        }];
+
+        processor
+            .submit_task(
+                BlockingTask::StatisticsCalculation {
+                    messages,
+                    callback_id: callback_id.clone(),
+                },
+                {
+                    let sender = Arc::clone(&sender);
+                    move |result| {
+                        if let BlockingTaskResult::Statistics { callback_id, .. } = result {
+                            if let Ok(mut guard) = sender.lock() {
+                                if let Some(tx) = guard.take() {
+                                    let _ = tx.send(callback_id);
+                                }
+                            }
+                        }
+                    }
+                },
+            )
+            .expect("submit blocking task");
+
+        let received_callback = tokio::time::timeout(Duration::from_secs(2), rx)
+            .await
+            .expect("callback timed out")
+            .expect("callback channel closed");
+
+        assert_eq!(received_callback, callback_id);
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let stats = processor.get_stats().expect("stats available");
+        assert_eq!(stats.completed_tasks, 1);
     }
 
     #[test]

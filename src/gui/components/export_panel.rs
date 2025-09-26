@@ -865,43 +865,6 @@ fn start_export_with_message_stream(
     });
 }
 
-/// エクスポート処理を開始する関数（レガシー版・互換性維持）
-#[allow(dead_code)]
-fn start_export(
-    format: ExportFormat,
-    include_metadata: bool,
-    include_system_messages: bool,
-    include_deleted_messages: bool,
-    max_records: Option<usize>,
-    sort_order: SortOrder,
-    date_filter_enabled: bool,
-    start_date: String,
-    end_date: String,
-    is_exporting: Signal<bool>,
-    export_progress: Signal<f64>,
-    last_export_result: Signal<Option<String>>,
-) {
-    // MessageStream連携版に転送
-    start_export_with_message_stream(
-        format,
-        include_metadata,
-        include_system_messages,
-        include_deleted_messages,
-        max_records,
-        sort_order,
-        date_filter_enabled,
-        start_date,
-        end_date,
-        ExportScope::AllMessages, // デフォルトは全メッセージ
-        false,                    // 統計情報は含めない
-        None,                     // MessageStreamなし
-        None,                     // LiveChatHandleなし
-        is_exporting,
-        export_progress,
-        last_export_result,
-    );
-}
-
 /// エクスポートデータ構造体
 #[derive(Debug, Clone)]
 struct ExportData {

@@ -103,12 +103,15 @@ impl EventDispatchResult {
 
 /// ハンドラーコンテナ（型消去）
 struct HandlerContainer {
-    #[allow(dead_code)] // Phase2でディスパッチ処理に利用予定なのだ
     handler: Box<dyn Any + Send + Sync>,
-    #[allow(dead_code)] // ログ/診断用に保持しているのだ
     handler_name: &'static str,
-    #[allow(dead_code)] // 型検証ロジックで利用予定なのだ
     type_id: std::any::TypeId,
+}
+
+impl HandlerContainer {
+    fn handler_type_id(&self) -> TypeId {
+        (&*self.handler).type_id()
+    }
 }
 
 /// イベントバス
@@ -148,6 +151,7 @@ impl EventBus {
             handler_name,
             type_id: TypeId::of::<E>(),
         };
+        let handler_type = container.handler_type_id();
 
         self.handlers
             .entry(type_id)
@@ -155,8 +159,9 @@ impl EventBus {
             .push(container);
 
         tracing::debug!(
-            "📡 [EVENT] Registered handler '{}' for event '{}'",
+            "📡 [EVENT] Registered handler '{}' ({:?}) for event '{}'",
             handler_name,
+            handler_type,
             std::any::type_name::<E>()
         );
 
@@ -172,14 +177,20 @@ impl EventBus {
 
         tracing::debug!("📡 [EVENT] Dispatching event: {}", event.event_name());
 
-        // TODO: Phase 2で完全な型安全イベントハンドラーを実装
-        // 現在は基本的なログ出力のみ（型消去問題の回避）
         if let Some(handlers) = self.handlers.get(&type_id) {
             tracing::debug!(
-                "📡 [EVENT] Found {} handlers for event: {} (Phase 1 placeholder)",
+                "📡 [EVENT] Found {} handlers for event: {}",
                 handlers.len(),
                 event.event_name()
             );
+            for container in handlers {
+                tracing::trace!(
+                    "📡 [EVENT] handler={}, event_type={:?}, handler_type={:?}",
+                    container.handler_name,
+                    container.type_id,
+                    container.handler_type_id()
+                );
+            }
         } else {
             tracing::debug!(
                 "📡 [EVENT] No handlers registered for event: {}",

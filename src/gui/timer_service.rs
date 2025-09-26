@@ -126,10 +126,8 @@ pub type TimerHandler = Box<dyn Fn(TimerContext) -> TimerResult + Send + Sync>;
 struct TimerTask {
     id: TimerId,
     task_type: TimerTaskType,
-    #[allow(dead_code)] // 設定UI統合時に活用予定のタイマー設定なのだ
     config: TimerConfig,
     cancel_sender: Option<oneshot::Sender<()>>,
-    #[allow(dead_code)] // 追加メトリクス整備で使用予定のコンテキストなのだ
     context: TimerContext,
 }
 
@@ -299,6 +297,13 @@ impl TimerService {
             context.execution_count = execution_count;
             context.last_executed = Some(Instant::now());
 
+            {
+                let mut tasks = active_tasks.lock().unwrap();
+                if let Some(task_entry) = tasks.get_mut(&task_id) {
+                    task_entry.context = context.clone();
+                }
+            }
+
             // ハンドラー実行
             let result = handler(context.clone());
 
@@ -348,41 +353,68 @@ impl TimerService {
         stats: &Arc<Mutex<TimerStats>>,
     ) {
         // アクティブタスクから削除
-        let removed = {
+        let removed_task = {
             let mut tasks = active_tasks.lock().unwrap();
-            tasks.remove(task_id).is_some()
+            tasks.remove(task_id)
         };
 
-        if removed {
-            // 統計更新
-            let mut stats = stats.lock().unwrap();
-            stats.active_tasks = stats.active_tasks.saturating_sub(1);
+        if let Some(task) = removed_task {
+            let priority = task.config.priority;
+            let executions = task.context.execution_count;
 
-            match reason {
-                "completed" => stats.completed_tasks += 1,
-                "cancelled" => stats.cancelled_tasks += 1,
-                "error" | "timeout" => stats.error_tasks += 1,
-                _ => {}
+            {
+                // 統計更新
+                let mut stats = stats.lock().unwrap();
+                stats.active_tasks = stats.active_tasks.saturating_sub(1);
+
+                match reason {
+                    "completed" => stats.completed_tasks += 1,
+                    "cancelled" => stats.cancelled_tasks += 1,
+                    "error" | "timeout" => stats.error_tasks += 1,
+                    _ => {}
+                }
+
+                stats.last_updated = Instant::now();
             }
 
-            stats.last_updated = Instant::now();
-
-            tracing::debug!("⏱️ [TIMER] Task completed: {} ({})", task_id, reason);
+            tracing::debug!(
+                "⏱️ [TIMER] Task completed: {} ({}) priority={} executions={}",
+                task_id,
+                reason,
+                priority,
+                executions
+            );
         }
     }
 
     /// タスクをキャンセル
     pub fn cancel_task(&self, task_id: &str) -> bool {
-        let sender = {
+        let removed_task = {
             let mut tasks = self.active_tasks.lock().unwrap();
-            tasks
-                .remove(task_id)
-                .and_then(|mut task| task.cancel_sender.take())
+            tasks.remove(task_id)
         };
 
-        if let Some(sender) = sender {
-            let _ = sender.send(());
-            tracing::info!("⏱️ [TIMER] Cancelled task: {}", task_id);
+        if let Some(mut task) = removed_task {
+            if let Some(sender) = task.cancel_sender.take() {
+                let _ = sender.send(());
+            }
+
+            let priority = task.config.priority;
+            let executions = task.context.execution_count;
+
+            {
+                let mut stats = self.stats.lock().unwrap();
+                stats.active_tasks = stats.active_tasks.saturating_sub(1);
+                stats.cancelled_tasks += 1;
+                stats.last_updated = Instant::now();
+            }
+
+            tracing::info!(
+                "⏱️ [TIMER] Cancelled task: {} (priority={}, executions={})",
+                task_id,
+                priority,
+                executions
+            );
             true
         } else {
             false

@@ -70,7 +70,6 @@ pub struct DomController {
     /// 制御対象コンテナID
     container_id: String,
     /// DOM状態
-    #[allow(dead_code)] // DOM同期強化時に活用予定のキャッシュなのだ
     state: DomState,
     /// イベントハンドラー登録済みフラグ
     initialized: bool,
@@ -333,7 +332,7 @@ impl DomController {
     }
 
     /// DOM状態を取得
-    pub async fn get_state(&self) -> Result<DomState, String> {
+    pub async fn get_state(&mut self) -> Result<DomState, String> {
         let script = r#"
             (function() {
                 const controller = window.liscovDomController;
@@ -353,7 +352,7 @@ impl DomController {
             Ok(_) => {
                 // 実際の実装では、evalの結果を解析してDomStateを構築
                 // Phase 3.2では簡略版として固定値を返す
-                Ok(DomState {
+                let state = DomState {
                     scroll_position: 0.0,
                     scroll_max: 1000.0,
                     is_visible: true,
@@ -362,7 +361,9 @@ impl DomController {
                         .duration_since(std::time::UNIX_EPOCH)
                         .unwrap_or_default()
                         .as_millis() as u64,
-                })
+                };
+                self.state = state.clone();
+                Ok(state)
             }
             Err(e) => {
                 let error_msg = format!("State retrieval failed: {:?}", e);
@@ -370,6 +371,11 @@ impl DomController {
                 Err(error_msg)
             }
         }
+    }
+
+    /// 直近で取得したDOM状態を参照
+    pub fn cached_state(&self) -> &DomState {
+        &self.state
     }
 
     /// パフォーマンス統計を取得

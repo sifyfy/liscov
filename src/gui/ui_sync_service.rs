@@ -1,4 +1,5 @@
 use crate::gui::state_management::{get_state_manager, AppState};
+use std::env;
 
 /// UI同期サービス
 /// 段階的にDioxus UI層との統合を進める
@@ -18,12 +19,17 @@ impl UiSyncService {
 
     /// グローバルUI同期サービスを開始（static メソッド）
     pub fn start() -> Result<(), String> {
-        // CPU使用率削減のため、グローバルUI同期を完全無効化
-        tracing::debug!("🎨 Global UI sync disabled for CPU optimization");
-        Ok(())
+        let enabled = env::var("LISCOV_ENABLE_UI_SYNC")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        if enabled {
+            Self::start_original()
+        } else {
+            tracing::debug!("🎨 Global UI sync disabled for CPU optimization");
+            Ok(())
+        }
     }
 
-    #[allow(dead_code)]
     fn start_original() -> Result<(), String> {
         if GLOBAL_RUNNING.load(std::sync::atomic::Ordering::Relaxed) {
             return Ok(()); // 既に実行中
