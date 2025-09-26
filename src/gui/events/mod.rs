@@ -103,8 +103,11 @@ impl EventDispatchResult {
 
 /// ハンドラーコンテナ（型消去）
 struct HandlerContainer {
+    #[allow(dead_code)] // Phase2でディスパッチ処理に利用予定なのだ
     handler: Box<dyn Any + Send + Sync>,
+    #[allow(dead_code)] // ログ/診断用に保持しているのだ
     handler_name: &'static str,
+    #[allow(dead_code)] // 型検証ロジックで利用予定なのだ
     type_id: std::any::TypeId,
 }
 
@@ -217,7 +220,7 @@ impl EventBus {
     }
 
     /// 統計情報を取得
-    pub fn get_stats(&self) -> &EventStats {
+    fn get_stats(&self) -> &EventStats {
         &self.stats
     }
 

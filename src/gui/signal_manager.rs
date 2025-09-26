@@ -130,7 +130,6 @@ struct UpdateStats {
     batched_updates: u64,
     debounced_updates: u64,
     high_priority_updates: u64,
-    last_reset: Instant,
 }
 
 impl UpdateStats {
@@ -140,7 +139,6 @@ impl UpdateStats {
             batched_updates: 0,
             debounced_updates: 0,
             high_priority_updates: 0,
-            last_reset: Instant::now(),
         }
     }
 }

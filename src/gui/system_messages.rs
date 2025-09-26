@@ -3,7 +3,6 @@
 //! 配信終了、エラー警告、統計情報などのシステムメッセージを生成
 
 use crate::gui::models::{GuiChatMessage, MessageType};
-use std::collections::HashMap;
 
 /// システムメッセージの種類
 #[derive(Debug, Clone, PartialEq)]
@@ -125,7 +124,7 @@ impl SystemMessageGenerator {
 
     /// 接続状態変更メッセージを生成
     pub fn create_connection_message(is_connected: bool, url: Option<&str>) -> GuiChatMessage {
-        let (emoji, title, content) = if is_connected {
+        let (emoji, _title, content) = if is_connected {
             let base_message = "✅ 配信に接続しました\n\n🔄 ライブチャットの監視を開始します";
             let content = if let Some(url) = url {
                 format!("{}\n📡 配信URL: {}", base_message, url)

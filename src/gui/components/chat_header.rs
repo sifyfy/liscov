@@ -77,7 +77,6 @@ pub fn ChatHeader(props: ChatHeaderProps) -> Element {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     /// ChatHeaderコンポーネントの基本的な構造テスト
     #[test]

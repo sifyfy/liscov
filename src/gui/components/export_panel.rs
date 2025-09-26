@@ -838,7 +838,16 @@ fn start_export_with_message_stream(
             String::new()
         };
 
-        let final_message = format!("{}{}", result_message, stats_message);
+        let metadata_message = if let Some(meta) = &export_data.metadata {
+            format!(
+                "\n🗂️ Export metadata: scope={}, total={}, format={}, generated_at={}",
+                meta.export_scope, meta.total_count, meta.format, meta.export_time
+            )
+        } else {
+            String::new()
+        };
+
+        let final_message = format!("{}{}{}", result_message, stats_message, metadata_message);
 
         export_progress.set(1.0);
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -857,6 +866,7 @@ fn start_export_with_message_stream(
 }
 
 /// エクスポート処理を開始する関数（レガシー版・互換性維持）
+#[allow(dead_code)]
 fn start_export(
     format: ExportFormat,
     include_metadata: bool,

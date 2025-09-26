@@ -5,7 +5,7 @@ use crate::gui::hooks::use_live_chat::LiveChatHandle;
 use crate::gui::performance_monitor::{record_performance_event, PerformanceEventType}; // Phase 5.2
 use crate::gui::signal_optimizer::{process_batch_updates, queue_batch_update, BatchUpdateType}; // Phase 4.2
 use crate::gui::signal_optimizer::{record_signal_update, register_signal, SignalType}; // Phase 4.1
-use crate::gui::styles::theme::{get_connection_status_class, CssClasses};
+use crate::gui::styles::theme::CssClasses;
 use crate::gui::timer_service::cancel_highlight_clear_tasks; // Phase 3.3
 
 // Message streaming integration
@@ -14,8 +14,7 @@ use crate::gui::models::GuiChatMessage;
 
 // Phase 4.3: クロージャ最適化
 use crate::gui::closure_optimizer::{
-    create_weak_signal_connection, get_closure_optimizer, get_optimized_signal_handler,
-    perform_periodic_cleanup, record_closure_creation,
+    get_optimized_signal_handler, perform_periodic_cleanup, record_closure_creation,
 };
 
 use dioxus::prelude::*;
@@ -64,7 +63,7 @@ pub fn ChatDisplay(
     let user_has_scrolled = use_signal(|| false);
     let mut show_filter_panel = use_signal(|| false);
     let highlighted_message_ids = use_signal(|| std::collections::HashSet::<String>::new());
-    let mut last_message_count = use_signal(|| 0usize);
+    let last_message_count = use_signal(|| 0usize);
     let _last_effect_time = use_signal(|| std::time::Instant::now()); // 未使用
 
     // MessageStream連携：アーカイブ検索機能の追加
@@ -85,7 +84,7 @@ pub fn ChatDisplay(
 
     // 🎯 Phase C2: 安全な単方向同期システム (chat_display 無限ループ回避版)
     use_effect({
-        let live_chat_handle = live_chat_handle.clone();
+        let _live_chat_handle = live_chat_handle.clone();
         let mut message_stream = message_stream.clone();
         let mut stream_stats = stream_stats.clone();
         let mut highlighted_message_ids = highlighted_message_ids.clone();
@@ -200,8 +199,8 @@ pub fn ChatDisplay(
 
     // 🚀 **Dioxus memo_chain最適化**: 効率的なフィルタリング処理
     // Step 1: 差分更新システム連携 - 新着メッセージのフィルタリング
-    let new_filtered_message = use_memo({
-        let live_chat_handle = live_chat_handle.clone();
+    let _new_filtered_message = use_memo({
+        let _live_chat_handle = live_chat_handle.clone();
         let global_filter = global_filter.clone();
         move || {
             if let Some(new_msg) = live_chat_handle.new_message.read().as_ref() {
@@ -390,7 +389,7 @@ pub fn ChatDisplay(
 
     // 🚀 無限ループ回避版：メッセージカウント監視
     use_effect({
-        let live_chat_handle = live_chat_handle.clone();
+        let _live_chat_handle = live_chat_handle.clone();
         let mut last_message_count = last_message_count.clone();
 
         move || {

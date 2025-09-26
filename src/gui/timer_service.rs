@@ -126,8 +126,10 @@ pub type TimerHandler = Box<dyn Fn(TimerContext) -> TimerResult + Send + Sync>;
 struct TimerTask {
     id: TimerId,
     task_type: TimerTaskType,
+    #[allow(dead_code)] // 設定UI統合時に活用予定のタイマー設定なのだ
     config: TimerConfig,
     cancel_sender: Option<oneshot::Sender<()>>,
+    #[allow(dead_code)] // 追加メトリクス整備で使用予定のコンテキストなのだ
     context: TimerContext,
 }
 

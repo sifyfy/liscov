@@ -138,6 +138,7 @@ pub struct BlockingProcessor {
     task_sender: mpsc::UnboundedSender<BlockingTask>,
 
     /// 結果受信チャネル
+    #[allow(dead_code)] // レガシーAPI互換のためキューを保持しているのだ
     result_receiver: Arc<Mutex<Option<mpsc::UnboundedReceiver<BlockingTaskResult>>>>,
 
     /// コールバック管理

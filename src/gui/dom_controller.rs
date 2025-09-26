@@ -70,6 +70,7 @@ pub struct DomController {
     /// 制御対象コンテナID
     container_id: String,
     /// DOM状態
+    #[allow(dead_code)] // DOM同期強化時に活用予定のキャッシュなのだ
     state: DomState,
     /// イベントハンドラー登録済みフラグ
     initialized: bool,

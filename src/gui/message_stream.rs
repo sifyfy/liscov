@@ -4,7 +4,7 @@
 
 use crate::gui::models::GuiChatMessage;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{HashMap, VecDeque};
 
 /// 表示制限の設定
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

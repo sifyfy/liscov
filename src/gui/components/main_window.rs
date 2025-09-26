@@ -1,8 +1,8 @@
 use dioxus::prelude::*;
 
 use crate::gui::{
-    components::signal_analyzer::SignalAnalyzer, components::TabContent, hooks::use_live_chat,
-    models::ActiveTab, styles::theme::get_embedded_css,
+    components::TabContent, hooks::use_live_chat, models::ActiveTab,
+    styles::theme::get_embedded_css,
 };
 
 /// 統合ヘッダー・タブナビゲーションコンポーネント

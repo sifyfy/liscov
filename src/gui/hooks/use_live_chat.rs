@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use crate::gui::{
     models::{GuiChatMessage, MessageType},
     services::{LiveChatService, ServiceState},
-    signal_manager::{get_signal_manager, use_optimized_signals, SignalUpdateType, UpdatePriority},
+    signal_manager::use_optimized_signals,
     state_management::{get_state_manager, AppEvent, ChatStats},
 };
 
@@ -407,7 +407,7 @@ pub fn use_live_chat() -> LiveChatHandle {
     tracing::debug!("✅ All signals initialized (optimized)");
 
     // Phase 2.3: 最適化されたSignal管理システムを初期化
-    let optimized_signals = use_optimized_signals();
+    let _optimized_signals = use_optimized_signals();
 
     // 🎯 Phase C1: 無限ループリスクゼロの安全な単方向同期
     use_effect(move || {

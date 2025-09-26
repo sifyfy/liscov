@@ -3,7 +3,7 @@
 //! 連続403エラーによる配信終了の検出とシステムメッセージ送信
 
 use crate::gui::state_management::{get_state_manager, AppEvent};
-use crate::gui::system_messages::{StreamStats, SystemMessageGenerator};
+use crate::gui::system_messages::SystemMessageGenerator;
 use std::time::{Duration, Instant};
 
 /// エラー分類
@@ -407,7 +407,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn test_reset_clears_stream_end_flag() {
         let mut detector = StreamEndDetector::new();
 
@@ -419,6 +418,7 @@ mod tests {
         assert!(!detector.is_stream_ended());
         assert_eq!(detector.consecutive_errors(), 0);
     }
+    #[test]
     fn test_non_403_errors() {
         let mut detector = StreamEndDetector::new();
 

@@ -302,8 +302,8 @@ fn SettingsContent() -> Element {
 /// チャット表示設定コンポーネント
 #[component]
 fn ChatDisplaySettings() -> Element {
-    let mut app_state = use_context::<Signal<crate::gui::models::AppState>>();
-    let mut font_size = use_signal(|| app_state.read().chat_display_config.message_font_size);
+    let app_state = use_context::<Signal<crate::gui::models::AppState>>();
+    let font_size = use_signal(|| app_state.read().chat_display_config.message_font_size);
 
     // AppStateから設定を同期
     use_effect({
@@ -1057,7 +1057,6 @@ fn UiSettings() -> Element {
 fn SignalOptimizationSettings() -> Element {
     let mut analysis_report = use_signal(|| String::new());
     let mut show_report = use_signal(|| false);
-    let mut auto_refresh = use_signal(|| false);
 
     rsx! {
         div {

@@ -5,7 +5,6 @@
 //! 注意: この版は簡略版です。RcのSend/Sync問題を回避するため、
 //! ローカル最適化のみ提供し、グローバル状態は使用しません。
 
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
 /// クロージャ最適化統計 (簡略版)

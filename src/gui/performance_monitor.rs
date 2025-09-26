@@ -83,6 +83,7 @@ pub struct PerformanceMonitor {
     /// 最大履歴サイズ
     max_history_size: usize,
     /// サンプリング間隔
+    #[allow(dead_code)] // 設定UI整備後に利用予定のインターバルなのだ
     sampling_interval: Duration,
     /// 統計情報
     stats: PerformanceStats,
