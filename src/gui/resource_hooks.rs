@@ -37,14 +37,14 @@ impl Default for MessageFetchResult {
 }
 
 /// Phase 2.2: use_resource活用によるメッセージ取得フック
-/// 
+///
 /// Dioxus推奨パターン:
 /// - 自動依存関係管理
 /// - エラーハンドリング統合
 /// - Suspenseコンポーネント対応
 pub fn use_message_resource() -> Resource<MessageFetchResult> {
     let app_context = use_app_context();
-    
+
     // 依存関係: 接続状態とURL
     let live_chat_state = app_context.live_chat;
     let is_connected = live_chat_state.read().is_connected;
@@ -60,7 +60,7 @@ pub fn use_message_resource() -> Resource<MessageFetchResult> {
     use_resource(move || {
         let current_url_captured = current_url.clone();
         let service_state_captured = service_state.clone();
-        
+
         async move {
             tracing::info!(
                 "🚀 [USE_RESOURCE] Starting message fetch resource for URL: {:?}",
@@ -75,10 +75,9 @@ pub fn use_message_resource() -> Resource<MessageFetchResult> {
 
             // 🚀 Dioxus推奨: spawn_blockingで重い処理を分離
             let fetch_result = tokio::task::spawn_blocking(move || {
-                tokio::runtime::Handle::current().block_on(async {
-                    fetch_messages_batch().await
-                })
-            }).await;
+                tokio::runtime::Handle::current().block_on(async { fetch_messages_batch().await })
+            })
+            .await;
 
             match fetch_result {
                 Ok(Ok(result)) => {
@@ -111,16 +110,16 @@ pub fn use_message_resource() -> Resource<MessageFetchResult> {
 async fn fetch_messages_batch() -> Result<MessageFetchResult, String> {
     let service_arc = get_global_service();
     let mut service = service_arc.lock().await;
-    
+
     // 🚀 バッチ処理最適化: 一度に複数メッセージを取得
     match service.get_recent_messages_batch().await {
         Ok(messages) => {
             let fetch_count = messages.len();
-            
+
             // 🚀 最適化: MessagesAddedイベントでバッチ送信
             if !messages.is_empty() {
                 let send_result = send_app_event(AppEvent::MessagesAdded(messages.clone()));
-                
+
                 match send_result {
                     Ok(()) => {
                         tracing::info!(
@@ -136,7 +135,7 @@ async fn fetch_messages_batch() -> Result<MessageFetchResult, String> {
                     }
                 }
             }
-            
+
             Ok(MessageFetchResult {
                 messages,
                 fetch_count,
@@ -144,61 +143,59 @@ async fn fetch_messages_batch() -> Result<MessageFetchResult, String> {
                 last_fetch_time: std::time::Instant::now(),
             })
         }
-        Err(e) => {
-            Err(format!("Service fetch error: {}", e))
-        }
+        Err(e) => Err(format!("Service fetch error: {}", e)),
     }
 }
 
 /// Phase 2.2: リアルタイムメッセージストリームフック
-/// 
+///
 /// Dioxus use_resource + インターバル処理による最適化
 pub fn use_realtime_message_stream() -> Signal<Vec<GuiChatMessage>> {
     let app_context = use_app_context();
     let live_chat_state = app_context.live_chat;
     let message_stream_state = app_context.message_stream;
-    
+
     // リアルタイムメッセージストリーム
     let realtime_messages = use_signal(Vec::<GuiChatMessage>::new);
-    
+
     // 🚀 use_resource統合: 定期的なメッセージ取得
     use_effect(move || {
         let mut realtime_messages_clone = realtime_messages;
         let live_chat_clone = live_chat_state;
         let message_stream_clone = message_stream_state;
-        
+
         spawn(async move {
             // 🚀 Dioxus推奨: インターバル処理の最適化
             let mut interval = interval(Duration::from_millis(500));
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            
+
             tracing::info!(
                 "🚀 [REALTIME_STREAM] Starting optimized message stream (500ms interval)"
             );
-            
+
             let mut last_message_count = 0;
             let mut cycle_count = 0;
-            
+
             loop {
                 interval.tick().await;
                 cycle_count += 1;
-                
+
                 // 接続状態チェック
                 let is_connected = live_chat_clone.read().is_connected;
                 if !is_connected {
                     if cycle_count % 100 == 0 {
                         tracing::debug!(
-                            "⏸️ [REALTIME_STREAM] Not connected, cycle #{}", 
+                            "⏸️ [REALTIME_STREAM] Not connected, cycle #{}",
                             cycle_count
                         );
                     }
                     continue;
                 }
-                
+
                 // メッセージストリーム状態から差分を取得
                 let current_messages = message_stream_clone.read().messages();
                 let current_count = current_messages.len();
-                
+
                 // 🚀 差分更新最適化: 変更があった場合のみ更新
                 if current_count != last_message_count {
                     tracing::info!(
@@ -207,7 +204,7 @@ pub fn use_realtime_message_stream() -> Signal<Vec<GuiChatMessage>> {
                         current_count,
                         cycle_count
                     );
-                    
+
                     // use_resourceパターン: 新着メッセージのみ抽出
                     let new_messages = if current_count > last_message_count {
                         let new_count = current_count - last_message_count;
@@ -224,11 +221,11 @@ pub fn use_realtime_message_stream() -> Signal<Vec<GuiChatMessage>> {
                         // 全体更新が必要な場合（メッセージクリア等）
                         current_messages
                     };
-                    
+
                     realtime_messages_clone.set(new_messages);
                     last_message_count = current_count;
                 }
-                
+
                 // 定期的な生存確認ログ
                 if cycle_count % 120 == 0 {
                     // 120 * 500ms = 60秒ごと
@@ -242,7 +239,7 @@ pub fn use_realtime_message_stream() -> Signal<Vec<GuiChatMessage>> {
             }
         });
     });
-    
+
     realtime_messages
 }
 
@@ -250,7 +247,7 @@ pub fn use_realtime_message_stream() -> Signal<Vec<GuiChatMessage>> {
 #[component]
 pub fn MessageLoader() -> Element {
     let message_resource = use_message_resource();
-    
+
     match &*message_resource.read_unchecked() {
         Some(result) => {
             if let Some(error) = &result.error {
@@ -284,11 +281,11 @@ pub fn use_conditional_message_fetch(
 ) -> Resource<Option<Vec<GuiChatMessage>>> {
     let app_context = use_app_context();
     let live_chat_state = app_context.live_chat;
-    
+
     use_resource(move || {
         let should_fetch_value = *should_fetch.read();
         let is_connected = live_chat_state.read().is_connected;
-        
+
         async move {
             if !should_fetch_value || !is_connected {
                 tracing::debug!(
@@ -298,12 +295,12 @@ pub fn use_conditional_message_fetch(
                 );
                 return None;
             }
-            
+
             tracing::info!(
                 "🚀 [CONDITIONAL_FETCH] Starting conditional fetch with {}ms interval",
                 fetch_interval_ms
             );
-            
+
             // 🚀 use_resource + spawn_blocking最適化
             let fetch_result = tokio::task::spawn_blocking(move || {
                 tokio::runtime::Handle::current().block_on(async {
@@ -311,14 +308,12 @@ pub fn use_conditional_message_fetch(
                     let mut service = service_arc.lock().await;
                     service.get_recent_messages_batch().await
                 })
-            }).await;
-            
+            })
+            .await;
+
             match fetch_result {
                 Ok(Ok(messages)) => {
-                    tracing::info!(
-                        "✅ [CONDITIONAL_FETCH] Fetched {} messages",
-                        messages.len()
-                    );
+                    tracing::info!("✅ [CONDITIONAL_FETCH] Fetched {} messages", messages.len());
                     Some(messages)
                 }
                 Ok(Err(e)) => {

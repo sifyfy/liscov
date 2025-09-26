@@ -5,10 +5,10 @@
 //! - 非同期処理の最適化
 //! - パフォーマンス監視
 
+use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
-use serde::{Deserialize, Serialize};
 
 use crate::gui::models::GuiChatMessage;
 use crate::gui::state_management::ChatStats;
@@ -136,16 +136,18 @@ pub struct BlockingProcessorStats {
 pub struct BlockingProcessor {
     /// タスク送信チャネル
     task_sender: mpsc::UnboundedSender<BlockingTask>,
-    
+
     /// 結果受信チャネル
     result_receiver: Arc<Mutex<Option<mpsc::UnboundedReceiver<BlockingTaskResult>>>>,
-    
+
     /// コールバック管理
-    callbacks: Arc<Mutex<std::collections::HashMap<String, Box<dyn Fn(BlockingTaskResult) + Send + Sync>>>>,
-    
+    callbacks: Arc<
+        Mutex<std::collections::HashMap<String, Box<dyn Fn(BlockingTaskResult) + Send + Sync>>>,
+    >,
+
     /// 統計情報
     stats: Arc<Mutex<BlockingProcessorStats>>,
-    
+
     /// アクティブワーカー数
     active_workers: Arc<Mutex<usize>>,
 }
@@ -155,23 +157,26 @@ impl BlockingProcessor {
     pub fn new() -> Self {
         let (task_sender, mut task_receiver) = mpsc::unbounded_channel::<BlockingTask>();
         let (result_sender, mut result_receiver) = mpsc::unbounded_channel::<BlockingTaskResult>();
-        
-        let callbacks = Arc::new(Mutex::new(std::collections::HashMap::<String, Box<dyn Fn(BlockingTaskResult) + Send + Sync>>::new()));
+
+        let callbacks = Arc::new(Mutex::new(std::collections::HashMap::<
+            String,
+            Box<dyn Fn(BlockingTaskResult) + Send + Sync>,
+        >::new()));
         let stats = Arc::new(Mutex::new(BlockingProcessorStats::default()));
         let active_workers = Arc::new(Mutex::new(0));
-        
+
         // ワーカープール管理
         let stats_clone = stats.clone();
         let active_workers_clone = active_workers.clone();
         let result_sender_clone = result_sender.clone();
-        
+
         // Phase 2.4: 重処理ワーカープールを起動
         tokio::spawn(async move {
             tracing::info!("🚀 [BLOCKING_PROC] Phase 2.4 Heavy processing worker pool started");
-            
+
             let max_workers = num_cpus::get().min(8); // 最大8ワーカー
             let mut current_workers = 0;
-            
+
             while let Some(task) = task_receiver.recv().await {
                 // ワーカー数制限
                 while current_workers >= max_workers {
@@ -180,23 +185,23 @@ impl BlockingProcessor {
                         current_workers = *active;
                     }
                 }
-                
+
                 // 新しいワーカーでタスク処理
                 let task_clone = task.clone();
                 let result_sender_worker = result_sender_clone.clone();
                 let active_workers_worker = active_workers_clone.clone();
                 let stats_worker = stats_clone.clone();
-                
+
                 tokio::task::spawn_blocking(move || {
                     // ワーカー数を増加
                     if let Ok(mut active) = active_workers_worker.lock() {
                         *active += 1;
                     }
-                    
+
                     let start_time = Instant::now();
                     let result = Self::process_blocking_task(task_clone);
                     let processing_time = start_time.elapsed();
-                    
+
                     // 統計更新
                     if let Ok(mut stats) = stats_worker.lock() {
                         stats.total_tasks += 1;
@@ -205,26 +210,27 @@ impl BlockingProcessor {
                             _ => stats.completed_tasks += 1,
                         }
                         stats.total_processing_time += processing_time;
-                        
+
                         // 平均処理時間の更新
                         if stats.completed_tasks > 0 {
-                            stats.average_processing_time = stats.total_processing_time / stats.completed_tasks as u32;
+                            stats.average_processing_time =
+                                stats.total_processing_time / stats.completed_tasks as u32;
                         }
                     }
-                    
+
                     // 結果送信
                     let _ = result_sender_worker.send(result);
-                    
+
                     // ワーカー数を減少
                     if let Ok(mut active) = active_workers_worker.lock() {
                         *active = active.saturating_sub(1);
                     }
                 });
-                
+
                 current_workers += 1;
             }
         });
-        
+
         // 結果配信システム
         let callbacks_result = callbacks.clone();
         tokio::spawn(async move {
@@ -233,11 +239,13 @@ impl BlockingProcessor {
                     BlockingTaskResult::MessageAnalysis { callback_id, .. } => callback_id.clone(),
                     BlockingTaskResult::Statistics { callback_id, .. } => callback_id.clone(),
                     BlockingTaskResult::FileOperation { callback_id, .. } => callback_id.clone(),
-                    BlockingTaskResult::DataTransformation { callback_id, .. } => callback_id.clone(),
+                    BlockingTaskResult::DataTransformation { callback_id, .. } => {
+                        callback_id.clone()
+                    }
                     BlockingTaskResult::SearchFilter { callback_id, .. } => callback_id.clone(),
                     BlockingTaskResult::Error { callback_id, .. } => callback_id.clone(),
                 };
-                
+
                 // コールバック実行
                 if let Ok(callbacks_map) = callbacks_result.lock() {
                     if let Some(callback) = callbacks_map.get(&callback_id) {
@@ -246,7 +254,7 @@ impl BlockingProcessor {
                 }
             }
         });
-        
+
         Self {
             task_sender,
             result_receiver: Arc::new(Mutex::new(None)), // バックグラウンドタスクで消費済み
@@ -255,7 +263,7 @@ impl BlockingProcessor {
             active_workers,
         }
     }
-    
+
     /// 重処理タスクを送信
     pub fn submit_task<F>(&self, task: BlockingTask, callback: F) -> Result<(), String>
     where
@@ -268,23 +276,27 @@ impl BlockingProcessor {
             BlockingTask::DataTransformation { callback_id, .. } => callback_id.clone(),
             BlockingTask::SearchAndFilter { callback_id, .. } => callback_id.clone(),
         };
-        
+
         // コールバック登録
         if let Ok(mut callbacks) = self.callbacks.lock() {
             callbacks.insert(callback_id, Box::new(callback));
         }
-        
+
         // タスク送信
-        self.task_sender.send(task)
+        self.task_sender
+            .send(task)
             .map_err(|e| format!("Failed to submit blocking task: {}", e))
     }
-    
+
     /// 重処理タスクの実際の処理（spawn_blocking内で実行）
     fn process_blocking_task(task: BlockingTask) -> BlockingTaskResult {
         let start_time = Instant::now();
-        
+
         match task {
-            BlockingTask::MessageBatchAnalysis { messages, callback_id } => {
+            BlockingTask::MessageBatchAnalysis {
+                messages,
+                callback_id,
+            } => {
                 let stats = Self::analyze_messages_blocking(&messages);
                 BlockingTaskResult::MessageAnalysis {
                     callback_id,
@@ -292,8 +304,11 @@ impl BlockingProcessor {
                     processing_time: start_time.elapsed(),
                 }
             }
-            
-            BlockingTask::StatisticsCalculation { messages, callback_id } => {
+
+            BlockingTask::StatisticsCalculation {
+                messages,
+                callback_id,
+            } => {
                 let stats = Self::calculate_statistics_blocking(&messages);
                 BlockingTaskResult::Statistics {
                     callback_id,
@@ -301,9 +316,15 @@ impl BlockingProcessor {
                     processing_time: start_time.elapsed(),
                 }
             }
-            
-            BlockingTask::FileOperation { operation_type, data, file_path, callback_id } => {
-                let (success, file_size) = Self::process_file_operation_blocking(operation_type, &data, &file_path);
+
+            BlockingTask::FileOperation {
+                operation_type,
+                data,
+                file_path,
+                callback_id,
+            } => {
+                let (success, file_size) =
+                    Self::process_file_operation_blocking(operation_type, &data, &file_path);
                 BlockingTaskResult::FileOperation {
                     callback_id,
                     success,
@@ -312,8 +333,12 @@ impl BlockingProcessor {
                     processing_time: start_time.elapsed(),
                 }
             }
-            
-            BlockingTask::DataTransformation { data, transform_type, callback_id } => {
+
+            BlockingTask::DataTransformation {
+                data,
+                transform_type,
+                callback_id,
+            } => {
                 let (result_data, format) = Self::transform_data_blocking(data, transform_type);
                 BlockingTaskResult::DataTransformation {
                     callback_id,
@@ -322,9 +347,15 @@ impl BlockingProcessor {
                     processing_time: start_time.elapsed(),
                 }
             }
-            
-            BlockingTask::SearchAndFilter { messages, query, filter_options, callback_id } => {
-                let (filtered_messages, total_matches) = Self::search_and_filter_blocking(messages, &query, &filter_options);
+
+            BlockingTask::SearchAndFilter {
+                messages,
+                query,
+                filter_options,
+                callback_id,
+            } => {
+                let (filtered_messages, total_matches) =
+                    Self::search_and_filter_blocking(messages, &query, &filter_options);
                 BlockingTaskResult::SearchFilter {
                     callback_id,
                     filtered_messages,
@@ -334,15 +365,15 @@ impl BlockingProcessor {
             }
         }
     }
-    
+
     /// メッセージ解析（CPU集約的処理）
     fn analyze_messages_blocking(messages: &[GuiChatMessage]) -> ChatStats {
         let mut stats = ChatStats::default();
-        
+
         for message in messages {
             // 詳細な解析処理（CPU集約的）
             stats.total_messages += 1;
-            
+
             // メッセージタイプ別処理（ChatStatsの実際のフィールドのみ使用）
             match &message.message_type {
                 crate::gui::models::MessageType::Text => {
@@ -362,38 +393,38 @@ impl BlockingProcessor {
                     // システムメッセージの処理
                 }
             }
-            
+
             // 内容解析（重い処理）
             // ChatStatsには対応するフィールドがないため、処理のみ
             if message.content.len() > 100 {
                 // 長いメッセージの解析処理
             }
-            
+
             // ユーザー分析
             if message.is_member {
                 // メンバーメッセージの解析処理
             }
         }
-        
+
         // ChatStatsの実際のフィールドに基づく統計計算
         if !messages.is_empty() {
             // メッセージ/分の計算（簡略化）
             stats.messages_per_minute = stats.total_messages as f64;
-            
+
             // 現在時刻を設定
             stats.last_message_time = Some(chrono::Utc::now());
             stats.start_time = Some(chrono::Utc::now());
         }
-        
+
         stats
     }
-    
+
     /// 統計計算（CPU集約的処理）
     fn calculate_statistics_blocking(messages: &[GuiChatMessage]) -> ChatStats {
         // より詳細な統計計算
         Self::analyze_messages_blocking(messages)
     }
-    
+
     /// ファイル操作処理
     fn process_file_operation_blocking(
         operation_type: FileOperationType,
@@ -425,7 +456,7 @@ impl BlockingProcessor {
             }
         }
     }
-    
+
     /// データ変換処理（CPU集約的）
     fn transform_data_blocking(
         data: Vec<GuiChatMessage>,
@@ -466,7 +497,7 @@ impl BlockingProcessor {
             }
         }
     }
-    
+
     /// 検索・フィルタリング処理（CPU集約的）
     fn search_and_filter_blocking(
         messages: Vec<GuiChatMessage>,
@@ -474,45 +505,58 @@ impl BlockingProcessor {
         filter_options: &FilterOptions,
     ) -> (Vec<GuiChatMessage>, usize) {
         let mut filtered = Vec::new();
-        
+
         for message in messages {
             let mut matches = true;
-            
+
             // テキスト検索
-            if !query.is_empty() && !message.content.to_lowercase().contains(&query.to_lowercase()) {
+            if !query.is_empty()
+                && !message
+                    .content
+                    .to_lowercase()
+                    .contains(&query.to_lowercase())
+            {
                 matches = false;
             }
-            
+
             // 作者フィルター
             if let Some(ref author_filter) = filter_options.author_filter {
-                if !message.author.to_lowercase().contains(&author_filter.to_lowercase()) {
+                if !message
+                    .author
+                    .to_lowercase()
+                    .contains(&author_filter.to_lowercase())
+                {
                     matches = false;
                 }
             }
-            
+
             // 内容フィルター
             if let Some(ref content_filter) = filter_options.content_filter {
-                if !message.content.to_lowercase().contains(&content_filter.to_lowercase()) {
+                if !message
+                    .content
+                    .to_lowercase()
+                    .contains(&content_filter.to_lowercase())
+                {
                     matches = false;
                 }
             }
-            
+
             // メッセージタイプフィルター
             if let Some(ref type_filter) = filter_options.message_type_filter {
                 if message.message_type != *type_filter {
                     matches = false;
                 }
             }
-            
+
             if matches {
                 filtered.push(message);
             }
         }
-        
+
         let total_matches = filtered.len();
         (filtered, total_matches)
     }
-    
+
     /// 統計情報を取得
     pub fn get_stats(&self) -> Option<BlockingProcessorStats> {
         self.stats.lock().ok().map(|stats| {
@@ -545,14 +589,19 @@ where
 {
     let processor = get_blocking_processor();
     let callback_id = format!("analysis_{}", uuid::Uuid::new_v4());
-    
+
     processor.submit_task(
         BlockingTask::MessageBatchAnalysis {
             messages,
             callback_id: callback_id.clone(),
         },
         move |result| {
-            if let BlockingTaskResult::MessageAnalysis { stats, processing_time, .. } = result {
+            if let BlockingTaskResult::MessageAnalysis {
+                stats,
+                processing_time,
+                ..
+            } = result
+            {
                 callback(stats, processing_time);
             }
         },
@@ -566,7 +615,7 @@ where
 {
     let processor = get_blocking_processor();
     let callback_id = format!("export_{}", uuid::Uuid::new_v4());
-    
+
     processor.submit_task(
         BlockingTask::FileOperation {
             operation_type: FileOperationType::Export,
@@ -575,7 +624,13 @@ where
             callback_id: callback_id.clone(),
         },
         move |result| {
-            if let BlockingTaskResult::FileOperation { success, file_size, processing_time, .. } = result {
+            if let BlockingTaskResult::FileOperation {
+                success,
+                file_size,
+                processing_time,
+                ..
+            } = result
+            {
                 callback(success, file_size, processing_time);
             }
         },
@@ -593,7 +648,7 @@ where
 {
     let processor = get_blocking_processor();
     let callback_id = format!("transform_{}", uuid::Uuid::new_v4());
-    
+
     processor.submit_task(
         BlockingTask::DataTransformation {
             data,
@@ -601,7 +656,13 @@ where
             callback_id: callback_id.clone(),
         },
         move |result| {
-            if let BlockingTaskResult::DataTransformation { result_data, format, processing_time, .. } = result {
+            if let BlockingTaskResult::DataTransformation {
+                result_data,
+                format,
+                processing_time,
+                ..
+            } = result
+            {
                 callback(result_data, format, processing_time);
             }
         },
@@ -627,10 +688,10 @@ mod tests {
             message_type_filter: Some(crate::gui::models::MessageType::Text),
             time_range: None,
         };
-        
+
         let serialized = serde_json::to_string(&options).unwrap();
         let deserialized: FilterOptions = serde_json::from_str(&serialized).unwrap();
-        
+
         assert_eq!(options.author_filter, deserialized.author_filter);
     }
 }

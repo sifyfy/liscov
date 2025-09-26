@@ -89,14 +89,16 @@ pub enum DetectionResult {
 impl StreamEndDetector {
     /// 新しいDetectorを作成
     pub fn new() -> Self {
-        Self {
+        let mut detector = Self {
             consecutive_errors: 0,
             last_error_type: None,
             stream_start_time: Some(Instant::now()),
             stream_ended: false,
             last_system_message_time: None,
             first_error_time: None,
-        }
+        };
+        detector.reset();
+        detector
     }
 
     /// 成功時の処理（エラーカウンターをリセット）
@@ -110,6 +112,10 @@ impl StreamEndDetector {
         self.consecutive_errors = 0;
         self.last_error_type = None;
         self.first_error_time = None;
+        if self.stream_ended {
+            tracing::info!("?? [STREAM_DETECTOR] Resetting stream_end flag after success");
+        }
+        self.stream_ended = false;
     }
 
     /// エラー発生時の処理と配信終了判定
@@ -292,6 +298,16 @@ impl StreamEndDetector {
         self.consecutive_errors = 8;
         self.first_error_time = Some(Instant::now());
     }
+
+    /// 監視開始時に全状態をリセット
+    pub fn reset(&mut self) {
+        self.consecutive_errors = 0;
+        self.last_error_type = None;
+        self.stream_start_time = Some(Instant::now());
+        self.stream_ended = false;
+        self.last_system_message_time = None;
+        self.first_error_time = None;
+    }
 }
 
 impl Default for StreamEndDetector {
@@ -391,6 +407,18 @@ mod tests {
     }
 
     #[test]
+    #[test]
+    fn test_reset_clears_stream_end_flag() {
+        let mut detector = StreamEndDetector::new();
+
+        detector.force_stream_ended();
+        assert!(detector.is_stream_ended());
+        assert!(detector.consecutive_errors() >= 8);
+
+        detector.reset();
+        assert!(!detector.is_stream_ended());
+        assert_eq!(detector.consecutive_errors(), 0);
+    }
     fn test_non_403_errors() {
         let mut detector = StreamEndDetector::new();
 

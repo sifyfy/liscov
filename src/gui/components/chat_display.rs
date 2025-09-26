@@ -92,23 +92,23 @@ pub fn ChatDisplay(
 
         move || {
             tracing::info!("🎯 [SAFE_CHAT_SYNC] ChatDisplay unidirectional sync initialized");
-            
+
             // 安全な単方向同期: StateManager → MessageStream のみ
             spawn(async move {
                 let mut last_message_count = 0usize;
                 let mut sync_counter = 0u64;
-                
+
                 loop {
                     // 500ms間隔の安全なポーリング（無限ループリスクなし）
                     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                     sync_counter += 1;
-                    
+
                     // StateManagerから状態取得（読み取り専用）
                     let state_manager = crate::gui::state_management::get_state_manager();
                     let current_state = state_manager.get_state_unchecked();
                     let current_messages = current_state.messages();
                     let current_message_count = current_messages.len();
-                    
+
                     // 変更検出: メッセージ数変化
                     if current_message_count != last_message_count {
                         tracing::info!(
@@ -117,7 +117,7 @@ pub fn ChatDisplay(
                             current_message_count,
                             sync_counter
                         );
-                        
+
                         // MessageStreamを安全に更新（一方向のみ）
                         message_stream.with_mut(|stream| {
                             // 差分メッセージのみを追加
@@ -125,16 +125,20 @@ pub fn ChatDisplay(
                                 let new_messages = &current_messages[last_message_count..];
                                 for new_message in new_messages {
                                     stream.push_message(new_message.clone());
-                                    
+
                                     // ハイライト処理（Signal更新なし）
                                     if highlight_enabled() {
                                         let message_id = format!(
                                             "{}:{}:{}",
                                             new_message.timestamp,
                                             new_message.author,
-                                            new_message.content.chars().take(20).collect::<String>()
+                                            new_message
+                                                .content
+                                                .chars()
+                                                .take(20)
+                                                .collect::<String>()
                                         );
-                                        
+
                                         highlighted_message_ids.with_mut(|ids| {
                                             ids.insert(message_id.clone());
                                             // 最大5件のハイライトを維持
@@ -153,12 +157,12 @@ pub fn ChatDisplay(
                                 highlighted_message_ids.with_mut(|ids| ids.clear());
                             }
                         });
-                        
+
                         // 統計情報を安全に更新
                         stream_stats.set(message_stream.read().stats());
                         last_message_count = current_message_count;
                     }
-                    
+
                     // 30秒ごとのステータスログ
                     if sync_counter % 60 == 0 {
                         tracing::info!(
@@ -388,12 +392,12 @@ pub fn ChatDisplay(
     use_effect({
         let live_chat_handle = live_chat_handle.clone();
         let mut last_message_count = last_message_count.clone();
-        
+
         move || {
             // 差分更新イベント監視（無限ループ回避）
             let _event_trigger = live_chat_handle.message_added_event;
             let current_count = live_chat_handle.messages.read().len();
-            
+
             last_message_count.set(current_count);
 
             tracing::debug!(
@@ -769,7 +773,7 @@ pub fn ChatDisplay(
                                         }
                                     }
                                 },
-                            
+
                             option {
                                 value: "50",
                                 selected: {

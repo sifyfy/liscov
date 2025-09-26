@@ -1,10 +1,10 @@
 //! GUI層のトレイト定義
-//! 
+//!
 //! Phase 2実装: トレイトベース設計への移行
 
 use async_trait::async_trait;
-use tokio::sync::mpsc;
 use std::collections::HashMap;
+use tokio::sync::mpsc;
 
 use super::models::GuiChatMessage;
 use super::services::ServiceState;
@@ -49,13 +49,20 @@ pub trait ChatService: Send + Sync {
 #[async_trait]
 pub trait MessageProcessor: Send + Sync {
     /// チャットアイテムをGUIメッセージに変換
-    fn process_chat_item(&self, item: &crate::get_live_chat::ChatItem) -> Result<GuiChatMessage, ProcessingError>;
+    fn process_chat_item(
+        &self,
+        item: &crate::get_live_chat::ChatItem,
+    ) -> Result<GuiChatMessage, ProcessingError>;
 
     /// メッセージバッチを処理
-    async fn process_message_batch(&self, items: &[crate::get_live_chat::ChatItem]) -> Result<Vec<GuiChatMessage>, ProcessingError>;
+    async fn process_message_batch(
+        &self,
+        items: &[crate::get_live_chat::ChatItem],
+    ) -> Result<Vec<GuiChatMessage>, ProcessingError>;
 
     /// メッセージのフィルタリング
-    fn filter_message(&self, message: &GuiChatMessage, filter_config: &MessageFilterConfig) -> bool;
+    fn filter_message(&self, message: &GuiChatMessage, filter_config: &MessageFilterConfig)
+        -> bool;
 
     /// メッセージの統計情報を更新
     fn update_statistics(&self, message: &GuiChatMessage, stats: &mut MessageStatistics);
@@ -68,13 +75,20 @@ pub trait MessageRepository: Send + Sync {
     async fn save_message(&self, message: &GuiChatMessage) -> Result<String, RepositoryError>;
 
     /// メッセージバッチを保存
-    async fn save_message_batch(&self, messages: &[GuiChatMessage]) -> Result<Vec<String>, RepositoryError>;
+    async fn save_message_batch(
+        &self,
+        messages: &[GuiChatMessage],
+    ) -> Result<Vec<String>, RepositoryError>;
 
     /// メッセージを取得
-    async fn get_messages(&self, query: MessageQuery) -> Result<Vec<GuiChatMessage>, RepositoryError>;
+    async fn get_messages(
+        &self,
+        query: MessageQuery,
+    ) -> Result<Vec<GuiChatMessage>, RepositoryError>;
 
     /// メッセージ数を取得
-    async fn count_messages(&self, filter: Option<MessageFilter>) -> Result<usize, RepositoryError>;
+    async fn count_messages(&self, filter: Option<MessageFilter>)
+        -> Result<usize, RepositoryError>;
 
     /// メッセージを削除
     async fn delete_message(&self, id: &str) -> Result<(), RepositoryError>;
@@ -87,7 +101,11 @@ pub trait ConfigurationManager: Send + Sync {
     async fn get_config_json(&self, key: &str) -> Result<Option<serde_json::Value>, ConfigError>;
 
     /// 設定をJSON値として保存
-    async fn set_config_json(&self, key: &str, value: &serde_json::Value) -> Result<(), ConfigError>;
+    async fn set_config_json(
+        &self,
+        key: &str,
+        value: &serde_json::Value,
+    ) -> Result<(), ConfigError>;
 
     /// 設定を削除
     async fn remove_config(&self, key: &str) -> Result<(), ConfigError>;
@@ -104,18 +122,16 @@ pub struct ConfigurationHelper;
 
 impl ConfigurationHelper {
     /// 型安全な設定取得
-    pub async fn get_typed_config<T, C>(
-        manager: &C,
-        key: &str,
-    ) -> Result<Option<T>, ConfigError>
+    pub async fn get_typed_config<T, C>(manager: &C, key: &str) -> Result<Option<T>, ConfigError>
     where
         T: serde::de::DeserializeOwned + Send,
         C: ConfigurationManager + ?Sized,
     {
         match manager.get_config_json(key).await? {
             Some(json_value) => {
-                let typed_value = serde_json::from_value(json_value)
-                    .map_err(|e| ConfigError::Serialization(format!("Deserialization failed: {}", e)))?;
+                let typed_value = serde_json::from_value(json_value).map_err(|e| {
+                    ConfigError::Serialization(format!("Deserialization failed: {}", e))
+                })?;
                 Ok(Some(typed_value))
             }
             None => Ok(None),
@@ -138,16 +154,14 @@ impl ConfigurationHelper {
     }
 
     /// 型安全な設定検証
-    pub fn validate_typed_config<T, C>(
-        manager: &C,
-        value: &T,
-    ) -> Result<(), ConfigError>
+    pub fn validate_typed_config<T, C>(manager: &C, value: &T) -> Result<(), ConfigError>
     where
         T: serde::Serialize,
         C: ConfigurationManager + ?Sized,
     {
-        let json_value = serde_json::to_value(value)
-            .map_err(|e| ConfigError::Serialization(format!("Validation serialization failed: {}", e)))?;
+        let json_value = serde_json::to_value(value).map_err(|e| {
+            ConfigError::Serialization(format!("Validation serialization failed: {}", e))
+        })?;
         manager.validate_config_json(&json_value)
     }
 }
@@ -174,13 +188,13 @@ pub trait LiveChatFactory: Send + Sync {
 pub enum ProcessingError {
     #[error("Conversion error: {0}")]
     Conversion(String),
-    
+
     #[error("Validation error: {0}")]
     Validation(String),
-    
+
     #[error("Format error: {0}")]
     Format(String),
-    
+
     #[error("Processing failed: {0}")]
     Processing(String),
 }
@@ -190,16 +204,16 @@ pub enum ProcessingError {
 pub enum RepositoryError {
     #[error("Database error: {0}")]
     Database(String),
-    
+
     #[error("File system error: {0}")]
     FileSystem(String),
-    
+
     #[error("Serialization error: {0}")]
     Serialization(String),
-    
+
     #[error("Network error: {0}")]
     Network(String),
-    
+
     #[error("Not found: {0}")]
     NotFound(String),
 }
@@ -209,13 +223,13 @@ pub enum RepositoryError {
 pub enum ConfigError {
     #[error("Serialization error: {0}")]
     Serialization(String),
-    
+
     #[error("Validation error: {0}")]
     Validation(String),
-    
+
     #[error("File access error: {0}")]
     FileAccess(String),
-    
+
     #[error("Permission denied: {0}")]
     PermissionDenied(String),
 }

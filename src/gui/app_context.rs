@@ -80,7 +80,7 @@ impl Clone for MessageStreamState {
         if !existing_messages.is_empty() {
             new_message_manager.add_messages_batch(existing_messages);
         }
-        
+
         Self {
             message_manager: new_message_manager,
             author_comment_counts: self.author_comment_counts.clone(),
@@ -160,7 +160,7 @@ pub fn AppContextProvider(children: Element) -> Element {
 
         spawn(async move {
             let (event_sender, mut event_receiver) = mpsc::unbounded_channel::<AppEvent>();
-            
+
             // グローバルイベントハンドラーを設定
             GLOBAL_EVENT_SENDER.set(event_sender).ok();
 
@@ -168,24 +168,21 @@ pub fn AppContextProvider(children: Element) -> Element {
 
             // イベント処理ループ
             while let Some(event) = event_receiver.recv().await {
-                handle_unified_event(
-                    event,
-                    live_chat_clone,
-                    message_stream_clone,
-                    stats_clone,
-                ).await;
+                handle_unified_event(event, live_chat_clone, message_stream_clone, stats_clone)
+                    .await;
             }
         });
     });
 
     // コンテキストを提供
     use_context_provider(|| app_context);
-    
+
     children
 }
 
 /// グローバルイベント送信者（旧STATE_MANAGER代替）
-static GLOBAL_EVENT_SENDER: std::sync::OnceLock<mpsc::UnboundedSender<AppEvent>> = std::sync::OnceLock::new();
+static GLOBAL_EVENT_SENDER: std::sync::OnceLock<mpsc::UnboundedSender<AppEvent>> =
+    std::sync::OnceLock::new();
 
 /// イベントを送信（旧StateManager::send_eventの代替）
 pub fn send_app_event(event: AppEvent) -> Result<(), String> {
@@ -271,7 +268,7 @@ async fn handle_unified_event(
         AppEvent::ConnectionChanged { is_connected } => {
             live_chat.with_mut(|chat_state| {
                 chat_state.is_connected = is_connected;
-                
+
                 // 接続開始時に統計をリセット
                 if is_connected && stats.read().start_time.is_none() {
                     stats.with_mut(|stats_state| {
@@ -362,7 +359,7 @@ fn update_stats(mut stats: Signal<ChatStats>) {
     stats.with_mut(|stats_state| {
         // 実装は旧StateManager::update_stats_staticを参考
         stats_state.last_message_time = Some(chrono::Utc::now());
-        
+
         // 稼働時間の計算
         if let Some(start_time) = stats_state.start_time {
             let duration = chrono::Utc::now().signed_duration_since(start_time);
@@ -381,7 +378,7 @@ pub fn use_app_context() -> AppContext {
 /// 旧use_live_chatの代替（後方互換性）
 pub fn use_unified_live_chat() -> LiveChatHandle {
     let app_context = use_app_context();
-    
+
     // 後方互換性のためのハンドル作成
     LiveChatHandle {
         live_chat_state: app_context.live_chat,
@@ -402,7 +399,7 @@ impl LiveChatHandle {
     /// ライブチャット監視を開始
     pub fn start_monitoring(&self, url: String, output_file: Option<String>) {
         let mut live_chat_signal = self.live_chat_state;
-        
+
         spawn(async move {
             // 開始時に停止フラグをリセット
             live_chat_signal.with_mut(|state| {
@@ -419,7 +416,9 @@ impl LiveChatHandle {
 
             // イベント送信
             let _ = send_app_event(AppEvent::ServiceStateChanged(ServiceState::Connecting));
-            let _ = send_app_event(AppEvent::ConnectionChanged { is_connected: false });
+            let _ = send_app_event(AppEvent::ConnectionChanged {
+                is_connected: false,
+            });
 
             let result = {
                 let mut service = service_arc.lock().await;
@@ -436,21 +435,23 @@ impl LiveChatHandle {
 
                     let _ = send_app_event(AppEvent::ServiceStateChanged(ServiceState::Connected));
                     let _ = send_app_event(AppEvent::ConnectionChanged { is_connected: true });
-                    
+
                     tracing::info!("✅ [APP_CONTEXT] Live chat monitoring started");
                 }
                 Err(e) => {
                     let error_message = format!("❌ 監視開始エラー: {}", e);
                     let error_state = ServiceState::Error(error_message);
-                    
+
                     live_chat_signal.with_mut(|state| {
                         state.service_state = error_state.clone();
                         state.is_connected = false;
                     });
 
                     let _ = send_app_event(AppEvent::ServiceStateChanged(error_state));
-                    let _ = send_app_event(AppEvent::ConnectionChanged { is_connected: false });
-                    
+                    let _ = send_app_event(AppEvent::ConnectionChanged {
+                        is_connected: false,
+                    });
+
                     tracing::error!("❌ [APP_CONTEXT] Failed to start monitoring: {}", e);
                 }
             }
@@ -460,7 +461,7 @@ impl LiveChatHandle {
     /// ライブチャット監視を停止
     pub fn stop_monitoring(&self) {
         let mut live_chat_signal = self.live_chat_state;
-        
+
         spawn(async move {
             // 即座に停止処理中フラグを設定
             live_chat_signal.with_mut(|state| {
@@ -470,7 +471,7 @@ impl LiveChatHandle {
             let _ = send_app_event(AppEvent::StoppingStateChanged { is_stopping: true });
 
             let service_arc = crate::gui::services::get_global_service().clone();
-            
+
             let result = {
                 let mut service = service_arc.lock().await;
                 service.stop_monitoring().await
@@ -487,9 +488,11 @@ impl LiveChatHandle {
             });
 
             let _ = send_app_event(AppEvent::ServiceStateChanged(ServiceState::Idle));
-            let _ = send_app_event(AppEvent::ConnectionChanged { is_connected: false });
+            let _ = send_app_event(AppEvent::ConnectionChanged {
+                is_connected: false,
+            });
             let _ = send_app_event(AppEvent::StoppingStateChanged { is_stopping: false });
-            
+
             tracing::info!("⏹️ [APP_CONTEXT] Live chat monitoring stopped");
         });
     }

@@ -337,7 +337,7 @@ mod tests {
         // FetchErrorの各バリアントをテスト
         let error = FetchError::NotFound;
         assert!(format!("{}", error).contains("Not found"));
-        
+
         let anyhow_error = anyhow::anyhow!("Test error");
         let fetch_error = FetchError::from(anyhow_error);
         match fetch_error {
@@ -351,7 +351,7 @@ mod tests {
         // JSON解析エラーからの変換をテスト
         let json_error = serde_json::from_str::<serde_json::Value>("invalid json").unwrap_err();
         let fetch_error = FetchError::from(json_error);
-        
+
         match fetch_error {
             FetchError::Serialization(_) => (), // 期待される
             _ => panic!("Expected FetchError::Serialization variant"),
@@ -363,7 +363,7 @@ mod tests {
         // anyhowエラーからの変換をテスト
         let anyhow_error = anyhow::anyhow!("Test error");
         let fetch_error = FetchError::from(anyhow_error);
-        
+
         match fetch_error {
             FetchError::Other(_) => (), // 期待される
             _ => panic!("Expected FetchError::Other variant"),
@@ -379,11 +379,11 @@ mod tests {
             ClientVersion::new("2.0".to_string()),
             ClientId("1".to_string()),
         );
-        
+
         // 空の継続トークンを設定
         inner_tube.continuation = Continuation("".to_string());
         assert_eq!(inner_tube.continuation.to_string(), "");
-        
+
         // 無効な継続トークンを設定
         inner_tube.continuation = Continuation("invalid_token".to_string());
         assert_eq!(inner_tube.continuation.to_string(), "invalid_token");
@@ -432,10 +432,10 @@ mod tests {
             "Time test".to_string(),
             1609459200, // 2021-01-01 00:00:00 UTC
         );
-        
+
         let datetime_str = message.datetime();
         assert!(!datetime_str.is_empty());
-        
+
         // タイムスタンプ0での処理
         let zero_message = ChatMessage::new(
             "msg_zero".to_string(),
@@ -443,7 +443,7 @@ mod tests {
             "Zero timestamp".to_string(),
             0,
         );
-        
+
         let zero_datetime = zero_message.datetime();
         assert!(!zero_datetime.is_empty());
     }

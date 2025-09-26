@@ -1,13 +1,13 @@
-use dioxus::prelude::*;
 use crate::gui::{
     hooks::LiveChatHandle,
-    styles::theme::{CssClasses, get_connection_status_class},
+    styles::theme::{get_connection_status_class, CssClasses},
 };
+use dioxus::prelude::*;
 
 /// チャットヘッダーコンポーネント
-/// 
+///
 /// 接続状態の表示を担当する軽量なヘッダーコンポーネント
-/// 
+///
 /// # Props
 /// - `live_chat_handle`: ライブチャットハンドル（接続状態取得用）
 /// - `is_connecting`: 接続中フラグ
@@ -20,11 +20,11 @@ pub struct ChatHeaderProps {
 }
 
 /// チャットヘッダーコンポーネント
-/// 
+///
 /// 責務:
 /// - ライブチャット接続状態の表示
 /// - 状態に応じた視覚的なフィードバック提供
-/// 
+///
 /// 分離理由:
 /// - 単一責任原則（状態表示のみ）
 /// - 独立性が高く再利用可能

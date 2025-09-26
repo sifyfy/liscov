@@ -193,6 +193,12 @@ pub fn use_state_manager_integration() {
 }
 ```
 
+### SignalManagerの非同期実行戦略
+
+- `src/gui/signal_manager.rs` の `SignalTaskExecutor` で Dioxus の `spawn` と Tokio の `tokio::spawn` を切り替えられる抽象層を設けたのだ。
+- 実行器は `SignalManager::new_with_executor` で注入可能になり、プロダクションは `SignalManager::new()` 経由で Dioxus 実行器を利用しつつ、テストでは `SignalTaskExecutor::tokio()` を渡して純粋な Tokio ランタイム上で検証できるのだ。
+- バッチ処理ループはこれまでどおり 16ms 間隔の `tokio::time::interval` を使用するが、実行器を差し替えることで GUI 以外の統合テストや将来のバックエンド連携にも再利用しやすくなったのだ。
+
 ## 🎨 レンダリング最適化
 
 ### 計算量制限とメモ化

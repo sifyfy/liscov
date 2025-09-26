@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 use crate::gui::{
     models::{GuiChatMessage, MessageType},
     services::{LiveChatService, ServiceState},
-    state_management::{get_state_manager, AppEvent, ChatStats},
     signal_manager::{get_signal_manager, use_optimized_signals, SignalUpdateType, UpdatePriority},
+    state_management::{get_state_manager, AppEvent, ChatStats},
 };
 
 /// グローバルライブチャット状態
@@ -33,9 +33,9 @@ pub static GLOBAL_LIVE_CHAT: OnceLock<Arc<Mutex<GlobalLiveChatState>>> = OnceLoc
 /// ライブチャットハンドル
 #[derive(Clone)]
 pub struct LiveChatHandle {
-    pub messages: Signal<Vec<GuiChatMessage>>,           // 後方互換性のため保持
-    pub new_message: Signal<Option<GuiChatMessage>>,     // 新着メッセージのみ
-    pub message_added_event: Signal<u64>,                // メッセージ追加イベント (カウンター)
+    pub messages: Signal<Vec<GuiChatMessage>>, // 後方互換性のため保持
+    pub new_message: Signal<Option<GuiChatMessage>>, // 新着メッセージのみ
+    pub message_added_event: Signal<u64>,      // メッセージ追加イベント (カウンター)
     pub state: Signal<ServiceState>,
     pub is_connected: Signal<bool>,
     pub stats: Signal<ChatStats>,
@@ -395,7 +395,7 @@ pub fn use_live_chat() -> LiveChatHandle {
         tracing::debug!("📊 Initializing stats signal");
         initial_stats.clone()
     });
-    
+
     // 差分更新システム用のSignal初期化
     let new_message = use_signal(|| None::<GuiChatMessage>);
     let message_added_event = use_signal(|| 0u64);
@@ -408,7 +408,7 @@ pub fn use_live_chat() -> LiveChatHandle {
 
     // Phase 2.3: 最適化されたSignal管理システムを初期化
     let optimized_signals = use_optimized_signals();
-    
+
     // 🎯 Phase C1: 無限ループリスクゼロの安全な単方向同期
     use_effect(move || {
         let mut messages_clone = messages;
@@ -428,16 +428,16 @@ pub fn use_live_chat() -> LiveChatHandle {
             let mut last_connected = false;
             let mut last_stopping = false;
             let mut sync_counter = 0u64;
-            
+
             loop {
                 // 500ms間隔の安全なポーリング（無限ループリスクなし）
                 tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                 sync_counter += 1;
-                
+
                 // StateManagerから状態取得（読み取り専用）
                 let current_state = get_state_manager().get_state_unchecked();
                 let current_message_count = current_state.messages().len();
-                
+
                 // 変更検出: メッセージ数変化
                 if current_message_count != last_message_count {
                     tracing::info!(
@@ -446,10 +446,10 @@ pub fn use_live_chat() -> LiveChatHandle {
                         current_message_count,
                         sync_counter
                     );
-                    
+
                     // UI Signalを安全に更新（一方向のみ）
                     messages_clone.set(current_state.messages());
-                    
+
                     // 新着メッセージの差分更新
                     if current_message_count > last_message_count {
                         let new_messages = current_state.messages();
@@ -459,11 +459,11 @@ pub fn use_live_chat() -> LiveChatHandle {
                             message_added_event_clone.set(current_event_count + 1);
                         }
                     }
-                    
+
                     last_message_count = current_message_count;
                 }
-                
-                // 変更検出: 接続状態変化  
+
+                // 変更検出: 接続状態変化
                 if current_state.is_connected != last_connected {
                     tracing::info!(
                         "🔗 [SAFE_SYNC] Connection changed: {} → {}",
@@ -473,7 +473,7 @@ pub fn use_live_chat() -> LiveChatHandle {
                     is_connected_clone.set(current_state.is_connected);
                     last_connected = current_state.is_connected;
                 }
-                
+
                 // 変更検出: サービス状態変化
                 if current_state.service_state != last_state {
                     tracing::info!(
@@ -484,7 +484,7 @@ pub fn use_live_chat() -> LiveChatHandle {
                     state_clone.set(current_state.service_state.clone());
                     last_state = current_state.service_state.clone();
                 }
-                
+
                 // 変更検出: 停止状態変化
                 if current_state.is_stopping != last_stopping {
                     tracing::info!(
@@ -495,10 +495,10 @@ pub fn use_live_chat() -> LiveChatHandle {
                     is_stopping_clone.set(current_state.is_stopping);
                     last_stopping = current_state.is_stopping;
                 }
-                
+
                 // 統計情報は常に更新（変更量少ない）
                 stats_clone.set(current_state.stats.clone());
-                
+
                 // 30秒ごとのステータスログ
                 if sync_counter % 60 == 0 {
                     tracing::info!(

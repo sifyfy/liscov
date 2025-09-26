@@ -104,38 +104,67 @@ fn validate_file_path(path: &str) -> Result<(), LiveChatError> {
     if path.is_empty() {
         return Err(LiveChatError::invalid_format("Empty file path"));
     }
-    
+
     // パス長制限（非常に長いパスを拒否）
     if path.len() > 4096 {
         return Err(LiveChatError::invalid_format(format!(
-            "Path too long ({} chars, max 4096)", 
+            "Path too long ({} chars, max 4096)",
             path.len()
         )));
     }
-    
+
     // ディレクトリトラバーサル攻撃の検出
     if path.contains("../") || path.contains("..\\") {
-        return Err(LiveChatError::invalid_format("Directory traversal detected"));
+        return Err(LiveChatError::invalid_format(
+            "Directory traversal detected",
+        ));
     }
-    
+
     // Null文字やその他の危険な文字をチェック
     if path.contains('\0') {
         return Err(LiveChatError::invalid_format("Null character in path"));
     }
-    
+
     // Windowsで危険な文字をチェック
     if cfg!(windows) {
-        let dangerous_chars = ['<', '>', ':', '"', '|', '?', '*'];
+        let dangerous_chars = ['<', '>', '"', '|', '?', '*'];
         for ch in dangerous_chars {
             if path.contains(ch) {
                 return Err(LiveChatError::invalid_format(format!(
-                    "Invalid character '{}' in Windows path", 
+                    "Invalid character '{}' in Windows path",
                     ch
                 )));
             }
         }
+
+        let colon_positions: Vec<_> = path.match_indices(':').map(|(idx, _)| idx).collect();
+        if !colon_positions.is_empty() {
+            let starts_with_extended = path.starts_with("\\\\?\\");
+            let expected_index = if starts_with_extended { 5 } else { 1 };
+            let drive_char_index = if starts_with_extended { 4 } else { 0 };
+            let follow_index = expected_index + 1;
+
+            let drive_prefix_valid = colon_positions.len() == 1
+                && colon_positions[0] == expected_index
+                && path
+                    .chars()
+                    .nth(drive_char_index)
+                    .map(|c| c.is_ascii_alphabetic())
+                    .unwrap_or(false)
+                && path
+                    .chars()
+                    .nth(follow_index)
+                    .map_or(true, |c| c == '\\' || c == '/');
+
+            if !drive_prefix_valid {
+                return Err(LiveChatError::invalid_format(format!(
+                    "Invalid colon placement in Windows path: {}",
+                    path
+                )));
+            }
+        }
     }
-    
+
     // PathBufを使用してパスの正当性を検証
     let path_buf = match PathBuf::from(path).canonicalize() {
         Ok(canonical_path) => canonical_path,
@@ -146,30 +175,32 @@ fn validate_file_path(path: &str) -> Result<(), LiveChatError> {
                 if parent.exists() {
                     path_buf
                 } else {
-                    return Err(LiveChatError::invalid_format("Parent directory does not exist"));
+                    return Err(LiveChatError::invalid_format(
+                        "Parent directory does not exist",
+                    ));
                 }
             } else {
                 path_buf
             }
         }
     };
-    
+
     // 絶対パスに変換された結果が元のパスと著しく異なる場合は拒否
     let canonical_str = path_buf.to_string_lossy();
-    
+
     // システムディレクトリへのアクセスを制限（Unix系）
     if cfg!(unix) {
         let restricted_prefixes = ["/etc", "/proc", "/sys", "/dev"];
         for prefix in &restricted_prefixes {
             if canonical_str.starts_with(prefix) {
                 return Err(LiveChatError::invalid_format(format!(
-                    "Access to system directory '{}' is restricted", 
+                    "Access to system directory '{}' is restricted",
                     prefix
                 )));
             }
         }
     }
-    
+
     // Windowsシステムディレクトリの制限
     if cfg!(windows) {
         let path_lower = canonical_str.to_lowercase();
@@ -177,13 +208,13 @@ fn validate_file_path(path: &str) -> Result<(), LiveChatError> {
         for prefix in &restricted_prefixes {
             if path_lower.starts_with(prefix) {
                 return Err(LiveChatError::invalid_format(format!(
-                    "Access to system directory '{}' is restricted", 
+                    "Access to system directory '{}' is restricted",
                     prefix
                 )));
             }
         }
     }
-    
+
     Ok(())
 }
 
@@ -208,7 +239,7 @@ where
 {
     // ファイルパス検証を最初に実行
     validate_file_path(path)?;
-    
+
     let file = File::open(path).map_err(|e| {
         LiveChatError::generic("opening file", format!("Failed to open '{}': {}", path, e))
     })?;
@@ -437,7 +468,10 @@ mod tests {
         assert!(result.is_err(), "Directory traversal should be rejected");
 
         let result = validate_file_path("data\\..\\secret.txt");
-        assert!(result.is_err(), "Windows directory traversal should be rejected");
+        assert!(
+            result.is_err(),
+            "Windows directory traversal should be rejected"
+        );
 
         // Null文字
         let result = validate_file_path("test\0.txt");
@@ -447,6 +481,14 @@ mod tests {
         let long_path = "a".repeat(5000);
         let result = validate_file_path(&long_path);
         assert!(result.is_err(), "Extremely long path should be rejected");
+
+        #[cfg(windows)]
+        {
+            let temp_drive_path = std::env::temp_dir().join("ndjson_valid_path_test.ndjson");
+            let drive_path = temp_drive_path.to_string_lossy().into_owned();
+            let result = validate_file_path(&drive_path);
+            assert!(result.is_ok(), "Windows absolute path should be accepted");
+        }
     }
 
     #[test]
@@ -454,16 +496,33 @@ mod tests {
     fn test_windows_path_validation() {
         use super::validate_file_path;
 
-        // Windows危険文字
-        let dangerous_chars = ['<', '>', ':', '"', '|', '?', '*'];
+        // Windows固有文字
+        let dangerous_chars = ['<', '>', '"', '|', '?', '*'];
         for ch in dangerous_chars {
             let path = format!("test{}.txt", ch);
             let result = validate_file_path(&path);
-            assert!(result.is_err(), "Dangerous character '{}' should be rejected", ch);
+            assert!(
+                result.is_err(),
+                "Dangerous character '{}' should be rejected",
+                ch
+            );
         }
 
-        // Windowsシステムディレクトリ（モック）
-        // 実際のテストではこれらのパスは存在しないため、テストは制限的
+        let invalid_colon = "logs:chat.ndjson";
+        assert!(
+            validate_file_path(invalid_colon).is_err(),
+            "Colon outside drive prefix should be rejected"
+        );
+
+        let temp_drive_path = std::env::temp_dir().join("ndjson_windows_validation.ndjson");
+        let drive_path = temp_drive_path.to_string_lossy().into_owned();
+        assert!(
+            validate_file_path(&drive_path).is_ok(),
+            "Absolute Windows path should be accepted"
+        );
+
+        // Windowsシステムディレクトリ（ロック）
+        // 実際のテストではこれらのパスは存在しないため、テストは限定的
         println!("Windows path validation test completed (limited scope in test environment)");
     }
 
@@ -483,7 +542,10 @@ mod tests {
     fn test_file_path_validation_integration() {
         // 統合テスト: ファイルパス検証が実際のパース関数で動作することを確認
         let result = parse_ndjson_file("../invalid_traversal.ndjson");
-        assert!(result.is_err(), "Directory traversal should prevent file parsing");
+        assert!(
+            result.is_err(),
+            "Directory traversal should prevent file parsing"
+        );
 
         let result = parse_ndjson_file("");
         assert!(result.is_err(), "Empty path should prevent file parsing");

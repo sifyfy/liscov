@@ -91,8 +91,8 @@ impl MessageStream {
         Self {
             display_window: VecDeque::with_capacity(capacity),
             archive: Vec::new(),
-            message_id_map: HashMap::new(),              // 🚀 IDマッピング初期化
-            message_id_order: VecDeque::new(),           // 🚀 ID順序リスト初期化
+            message_id_map: HashMap::new(),    // 🚀 IDマッピング初期化
+            message_id_order: VecDeque::new(), // 🚀 ID順序リスト初期化
             config,
             total_count: 0,
             archived_count: 0,
@@ -119,7 +119,7 @@ impl MessageStream {
     pub fn push_message(&mut self, message: GuiChatMessage) {
         // 🚀 IDベース更新システム: ユニークIDを生成
         let message_id = self.generate_message_id(&message);
-        
+
         // 重複チェック（O(1)）
         if self.message_id_map.contains_key(&message_id) {
             // 既存メッセージの場合は更新をスキップ
@@ -149,12 +149,12 @@ impl MessageStream {
     fn generate_message_id(&self, message: &GuiChatMessage) -> String {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
-        
+
         let mut hasher = DefaultHasher::new();
         message.timestamp.hash(&mut hasher);
         message.author.hash(&mut hasher);
         message.content.hash(&mut hasher);
-        
+
         format!("msg_{:x}", hasher.finish())
     }
 

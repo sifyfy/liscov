@@ -275,58 +275,92 @@ impl LiscovDatabase {
 
     /// 金額文字列をデータベース用にパース（堅牢性強化版）
     fn parse_amount_for_db(&self, amount_str: &str) -> Option<f64> {
-        // 入力検証
-        if amount_str.is_empty() {
+        Self::parse_amount(amount_str)
+    }
+
+    /// Extracts a floating point amount from locale-specific currency strings.
+    fn parse_amount(amount_str: &str) -> Option<f64> {
+        const MAX_LENGTH: usize = 50;
+
+        let trimmed = amount_str.trim();
+        if trimmed.is_empty() {
             tracing::debug!("Empty amount string provided");
             return None;
         }
 
-        if amount_str.len() > 50 {
-            tracing::warn!(
-                "Amount string too long ({}): {}",
-                amount_str.len(),
-                amount_str
-            );
+        if trimmed.len() > MAX_LENGTH {
+            tracing::warn!("Amount string too long ({}): {}", trimmed.len(), trimmed);
             return None;
         }
 
-        // 数字とピリオドのみを抽出
-        let clean_amount = amount_str
-            .chars()
-            .filter(|c| c.is_ascii_digit() || *c == '.')
-            .collect::<String>();
-
-        // 空の結果をチェック
-        if clean_amount.is_empty() {
-            tracing::debug!("No valid numeric characters in amount: {}", amount_str);
+        if trimmed.contains('-') || (trimmed.contains('(') && trimmed.contains(')')) {
+            tracing::warn!("Negative amount detected: {}", trimmed);
             return None;
         }
 
-        // ピリオドが複数ある場合をチェック
-        let dot_count = clean_amount.chars().filter(|&c| c == '.').count();
-        if dot_count > 1 {
-            tracing::warn!("Invalid amount format (multiple decimals): {}", amount_str);
+        let mut filtered = String::new();
+        for ch in trimmed.chars() {
+            match ch {
+                '0'..='9' => filtered.push(ch),
+                '.' | ',' => filtered.push(ch),
+                '\'' | ' ' | ' ' | ' ' => {}
+                _ => {}
+            }
+        }
+
+        if filtered.is_empty() {
+            tracing::debug!("No valid numeric characters in amount: {}", trimmed);
             return None;
         }
 
-        // パースを試行
-        match clean_amount.parse::<f64>() {
+        let last_dot = filtered.rfind('.');
+        let last_comma = filtered.rfind(',');
+        let decimal_char = match (last_dot, last_comma) {
+            (Some(d), Some(c)) => Some(if d > c { '.' } else { ',' }),
+            (Some(d), None) => {
+                let frac_len = filtered.len().saturating_sub(d + 1);
+                if frac_len > 0 && frac_len <= 2 {
+                    Some('.')
+                } else {
+                    None
+                }
+            }
+            (None, Some(c)) => {
+                let frac_len = filtered.len().saturating_sub(c + 1);
+                if frac_len > 0 && frac_len <= 2 {
+                    Some(',')
+                } else {
+                    None
+                }
+            }
+            (None, None) => None,
+        };
+
+        let mut normalized = String::with_capacity(filtered.len());
+        for ch in filtered.chars() {
+            match ch {
+                '0'..='9' => normalized.push(ch),
+                '.' | ',' => {
+                    if Some(ch) == decimal_char {
+                        normalized.push('.');
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if normalized.is_empty() {
+            return None;
+        }
+
+        match normalized.parse::<f64>() {
+            Ok(amount) if amount >= 0.0 => Some(amount),
             Ok(amount) => {
-                // 負の値や異常に大きな値をチェック
-                if amount < 0.0 {
-                    tracing::warn!("Negative amount detected: {}", amount);
-                    return None;
-                }
-
-                if amount > 1_000_000.0 {
-                    tracing::warn!("Unusually large amount detected: {}", amount);
-                    // 警告は出すが、値は受け入れる（大額の寄付もあり得る）
-                }
-
-                Some(amount)
+                tracing::warn!("Negative amount detected after normalization: {}", amount);
+                None
             }
             Err(e) => {
-                tracing::warn!("Failed to parse amount '{}': {}", amount_str, e);
+                tracing::warn!("Failed to parse normalized amount '{}': {}", normalized, e);
                 None
             }
         }
@@ -434,6 +468,35 @@ impl LiscovDatabase {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn approx_eq(a: f64, b: f64) {
+        assert!((a - b).abs() < 0.0001, "expected {} =~ {}", a, b);
+    }
+
+    #[test]
+    fn test_parse_amount_locale_variants() {
+        let cases = [
+            ("€5,00", 5.00),
+            ("R$ 1.234,56", 1234.56),
+            ("US$1,234.56", 1234.56),
+            ("1 234,56 PLN", 1234.56),
+            ("CHF 1'234.50", 1234.50),
+            ("CAD 1 234,56", 1234.56),
+            ("¥500", 500.0),
+            ("NT$1,000", 1000.0),
+        ];
+
+        for (input, expected) in cases {
+            let parsed = LiscovDatabase::parse_amount(input)
+                .expect(&format!("amount should parse: {}", input));
+            approx_eq(parsed, expected);
+        }
+
+        assert!(LiscovDatabase::parse_amount("").is_none());
+        assert!(LiscovDatabase::parse_amount("-5,00").is_none());
+        assert!(LiscovDatabase::parse_amount("(5.00)").is_none());
+        assert!(LiscovDatabase::parse_amount("abc").is_none());
+    }
 
     #[test]
     fn test_database_creation() -> Result<()> {

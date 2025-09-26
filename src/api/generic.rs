@@ -1,9 +1,9 @@
 //! ジェネリックAPI統一システム
-//! 
+//!
 //! Phase 3実装: 異なるAPIを統一されたインターフェースで抽象化
 
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -93,11 +93,14 @@ impl Default for RetryConfig {
 #[async_trait]
 pub trait GenericApiClient: Send + Sync {
     /// JSONリクエストを送信（dyn互換）
-    async fn send_json_request(&self, request: GenericRequest<serde_json::Value>) -> LiscovResult<GenericResponse<serde_json::Value>>;
-    
+    async fn send_json_request(
+        &self,
+        request: GenericRequest<serde_json::Value>,
+    ) -> LiscovResult<GenericResponse<serde_json::Value>>;
+
     /// クライアント設定を取得
     fn get_config(&self) -> &ApiClientConfig;
-    
+
     /// ヘルスチェック
     async fn health_check(&self) -> LiscovResult<bool>;
 }
@@ -106,11 +109,14 @@ pub trait GenericApiClient: Send + Sync {
 #[async_trait]
 pub trait TypedApiClient: GenericApiClient {
     /// 型付きリクエストを送信
-    async fn send_request<TReq, TRes>(&self, request: GenericRequest<TReq>) -> LiscovResult<GenericResponse<TRes>>
+    async fn send_request<TReq, TRes>(
+        &self,
+        request: GenericRequest<TReq>,
+    ) -> LiscovResult<GenericResponse<TRes>>
     where
         TReq: Serialize + Send + Sync,
         TRes: DeserializeOwned + Send + Sync;
-    
+
     /// GET リクエストの便利メソッド
     async fn get<TRes>(&self, endpoint: &str) -> LiscovResult<GenericResponse<TRes>>
     where
@@ -126,12 +132,16 @@ pub trait TypedApiClient: GenericApiClient {
             timeout_ms: None,
             retry_config: None,
         };
-        
+
         self.send_request(request).await
     }
-    
+
     /// POST リクエストの便利メソッド
-    async fn post<TReq, TRes>(&self, endpoint: &str, body: TReq) -> LiscovResult<GenericResponse<TRes>>
+    async fn post<TReq, TRes>(
+        &self,
+        endpoint: &str,
+        body: TReq,
+    ) -> LiscovResult<GenericResponse<TRes>>
     where
         TReq: Serialize + Send + Sync,
         TRes: DeserializeOwned + Send + Sync,
@@ -146,7 +156,7 @@ pub trait TypedApiClient: GenericApiClient {
             timeout_ms: None,
             retry_config: None,
         };
-        
+
         self.send_request(request).await
     }
 }
@@ -208,24 +218,29 @@ where
 {
     /// エンティティを作成
     async fn create(&self, entity: T) -> LiscovResult<T>;
-    
+
     /// IDでエンティティを取得
     async fn get_by_id(&self, id: K) -> LiscovResult<Option<T>>;
-    
+
     /// 全エンティティを取得
     async fn get_all(&self) -> LiscovResult<Vec<T>>;
-    
+
     /// エンティティを更新
     async fn update(&self, id: K, entity: T) -> LiscovResult<T>;
-    
+
     /// エンティティを削除
     async fn delete(&self, id: K) -> LiscovResult<bool>;
-    
+
     /// 条件に基づくクエリ
     async fn query(&self, filters: HashMap<String, serde_json::Value>) -> LiscovResult<Vec<T>>;
-    
+
     /// ページング付きクエリ
-    async fn query_paged(&self, filters: HashMap<String, serde_json::Value>, page: u32, size: u32) -> LiscovResult<PagedResult<T>>;
+    async fn query_paged(
+        &self,
+        filters: HashMap<String, serde_json::Value>,
+        page: u32,
+        size: u32,
+    ) -> LiscovResult<PagedResult<T>>;
 }
 
 /// ページング結果
@@ -255,16 +270,16 @@ where
 {
     /// ストリームを開始
     async fn start_stream(&mut self, config: StreamConfig) -> LiscovResult<()>;
-    
+
     /// ストリームを停止
     async fn stop_stream(&mut self) -> LiscovResult<()>;
-    
+
     /// 次のデータを取得（非ブロッキング）
     async fn next_data(&mut self) -> LiscovResult<Option<T>>;
-    
+
     /// ストリームの状態を取得
     fn get_stream_status(&self) -> StreamStatus;
-    
+
     /// ストリーム統計を取得
     fn get_stream_stats(&self) -> StreamStats;
 }
@@ -319,13 +334,13 @@ where
 {
     /// キャッシュからデータを取得（ミスした場合はAPIから取得）
     async fn get_cached(&self, key: K) -> LiscovResult<V>;
-    
+
     /// キャッシュを手動で更新
     async fn refresh_cache(&self, key: K) -> LiscovResult<V>;
-    
+
     /// キャッシュをクリア
     async fn clear_cache(&self) -> LiscovResult<()>;
-    
+
     /// キャッシュ統計を取得
     fn get_cache_stats(&self) -> CacheStats;
 }
@@ -349,11 +364,14 @@ pub struct CacheStats {
 #[async_trait]
 pub trait BatchApiClient: GenericApiClient {
     /// 複数のリクエストをバッチで実行
-    async fn send_batch<TReq, TRes>(&self, requests: Vec<GenericRequest<TReq>>) -> LiscovResult<Vec<GenericResponse<TRes>>>
+    async fn send_batch<TReq, TRes>(
+        &self,
+        requests: Vec<GenericRequest<TReq>>,
+    ) -> LiscovResult<Vec<GenericResponse<TRes>>>
     where
         TReq: Serialize + Send + Sync,
         TRes: DeserializeOwned + Send + Sync;
-    
+
     /// バッチサイズの制限を取得
     fn get_max_batch_size(&self) -> usize;
 }
@@ -362,13 +380,19 @@ pub trait BatchApiClient: GenericApiClient {
 pub trait ApiMetrics: Send + Sync {
     /// リクエスト開始を記録
     fn record_request_start(&self, endpoint: &str, method: &HttpMethod);
-    
+
     /// リクエスト完了を記録
-    fn record_request_complete(&self, endpoint: &str, method: &HttpMethod, status_code: u16, duration_ms: u64);
-    
+    fn record_request_complete(
+        &self,
+        endpoint: &str,
+        method: &HttpMethod,
+        status_code: u16,
+        duration_ms: u64,
+    );
+
     /// エラーを記録
     fn record_error(&self, endpoint: &str, method: &HttpMethod, error_type: &str);
-    
+
     /// メトリクスを取得
     fn get_metrics(&self) -> ApiMetricsSnapshot;
 }
@@ -421,7 +445,9 @@ pub struct ResponseMapper;
 
 impl ResponseMapper {
     /// JSONレスポンスを特定の型に変換
-    pub fn map_json_response<T>(response: GenericResponse<serde_json::Value>) -> LiscovResult<GenericResponse<T>>
+    pub fn map_json_response<T>(
+        response: GenericResponse<serde_json::Value>,
+    ) -> LiscovResult<GenericResponse<T>>
     where
         T: DeserializeOwned,
     {
@@ -430,7 +456,7 @@ impl ResponseMapper {
         } else {
             None
         };
-        
+
         Ok(GenericResponse {
             request_id: response.request_id,
             status_code: response.status_code,
@@ -441,9 +467,12 @@ impl ResponseMapper {
             metadata: response.metadata,
         })
     }
-    
+
     /// エラーレスポンスを作成
-    pub fn create_error_response<T>(request_id: String, error_message: String) -> GenericResponse<T> {
+    pub fn create_error_response<T>(
+        request_id: String,
+        error_message: String,
+    ) -> GenericResponse<T> {
         GenericResponse {
             request_id,
             status_code: 500,
@@ -463,7 +492,7 @@ pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 pub trait ApiClientFactory: Send + Sync {
     /// 設定からクライアントを作成
     fn create_client(&self, config: ApiClientConfig) -> Box<dyn GenericApiClient>;
-    
+
     /// 特定の用途向けのクライアントを作成
     fn create_youtube_client(&self) -> LiscovResult<Box<dyn GenericApiClient>>;
     fn create_database_client(&self) -> LiscovResult<Box<dyn GenericApiClient>>;
@@ -473,7 +502,7 @@ pub trait ApiClientFactory: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_generic_request_creation() {
         let request = GenericRequest {
@@ -486,12 +515,12 @@ mod tests {
             timeout_ms: Some(5000),
             retry_config: Some(RetryConfig::default()),
         };
-        
+
         assert_eq!(request.id, "test-123");
         assert_eq!(request.method, HttpMethod::GET);
         assert_eq!(request.timeout_ms, Some(5000));
     }
-    
+
     #[test]
     fn test_retry_config_default() {
         let config = RetryConfig::default();
@@ -499,7 +528,7 @@ mod tests {
         assert_eq!(config.initial_delay_ms, 1000);
         assert_eq!(config.backoff_multiplier, 2.0);
     }
-    
+
     #[test]
     fn test_paged_result() {
         let result = PagedResult {
@@ -511,20 +540,18 @@ mod tests {
             has_previous: false,
             has_next: true,
         };
-        
+
         assert_eq!(result.data.len(), 3);
         assert_eq!(result.total_pages, 10);
         assert!(!result.has_previous);
         assert!(result.has_next);
     }
-    
+
     #[test]
     fn test_response_mapper_error_creation() {
-        let error_response: GenericResponse<String> = ResponseMapper::create_error_response(
-            "req-123".to_string(),
-            "Test error".to_string(),
-        );
-        
+        let error_response: GenericResponse<String> =
+            ResponseMapper::create_error_response("req-123".to_string(), "Test error".to_string());
+
         assert_eq!(error_response.request_id, "req-123");
         assert_eq!(error_response.status_code, 500);
         assert_eq!(error_response.error, Some("Test error".to_string()));

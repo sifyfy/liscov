@@ -34,6 +34,7 @@ pub struct LiveChatService {
     inner_tube: Arc<TokioMutex<Option<InnerTube>>>,
     state: Arc<TokioMutex<ServiceState>>,
     shutdown_sender: Option<mpsc::UnboundedSender<()>>,
+    message_sender: Arc<TokioMutex<Option<mpsc::UnboundedSender<GuiChatMessage>>>>,
     output_file: Arc<TokioMutex<Option<String>>>,
     response_saver: Arc<TokioMutex<RawResponseSaver>>,
     stream_end_detector: Arc<TokioMutex<StreamEndDetector>>,
@@ -46,6 +47,7 @@ impl LiveChatService {
             inner_tube: Arc::new(TokioMutex::new(None)),
             state: Arc::new(TokioMutex::new(ServiceState::Idle)),
             shutdown_sender: None,
+            message_sender: Arc::new(TokioMutex::new(None)),
             output_file: Arc::new(TokioMutex::new(None)),
             response_saver: Arc::new(TokioMutex::new(
                 RawResponseSaver::new(SaveConfig::default()),
@@ -87,11 +89,13 @@ impl LiveChatService {
                 drop(inner_tube_guard);
 
                 // ダミーレシーバー（互換性のため）
-                let (_dummy_tx, message_rx) = mpsc::unbounded_channel();
+                let (message_tx, message_rx) = mpsc::unbounded_channel();
+                self.set_message_sender(Some(message_tx)).await;
                 let (shutdown_tx, shutdown_rx) = mpsc::unbounded_channel();
 
                 self.shutdown_sender = Some(shutdown_tx);
 
+                self.reset_stream_end_detector().await;
                 // 状態をConnectedに変更
                 {
                     let mut state = self.state.lock().await;
@@ -137,6 +141,9 @@ impl LiveChatService {
         // URLも破棄（完全停止）
         self.last_url = None;
 
+        self.set_message_sender(None).await;
+        self.reset_stream_end_detector().await;
+
         tracing::info!("Live chat monitoring stopped");
         Ok(())
     }
@@ -164,6 +171,9 @@ impl LiveChatService {
             let _ = get_state_manager()
                 .send_event(AppEvent::ContinuationTokenUpdated(Some(continuation)));
         }
+
+        self.set_message_sender(None).await;
+        self.reset_stream_end_detector().await;
 
         tracing::info!("Live chat monitoring paused");
         Ok(())
@@ -227,11 +237,13 @@ impl LiveChatService {
         self.last_url = Some(url);
 
         // チャネルを作成してメッセージ受信タスクを開始
-        let (_message_sender, message_receiver) = mpsc::unbounded_channel();
+        let (message_tx, message_receiver) = mpsc::unbounded_channel();
+        self.set_message_sender(Some(message_tx)).await;
         let (shutdown_sender, shutdown_receiver) = mpsc::unbounded_channel();
 
         self.shutdown_sender = Some(shutdown_sender);
 
+        self.reset_stream_end_detector().await;
         // バックグラウンドタスクを開始
         self.spawn_global_message_receiver_task(shutdown_receiver)
             .await;
@@ -246,7 +258,40 @@ impl LiveChatService {
         Ok(message_receiver)
     }
 
+    async fn set_message_sender(&self, sender: Option<mpsc::UnboundedSender<GuiChatMessage>>) {
+        let mut guard = self.message_sender.lock().await;
+        *guard = sender;
+    }
+
+    async fn broadcast_to_receivers(
+        message_sender: &Arc<TokioMutex<Option<mpsc::UnboundedSender<GuiChatMessage>>>>,
+        message: &GuiChatMessage,
+    ) -> bool {
+        let sender_option = {
+            let guard = message_sender.lock().await;
+            guard.clone()
+        };
+
+        if let Some(sender) = sender_option {
+            if sender.send(message.clone()).is_err() {
+                tracing::warn!("?? [API_SERVICE] Dropping message sender because receiver hung up");
+                let mut guard = message_sender.lock().await;
+                guard.take();
+                false
+            } else {
+                true
+            }
+        } else {
+            false
+        }
+    }
+
     /// 現在の状態を取得
+    async fn reset_stream_end_detector(&self) {
+        let mut detector = self.stream_end_detector.lock().await;
+        detector.reset();
+    }
+
     pub async fn get_state(&self) -> ServiceState {
         let state = self.state.lock().await;
         state.clone()
@@ -302,6 +347,7 @@ impl LiveChatService {
         let output_file = Arc::clone(&self.output_file);
         let response_saver = Arc::clone(&self.response_saver);
         let stream_end_detector = Arc::clone(&self.stream_end_detector);
+        let message_sender = Arc::clone(&self.message_sender);
 
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(2));
@@ -465,6 +511,9 @@ impl LiveChatService {
                                                     );
                                                     state_manager_send_results.push(false);
                                                 }
+                                            }
+                                            if !Self::broadcast_to_receivers(&message_sender, &gui_message).await {
+                                                tracing::trace!("?? [API_SERVICE] No external message receiver registered");
                                             }
 
                                             // ファイルに保存（オプション・自動保存設定に基づく）
@@ -640,10 +689,13 @@ impl LiveChatService {
             }
 
             tracing::info!(
-                                        "🏁 Message receiver task completed. Total requests: {}, consecutive errors at end: {}",
-                                        request_count,
-                                        consecutive_errors
-                                    );
+                "🏁 Message receiver task completed. Total requests: {}, consecutive errors at end: {}",
+                request_count,
+                consecutive_errors
+            );
+
+            let mut sender_guard = message_sender.lock().await;
+            sender_guard.take();
         });
     }
 
@@ -659,69 +711,78 @@ impl LiveChatService {
             .open(file_path)
             .await?;
 
-        file.write_all(format!("{}\n", json_line).as_bytes())
-            .await?;
+        file.write_all(
+            format!(
+                "{}
+",
+                json_line
+            )
+            .as_bytes(),
+        )
+        .await?;
         file.flush().await?;
 
         Ok(())
     }
 
     /// Phase 2.2: use_resource統合用バッチメッセージ取得
-    /// 
+    ///
     /// 現在のメッセージバッファから最新のメッセージをバッチで取得
     pub async fn get_recent_messages_batch(&mut self) -> anyhow::Result<Vec<GuiChatMessage>> {
         // StateManagerから現在のメッセージを取得
         use crate::gui::state_management::get_state_manager;
-        
+
         let current_state = get_state_manager().get_state_unchecked();
         let messages = current_state.messages();
-        
+
         tracing::debug!(
             "🚀 [BATCH_FETCH] Retrieved {} messages from state manager",
             messages.len()
         );
-        
+
         Ok(messages)
     }
 
     /// Phase 2.2: 最新N件のメッセージを取得（use_resource用）
-    pub async fn get_latest_messages(&mut self, count: usize) -> anyhow::Result<Vec<GuiChatMessage>> {
+    pub async fn get_latest_messages(
+        &mut self,
+        count: usize,
+    ) -> anyhow::Result<Vec<GuiChatMessage>> {
         use crate::gui::state_management::get_state_manager;
-        
+
         let current_state = get_state_manager().get_state_unchecked();
         let recent_messages = current_state.recent_messages(count);
-        
+
         tracing::debug!(
             "🚀 [LATEST_FETCH] Retrieved {} latest messages (requested: {})",
             recent_messages.len(),
             count
         );
-        
+
         Ok(recent_messages)
     }
 
     /// Phase 2.2: 差分メッセージ取得（効率的な更新用）
-    pub async fn get_new_messages_since(&mut self, last_count: usize) -> anyhow::Result<Vec<GuiChatMessage>> {
+    pub async fn get_new_messages_since(
+        &mut self,
+        last_count: usize,
+    ) -> anyhow::Result<Vec<GuiChatMessage>> {
         use crate::gui::state_management::get_state_manager;
-        
+
         let current_state = get_state_manager().get_state_unchecked();
         let all_messages = current_state.messages();
         let current_count = all_messages.len();
-        
+
         if current_count > last_count {
-            let new_messages = all_messages
-                .iter()
-                .skip(last_count)
-                .cloned()
-                .collect();
-            
+            let new_messages = all_messages.iter().skip(last_count).cloned().collect();
+
             tracing::info!(
                 "🚀 [DIFF_FETCH] Retrieved {} new messages (total: {} → {})",
                 current_count - last_count,
                 last_count,
                 current_count
             );
-            
+
             Ok(new_messages)
         } else {
             tracing::debug!(
@@ -737,6 +798,59 @@ impl LiveChatService {
 impl Default for LiveChatService {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn broadcast_sends_message_to_registered_receiver() {
+        let service = LiveChatService::new();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        {
+            let mut sender_guard = service.message_sender.lock().await;
+            *sender_guard = Some(tx);
+        }
+
+        let message = GuiChatMessage {
+            author: "tester".to_string(),
+            content: "hello".to_string(),
+            ..GuiChatMessage::default()
+        };
+
+        let delivered =
+            LiveChatService::broadcast_to_receivers(&service.message_sender, &message).await;
+        assert!(
+            delivered,
+            "expected message to be delivered to registered receiver"
+        );
+
+        let received = rx.recv().await.expect("receiver should obtain a message");
+        assert_eq!(received, message);
+    }
+
+    #[tokio::test]
+    async fn stop_monitoring_closes_message_channel() {
+        let mut service = LiveChatService::new();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        {
+            let mut sender_guard = service.message_sender.lock().await;
+            *sender_guard = Some(tx);
+        }
+
+        service
+            .stop_monitoring()
+            .await
+            .expect("stop_monitoring should succeed");
+
+        assert!(
+            rx.recv().await.is_none(),
+            "channel should close after stop_monitoring"
+        );
     }
 }
 

@@ -379,21 +379,24 @@ mod tests {
             "empty-channel-id".to_string(),
         );
         // メッセージを追加しない（空のデータセット）
-        
+
         let config = ExportConfig::default();
-        
+
         let result = exporter.export(&data, &config);
         assert!(result.is_ok());
-        
+
         let csv_bytes = result.unwrap();
         let csv_str = String::from_utf8(csv_bytes).unwrap();
-        
+
         // ヘッダーはあるがメッセージデータがない
         assert!(csv_str.contains("id,timestamp,author"));
         let lines: Vec<&str> = csv_str.lines().collect();
-        let data_lines = lines.iter().filter(|line| 
-            !line.starts_with('#') && !line.is_empty() && !line.contains("id,timestamp,author")
-        ).count();
+        let data_lines = lines
+            .iter()
+            .filter(|line| {
+                !line.starts_with('#') && !line.is_empty() && !line.contains("id,timestamp,author")
+            })
+            .count();
         assert_eq!(data_lines, 0);
     }
 
@@ -406,7 +409,7 @@ mod tests {
             "Large Channel".to_string(),
             "large-channel-id".to_string(),
         );
-        
+
         // 大量のメッセージを追加（10,000件）
         for i in 0..10000 {
             data.messages.push(ExportableData {
@@ -414,43 +417,73 @@ mod tests {
                 timestamp: Utc::now(),
                 author: format!("User{}", i % 100), // 100人のユーザーが循環
                 author_id: format!("user{}", i % 100),
-                content: format!("メッセージ番号 {} です。これは大容量データのテストです。", i),
-                message_type: if i % 50 == 0 { "superchat".to_string() } else { "text".to_string() },
-                amount: if i % 50 == 0 { Some((i as f64) * 100.0) } else { None },
-                currency: if i % 50 == 0 { Some("JPY".to_string()) } else { None },
+                content: format!(
+                    "メッセージ番号 {} です。これは大容量データのテストです。",
+                    i
+                ),
+                message_type: if i % 50 == 0 {
+                    "superchat".to_string()
+                } else {
+                    "text".to_string()
+                },
+                amount: if i % 50 == 0 {
+                    Some((i as f64) * 100.0)
+                } else {
+                    None
+                },
+                currency: if i % 50 == 0 {
+                    Some("JPY".to_string())
+                } else {
+                    None
+                },
                 emoji_count: i % 10,
                 word_count: i % 20 + 1,
-                is_deleted: i % 500 == 0, // 500件に1件削除フラグ
+                is_deleted: i % 500 == 0,    // 500件に1件削除フラグ
                 is_moderator: i % 1000 == 0, // 1000件に1件モデレーター
-                is_member: i % 100 == 0, // 100件に1件メンバー
-                is_verified: i % 200 == 0, // 200件に1件認証済み
-                badges: if i % 100 == 0 { vec!["Member".to_string()] } else { vec![] },
+                is_member: i % 100 == 0,     // 100件に1件メンバー
+                is_verified: i % 200 == 0,   // 200件に1件認証済み
+                badges: if i % 100 == 0 {
+                    vec!["Member".to_string()]
+                } else {
+                    vec![]
+                },
                 metadata: HashMap::new(),
             });
         }
-        
+
         let config = ExportConfig::default();
-        
+
         let start_time = std::time::Instant::now();
         let result = exporter.export(&data, &config);
         let export_duration = start_time.elapsed();
-        
+
         assert!(result.is_ok());
-        
+
         let csv_bytes = result.unwrap();
         let csv_str = String::from_utf8(csv_bytes).unwrap();
-        
+
         // 10,000件のメッセージが含まれているか確認
         let lines: Vec<&str> = csv_str.lines().collect();
-        let data_lines = lines.iter().filter(|line| 
-            !line.starts_with('#') && !line.is_empty() && !line.contains("id,timestamp,author")
-        ).count();
+        let data_lines = lines
+            .iter()
+            .filter(|line| {
+                !line.starts_with('#') && !line.is_empty() && !line.contains("id,timestamp,author")
+            })
+            .count();
         // メタデータセクションがあるため、実際のデータ行数は期待値とわずかに異なる場合がある
-        assert!(data_lines >= 9950 && data_lines <= 10050, "Expected around 10000 data lines, got {}", data_lines);
-        
+        assert!(
+            data_lines >= 9950 && data_lines <= 10050,
+            "Expected around 10000 data lines, got {}",
+            data_lines
+        );
+
         // パフォーマンス確認（5秒以内）
-        assert!(export_duration.as_secs() < 5, "大容量CSVエクスポートが遅すぎます: {:?}", export_duration);
-        
+        assert!(
+            export_duration.as_secs() < 5,
+            "大容量CSVエクスポートが遅すぎます: {:?}",
+            export_duration
+        );
+
         println!("10,000件のCSVエクスポート時間: {:?}", export_duration);
     }
 
@@ -463,14 +496,15 @@ mod tests {
             "Extreme Channel".to_string(),
             "extreme-channel-id".to_string(),
         );
-        
+
         // 極端なコンテンツを持つメッセージ
         data.messages.push(ExportableData {
             id: "extreme1".to_string(),
             timestamp: Utc::now(),
             author: "\"Weird,User\"".to_string(), // CSVで問題となる文字
             author_id: "weird\nuser".to_string(), // 改行文字
-            content: "\"これは\"コンマ,改行\n\rタブ\t\tを含む\",\"極端な文字列です\"\"\"".to_string(),
+            content: "\"これは\"コンマ,改行\n\rタブ\t\tを含む\",\"極端な文字列です\"\"\""
+                .to_string(),
             message_type: "text".to_string(),
             amount: None,
             currency: None,
@@ -483,7 +517,7 @@ mod tests {
             badges: vec!["\"VIP,Member\"".to_string()],
             metadata: HashMap::new(),
         });
-        
+
         // 非常に長いコンテンツ
         data.messages.push(ExportableData {
             id: "extreme2".to_string(),
@@ -503,7 +537,7 @@ mod tests {
             badges: vec![],
             metadata: HashMap::new(),
         });
-        
+
         // 絵文字とUnicode文字
         data.messages.push(ExportableData {
             id: "extreme3".to_string(),
@@ -523,15 +557,15 @@ mod tests {
             badges: vec!["🏆Winner🏆".to_string()],
             metadata: HashMap::new(),
         });
-        
+
         let config = ExportConfig::default();
-        
+
         let result = exporter.export(&data, &config);
         assert!(result.is_ok());
-        
+
         let csv_bytes = result.unwrap();
         let csv_str = String::from_utf8(csv_bytes).unwrap();
-        
+
         // CSVが適切にエスケープされているか確認
         assert!(csv_str.contains("\"\"\"Weird,User\"\"\""));
         assert!(csv_str.contains("🎮🔥💯🚀⭐"));
@@ -547,7 +581,7 @@ mod tests {
             "Limited Channel".to_string(),
             "limited-channel-id".to_string(),
         );
-        
+
         // 1000件のメッセージを追加
         for i in 0..1000 {
             data.messages.push(ExportableData {
@@ -569,24 +603,27 @@ mod tests {
                 metadata: HashMap::new(),
             });
         }
-        
+
         // 最大100件に制限
         let config = ExportConfig {
             max_records: Some(100),
             ..Default::default()
         };
-        
+
         let result = exporter.export(&data, &config);
         assert!(result.is_ok());
-        
+
         let csv_bytes = result.unwrap();
         let csv_str = String::from_utf8(csv_bytes).unwrap();
-        
+
         // 100件のメッセージのみが含まれているか確認
         let lines: Vec<&str> = csv_str.lines().collect();
-        let data_lines = lines.iter().filter(|line| 
-            !line.starts_with('#') && !line.is_empty() && !line.contains("id,timestamp,author")
-        ).count();
+        let data_lines = lines
+            .iter()
+            .filter(|line| {
+                !line.starts_with('#') && !line.is_empty() && !line.contains("id,timestamp,author")
+            })
+            .count();
         assert_eq!(data_lines, 100);
     }
 
@@ -599,7 +636,7 @@ mod tests {
             "Memory Test Channel".to_string(),
             "memory-test-id".to_string(),
         );
-        
+
         // 中程度のデータセット（5,000件）でメモリ使用量をテスト
         for i in 0..5000 {
             data.messages.push(ExportableData {
@@ -607,7 +644,10 @@ mod tests {
                 timestamp: Utc::now(),
                 author: format!("User{}", i),
                 author_id: format!("user{}", i),
-                content: format!("これは{}番目のメッセージです。メモリ効率をテストしています。", i),
+                content: format!(
+                    "これは{}番目のメッセージです。メモリ効率をテストしています。",
+                    i
+                ),
                 message_type: "text".to_string(),
                 amount: None,
                 currency: None,
@@ -621,21 +661,21 @@ mod tests {
                 metadata: HashMap::new(),
             });
         }
-        
+
         let config = ExportConfig::default();
-        
+
         // メモリ使用量監視（簡易版）
         let _start_memory = std::process::id(); // プロセスIDを基準とした簡易測定
-        
+
         let result = exporter.export(&data, &config);
         assert!(result.is_ok());
-        
+
         let csv_bytes = result.unwrap();
-        
+
         // 結果のサイズが妥当であることを確認
         assert!(csv_bytes.len() > 100000); // 最低限のサイズ
         assert!(csv_bytes.len() < 10_000_000); // 上限チェック（10MB未満）
-        
+
         // UTF-8として有効であることを確認
         let csv_str = String::from_utf8(csv_bytes);
         assert!(csv_str.is_ok());
@@ -644,19 +684,40 @@ mod tests {
     #[test]
     fn test_csv_edge_case_characters() {
         let exporter = CsvExporter::new();
-        
+
         // 特殊文字のエスケープテスト（さらに詳細）
         assert_eq!(exporter.escape_csv_field("normal"), "normal");
         assert_eq!(exporter.escape_csv_field(""), "");
-        assert_eq!(exporter.escape_csv_field("test,with,comma"), "\"test,with,comma\"");
-        assert_eq!(exporter.escape_csv_field("test\"with\"quote"), "\"test\"\"with\"\"quote\"");
-        assert_eq!(exporter.escape_csv_field("test\nwith\nnewline"), "\"test\nwith\nnewline\"");
-        assert_eq!(exporter.escape_csv_field("test\rwith\rcarriage"), "\"test\rwith\rcarriage\"");
-        assert_eq!(exporter.escape_csv_field("test\twith\ttab"), "test\twith\ttab"); // タブは区切り文字でない限りエスケープ不要
-        
+        assert_eq!(
+            exporter.escape_csv_field("test,with,comma"),
+            "\"test,with,comma\""
+        );
+        assert_eq!(
+            exporter.escape_csv_field("test\"with\"quote"),
+            "\"test\"\"with\"\"quote\""
+        );
+        assert_eq!(
+            exporter.escape_csv_field("test\nwith\nnewline"),
+            "\"test\nwith\nnewline\""
+        );
+        assert_eq!(
+            exporter.escape_csv_field("test\rwith\rcarriage"),
+            "\"test\rwith\rcarriage\""
+        );
+        assert_eq!(
+            exporter.escape_csv_field("test\twith\ttab"),
+            "test\twith\ttab"
+        ); // タブは区切り文字でない限りエスケープ不要
+
         // カスタム区切り文字でのテスト
         let tab_exporter = CsvExporter::new().with_delimiter('\t');
-        assert_eq!(tab_exporter.escape_csv_field("test\twith\ttab"), "\"test\twith\ttab\"");
-        assert_eq!(tab_exporter.escape_csv_field("test,with,comma"), "test,with,comma");
+        assert_eq!(
+            tab_exporter.escape_csv_field("test\twith\ttab"),
+            "\"test\twith\ttab\""
+        );
+        assert_eq!(
+            tab_exporter.escape_csv_field("test,with,comma"),
+            "test,with,comma"
+        );
     }
 }

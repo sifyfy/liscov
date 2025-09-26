@@ -1,12 +1,12 @@
 //! 統合APIクライアント実装
-//! 
+//!
 //! ジェネリックAPIシステムの具象実装
 
 use async_trait::async_trait;
-use serde::{Serialize, de::DeserializeOwned};
+use parking_lot::RwLock;
+use serde::{de::DeserializeOwned, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use parking_lot::RwLock;
 
 use crate::api::generic::*;
 use crate::LiscovResult;
@@ -66,8 +66,14 @@ impl UnifiedApiClient {
             default_timeout_ms: 15000,
             default_headers: {
                 let mut headers = HashMap::new();
-                headers.insert("User-Agent".to_string(), "Mozilla/5.0 (compatible; Liscov/1.0)".to_string());
-                headers.insert("Accept".to_string(), "application/json, text/html".to_string());
+                headers.insert(
+                    "User-Agent".to_string(),
+                    "Mozilla/5.0 (compatible; Liscov/1.0)".to_string(),
+                );
+                headers.insert(
+                    "Accept".to_string(),
+                    "application/json, text/html".to_string(),
+                );
                 headers
             },
             default_retry_config: RetryConfig {
@@ -131,7 +137,7 @@ impl UnifiedApiClient {
         TRes: DeserializeOwned + Send + Sync,
     {
         let start_time = chrono::Utc::now();
-        
+
         // メトリクス記録開始
         self.record_request_start(&request.endpoint, &request.method);
 
@@ -152,7 +158,8 @@ impl UnifiedApiClient {
             HttpMethod::HEAD => self.http_client.head(&full_url),
             HttpMethod::OPTIONS => {
                 // reqwestにはoptionsメソッドがないため、request()を使用
-                self.http_client.request(reqwest::Method::OPTIONS, &full_url)
+                self.http_client
+                    .request(reqwest::Method::OPTIONS, &full_url)
             }
         };
 
@@ -180,10 +187,14 @@ impl UnifiedApiClient {
         }
 
         // リクエストを送信（リトライ付き）
-        let response = self.execute_with_retry(http_request, &request.retry_config).await?;
-        
+        let response = self
+            .execute_with_retry(http_request, &request.retry_config)
+            .await?;
+
         let end_time = chrono::Utc::now();
-        let duration_ms = end_time.signed_duration_since(start_time).num_milliseconds() as u64;
+        let duration_ms = end_time
+            .signed_duration_since(start_time)
+            .num_milliseconds() as u64;
 
         // レスポンスを解析
         let status_code = response.status().as_u16();
@@ -230,28 +241,33 @@ impl UnifiedApiClient {
         request_builder: reqwest::RequestBuilder,
         retry_config: &Option<RetryConfig>,
     ) -> LiscovResult<reqwest::Response> {
-        let retry_config = retry_config.as_ref().unwrap_or(&self.config.default_retry_config);
+        let retry_config = retry_config
+            .as_ref()
+            .unwrap_or(&self.config.default_retry_config);
         let mut attempts = 0;
         let mut delay_ms = retry_config.initial_delay_ms;
 
         loop {
             attempts += 1;
-            
+
             // リクエストを複製（RequestBuilderは消費されるため）
-            let cloned_request = request_builder.try_clone()
-                .ok_or_else(|| {
-                    let io_error = std::io::Error::new(std::io::ErrorKind::Other, "Request cloning failed");
-                    crate::LiscovError::StdIo(io_error)
-                })?;
+            let cloned_request = request_builder.try_clone().ok_or_else(|| {
+                let io_error =
+                    std::io::Error::new(std::io::ErrorKind::Other, "Request cloning failed");
+                crate::LiscovError::StdIo(io_error)
+            })?;
 
             match cloned_request.send().await {
                 Ok(response) => {
-                    if response.status().is_success() || 
-                       !retry_config.retryable_status_codes.contains(&response.status().as_u16()) ||
-                       attempts >= retry_config.max_attempts {
+                    if response.status().is_success()
+                        || !retry_config
+                            .retryable_status_codes
+                            .contains(&response.status().as_u16())
+                        || attempts >= retry_config.max_attempts
+                    {
                         return Ok(response);
                     }
-                    
+
                     // リトライ可能なエラーの場合は待機
                     if attempts < retry_config.max_attempts {
                         tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
@@ -259,14 +275,14 @@ impl UnifiedApiClient {
                         delay_ms = delay_ms.min(retry_config.max_delay_ms);
                         continue;
                     }
-                    
+
                     return Ok(response);
                 }
                 Err(e) => {
                     if attempts >= retry_config.max_attempts {
                         return Err(crate::LiscovError::Network(e));
                     }
-                    
+
                     // ネットワークエラーの場合もリトライ
                     tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
                     delay_ms = ((delay_ms as f64) * retry_config.backoff_multiplier) as u64;
@@ -279,7 +295,10 @@ impl UnifiedApiClient {
 
 #[async_trait]
 impl GenericApiClient for UnifiedApiClient {
-    async fn send_json_request(&self, request: GenericRequest<serde_json::Value>) -> LiscovResult<GenericResponse<serde_json::Value>> {
+    async fn send_json_request(
+        &self,
+        request: GenericRequest<serde_json::Value>,
+    ) -> LiscovResult<GenericResponse<serde_json::Value>> {
         self.execute_http_request(request).await
     }
 
@@ -309,7 +328,10 @@ impl GenericApiClient for UnifiedApiClient {
 
 #[async_trait]
 impl TypedApiClient for UnifiedApiClient {
-    async fn send_request<TReq, TRes>(&self, request: GenericRequest<TReq>) -> LiscovResult<GenericResponse<TRes>>
+    async fn send_request<TReq, TRes>(
+        &self,
+        request: GenericRequest<TReq>,
+    ) -> LiscovResult<GenericResponse<TRes>>
     where
         TReq: Serialize + Send + Sync,
         TRes: DeserializeOwned + Send + Sync,
@@ -321,29 +343,38 @@ impl TypedApiClient for UnifiedApiClient {
 impl ApiMetrics for UnifiedApiClient {
     fn record_request_start(&self, endpoint: &str, _method: &HttpMethod) {
         let mut metrics = self.metrics.write();
-        
+
         // エンドポイント統計を初期化（存在しない場合）
-        metrics.endpoint_stats.entry(endpoint.to_string()).or_insert_with(|| EndpointStats {
-            request_count: 0,
-            success_count: 0,
-            error_count: 0,
-            average_response_time_ms: 0.0,
-            min_response_time_ms: u64::MAX,
-            max_response_time_ms: 0,
-        });
-        
+        metrics
+            .endpoint_stats
+            .entry(endpoint.to_string())
+            .or_insert_with(|| EndpointStats {
+                request_count: 0,
+                success_count: 0,
+                error_count: 0,
+                average_response_time_ms: 0.0,
+                min_response_time_ms: u64::MAX,
+                max_response_time_ms: 0,
+            });
+
         // グローバル統計を更新
         metrics.global_stats.total_requests += 1;
     }
 
-    fn record_request_complete(&self, endpoint: &str, _method: &HttpMethod, status_code: u16, duration_ms: u64) {
+    fn record_request_complete(
+        &self,
+        endpoint: &str,
+        _method: &HttpMethod,
+        status_code: u16,
+        duration_ms: u64,
+    ) {
         let mut metrics = self.metrics.write();
-        
+
         // エンドポイント統計を先に更新
         let (success_count_delta, error_count_delta) = {
             if let Some(endpoint_stats) = metrics.endpoint_stats.get_mut(endpoint) {
                 endpoint_stats.request_count += 1;
-                
+
                 let (success_delta, error_delta) = if status_code >= 200 && status_code < 300 {
                     endpoint_stats.success_count += 1;
                     (1, 0)
@@ -351,48 +382,55 @@ impl ApiMetrics for UnifiedApiClient {
                     endpoint_stats.error_count += 1;
                     (0, 1)
                 };
-                
+
                 // レスポンス時間統計を更新
                 let current_avg = endpoint_stats.average_response_time_ms;
                 let count = endpoint_stats.request_count as f64;
-                endpoint_stats.average_response_time_ms = 
+                endpoint_stats.average_response_time_ms =
                     (current_avg * (count - 1.0) + duration_ms as f64) / count;
-                
-                endpoint_stats.min_response_time_ms = endpoint_stats.min_response_time_ms.min(duration_ms);
-                endpoint_stats.max_response_time_ms = endpoint_stats.max_response_time_ms.max(duration_ms);
-                
+
+                endpoint_stats.min_response_time_ms =
+                    endpoint_stats.min_response_time_ms.min(duration_ms);
+                endpoint_stats.max_response_time_ms =
+                    endpoint_stats.max_response_time_ms.max(duration_ms);
+
                 (success_delta, error_delta)
             } else {
                 (0, 0)
             }
         };
-        
+
         // グローバル統計を更新
         metrics.global_stats.total_success += success_count_delta;
         metrics.global_stats.total_errors += error_count_delta;
-        
+
         let total_requests = metrics.global_stats.total_requests as f64;
         if total_requests > 0.0 {
-            metrics.global_stats.success_rate = 
+            metrics.global_stats.success_rate =
                 (metrics.global_stats.total_success as f64) / total_requests * 100.0;
-            
+
             let current_global_avg = metrics.global_stats.average_response_time_ms;
-            metrics.global_stats.average_response_time_ms = 
+            metrics.global_stats.average_response_time_ms =
                 (current_global_avg * (total_requests - 1.0) + duration_ms as f64) / total_requests;
         }
     }
 
     fn record_error(&self, endpoint: &str, method: &HttpMethod, error_type: &str) {
         let mut metrics = self.metrics.write();
-        
+
         if let Some(endpoint_stats) = metrics.endpoint_stats.get_mut(endpoint) {
             endpoint_stats.error_count += 1;
         }
-        
+
         metrics.global_stats.total_errors += 1;
-        
+
         // エラータイプ別の統計も将来的に追加可能
-        tracing::warn!("API error recorded: {} {} - {}", endpoint, method.to_string(), error_type);
+        tracing::warn!(
+            "API error recorded: {} {} - {}",
+            endpoint,
+            method.to_string(),
+            error_type
+        );
     }
 
     fn get_metrics(&self) -> ApiMetricsSnapshot {
@@ -443,14 +481,14 @@ impl ApiClientFactory for UnifiedApiClientFactory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_unified_client_creation() {
         let client = UnifiedApiClient::with_default_config();
         assert_eq!(client.config.base_url, "https://api.example.com");
         assert_eq!(client.config.default_timeout_ms, 10000);
     }
-    
+
     #[test]
     fn test_youtube_client_config() {
         let client = UnifiedApiClient::for_youtube();
@@ -458,27 +496,30 @@ mod tests {
         assert_eq!(client.config.default_timeout_ms, 15000);
         assert!(client.config.rate_limit.is_some());
     }
-    
+
     #[test]
     fn test_metrics_recording() {
         let client = UnifiedApiClient::with_default_config();
-        
+
         client.record_request_start("/test", &HttpMethod::GET);
         client.record_request_complete("/test", &HttpMethod::GET, 200, 150);
-        
+
         let metrics = client.get_metrics();
         assert_eq!(metrics.global_stats.total_requests, 1);
         assert_eq!(metrics.global_stats.total_success, 1);
         assert!(metrics.endpoint_stats.contains_key("/test"));
     }
-    
+
     #[tokio::test]
     async fn test_client_factory() {
         let factory = UnifiedApiClientFactory;
-        
+
         let youtube_client = factory.create_youtube_client().unwrap();
-        assert_eq!(youtube_client.get_config().base_url, "https://www.youtube.com");
-        
+        assert_eq!(
+            youtube_client.get_config().base_url,
+            "https://www.youtube.com"
+        );
+
         let db_client = factory.create_database_client().unwrap();
         assert_eq!(db_client.get_config().base_url, "file://");
     }

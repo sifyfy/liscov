@@ -1,14 +1,14 @@
 //! 既存APIのジェネリックAPI統合アダプター
-//! 
+//!
 //! 既存のYouTube API、Database APIなどをジェネリックAPIシステムで使用できるように適応
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::analytics::data_exporter::DataExporter;
 use crate::api::generic::*;
 use crate::database::LiscovDatabase;
 use crate::gui::models::GuiChatMessage;
-use crate::analytics::data_exporter::DataExporter;
 use crate::LiscovResult;
 
 /// YouTube APIアダプター
@@ -71,14 +71,15 @@ impl YouTubeApiAdapter {
         };
 
         // APIを呼び出し
-        let response: GenericResponse<serde_json::Value> = self.client.send_json_request(generic_request).await?;
-        
+        let response: GenericResponse<serde_json::Value> =
+            self.client.send_json_request(generic_request).await?;
+
         // レスポンスをパース（簡略化）
         if let Some(body) = response.body {
             // 実際の実装では、YouTube APIのレスポンス形式に基づいて詳細なパースを行う
             let messages = self.parse_youtube_messages(&body)?;
             let continuation_token = self.extract_continuation_token(&body);
-            
+
             Ok(LiveChatResponse {
                 messages,
                 continuation_token,
@@ -90,35 +91,43 @@ impl YouTubeApiAdapter {
     }
 
     /// YouTubeレスポンスからメッセージをパース
-    fn parse_youtube_messages(&self, data: &serde_json::Value) -> LiscovResult<Vec<GuiChatMessage>> {
+    fn parse_youtube_messages(
+        &self,
+        data: &serde_json::Value,
+    ) -> LiscovResult<Vec<GuiChatMessage>> {
         // TODO: 実際のYouTube APIレスポンス形式に基づいてパース
         // ここでは簡略化された実装
         let mut messages = Vec::new();
-        
-        if let Some(actions) = data.get("continuationContents")
+
+        if let Some(actions) = data
+            .get("continuationContents")
             .and_then(|c| c.get("liveChatContinuation"))
             .and_then(|l| l.get("actions"))
-            .and_then(|a| a.as_array()) {
-            
+            .and_then(|a| a.as_array())
+        {
             for action in actions {
                 if let Some(message) = self.parse_single_message(action)? {
                     messages.push(message);
                 }
             }
         }
-        
+
         Ok(messages)
     }
 
     /// 単一メッセージのパース
-    fn parse_single_message(&self, action: &serde_json::Value) -> LiscovResult<Option<GuiChatMessage>> {
+    fn parse_single_message(
+        &self,
+        action: &serde_json::Value,
+    ) -> LiscovResult<Option<GuiChatMessage>> {
         // YouTube APIの実際の形式に基づいてパースする必要がある
         // ここでは簡略化
-        if let Some(_replay_chat_item) = action.get("replayChatItemAction")
+        if let Some(_replay_chat_item) = action
+            .get("replayChatItemAction")
             .and_then(|r| r.get("actions"))
             .and_then(|a| a.as_array())
-            .and_then(|arr| arr.first()) {
-            
+            .and_then(|arr| arr.first())
+        {
             // メッセージの詳細をパース
             // TODO: 実装を完成させる
             Ok(None)
@@ -155,25 +164,17 @@ impl DatabaseApiAdapter {
     /// データベース操作をジェネリックAPIとして実行
     pub async fn execute_query(&self, query: DatabaseQuery) -> LiscovResult<DatabaseQueryResult> {
         match query.operation {
-            DatabaseOperation::Select => {
-                self.execute_select(query).await
-            }
-            DatabaseOperation::Insert => {
-                self.execute_insert(query).await
-            }
-            DatabaseOperation::Update => {
-                self.execute_update(query).await
-            }
-            DatabaseOperation::Delete => {
-                self.execute_delete(query).await
-            }
+            DatabaseOperation::Select => self.execute_select(query).await,
+            DatabaseOperation::Insert => self.execute_insert(query).await,
+            DatabaseOperation::Update => self.execute_update(query).await,
+            DatabaseOperation::Delete => self.execute_delete(query).await,
         }
     }
 
     async fn execute_select(&self, query: DatabaseQuery) -> LiscovResult<DatabaseQueryResult> {
         // TODO: 実際のSQLクエリ実行
         // ここでは簡略化
-        
+
         let generic_request = GenericRequest {
             id: uuid::Uuid::new_v4().to_string(),
             endpoint: format!("/db/{}", query.table),
@@ -185,8 +186,9 @@ impl DatabaseApiAdapter {
             retry_config: None,
         };
 
-        let response: GenericResponse<serde_json::Value> = self.client.send_json_request(generic_request).await?;
-        
+        let response: GenericResponse<serde_json::Value> =
+            self.client.send_json_request(generic_request).await?;
+
         Ok(DatabaseQueryResult {
             affected_rows: 0,
             data: response.body.unwrap_or_default(),
@@ -206,8 +208,9 @@ impl DatabaseApiAdapter {
             retry_config: None,
         };
 
-        let response: GenericResponse<serde_json::Value> = self.client.send_json_request(generic_request).await?;
-        
+        let response: GenericResponse<serde_json::Value> =
+            self.client.send_json_request(generic_request).await?;
+
         Ok(DatabaseQueryResult {
             affected_rows: 1, // 簡略化
             data: response.body.unwrap_or_default(),
@@ -227,8 +230,9 @@ impl DatabaseApiAdapter {
             retry_config: None,
         };
 
-        let response: GenericResponse<serde_json::Value> = self.client.send_json_request(generic_request).await?;
-        
+        let response: GenericResponse<serde_json::Value> =
+            self.client.send_json_request(generic_request).await?;
+
         Ok(DatabaseQueryResult {
             affected_rows: 1, // 簡略化
             data: response.body.unwrap_or_default(),
@@ -248,8 +252,9 @@ impl DatabaseApiAdapter {
             retry_config: None,
         };
 
-        let response: GenericResponse<serde_json::Value> = self.client.send_json_request(generic_request).await?;
-        
+        let response: GenericResponse<serde_json::Value> =
+            self.client.send_json_request(generic_request).await?;
+
         Ok(DatabaseQueryResult {
             affected_rows: 1, // 簡略化
             data: response.body.unwrap_or_default(),
@@ -296,7 +301,10 @@ impl AnalyticsApiAdapter {
     }
 
     /// アナリティクスデータを取得
-    pub async fn get_analytics(&self, request: AnalyticsRequest) -> LiscovResult<AnalyticsResponse> {
+    pub async fn get_analytics(
+        &self,
+        request: AnalyticsRequest,
+    ) -> LiscovResult<AnalyticsResponse> {
         let generic_request = GenericRequest {
             id: uuid::Uuid::new_v4().to_string(),
             endpoint: "/analytics/data".to_string(),
@@ -308,8 +316,9 @@ impl AnalyticsApiAdapter {
             retry_config: Some(RetryConfig::default()),
         };
 
-        let response: GenericResponse<serde_json::Value> = self.client.send_json_request(generic_request).await?;
-        
+        let response: GenericResponse<serde_json::Value> =
+            self.client.send_json_request(generic_request).await?;
+
         if let Some(body) = response.body {
             Ok(serde_json::from_value(body)?)
         } else {
@@ -330,8 +339,9 @@ impl AnalyticsApiAdapter {
             retry_config: Some(RetryConfig::default()),
         };
 
-        let response: GenericResponse<serde_json::Value> = self.client.send_json_request(generic_request).await?;
-        
+        let response: GenericResponse<serde_json::Value> =
+            self.client.send_json_request(generic_request).await?;
+
         if let Some(body) = response.body {
             Ok(serde_json::from_value(body)?)
         } else {
@@ -434,19 +444,19 @@ impl UnifiedApiService {
 mod tests {
     use super::*;
     // use crate::api::unified_client::UnifiedApiClient; // 未使用のため一時的にコメントアウト
-    
+
     #[test]
     fn test_live_chat_request_serialization() {
         let request = LiveChatRequest {
             video_id: "test_video_123".to_string(),
             continuation_token: Some("continuation_123".to_string()),
         };
-        
+
         let json = serde_json::to_string(&request).unwrap();
         assert!(json.contains("test_video_123"));
         assert!(json.contains("continuation_123"));
     }
-    
+
     #[test]
     fn test_database_query_creation() {
         let query = DatabaseQuery {
@@ -459,11 +469,11 @@ mod tests {
                 conditions
             }),
         };
-        
+
         assert_eq!(query.table, "messages");
         assert!(matches!(query.operation, DatabaseOperation::Select));
     }
-    
+
     #[test]
     fn test_analytics_request() {
         let request = AnalyticsRequest {
@@ -476,7 +486,7 @@ mod tests {
                 filters
             },
         };
-        
+
         assert_eq!(request.metrics.len(), 2);
         assert!(request.filters.contains_key("channel_id"));
     }

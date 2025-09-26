@@ -649,7 +649,7 @@ fn start_export_with_message_stream(
     format: ExportFormat,
     include_metadata: bool,
     include_system_messages: bool,
-    include_deleted_messages: bool,  
+    include_deleted_messages: bool,
     max_records: Option<usize>,
     sort_order: SortOrder,
     date_filter_enabled: bool,
@@ -672,7 +672,7 @@ fn start_export_with_message_stream(
         let (messages, stats) = if let Some(stream_signal) = message_stream {
             let stream = stream_signal.read();
             let stats = Some(stream.stats());
-            
+
             let messages = match export_scope {
                 ExportScope::DisplayedOnly => {
                     // 表示中のメッセージのみ
@@ -681,11 +681,11 @@ fn start_export_with_message_stream(
                 ExportScope::AllMessages => {
                     // 全メッセージ（表示+アーカイブ）
                     let mut all_messages = Vec::new();
-                    
+
                     // アーカイブ分を検索で取得（簡易実装）
                     // 実際の実装では、MessageStreamにget_all_messages()メソッドを追加する方が良い
                     all_messages.extend(stream.display_messages());
-                    
+
                     // 注意: 現在の実装ではアーカイブに直接アクセスできないため、
                     // 代替としてlive_chat_handleから取得
                     if let Some(handle) = &live_chat_handle {
@@ -695,7 +695,7 @@ fn start_export_with_message_stream(
                             all_messages = live_messages.clone();
                         }
                     }
-                    
+
                     all_messages
                 }
                 ExportScope::ArchivedOnly => {
@@ -704,7 +704,7 @@ fn start_export_with_message_stream(
                     Vec::new()
                 }
             };
-            
+
             (messages, stats)
         } else if let Some(handle) = live_chat_handle {
             // MessageStreamがない場合はLiveChatHandleから取得
@@ -718,12 +718,12 @@ fn start_export_with_message_stream(
 
         // フィルタリング処理
         let mut filtered_messages = messages;
-        
+
         // システムメッセージフィルタ
         if !include_system_messages {
             filtered_messages.retain(|msg| !msg.content.starts_with("[システム]"));
         }
-        
+
         // 削除メッセージフィルタ
         if !include_deleted_messages {
             filtered_messages.retain(|msg| !msg.content.contains("[削除済み]"));
@@ -754,8 +754,16 @@ fn start_export_with_message_stream(
             SortOrder::ByMessageType => {
                 // メッセージタイプ別ソート（簡易実装）
                 filtered_messages.sort_by(|a, b| {
-                    let type_a = if a.content.contains("Super Chat") { 1 } else { 0 };
-                    let type_b = if b.content.contains("Super Chat") { 1 } else { 0 };
+                    let type_a = if a.content.contains("Super Chat") {
+                        1
+                    } else {
+                        0
+                    };
+                    let type_b = if b.content.contains("Super Chat") {
+                        1
+                    } else {
+                        0
+                    };
                     type_a.cmp(&type_b)
                 });
             }
@@ -764,7 +772,9 @@ fn start_export_with_message_stream(
                 filtered_messages.sort_by(|a, b| {
                     let amount_a: f64 = extract_amount(&a.content).unwrap_or(0.0);
                     let amount_b: f64 = extract_amount(&b.content).unwrap_or(0.0);
-                    amount_b.partial_cmp(&amount_a).unwrap_or(std::cmp::Ordering::Equal)
+                    amount_b
+                        .partial_cmp(&amount_a)
+                        .unwrap_or(std::cmp::Ordering::Equal)
                 });
             }
         }
@@ -806,7 +816,7 @@ fn start_export_with_message_stream(
             "{}形式でのエクスポートが完了しました。\n📊 {}件のメッセージをエクスポート\n📁 ファイル: message_export_{}.{}",
             match format {
                 ExportFormat::Json => "JSON",
-                ExportFormat::Csv => "CSV", 
+                ExportFormat::Csv => "CSV",
                 ExportFormat::Excel => "Excel",
             },
             export_data.messages.len(),
@@ -819,7 +829,7 @@ fn start_export_with_message_stream(
             format!(
                 "\n💾 MessageStream統計:\n  表示中: {}件, アーカイブ: {}件, 総計: {}件\n  メモリ使用量: {:.2}MB, 削減率: {}%",
                 stats.display_count,
-                stats.archived_count, 
+                stats.archived_count,
                 stats.total_count,
                 stats.memory_mb(),
                 stats.effective_reduction_percent
@@ -873,9 +883,9 @@ fn start_export(
         start_date,
         end_date,
         ExportScope::AllMessages, // デフォルトは全メッセージ
-        false, // 統計情報は含めない
-        None,  // MessageStreamなし
-        None,  // LiveChatHandleなし
+        false,                    // 統計情報は含めない
+        None,                     // MessageStreamなし
+        None,                     // LiveChatHandleなし
         is_exporting,
         export_progress,
         last_export_result,
@@ -903,11 +913,15 @@ struct ExportMetadata {
 fn extract_amount(content: &str) -> Option<f64> {
     // "¥100"や"$10.50"のような形式から金額を抽出
     if content.contains("¥") {
-        content.split("¥").nth(1)
+        content
+            .split("¥")
+            .nth(1)
             .and_then(|s| s.split_whitespace().next())
             .and_then(|s| s.replace(",", "").parse().ok())
     } else if content.contains("$") {
-        content.split("$").nth(1)
+        content
+            .split("$")
+            .nth(1)
             .and_then(|s| s.split_whitespace().next())
             .and_then(|s| s.parse().ok())
     } else {
