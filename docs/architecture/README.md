@@ -29,6 +29,7 @@
 - [API アーキテクチャ](./api-architecture.md) - YouTube InnerTube API統合
 - [データ アーキテクチャ](./data-architecture.md) - データベース設計とモデル
 - [状態管理システム](./state-management.md) - イベント駆動状態管理
+- [SignalTaskExecutor 非GUI統合シナリオ](./signal-task-executor-scenarios.md) - 実行器切替とヘッドレス設計の指針
 - [パフォーマンス戦略](./performance.md) - メモリ最適化と性能設計
 - [移行戦略](./migration-strategy.md) - Slint→Dioxus移行記録
 

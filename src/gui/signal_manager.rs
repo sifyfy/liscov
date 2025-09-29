@@ -12,7 +12,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 use crate::gui::models::GuiChatMessage;
 use crate::gui::services::ServiceState;
@@ -40,12 +40,17 @@ impl SignalTaskExecutor {
         (self.executor)(Box::pin(future));
     }
 
-    pub fn tokio() -> Self {
-        Self::new(|task| {
-            tokio::spawn(async move {
+    pub fn from_handle(handle: tokio::runtime::Handle) -> Self {
+        Self::new(move |task| {
+            let handle = handle.clone();
+            handle.spawn(async move {
                 task.await;
             });
         })
+    }
+
+    pub fn tokio() -> Self {
+        Self::from_handle(tokio::runtime::Handle::current())
     }
 
     pub fn dioxus() -> Self {
@@ -64,7 +69,7 @@ impl Default for SignalTaskExecutor {
 }
 
 /// Signal更新の種類
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum SignalUpdateType {
     /// メッセージ追加（差分更新）
     MessageAdded(GuiChatMessage),
@@ -80,10 +85,12 @@ pub enum SignalUpdateType {
     StoppingChanged(bool),
     /// 統計情報更新
     StatsUpdated(ChatStats),
+    /// バッチ処理を即座に完了させるためのフラッシュ要求
+    ForceFlush(oneshot::Sender<()>),
 }
 
 /// Signal更新要求
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct SignalUpdateRequest {
     pub update_type: SignalUpdateType,
     pub priority: UpdatePriority,
@@ -149,7 +156,7 @@ static GLOBAL_SIGNAL_MANAGER: OnceLock<Arc<SignalManager>> = OnceLock::new();
 impl SignalManager {
     /// 新しいSignal管理システムを作成
     pub fn new_with_executor(executor: SignalTaskExecutor) -> Self {
-        let (update_sender, mut update_receiver) = mpsc::unbounded_channel();
+        let (update_sender, mut update_receiver) = mpsc::unbounded_channel::<SignalUpdateRequest>();
 
         let dependencies = Arc::new(Mutex::new(HashMap::new()));
         let debounce_map = Arc::new(Mutex::new(HashMap::new()));
@@ -171,6 +178,19 @@ impl SignalManager {
             loop {
                 tokio::select! {
                     Some(update_request) = update_receiver.recv() => {
+                        if let SignalUpdateType::ForceFlush(responder) = update_request.update_type {
+                            if !batch_buffer.is_empty() {
+                                Self::process_batch_updates(
+                                    &mut batch_buffer,
+                                    &deps_clone,
+                                    &debounce_clone,
+                                    &stats_clone
+                                ).await;
+                            }
+                            let _ = responder.send(());
+                            continue;
+                        }
+
                         batch_buffer.push(update_request);
 
                         if batch_buffer.last().unwrap().priority == UpdatePriority::High {
@@ -284,6 +304,10 @@ impl SignalManager {
 
         for request in batch_buffer.drain(..) {
             match request.update_type {
+                SignalUpdateType::ForceFlush(_) => {
+                    // ForceFlush はバッチ投入前に処理される想定なのだ
+                    continue;
+                }
                 SignalUpdateType::MessageAdded(msg) => {
                     message_batch.push(msg);
                 }
@@ -385,6 +409,25 @@ impl SignalManager {
     }
 
     /// 統計情報を取得
+    /// 保留中の更新を即座に処理するのだ
+    pub async fn force_flush(&self) -> Result<(), String> {
+        let (tx, rx) = oneshot::channel();
+
+        let request = SignalUpdateRequest {
+            update_type: SignalUpdateType::ForceFlush(tx),
+            priority: UpdatePriority::High,
+            timestamp: Instant::now(),
+            debounce_key: None,
+        };
+
+        self.update_sender
+            .send(request)
+            .map_err(|e| format!("Failed to send flush request: {}", e))?;
+
+        rx.await
+            .map_err(|_| "Flush task dropped before completion".to_string())
+    }
+
     pub fn get_stats(&self) -> Option<String> {
         if let Ok(stats) = self.update_stats.lock() {
             Some(format!(
@@ -495,6 +538,65 @@ mod tests {
                 debounce_key: None,
             })
             .is_ok());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_signal_task_executor_from_handle_spawns() {
+        let handle = tokio::runtime::Handle::current();
+        let executor = SignalTaskExecutor::from_handle(handle);
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        executor.spawn(async move {
+            let _ = tx.send(());
+        });
+
+        rx.await.expect("task should execute");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_signal_task_executor_from_handle_multi_thread() {
+        let handle = tokio::runtime::Handle::current();
+        let executor = SignalTaskExecutor::from_handle(handle);
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        executor.spawn(async move {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+            let _ = tx.send(());
+        });
+
+        rx.await.expect("task should execute on multi-thread");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_force_flush_processes_pending_updates() {
+        let manager = SignalManager::new_with_executor(SignalTaskExecutor::tokio());
+
+        let before = manager.update_stats.lock().unwrap().total_updates;
+
+        manager
+            .request_update(
+                SignalUpdateType::MessageAdded(GuiChatMessage::default()),
+                UpdatePriority::Medium,
+                None,
+            )
+            .expect("should enqueue update");
+
+        manager
+            .force_flush()
+            .await
+            .expect("force flush should succeed");
+
+        let stats = manager.update_stats.lock().unwrap();
+        assert!(stats.total_updates > before);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_force_flush_without_pending_updates() {
+        let manager = SignalManager::new_with_executor(SignalTaskExecutor::tokio());
+        manager
+            .force_flush()
+            .await
+            .expect("force flush should succeed");
     }
 
     #[tokio::test(flavor = "current_thread")]
