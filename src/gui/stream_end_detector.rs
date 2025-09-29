@@ -349,8 +349,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_stream_end_detection() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_stream_end_detection() {
         let mut detector = StreamEndDetector::new();
 
         // 1-2回のエラーは継続
@@ -384,8 +384,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_success_resets_counter() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_success_resets_counter() {
         let mut detector = StreamEndDetector::new();
 
         // 3回エラー
@@ -406,8 +406,8 @@ mod tests {
         assert_eq!(detector.consecutive_errors(), 1);
     }
 
-    #[test]
-    fn test_reset_clears_stream_end_flag() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_reset_clears_stream_end_flag() {
         let mut detector = StreamEndDetector::new();
 
         detector.force_stream_ended();
@@ -418,8 +418,33 @@ mod tests {
         assert!(!detector.is_stream_ended());
         assert_eq!(detector.consecutive_errors(), 0);
     }
-    #[test]
-    fn test_non_403_errors() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_error_recovery_after_reset() {
+        let mut detector = StreamEndDetector::new();
+
+        for _ in 0..8 {
+            detector.on_error("403 Forbidden");
+        }
+        assert!(detector.is_stream_ended());
+        assert!(detector.consecutive_errors() >= 8);
+
+        detector.reset();
+        assert!(!detector.is_stream_ended());
+        assert_eq!(detector.consecutive_errors(), 0);
+
+        detector.on_success();
+        assert_eq!(detector.consecutive_errors(), 0);
+        assert!(!detector.is_stream_ended());
+
+        assert_eq!(
+            detector.on_error("403 Forbidden"),
+            DetectionResult::Continue
+        );
+        assert_eq!(detector.consecutive_errors(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_non_403_errors() {
         let mut detector = StreamEndDetector::new();
 
         // 404エラーは配信終了判定にならない

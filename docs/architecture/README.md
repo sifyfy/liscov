@@ -175,3 +175,8 @@
 - analytics::engagement_tracker のユニットテストではテストヘルパー `create_test_message` が author 名に基づいてユニークな `channel_id` を生成するのだ。
 - ユニーク視聴者数のアサーションを書くときは author を一意にするか、想定する channel_id を明示的に指定して整合を保つのだ。
 - viewer_sessions マップは channel_id 単体をキーに管理しているので、テストや機能からアクセスするときは `EngagementMetrics::viewer_session` アクセサ経由で channel_id を指定するのだ。
+
+### GUI テストの注意
+
+- gui::stream_end_detector のユニットテストは `#[tokio::test]` でランタイムを初期化するのだ。`StateManager` のイベントループがグローバルに起動するので、同じモジュールを触るテストは Tokio ランタイム配下で動かすのだ。
+- StreamEndDetector の再接続シナリオを検証する `test_error_recovery_after_reset` では reset → success → error の遷移を確認しているため、同様の再現テストを作るときは `StreamEndDetector::reset` と `on_success` を組み合わせるのだ。
