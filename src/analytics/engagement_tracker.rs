@@ -695,11 +695,12 @@ impl EngagementMetrics {
     fn update_viewer_session(&mut self, message: &GuiChatMessage) {
         let now = Utc::now();
 
+        let session_key = Self::viewer_session_key(message);
         let session = self
             .viewer_sessions
-            .entry(message.channel_id.clone())
+            .entry(session_key.clone())
             .or_insert_with(|| ViewerSession {
-                channel_id: message.channel_id.clone(),
+                channel_id: session_key.clone(),
                 display_name: message.author.clone(),
                 first_message_time: now,
                 last_message_time: now,
@@ -821,6 +822,22 @@ impl EngagementMetrics {
     }
 
     /// アクティビティ統計を更新
+    /// viewer_sessions のキーを生成する補助関数なのだ
+    fn viewer_session_key(message: &GuiChatMessage) -> String {
+        // 視聴者は名前を変えても channel_id は安定なので、channel_id をキーに使うのだ
+        message.channel_id.clone()
+    }
+
+    /// 視聴者セッションを参照するアクセサなのだ
+    pub fn viewer_session(&self, channel_id: &str) -> Option<&ViewerSession> {
+        self.viewer_sessions.get(channel_id)
+    }
+
+    /// 登録済み視聴者セッション数を返すのだ
+    pub fn viewer_session_count(&self) -> usize {
+        self.viewer_sessions.len()
+    }
+
     fn update_activity_stats(&mut self, message: &GuiChatMessage) {
         let now = Utc::now();
         let current_hour = now.hour() as u8;
@@ -2100,7 +2117,9 @@ mod tests {
 
         tracker.update_from_message(&emoji_msg);
 
-        let session = tracker.viewer_sessions.get(&emoji_msg.channel_id).unwrap();
+        let session = tracker
+            .viewer_session(&emoji_msg.channel_id)
+            .expect("viewer session should exist");
         assert!(session.emoji_count > 0);
         assert!(tracker.emoji_usage_rate > 0.0);
     }
@@ -2128,9 +2147,38 @@ mod tests {
 
         tracker.update_from_message(&message);
 
-        let session = tracker.viewer_sessions.get(&message.channel_id).unwrap();
+        let session = tracker
+            .viewer_session(&message.channel_id)
+            .expect("viewer session should exist");
         assert_eq!(session.activity_pattern.len(), 1);
         assert_eq!(session.activity_pattern[0].message_count, 1);
+    }
+
+    #[test]
+    fn test_viewer_session_key_consistency() {
+        let mut tracker = EngagementMetrics::new();
+
+        let mut first_message = create_test_message("SharedUser", "First", MessageType::Text);
+        first_message.channel_id = "shared_channel".to_string();
+
+        let mut renamed_message = first_message.clone();
+        renamed_message.author = "RenamedUser".to_string();
+        renamed_message.content = "Name changed but same channel".to_string();
+
+        tracker.update_from_message(&first_message);
+        tracker.update_from_message(&renamed_message);
+
+        assert_eq!(tracker.viewer_session_count(), 1);
+
+        let session = tracker
+            .viewer_session(&first_message.channel_id)
+            .expect("shared channel session should exist");
+        assert_eq!(session.total_messages, 2);
+
+        let other_message = create_test_message("AnotherUser", "Hello", MessageType::Text);
+        tracker.update_from_message(&other_message);
+
+        assert_eq!(tracker.viewer_session_count(), 2);
     }
 
     #[test]

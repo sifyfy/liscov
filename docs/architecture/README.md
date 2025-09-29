@@ -174,3 +174,4 @@
 
 - analytics::engagement_tracker のユニットテストではテストヘルパー `create_test_message` が author 名に基づいてユニークな `channel_id` を生成するのだ。
 - ユニーク視聴者数のアサーションを書くときは author を一意にするか、想定する channel_id を明示的に指定して整合を保つのだ。
+- viewer_sessions マップは channel_id 単体をキーに管理しているので、テストや機能からアクセスするときは `EngagementMetrics::viewer_session` アクセサ経由で channel_id を指定するのだ。
