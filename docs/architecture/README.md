@@ -169,3 +169,8 @@
 **最終更新**: 2025-06-25  
 **バージョン**: 0.1.0  
 **移行状況**: Phase 0-1 完了
+
+### Analytics テストデータの注意
+
+- analytics::engagement_tracker のユニットテストではテストヘルパー `create_test_message` が author 名に基づいてユニークな `channel_id` を生成するのだ。
+- ユニーク視聴者数のアサーションを書くときは author を一意にするか、想定する channel_id を明示的に指定して整合を保つのだ。

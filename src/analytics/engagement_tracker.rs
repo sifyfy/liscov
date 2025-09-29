@@ -1944,7 +1944,8 @@ mod tests {
             message_type,
             author: author.to_string(),
             author_icon_url: None,
-            channel_id: "test_channel".to_string(),
+            // author ごとにチャネルIDを分けてユニーク視聴者数を再現するのだ
+            channel_id: format!("channel_{}", author),
             content: content.to_string(),
             runs: Vec::new(),
             metadata: None,
@@ -2099,7 +2100,7 @@ mod tests {
 
         tracker.update_from_message(&emoji_msg);
 
-        let session = tracker.viewer_sessions.get("test_EmojiUser").unwrap();
+        let session = tracker.viewer_sessions.get(&emoji_msg.channel_id).unwrap();
         assert!(session.emoji_count > 0);
         assert!(tracker.emoji_usage_rate > 0.0);
     }
@@ -2127,7 +2128,7 @@ mod tests {
 
         tracker.update_from_message(&message);
 
-        let session = tracker.viewer_sessions.get("test_ActiveUser").unwrap();
+        let session = tracker.viewer_sessions.get(&message.channel_id).unwrap();
         assert_eq!(session.activity_pattern.len(), 1);
         assert_eq!(session.activity_pattern[0].message_count, 1);
     }
