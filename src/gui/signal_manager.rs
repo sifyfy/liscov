@@ -86,6 +86,7 @@ pub enum SignalUpdateType {
     /// 統計情報更新
     StatsUpdated(ChatStats),
     /// バッチ処理を即座に完了させるためのフラッシュ要求
+    /// ForceFlush は `force_flush` API からのみ利用するのだ。他の経路で送ると応答できないので注意してほしいのだ。
     ForceFlush(oneshot::Sender<()>),
 }
 
@@ -188,6 +189,8 @@ impl SignalManager {
                                 ).await;
                             }
                             let _ = responder.send(());
+                            // ForceFlush は現在のバッチ内容だけを即時反映する設計なのだ。
+                            // 送信直後に入ってくる追加更新は次サイクルで処理されることを想定しているのだ。
                             continue;
                         }
 
@@ -420,6 +423,7 @@ impl SignalManager {
             debounce_key: None,
         };
 
+        // ForceFlush は専用 API からのみ送る前提なのだ。`request_update` など他の経路では使わないでほしいのだ。
         self.update_sender
             .send(request)
             .map_err(|e| format!("Failed to send flush request: {}", e))?;
