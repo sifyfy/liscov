@@ -215,6 +215,13 @@ impl StateManager {
         }
     }
 
+    #[cfg(test)]
+    pub fn reset_state_for_tests(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            *state = AppState::default();
+        }
+    }
+
     /// イベントを送信
     pub fn send_event(&self, event: AppEvent) -> Result<(), mpsc::error::SendError<AppEvent>> {
         // メッセージ追加イベントのログを削減

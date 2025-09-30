@@ -320,6 +320,10 @@ impl Default for StreamEndDetector {
 mod tests {
     use super::*;
 
+    fn reset_state() {
+        get_state_manager().reset_state_for_tests();
+    }
+
     #[test]
     fn test_error_type_classification() {
         assert_eq!(
@@ -351,6 +355,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_stream_end_detection() {
+        reset_state();
         let mut detector = StreamEndDetector::new();
 
         // 1-2回のエラーは継続
@@ -386,6 +391,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_success_resets_counter() {
+        reset_state();
         let mut detector = StreamEndDetector::new();
 
         // 3回エラー
@@ -408,6 +414,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_reset_clears_stream_end_flag() {
+        reset_state();
         let mut detector = StreamEndDetector::new();
 
         detector.force_stream_ended();
@@ -420,6 +427,7 @@ mod tests {
     }
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_error_recovery_after_reset() {
+        reset_state();
         let mut detector = StreamEndDetector::new();
 
         for _ in 0..8 {
@@ -445,6 +453,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_non_403_errors() {
+        reset_state();
         let mut detector = StreamEndDetector::new();
 
         // 404エラーは配信終了判定にならない
