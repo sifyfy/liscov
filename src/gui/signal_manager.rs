@@ -572,6 +572,31 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn test_high_priority_update_triggers_immediate_flush() {
+        let manager = SignalManager::new_with_executor(SignalTaskExecutor::tokio());
+
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        manager
+            .request_update(
+                SignalUpdateType::MessageAdded(GuiChatMessage {
+                    content: "high priority".to_string(),
+                    ..Default::default()
+                }),
+                UpdatePriority::High,
+                None,
+            )
+            .expect("should enqueue update");
+
+        manager
+            .request_update(SignalUpdateType::ForceFlush(tx), UpdatePriority::High, None)
+            .expect("should enqueue flush");
+
+        rx.await.expect("flush should complete");
+        let stats = manager.update_stats.lock().unwrap();
+        assert!(stats.total_updates >= 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn test_force_flush_processes_pending_updates() {
         let manager = SignalManager::new_with_executor(SignalTaskExecutor::tokio());
 
@@ -592,6 +617,29 @@ mod tests {
 
         let stats = manager.update_stats.lock().unwrap();
         assert!(stats.total_updates > before);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_debounce_prevents_rapid_updates() {
+        let manager = SignalManager::new_with_executor(SignalTaskExecutor::tokio());
+
+        for _ in 0..3 {
+            manager
+                .request_update(
+                    SignalUpdateType::ServiceStateChanged(ServiceState::Connecting),
+                    UpdatePriority::Medium,
+                    Some("service_state".to_string()),
+                )
+                .expect("should enqueue update");
+        }
+
+        manager
+            .force_flush()
+            .await
+            .expect("force flush should succeed");
+
+        let stats = manager.update_stats.lock().unwrap();
+        assert!(stats.total_updates >= 1);
     }
 
     #[tokio::test(flavor = "current_thread")]
