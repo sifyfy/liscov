@@ -63,8 +63,8 @@ impl InnerTube {
 
     /// チャットモードを変更し、continuation tokenを更新する
     ///
-    /// 既存のcontinuation tokenのchattypeフィールドを変更することで
-    /// モードを切り替える。これにより、APIリクエストで異なるフィルタリングが適用される。
+    /// メインcontinuation tokenのバイナリを変更してモードを切り替える。
+    /// reload tokenは使用しない（reload tokenはAPIで直接使えないため）。
     ///
     /// # Arguments
     /// * `mode` - 新しいチャットモード
@@ -73,20 +73,26 @@ impl InnerTube {
     /// * `true` - モード変更成功
     /// * `false` - モード変更失敗（トークンが空または変更できない場合）
     pub fn set_chat_mode(&mut self, mode: ChatMode) -> bool {
-        if self.continuation.0.is_empty() {
-            tracing::warn!("Cannot change chat mode: continuation token is empty");
-            return false;
-        }
-
         // 既に同じモードの場合は何もしない
         if self.chat_mode == mode {
             tracing::debug!("Chat mode already set to {:?}", mode);
             return true;
         }
 
-        // continuation tokenを変更してモードを切り替え
+        // continuation tokenが空の場合は変更不可
+        if self.continuation.0.is_empty() {
+            tracing::warn!("Cannot change chat mode: continuation token is empty");
+            return false;
+        }
+
+        // continuation tokenをバイナリ変換してモードを変更
         if let Some(new_token) = modify_continuation_mode(&self.continuation, mode) {
-            tracing::info!("Chat mode changed: {:?} -> {:?}", self.chat_mode, mode);
+            tracing::info!(
+                "🔄 Chat mode changed: {:?} -> {:?} (token length: {})",
+                self.chat_mode,
+                mode,
+                new_token.0.len()
+            );
             self.continuation = new_token;
             self.chat_mode = mode;
             true
@@ -119,6 +125,106 @@ impl InnerTube {
             None
         } else {
             detect_chat_mode(&self.continuation)
+        }
+    }
+
+    /// チャットモードを非同期で切り替える
+    ///
+    /// reload tokenを使ってlive_chatページを再取得し、
+    /// 新しいモード用のmain continuation tokenを取得する。
+    ///
+    /// # Arguments
+    /// * `mode` - 切り替え先のチャットモード
+    ///
+    /// # Returns
+    /// * `Ok(true)` - 切り替え成功
+    /// * `Ok(false)` - reload tokenが利用できない
+    /// * `Err(_)` - ページ取得失敗
+    pub async fn switch_chat_mode(&mut self, mode: ChatMode) -> Result<bool> {
+        // 既に同じモードの場合は何もしない
+        if self.chat_mode == mode {
+            tracing::debug!("Chat mode already set to {:?}", mode);
+            return Ok(true);
+        }
+
+        // reload tokenを取得
+        let reload_token = if let Some(ref continuations) = self.chat_continuations {
+            if let Some(token) = continuations.get_for_mode(mode) {
+                token.clone()
+            } else {
+                tracing::warn!("No reload token available for mode {:?}", mode);
+                return Ok(false);
+            }
+        } else {
+            tracing::warn!("No chat_continuations available");
+            return Ok(false);
+        };
+
+        tracing::info!(
+            "🔄 Switching chat mode: {:?} -> {:?}",
+            self.chat_mode,
+            mode
+        );
+
+        // reload tokenを使ってlive_chatページを再取得
+        let url = format!(
+            "https://www.youtube.com/live_chat?continuation={}",
+            urlencoding::encode(&reload_token.0)
+        );
+
+        tracing::debug!("📋 Fetching live_chat page with reload token");
+
+        let response = self
+            .http_client
+            .get(&url)
+            .header(
+                "User-Agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            )
+            .send()
+            .await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let error_body = response.text().await.unwrap_or_default();
+            tracing::error!(
+                "❌ Page fetch failed with status: {}\nResponse: {}",
+                status,
+                &error_body[..200.min(error_body.len())]
+            );
+            return Err(anyhow::anyhow!("Page fetch failed with status: {}", status));
+        }
+
+        let html = response.text().await?;
+        tracing::debug!("📄 Received HTML response: {} chars", html.len());
+
+        // 新しいmain continuation tokenを抽出
+        if let Some(new_continuation) = crate::api::youtube::extract_continuation(&html) {
+            tracing::info!(
+                "✅ Chat mode switched: {:?} -> {:?} (new token length: {})",
+                self.chat_mode,
+                mode,
+                new_continuation.0.len()
+            );
+            self.continuation = new_continuation;
+            self.chat_mode = mode;
+
+            // 新しいreload tokensも更新
+            let new_continuations = crate::api::youtube::extract_chat_continuations(&html);
+            if new_continuations.has_any() {
+                self.chat_continuations = Some(new_continuations);
+            }
+
+            Ok(true)
+        } else {
+            tracing::warn!("⚠️ No continuation token found in response");
+            // フォールバック: バイナリ変換を試みる
+            if self.set_chat_mode(mode) {
+                tracing::info!("✅ Fallback: Chat mode switched using binary modification");
+                Ok(true)
+            } else {
+                Err(anyhow::anyhow!("Failed to extract continuation token"))
+            }
         }
     }
 }
@@ -222,12 +328,18 @@ pub async fn fetch_live_chat_page_with_mode(url: &str, preferred_mode: ChatMode)
     inner_tube.chat_mode = detected_mode;
     tracing::info!("🔍 Detected chat mode from token: {:?}", detected_mode);
 
-    // 希望するモードと異なる場合は切り替え
+    // 希望するモードと異なる場合は非同期で切り替え
     if preferred_mode != detected_mode {
-        if inner_tube.set_chat_mode(preferred_mode) {
-            tracing::info!("🔄 Switched chat mode to: {:?}", preferred_mode);
-        } else {
-            tracing::warn!("⚠️ Could not switch to preferred mode {:?}, using {:?}", preferred_mode, detected_mode);
+        match inner_tube.switch_chat_mode(preferred_mode).await {
+            Ok(true) => {
+                tracing::info!("🔄 Switched chat mode to: {:?}", preferred_mode);
+            }
+            Ok(false) => {
+                tracing::warn!("⚠️ Could not switch to preferred mode {:?}, using {:?}", preferred_mode, detected_mode);
+            }
+            Err(e) => {
+                tracing::warn!("⚠️ Failed to switch to preferred mode {:?}: {}, using {:?}", preferred_mode, e, detected_mode);
+            }
         }
     }
 

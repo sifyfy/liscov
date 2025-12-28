@@ -77,29 +77,36 @@ impl LiveChatService {
 
     /// チャットモードを変更（監視中でも有効）
     ///
-    /// 監視中の場合はInnerTubeクライアントのcontinuation tokenも更新する
+    /// 監視中の場合はreload tokenを使ってYouTube APIにリクエストし、
+    /// 新しいメッセージ取得用のcontinuation tokenを取得する。
     pub async fn change_chat_mode(&mut self, mode: ChatMode) -> anyhow::Result<bool> {
         let old_mode = self.chat_mode;
-        self.chat_mode = mode;
 
-        // InnerTubeクライアントが存在する場合はトークンを切り替え
+        // InnerTubeクライアントが存在する場合は非同期でモードを切り替え
         let mut inner_tube = self.inner_tube.lock().await;
         if let Some(ref mut client) = *inner_tube {
-            if client.set_chat_mode(mode) {
-                tracing::info!("🔄 Chat mode changed from {} to {}", old_mode, mode);
-                Ok(true)
-            } else {
-                // トークンが利用できない場合は元に戻す
-                self.chat_mode = old_mode;
-                tracing::warn!(
-                    "⚠️ Chat mode {} not available, keeping {}",
-                    mode,
-                    old_mode
-                );
-                Ok(false)
+            match client.switch_chat_mode(mode).await {
+                Ok(true) => {
+                    self.chat_mode = mode;
+                    tracing::info!("🔄 Chat mode changed from {} to {}", old_mode, mode);
+                    Ok(true)
+                }
+                Ok(false) => {
+                    tracing::warn!(
+                        "⚠️ Chat mode {} not available, keeping {}",
+                        mode,
+                        old_mode
+                    );
+                    Ok(false)
+                }
+                Err(e) => {
+                    tracing::error!("❌ Failed to switch chat mode: {}", e);
+                    Err(e)
+                }
             }
         } else {
             // クライアントがない場合は設定だけ変更
+            self.chat_mode = mode;
             tracing::info!("🔄 Chat mode pre-set to: {} (will apply on next start)", mode);
             Ok(true)
         }

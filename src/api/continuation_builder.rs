@@ -47,11 +47,22 @@ pub fn modify_continuation_mode(original: &Continuation, new_mode: ChatMode) -> 
         .or_else(|_| general_purpose::STANDARD.decode(&original.0))
         .ok()?;
 
+    tracing::debug!(
+        "📋 Token to modify: length={}, first 20 bytes={:02x?}",
+        decoded.len(),
+        &decoded[..20.min(decoded.len())]
+    );
+
     let mut modified = decoded.clone();
     let mut found = false;
 
-    // Field 16 内の nested field 1 を探す
-    // パターン: 0x82 0x01 (field 16) + length + 0x08 (field 1) + chattype
+    // chattype値を探す（0x01 または 0x04）
+    // 様々なパターンを試す:
+    // 1. Field 16: 0x82 0x01 + length + 0x08 + chattype
+    // 2. Field 13: 0x68 + chattype
+    // 3. バイト列 0x08 の後に 0x01 または 0x04
+
+    // パターン1: Field 16 内の nested field 1
     for i in 0..modified.len().saturating_sub(4) {
         if modified[i] == 0x82 && modified[i + 1] == 0x01 {
             let len = modified[i + 2] as usize;
@@ -59,7 +70,7 @@ pub fn modify_continuation_mode(original: &Continuation, new_mode: ChatMode) -> 
                 let old_val = modified[i + 4];
                 if old_val == 0x01 || old_val == 0x04 {
                     tracing::debug!(
-                        "Modifying chattype at offset {}: {} -> {}",
+                        "Modifying chattype at offset {} (pattern 1): {} -> {}",
                         i + 4,
                         old_val,
                         new_chattype
@@ -67,6 +78,33 @@ pub fn modify_continuation_mode(original: &Continuation, new_mode: ChatMode) -> 
                     modified[i + 4] = new_chattype;
                     found = true;
                     break;
+                }
+            }
+        }
+    }
+
+    // パターン2: 単純な 0x08 + chattype パターン（varintエンコードされたフィールド1）
+    if !found {
+        for i in 0..modified.len().saturating_sub(1) {
+            if modified[i] == 0x08 {
+                let val = modified[i + 1];
+                if val == 0x01 || val == 0x04 {
+                    tracing::debug!(
+                        "Found potential chattype at offset {} (pattern 2): value={}",
+                        i + 1,
+                        val
+                    );
+                    // 周辺のバイトを確認して、これがチャットモードフィールドかどうかを判定
+                    // 通常、chatypeフィールドは特定のコンテキスト内にある
+                    if i > 0 {
+                        tracing::debug!(
+                            "Context around offset {}: prev={:02x}, current=08 {:02x}, next={:02x?}",
+                            i,
+                            modified[i - 1],
+                            val,
+                            modified.get(i + 2..i + 4)
+                        );
+                    }
                 }
             }
         }

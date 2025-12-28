@@ -237,42 +237,68 @@ pub fn extract_chat_continuations(html: &str) -> ChatContinuations {
 
 /// subMenuItems形式からチャットモード用トークンを抽出
 ///
-/// 一部のYouTubeページでは以下の形式でトークンが含まれる:
-/// "subMenuItems":[{"title":"トップのチャット",...,"continuation":"TOKEN1"},{"title":"チャット",...,"continuation":"TOKEN2"}]
+/// YouTubeのsubMenuItemsは以下のネスト形式:
+/// "subMenuItems":[{
+///   "title":"トップのチャット",
+///   "continuation":{"reloadContinuationData":{"continuation":"TOKEN"}}
+/// }]
 fn extract_chat_continuations_from_submenu(html: &str) -> (Option<Continuation>, Option<Continuation>) {
-    // subMenuItems セクションを探す
-    let submenu_pattern = Regex::new(r#""subMenuItems"\s*:\s*\[([^\]]+)\]"#).ok();
+    // HTML全体から直接トークンを抽出（subMenuItemsセクションを別途抽出する必要なし）
 
-    if let Some(submenu_match) = submenu_pattern.and_then(|re| re.captures(html)) {
-        if let Some(submenu_content) = submenu_match.get(1) {
-            let content = submenu_content.as_str();
+    // トップチャット: ネストされた形式に対応
+    // タイトル: "Top chat", "トップチャット", "トップのチャット", "トップ チャット", "上位のチャット", "上位のチャットのリプレイ"
+    let top_pattern = Regex::new(
+        r#""title"\s*:\s*"(?:Top chat|トップチャット|トップのチャット|トップ チャット|上位のチャット(?:のリプレイ)?)"[^}]*"continuation"\s*:\s*\{\s*"reloadContinuationData"\s*:\s*\{\s*"continuation"\s*:\s*"([^"]+)""#
+    ).ok();
 
-            // 各アイテムからタイトルとcontinuationを抽出
-            // トップチャット: "title":"Top chat" または "title":"トップのチャット"
-            let top_pattern = Regex::new(
-                r#""title"\s*:\s*"(?:Top chat|トップのチャット|トップ チャット)"[^}]*"continuation"\s*:\s*"([^"]+)""#
-            ).ok();
+    // すべてのチャット: ネストされた形式に対応
+    // タイトル: "Live chat", "チャット", "チャットのリプレイ"
+    let all_pattern = Regex::new(
+        r#""title"\s*:\s*"(?:Live chat|チャット(?:のリプレイ)?)"[^}]*"continuation"\s*:\s*\{\s*"reloadContinuationData"\s*:\s*\{\s*"continuation"\s*:\s*"([^"]+)""#
+    ).ok();
 
-            // すべてのチャット: "title":"Live chat" または "title":"チャット"
-            let all_pattern = Regex::new(
-                r#""title"\s*:\s*"(?:Live chat|チャット)"[^}]*"continuation"\s*:\s*"([^"]+)""#
-            ).ok();
-
-            let top_chat = top_pattern
-                .and_then(|re| re.captures(content))
-                .and_then(|cap| cap.get(1))
-                .map(|m| Continuation(m.as_str().to_string()));
-
-            let all_chat = all_pattern
-                .and_then(|re| re.captures(content))
-                .and_then(|cap| cap.get(1))
-                .map(|m| Continuation(m.as_str().to_string()));
-
-            return (top_chat, all_chat);
+    // デバッグ: subMenuItemsセクションが存在するか確認
+    if html.contains("subMenuItems") {
+        tracing::debug!("📋 subMenuItems found in HTML");
+        // subMenuItemsセクションの内容をログに出力
+        if let Some(start) = html.find("\"subMenuItems\"") {
+            // UTF-8バイト境界を考慮してプレビューを取得
+            let end = html[start..].char_indices()
+                .take(500)
+                .last()
+                .map(|(i, c)| start + i + c.len_utf8())
+                .unwrap_or(html.len());
+            let preview = &html[start..end];
+            tracing::debug!("📋 subMenuItems preview: {}", preview);
         }
+    } else {
+        tracing::debug!("📋 subMenuItems NOT found in HTML");
     }
 
-    (None, None)
+    let top_chat = top_pattern
+        .and_then(|re| re.captures(html))
+        .and_then(|cap| cap.get(1))
+        .map(|m| {
+            tracing::debug!("📋 TopChat token extracted: {}...", &m.as_str()[..30.min(m.as_str().len())]);
+            Continuation(m.as_str().to_string())
+        });
+
+    let all_chat = all_pattern
+        .and_then(|re| re.captures(html))
+        .and_then(|cap| cap.get(1))
+        .map(|m| {
+            tracing::debug!("📋 AllChat token extracted: {}...", &m.as_str()[..30.min(m.as_str().len())]);
+            Continuation(m.as_str().to_string())
+        });
+
+    if top_chat.is_none() {
+        tracing::debug!("📋 TopChat pattern did NOT match");
+    }
+    if all_chat.is_none() {
+        tracing::debug!("📋 AllChat pattern did NOT match");
+    }
+
+    (top_chat, all_chat)
 }
 
 fn extract_hl(html: &str) -> Option<String> {
@@ -662,5 +688,63 @@ mod tests {
             FetchError::Parse(_) => {} // Expected
             _ => panic!("Expected Parse error"),
         }
+    }
+
+    #[test]
+    fn test_extract_chat_continuations_nested_format() {
+        // 実際のYouTubeのHTML構造をシミュレート
+        let html = r#"
+        "subMenuItems":[{"title":"上位のチャットのリプレイ","selected":true,"continuation":{"reloadContinuationData":{"continuation":"TOP_TOKEN_123","clickTrackingParams":"xxx"}},"accessibility":{"accessibilityData":{"label":"上位のチャットのリプレイ"}}},{"title":"チャットのリプレイ","selected":false,"continuation":{"reloadContinuationData":{"continuation":"ALL_TOKEN_456","clickTrackingParams":"yyy"}},"accessibility":{"accessibilityData":{"label":"チャットのリプレイ"}}}]
+        "#;
+
+        let continuations = extract_chat_continuations(html);
+
+        assert!(continuations.top_chat.is_some(), "TopChat token should be extracted");
+        assert!(continuations.all_chat.is_some(), "AllChat token should be extracted");
+        assert_eq!(continuations.top_chat.unwrap().0, "TOP_TOKEN_123");
+        assert_eq!(continuations.all_chat.unwrap().0, "ALL_TOKEN_456");
+    }
+
+    #[test]
+    fn test_extract_chat_continuations_live_format() {
+        // ライブ配信の形式（日本語）
+        let html = r#"
+        "subMenuItems":[{"title":"トップのチャット","selected":true,"continuation":{"reloadContinuationData":{"continuation":"LIVE_TOP","clickTrackingParams":"xxx"}}},{"title":"チャット","selected":false,"continuation":{"reloadContinuationData":{"continuation":"LIVE_ALL","clickTrackingParams":"yyy"}}}]
+        "#;
+
+        let continuations = extract_chat_continuations(html);
+
+        assert!(continuations.top_chat.is_some(), "TopChat token should be extracted");
+        assert!(continuations.all_chat.is_some(), "AllChat token should be extracted");
+        assert_eq!(continuations.top_chat.unwrap().0, "LIVE_TOP");
+        assert_eq!(continuations.all_chat.unwrap().0, "LIVE_ALL");
+    }
+
+    #[test]
+    fn test_extract_chat_continuations_english_format() {
+        // English format
+        let html = r#"
+        "subMenuItems":[{"title":"Top chat","selected":true,"continuation":{"reloadContinuationData":{"continuation":"EN_TOP","clickTrackingParams":"xxx"}}},{"title":"Live chat","selected":false,"continuation":{"reloadContinuationData":{"continuation":"EN_ALL","clickTrackingParams":"yyy"}}}]
+        "#;
+
+        let continuations = extract_chat_continuations(html);
+
+        assert!(continuations.top_chat.is_some(), "TopChat token should be extracted");
+        assert!(continuations.all_chat.is_some(), "AllChat token should be extracted");
+        assert_eq!(continuations.top_chat.unwrap().0, "EN_TOP");
+        assert_eq!(continuations.all_chat.unwrap().0, "EN_ALL");
+    }
+
+    #[test]
+    fn test_extract_chat_continuations_real_youtube_format() {
+        // 実際のYouTubeから取得したHTML構造
+        let html = r#""subMenuItems":[{"title":"上位のチャットのリプレイ","selected":true,"continuation":{"reloadContinuationData":{"continuation":"op2w0wQOGgBAAXIICAQYACAAKAE%3D","clickTrackingParams":"CE0QxqYCIhMIh5PElP3fkQMVoNU0Bx1UbSIpygEExcfLOg=="}},"accessibility":{"accessibilityData":{"label":"上位のチャットのリプレイ"}},"subtitle":"一部のメッセージ（不適切な可能性があるものなど）を非表示にします","trackingParams":"CEwQ48AHGAAiEwiHk8SU_d-RAxWg1TQHHVRtIik="},{"title":"チャットのリプレイ","selected":false,"continuation":{"reloadContinuationData":{"continuation":"op2w0wQOGgBAAXIICAEYACAAKAE%3D","clickTrackingParams":"CEsQxqYCIhMIh5PElP3fkQMVoNU0Bx1UbSIpygEExcfLOg=="}},"accessibility":{"accessibilityData":{"label":"チャットのリプレイ"}},"subtitle":"すべてのメッセージが表示されます","trackingParams":"CEoQ48AHGAEiEwiHk8SU_d-RAxWg1TQHHVRtIik="}]"#;
+
+        let continuations = extract_chat_continuations(html);
+
+        assert!(continuations.top_chat.is_some(), "TopChat token should be extracted from real YouTube HTML");
+        assert!(continuations.all_chat.is_some(), "AllChat token should be extracted from real YouTube HTML");
+        assert_eq!(continuations.top_chat.unwrap().0, "op2w0wQOGgBAAXIICAQYACAAKAE%3D");
+        assert_eq!(continuations.all_chat.unwrap().0, "op2w0wQOGgBAAXIICAEYACAAKAE%3D");
     }
 }
