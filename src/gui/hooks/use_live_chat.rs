@@ -330,8 +330,14 @@ impl LiveChatHandle {
 
     /// テストメッセージを追加
     pub fn add_test_message(&self, author: &str, content: &str, message_type: MessageType) {
+        let now = chrono::Utc::now();
+        let timestamp_usec = now.timestamp_micros().to_string();
+        let display_timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
+
         let test_message = GuiChatMessage {
-            timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
+            id: format!("test_{}", timestamp_usec),
+            timestamp: display_timestamp,
+            timestamp_usec,
             message_type,
             author: author.to_string(),
             author_icon_url: None, // テストメッセージにはアイコンなし

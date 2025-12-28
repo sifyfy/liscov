@@ -652,6 +652,14 @@ impl LiveChatService {
                                                 tracing::trace!("?? [API_SERVICE] No external message receiver registered");
                                             }
 
+                                            // WebSocket APIにブロードキャスト
+                                            {
+                                                let ws_server = crate::api::websocket_server::get_websocket_server();
+                                                if ws_server.is_running().await {
+                                                    ws_server.broadcast_message(&gui_message).await;
+                                                }
+                                            }
+
                                             // ファイルに保存（オプション・自動保存設定に基づく）
                                             let file_path = output_file.lock().await;
                                             if let Some(ref path) = *file_path {

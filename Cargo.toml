@@ -56,6 +56,8 @@ tokio = { version = "1.36", features = [
     "tracing",
 ] }
 tokio-stream = "0.1"
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
 yup-oauth2 = "12.1.0"
 chrono = { version = "0.4", features = ["serde"] }
 rand = "0.8" # For development mock data

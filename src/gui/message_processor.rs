@@ -417,14 +417,20 @@ impl DefaultMessageProcessorFactory {
 mod tests {
     use super::*;
     use crate::gui::models::{GuiChatMessage, MessageType};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_COUNTER: AtomicU64 = AtomicU64::new(1);
 
     fn create_test_message(
         author: &str,
         content: &str,
         message_type: MessageType,
     ) -> GuiChatMessage {
+        let counter = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
         GuiChatMessage {
-            timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
+            id: format!("test_{}", counter),
+            timestamp: "00:00:00".to_string(),
+            timestamp_usec: counter.to_string(),
             message_type,
             author: author.to_string(),
             author_icon_url: None,
@@ -589,19 +595,11 @@ mod tests {
 
         // ファクトリが正常にプロセッサを作成することを確認
         // 実際のメッセージでスパムフィルターの動作をテスト
-        use crate::gui::models::{GuiChatMessage, MessageType};
-        let test_message = GuiChatMessage {
-            timestamp: "12:34:56".to_string(),
-            message_type: MessageType::Text,
-            author: "testuser".to_string(),
-            author_icon_url: None,
-            channel_id: "test_channel".to_string(),
-            content: "spam spam spam spam spam".to_string(), // スパムっぽい内容
-            runs: Vec::new(),
-            metadata: None,
-            is_member: false,
-            comment_count: None,
-        };
+        let test_message = create_test_message(
+            "testuser",
+            "spam spam spam spam spam", // スパムっぽい内容
+            MessageType::Text,
+        );
 
         let filter_config = MessageFilterConfig {
             include_system_messages: false,

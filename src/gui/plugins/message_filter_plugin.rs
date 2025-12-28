@@ -408,10 +408,16 @@ impl Default for MessageFilterPlugin {
 mod tests {
     use super::*;
     use crate::gui::models::MessageType;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_COUNTER: AtomicU64 = AtomicU64::new(1);
 
     fn create_test_message(content: &str) -> GuiChatMessage {
+        let counter = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
         GuiChatMessage {
-            timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
+            id: format!("test_{}", counter),
+            timestamp: "00:00:00".to_string(),
+            timestamp_usec: counter.to_string(),
             message_type: MessageType::Text,
             author: content.to_string(),
             author_icon_url: None,

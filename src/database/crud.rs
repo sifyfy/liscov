@@ -259,8 +259,13 @@ impl LiscovDatabase {
             None
         };
 
+        let timestamp: String = row.get("timestamp")?;
+        let db_id: i64 = row.get("id")?;
+
         Ok(GuiChatMessage {
-            timestamp: row.get("timestamp")?,
+            id: format!("db_{}", db_id),
+            timestamp: timestamp.clone(),
+            timestamp_usec: String::new(), // データベースにはマイクロ秒タイムスタンプは保存されない
             message_type,
             author: row.get("author")?,
             author_icon_url: None, // データベースにはアイコンURLは保存されない
@@ -468,6 +473,36 @@ impl LiscovDatabase {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+    fn next_test_id() -> (String, String) {
+        let counter = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
+        (format!("test_{}", counter), counter.to_string())
+    }
+
+    fn create_test_message(
+        author: &str,
+        content: &str,
+        message_type: crate::gui::models::MessageType,
+    ) -> GuiChatMessage {
+        let (id, timestamp_usec) = next_test_id();
+        GuiChatMessage {
+            id,
+            timestamp: "12:00:00".to_string(),
+            timestamp_usec,
+            message_type,
+            author: author.to_string(),
+            author_icon_url: None,
+            channel_id: "test_channel".to_string(),
+            content: content.to_string(),
+            runs: Vec::new(),
+            metadata: None,
+            is_member: false,
+            comment_count: None,
+        }
+    }
 
     fn approx_eq(a: f64, b: f64) {
         assert!((a - b).abs() < 0.0001, "expected {} =~ {}", a, b);
@@ -529,20 +564,13 @@ mod tests {
         let mut db = LiscovDatabase::new_in_memory()?;
         let session_id = db.create_session("https://youtube.com/watch?v=test", None)?;
 
-        let message = GuiChatMessage {
-            timestamp: "12:00:00".to_string(),
-            message_type: crate::gui::models::MessageType::SuperChat {
+        let message = create_test_message(
+            "TestUser",
+            "Thank you!",
+            crate::gui::models::MessageType::SuperChat {
                 amount: "¥100".to_string(),
             },
-            author: "TestUser".to_string(),
-            author_icon_url: None,
-            channel_id: "test123".to_string(),
-            content: "Thank you!".to_string(),
-            runs: Vec::new(),
-            metadata: None,
-            is_member: false,
-            comment_count: None,
-        };
+        );
 
         let message_id = db.save_message(&session_id, &message)?;
         assert!(message_id > 0);
@@ -594,43 +622,32 @@ mod tests {
         let session_id = db.create_session("https://youtube.com/watch?v=test", None)?;
 
         // 空のメッセージコンテンツ
-        let empty_message = GuiChatMessage {
-            timestamp: "12:00:00".to_string(),
-            message_type: crate::gui::models::MessageType::Text,
-            author: "TestUser".to_string(),
-            author_icon_url: None,
-            channel_id: "test123".to_string(),
-            content: "".to_string(), // 空のコンテンツ
-            runs: Vec::new(),
-            metadata: None,
-            is_member: false,
-            comment_count: None,
-        };
+        let empty_message = create_test_message(
+            "TestUser",
+            "", // 空のコンテンツ
+            crate::gui::models::MessageType::Text,
+        );
 
         let empty_msg_id = db.save_message(&session_id, &empty_message)?;
         assert!(empty_msg_id > 0);
 
         // 非常に長いメッセージコンテンツ
         let long_content = "a".repeat(10000);
-        let long_message = GuiChatMessage {
-            timestamp: "12:01:00".to_string(),
-            message_type: crate::gui::models::MessageType::Text,
-            author: "TestUser".to_string(),
-            author_icon_url: None,
-            channel_id: "test123".to_string(),
-            content: long_content.clone(),
-            runs: Vec::new(),
-            metadata: None,
-            is_member: false,
-            comment_count: None,
-        };
+        let long_message = create_test_message(
+            "TestUser",
+            &long_content,
+            crate::gui::models::MessageType::Text,
+        );
 
         let long_msg_id = db.save_message(&session_id, &long_message)?;
         assert!(long_msg_id > 0);
 
         // 特殊文字を含むメッセージ
+        let (id, timestamp_usec) = next_test_id();
         let special_message = GuiChatMessage {
+            id,
             timestamp: "12:02:00".to_string(),
+            timestamp_usec,
             message_type: crate::gui::models::MessageType::SuperChat {
                 amount: "¥1000".to_string(),
             },
@@ -673,18 +690,11 @@ mod tests {
         let mut db = LiscovDatabase::new_in_memory()?;
         let fake_session_id = "nonexistent-session-id";
 
-        let message = GuiChatMessage {
-            timestamp: "12:00:00".to_string(),
-            message_type: crate::gui::models::MessageType::Text,
-            author: "TestUser".to_string(),
-            author_icon_url: None,
-            channel_id: "test123".to_string(),
-            content: "Test message".to_string(),
-            runs: Vec::new(),
-            metadata: None,
-            is_member: false,
-            comment_count: None,
-        };
+        let message = create_test_message(
+            "TestUser",
+            "Test message",
+            crate::gui::models::MessageType::Text,
+        );
 
         // 存在しないセッションへのメッセージ保存
         // 外部キー制約があれば失敗するが、現在の実装では成功する可能性がある
@@ -731,8 +741,11 @@ mod tests {
         let start_time = std::time::Instant::now();
 
         for i in 0..1000 {
+            let (id, timestamp_usec) = next_test_id();
             let message = GuiChatMessage {
+                id,
                 timestamp: format!("12:{:02}:{:02}", i / 60, i % 60),
+                timestamp_usec,
                 message_type: if i % 10 == 0 {
                     crate::gui::models::MessageType::SuperChat {
                         amount: format!("¥{}", (i + 1) * 100),
@@ -810,8 +823,11 @@ mod tests {
             let mut db_guard = db_clone.lock().unwrap();
 
             for i in 0..10 {
+                let counter = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
                 let message = GuiChatMessage {
+                    id: format!("test_{}", counter),
                     timestamp: format!("12:00:{:02}", i),
+                    timestamp_usec: counter.to_string(),
                     message_type: crate::gui::models::MessageType::Text,
                     author: format!("ThreadUser{}", i),
                     author_icon_url: None,
@@ -831,8 +847,11 @@ mod tests {
         {
             let mut db_guard = db_mutex.lock().unwrap();
             for i in 10..20 {
+                let (id, timestamp_usec) = next_test_id();
                 let message = GuiChatMessage {
+                    id,
                     timestamp: format!("12:00:{:02}", i),
+                    timestamp_usec,
                     message_type: crate::gui::models::MessageType::Text,
                     author: format!("MainUser{}", i),
                     author_icon_url: None,

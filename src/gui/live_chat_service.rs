@@ -105,8 +105,14 @@ impl EventDrivenLiveChatHandle {
         content: &str,
         message_type: crate::gui::models::MessageType,
     ) {
+        let now = chrono::Utc::now();
+        let timestamp_usec = now.timestamp_micros().to_string();
+        let display_timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
+
         let message = GuiChatMessage {
-            timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
+            id: format!("test_{}", timestamp_usec),
+            timestamp: display_timestamp,
+            timestamp_usec,
             message_type,
             author: author.to_string(),
             author_icon_url: None, // テストメッセージにはアイコンなし

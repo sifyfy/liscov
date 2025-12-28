@@ -3,7 +3,9 @@ use serde::{Deserialize, Serialize};
 /// GUI用のチャットメッセージ構造体
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct GuiChatMessage {
-    pub timestamp: String,
+    pub id: String,                      // メッセージの一意識別子
+    pub timestamp: String,               // 表示用タイムスタンプ (HH:MM:SS)
+    pub timestamp_usec: String,          // オリジナルタイムスタンプ (マイクロ秒、ソート用)
     pub message_type: MessageType,
     pub author: String,
     pub author_icon_url: Option<String>, // 投稿者のアイコンURL
@@ -13,6 +15,49 @@ pub struct GuiChatMessage {
     pub metadata: Option<MessageMetadata>,
     pub is_member: bool,            // メンバーかどうかの判定フラグ
     pub comment_count: Option<u32>, // この配信での投稿者のコメント回数
+}
+
+impl GuiChatMessage {
+    /// テスト用にIDとタイムスタンプを生成してメッセージを作成
+    #[cfg(test)]
+    pub fn new_for_test(
+        author: &str,
+        content: &str,
+        message_type: MessageType,
+    ) -> Self {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static TEST_COUNTER: AtomicU64 = AtomicU64::new(1);
+        let counter = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
+
+        Self {
+            id: format!("test_{}", counter),
+            timestamp: "00:00:00".to_string(),
+            timestamp_usec: counter.to_string(),
+            message_type,
+            author: author.to_string(),
+            content: content.to_string(),
+            ..Default::default()
+        }
+    }
+
+    /// テスト用にIDとタイムスタンプを自動生成（既存のフィールド値を保持）
+    #[cfg(test)]
+    pub fn with_test_id(mut self) -> Self {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static TEST_COUNTER: AtomicU64 = AtomicU64::new(1);
+        let counter = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
+
+        if self.id.is_empty() {
+            self.id = format!("test_{}", counter);
+        }
+        if self.timestamp.is_empty() {
+            self.timestamp = "00:00:00".to_string();
+        }
+        if self.timestamp_usec.is_empty() {
+            self.timestamp_usec = counter.to_string();
+        }
+        self
+    }
 }
 
 /// メッセージの一部（テキストまたはスタンプ）
@@ -131,8 +176,13 @@ impl From<crate::get_live_chat::ChatItem> for GuiChatMessage {
                     .first()
                     .map(|thumbnail| thumbnail.url.clone());
 
+                // タイムスタンプ変換（マイクロ秒 → 表示用）
+                let display_timestamp = timestamp_usec_to_display(&renderer.timestamp_usec);
+
                 Self {
-                    timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
+                    id: renderer.id.clone(),
+                    timestamp: display_timestamp,
+                    timestamp_usec: renderer.timestamp_usec.clone(),
                     message_type: MessageType::Text,
                     author: renderer.author_name.simple_text.clone(),
                     author_icon_url,
@@ -162,8 +212,13 @@ impl From<crate::get_live_chat::ChatItem> for GuiChatMessage {
                     .first()
                     .map(|thumbnail| thumbnail.url.clone());
 
+                // タイムスタンプ変換（マイクロ秒 → 表示用）
+                let display_timestamp = timestamp_usec_to_display(&renderer.timestamp_usec);
+
                 Self {
-                    timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
+                    id: renderer.id.clone(),
+                    timestamp: display_timestamp,
+                    timestamp_usec: renderer.timestamp_usec.clone(),
                     message_type: MessageType::SuperChat {
                         amount: renderer.purchase_amount_text.simple_text.clone(),
                     },
@@ -205,8 +260,13 @@ impl From<crate::get_live_chat::ChatItem> for GuiChatMessage {
                     .first()
                     .map(|thumbnail| thumbnail.url.clone());
 
+                // タイムスタンプ変換（マイクロ秒 → 表示用）
+                let display_timestamp = timestamp_usec_to_display(&renderer.timestamp_usec);
+
                 Self {
-                    timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
+                    id: renderer.id.clone(),
+                    timestamp: display_timestamp,
+                    timestamp_usec: renderer.timestamp_usec.clone(),
                     message_type: MessageType::SuperSticker {
                         amount: renderer.purchase_amount_text.simple_text.clone(),
                     },
@@ -241,8 +301,13 @@ impl From<crate::get_live_chat::ChatItem> for GuiChatMessage {
                     .first()
                     .map(|thumbnail| thumbnail.url.clone());
 
+                // タイムスタンプ変換（マイクロ秒 → 表示用）
+                let display_timestamp = timestamp_usec_to_display(&renderer.timestamp_usec);
+
                 Self {
-                    timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
+                    id: renderer.id.clone(),
+                    timestamp: display_timestamp,
+                    timestamp_usec: renderer.timestamp_usec.clone(),
                     message_type: MessageType::Membership,
                     author: renderer.author_name.simple_text.clone(),
                     author_icon_url,
@@ -261,20 +326,44 @@ impl From<crate::get_live_chat::ChatItem> for GuiChatMessage {
                     comment_count: None, // StateManagerで後から設定される
                 }
             }
-            _ => Self {
-                timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
-                message_type: MessageType::System,
-                author: "System".to_string(),
-                author_icon_url: None, // Systemメッセージにはアイコンなし
-                channel_id: "".to_string(),
-                content: "Unknown message type".to_string(),
-                runs: Vec::new(), // Systemメッセージは固定テキスト
-                metadata: None,
-                is_member: false,
-                comment_count: None, // Systemメッセージにはカウントなし
-            },
+            _ => {
+                // システムメッセージ用のタイムスタンプ（現在時刻をマイクロ秒で）
+                let now_usec = chrono::Utc::now().timestamp_micros().to_string();
+                let display_timestamp = chrono::Utc::now().format("%H:%M:%S").to_string();
+
+                Self {
+                    id: format!("system_{}", now_usec),
+                    timestamp: display_timestamp,
+                    timestamp_usec: now_usec,
+                    message_type: MessageType::System,
+                    author: "System".to_string(),
+                    author_icon_url: None, // Systemメッセージにはアイコンなし
+                    channel_id: "".to_string(),
+                    content: "Unknown message type".to_string(),
+                    runs: Vec::new(), // Systemメッセージは固定テキスト
+                    metadata: None,
+                    is_member: false,
+                    comment_count: None, // Systemメッセージにはカウントなし
+                }
+            }
         }
     }
+}
+
+/// タイムスタンプをマイクロ秒から表示用文字列に変換
+fn timestamp_usec_to_display(timestamp_usec: &str) -> String {
+    if let Ok(usec) = timestamp_usec.parse::<i64>() {
+        // マイクロ秒をchrono DateTimeに変換
+        let secs = usec / 1_000_000;
+        let nsecs = ((usec % 1_000_000) * 1000) as u32;
+        if let Some(dt) = chrono::DateTime::from_timestamp(secs, nsecs) {
+            // ローカルタイムに変換して表示
+            let local: chrono::DateTime<chrono::Local> = dt.into();
+            return local.format("%H:%M:%S").to_string();
+        }
+    }
+    // パース失敗時は現在時刻を使用
+    chrono::Local::now().format("%H:%M:%S").to_string()
 }
 
 /// バッジ情報からメンバーシップ・モデレーター・認証情報を抽出

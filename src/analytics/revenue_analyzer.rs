@@ -403,24 +403,44 @@ mod tests {
     use super::*;
     use crate::gui::models::{GuiChatMessage, MessageType};
 
+    fn create_test_message(
+        author: &str,
+        channel_id: &str,
+        content: &str,
+        message_type: MessageType,
+        is_member: bool,
+    ) -> GuiChatMessage {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static TEST_COUNTER: AtomicU64 = AtomicU64::new(1);
+        let counter = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
+
+        GuiChatMessage {
+            id: format!("test_{}", counter),
+            timestamp: "00:00:00".to_string(),
+            timestamp_usec: counter.to_string(),
+            message_type,
+            author: author.to_string(),
+            author_icon_url: None,
+            channel_id: channel_id.to_string(),
+            content: content.to_string(),
+            runs: Vec::new(),
+            metadata: None,
+            is_member,
+            comment_count: None,
+        }
+    }
+
     #[test]
     fn test_revenue_calculation() {
         let mut analytics = RevenueAnalytics::new();
 
-        let super_chat_msg = GuiChatMessage {
-            timestamp: "12:00:00".to_string(),
-            message_type: MessageType::SuperChat {
-                amount: "¥100".to_string(),
-            },
-            author: "TestUser".to_string(),
-            author_icon_url: None,
-            channel_id: "test123".to_string(),
-            content: "Thank you!".to_string(),
-            runs: Vec::new(),
-            metadata: None,
-            is_member: false,
-            comment_count: None,
-        };
+        let super_chat_msg = create_test_message(
+            "TestUser",
+            "test123",
+            "Thank you!",
+            MessageType::SuperChat { amount: "¥100".to_string() },
+            false,
+        );
 
         analytics.update_from_message(&super_chat_msg);
         assert_eq!(analytics.total_revenue(), 100.0);
@@ -432,35 +452,21 @@ mod tests {
     fn test_multiple_super_chats() {
         let mut analytics = RevenueAnalytics::new();
 
-        let msg1 = GuiChatMessage {
-            timestamp: "12:00:00".to_string(),
-            message_type: MessageType::SuperChat {
-                amount: "¥100".to_string(),
-            },
-            author: "User1".to_string(),
-            author_icon_url: None,
-            channel_id: "user1".to_string(),
-            content: "Thanks!".to_string(),
-            runs: Vec::new(),
-            metadata: None,
-            is_member: false,
-            comment_count: None,
-        };
+        let msg1 = create_test_message(
+            "User1",
+            "user1",
+            "Thanks!",
+            MessageType::SuperChat { amount: "¥100".to_string() },
+            false,
+        );
 
-        let msg2 = GuiChatMessage {
-            timestamp: "12:01:00".to_string(),
-            message_type: MessageType::SuperChat {
-                amount: "¥50".to_string(),
-            },
-            author: "User2".to_string(),
-            author_icon_url: None,
-            channel_id: "user2".to_string(),
-            content: "Great stream!".to_string(),
-            runs: Vec::new(),
-            metadata: None,
-            is_member: false,
-            comment_count: None,
-        };
+        let msg2 = create_test_message(
+            "User2",
+            "user2",
+            "Great stream!",
+            MessageType::SuperChat { amount: "¥50".to_string() },
+            false,
+        );
 
         analytics.update_from_message(&msg1);
         analytics.update_from_message(&msg2);
@@ -475,18 +481,13 @@ mod tests {
     fn test_membership_tracking() {
         let mut analytics = RevenueAnalytics::new();
 
-        let membership_msg = GuiChatMessage {
-            timestamp: "12:00:00".to_string(),
-            message_type: MessageType::Membership,
-            author: "NewMember".to_string(),
-            author_icon_url: None,
-            channel_id: "member123".to_string(),
-            content: "New member!".to_string(),
-            runs: Vec::new(),
-            metadata: None,
-            is_member: true,
-            comment_count: None,
-        };
+        let membership_msg = create_test_message(
+            "NewMember",
+            "member123",
+            "New member!",
+            MessageType::Membership,
+            true,
+        );
 
         analytics.update_from_message(&membership_msg);
         assert_eq!(analytics.membership_gains, 1);
@@ -497,20 +498,13 @@ mod tests {
         let mut analytics = RevenueAnalytics::new();
 
         // Super Chat処理テスト
-        let super_chat_msg = GuiChatMessage {
-            timestamp: "12:00:00".to_string(),
-            message_type: MessageType::SuperChat {
-                amount: "¥500".to_string(),
-            },
-            author: "TestUser".to_string(),
-            author_icon_url: None,
-            channel_id: "test123".to_string(),
-            content: "Thank you!".to_string(),
-            runs: Vec::new(),
-            metadata: None,
-            is_member: false,
-            comment_count: None,
-        };
+        let super_chat_msg = create_test_message(
+            "TestUser",
+            "test123",
+            "Thank you!",
+            MessageType::SuperChat { amount: "¥500".to_string() },
+            false,
+        );
 
         analytics.update_from_message(&super_chat_msg);
 

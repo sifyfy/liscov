@@ -449,10 +449,19 @@ impl MessageFilter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+    fn next_test_id() -> (String, String) {
+        let counter = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
+        (format!("test_{}", counter), counter.to_string())
+    }
 
     fn create_test_message(author: &str, content: &str, amount: Option<f64>) -> GuiChatMessage {
         use crate::gui::models::{MessageMetadata, MessageType};
 
+        let (id, timestamp_usec) = next_test_id();
         let message_type = if let Some(amt) = amount {
             MessageType::SuperChat {
                 amount: amt.to_string(),
@@ -462,7 +471,9 @@ mod tests {
         };
 
         GuiChatMessage {
+            id,
             timestamp: "12:00:00".to_string(),
+            timestamp_usec,
             message_type,
             author: author.to_string(),
             author_icon_url: None,
@@ -485,8 +496,11 @@ mod tests {
     fn create_membership_message(author: &str, content: &str) -> GuiChatMessage {
         use crate::gui::models::{MessageMetadata, MessageType};
 
+        let (id, timestamp_usec) = next_test_id();
         GuiChatMessage {
+            id,
             timestamp: "12:00:00".to_string(),
+            timestamp_usec,
             message_type: MessageType::Membership,
             author: author.to_string(),
             author_icon_url: None,
@@ -509,8 +523,11 @@ mod tests {
     fn create_member_text_message(author: &str, content: &str) -> GuiChatMessage {
         use crate::gui::models::{MessageMetadata, MessageType};
 
+        let (id, timestamp_usec) = next_test_id();
         GuiChatMessage {
+            id,
             timestamp: "12:00:00".to_string(),
+            timestamp_usec,
             message_type: MessageType::Text,
             author: author.to_string(),
             author_icon_url: None,
@@ -927,8 +944,11 @@ mod tests {
         filter.set_amount_range(Some((100.0, 500.0)));
 
         // 様々な通貨記号でテスト
+        let (id1, ts1) = next_test_id();
         let msg_yen = GuiChatMessage {
+            id: id1,
             timestamp: "12:00:00".to_string(),
+            timestamp_usec: ts1,
             message_type: crate::gui::models::MessageType::SuperChat {
                 amount: "¥300".to_string(),
             },
@@ -949,8 +969,11 @@ mod tests {
             comment_count: None,
         };
 
+        let (id2, ts2) = next_test_id();
         let msg_dollar = GuiChatMessage {
+            id: id2,
             timestamp: "12:00:00".to_string(),
+            timestamp_usec: ts2,
             message_type: crate::gui::models::MessageType::SuperChat {
                 amount: "$200".to_string(),
             },

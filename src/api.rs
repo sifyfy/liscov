@@ -4,4 +4,5 @@ pub mod generic; // ジェネリックAPI統一システム
 pub mod innertube;
 pub mod manager; // API統合管理システム
 pub mod unified_client; // 統合APIクライアント実装
+pub mod websocket_server; // WebSocket API サーバー
 pub mod youtube;

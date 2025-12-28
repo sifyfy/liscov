@@ -4,6 +4,15 @@
 
 use crate::gui::models::{GuiChatMessage, MessageType};
 
+/// システムメッセージ用のIDとタイムスタンプを生成
+fn generate_system_id_and_timestamps() -> (String, String, String) {
+    let now = chrono::Utc::now();
+    let timestamp_usec = now.timestamp_micros().to_string();
+    let display_timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
+    let id = format!("system_{}", timestamp_usec);
+    (id, display_timestamp, timestamp_usec)
+}
+
 /// システムメッセージの種類
 #[derive(Debug, Clone, PartialEq)]
 pub enum SystemMessageType {
@@ -63,8 +72,12 @@ impl SystemMessageGenerator {
             )
         };
 
+        let (id, timestamp, timestamp_usec) = generate_system_id_and_timestamps();
+
         GuiChatMessage {
-            timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
+            id,
+            timestamp,
+            timestamp_usec,
             message_type: MessageType::System,
             author: "📡 System".to_string(),
             author_icon_url: None,
@@ -101,8 +114,12 @@ impl SystemMessageGenerator {
             emoji, message, consecutive_errors, error_type
         );
 
+        let (id, timestamp, timestamp_usec) = generate_system_id_and_timestamps();
+
         GuiChatMessage {
-            timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
+            id,
+            timestamp,
+            timestamp_usec,
             message_type: MessageType::System,
             author: "⚠️ System Alert".to_string(),
             author_icon_url: None,
@@ -140,8 +157,12 @@ impl SystemMessageGenerator {
             )
         };
 
+        let (id, timestamp, timestamp_usec) = generate_system_id_and_timestamps();
+
         GuiChatMessage {
-            timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
+            id,
+            timestamp,
+            timestamp_usec,
             message_type: MessageType::System,
             author: format!("{} System", emoji),
             author_icon_url: None,
@@ -167,8 +188,12 @@ impl SystemMessageGenerator {
 
     /// 一般的なシステムメッセージを生成
     pub fn create_general_message(title: &str, content: &str) -> GuiChatMessage {
+        let (id, timestamp, timestamp_usec) = generate_system_id_and_timestamps();
+
         GuiChatMessage {
-            timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
+            id,
+            timestamp,
+            timestamp_usec,
             message_type: MessageType::System,
             author: format!("ℹ️ {}", title),
             author_icon_url: None,

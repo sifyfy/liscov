@@ -456,8 +456,14 @@ mod tests {
         content: &str,
         message_type: MessageType,
     ) -> GuiChatMessage {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static TEST_COUNTER: AtomicU64 = AtomicU64::new(1);
+        let counter = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
+
         GuiChatMessage {
-            timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
+            id: format!("test_{}", counter),
+            timestamp: "00:00:00".to_string(),
+            timestamp_usec: counter.to_string(),
             message_type,
             author: author.to_string(),
             author_icon_url: None,

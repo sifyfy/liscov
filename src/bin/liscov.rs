@@ -140,6 +140,19 @@ fn main() -> LiscovResult<()> {
     let _plugin_manager = Arc::new(PluginManager::new());
     tracing::info!("🔌 Plugin system initialized");
 
+    // WebSocket APIサーバーを起動
+    let ws_server = liscov::api::websocket_server::get_websocket_server();
+    let ws_port = ws_server.port();
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+        rt.block_on(async {
+            if let Err(e) = ws_server.start().await {
+                tracing::error!("❌ Failed to start WebSocket server: {}", e);
+            }
+        });
+    });
+    tracing::info!("🌐 WebSocket API server started on ws://127.0.0.1:{}", ws_port);
+
     // ウィンドウ位置をデスクトップ範囲内に調整
     utils::validate_window_bounds(&mut config.window);
 
