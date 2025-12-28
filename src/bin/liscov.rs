@@ -148,6 +148,14 @@ fn main() -> LiscovResult<()> {
         rt.block_on(async {
             if let Err(e) = ws_server.start().await {
                 tracing::error!("❌ Failed to start WebSocket server: {}", e);
+                return;
+            }
+            // サーバーが停止するまで待機（shutdownシグナルを待つ）
+            loop {
+                if !ws_server.is_running().await {
+                    break;
+                }
+                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
             }
         });
     });
