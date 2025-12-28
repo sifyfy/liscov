@@ -8,9 +8,9 @@ use tokio::sync::{mpsc, Mutex as TokioMutex};
 use super::models::GuiChatMessage;
 use super::stream_end_detector::{DetectionResult, StreamEndDetector};
 use crate::api::innertube::{
-    fetch_live_chat_messages, fetch_live_chat_page, get_next_continuation, InnerTube,
+    fetch_live_chat_messages, fetch_live_chat_page_with_mode, get_next_continuation, InnerTube,
 };
-use crate::api::youtube::Continuation;
+use crate::api::youtube::{ChatMode, Continuation};
 use crate::get_live_chat::Action;
 use crate::io::{RawResponseSaver, SaveConfig};
 use tracing;
@@ -39,6 +39,8 @@ pub struct LiveChatService {
     response_saver: Arc<TokioMutex<RawResponseSaver>>,
     stream_end_detector: Arc<TokioMutex<StreamEndDetector>>,
     last_url: Option<String>,
+    /// 現在のチャットモード（トップチャット or すべてのチャット）
+    chat_mode: ChatMode,
     #[cfg(test)]
     test_fetch_live_chat_page: Option<anyhow::Result<InnerTube>>,
 }
@@ -56,8 +58,60 @@ impl LiveChatService {
             )),
             stream_end_detector: Arc::new(TokioMutex::new(StreamEndDetector::new())),
             last_url: None,
+            chat_mode: ChatMode::default(),
             #[cfg(test)]
             test_fetch_live_chat_page: None,
+        }
+    }
+
+    /// 現在のチャットモードを取得
+    pub fn get_chat_mode(&self) -> ChatMode {
+        self.chat_mode
+    }
+
+    /// チャットモードを設定（監視開始前に呼び出す）
+    pub fn set_chat_mode(&mut self, mode: ChatMode) {
+        self.chat_mode = mode;
+        tracing::info!("🔄 Chat mode set to: {}", mode);
+    }
+
+    /// チャットモードを変更（監視中でも有効）
+    ///
+    /// 監視中の場合はInnerTubeクライアントのcontinuation tokenも更新する
+    pub async fn change_chat_mode(&mut self, mode: ChatMode) -> anyhow::Result<bool> {
+        let old_mode = self.chat_mode;
+        self.chat_mode = mode;
+
+        // InnerTubeクライアントが存在する場合はトークンを切り替え
+        let mut inner_tube = self.inner_tube.lock().await;
+        if let Some(ref mut client) = *inner_tube {
+            if client.set_chat_mode(mode) {
+                tracing::info!("🔄 Chat mode changed from {} to {}", old_mode, mode);
+                Ok(true)
+            } else {
+                // トークンが利用できない場合は元に戻す
+                self.chat_mode = old_mode;
+                tracing::warn!(
+                    "⚠️ Chat mode {} not available, keeping {}",
+                    mode,
+                    old_mode
+                );
+                Ok(false)
+            }
+        } else {
+            // クライアントがない場合は設定だけ変更
+            tracing::info!("🔄 Chat mode pre-set to: {} (will apply on next start)", mode);
+            Ok(true)
+        }
+    }
+
+    /// 利用可能なチャットモードを取得
+    pub async fn available_chat_modes(&self) -> Vec<ChatMode> {
+        let inner_tube = self.inner_tube.lock().await;
+        if let Some(ref client) = *inner_tube {
+            client.available_chat_modes()
+        } else {
+            vec![self.chat_mode]
         }
     }
 
@@ -90,15 +144,18 @@ impl LiveChatService {
             *file_path = output_file;
         }
 
-        // InnerTubeクライアントを初期化
+        // InnerTubeクライアントを初期化（チャットモードを指定）
+        let chat_mode = self.chat_mode;
+        tracing::info!("🎯 Starting with chat mode: {}", chat_mode);
+
         #[cfg(test)]
         let fetch_result = if let Some(result) = self.test_fetch_live_chat_page.take() {
             result
         } else {
-            fetch_live_chat_page(url).await
+            fetch_live_chat_page_with_mode(url, chat_mode).await
         };
         #[cfg(not(test))]
-        let fetch_result = fetch_live_chat_page(url).await;
+        let fetch_result = fetch_live_chat_page_with_mode(url, chat_mode).await;
 
         match fetch_result {
             Ok(inner_tube) => {
@@ -283,9 +340,10 @@ impl LiveChatService {
         // InnerTubeクライアントの準備
         let mut inner_tube = self.inner_tube.lock().await;
         if inner_tube.is_none() {
-            // 新しいクライアントを作成
-            use crate::api::innertube::fetch_live_chat_page;
-            let client = fetch_live_chat_page(&url).await?;
+            // 新しいクライアントを作成（チャットモードを指定）
+            let chat_mode = self.chat_mode;
+            tracing::info!("🎯 Resuming with chat mode: {}", chat_mode);
+            let client = fetch_live_chat_page_with_mode(&url, chat_mode).await?;
             *inner_tube = Some(client);
         }
 

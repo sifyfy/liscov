@@ -1,10 +1,12 @@
 use crate::gui::memory_optimized::{ComprehensiveStats, OptimizedMessageManager};
 use crate::gui::models::GuiChatMessage;
 use crate::gui::services::ServiceState;
+use crate::gui::state_broadcaster::{get_broadcaster, StateChange};
 use crate::io::SaveConfig;
-use crate::{GuiError, LiscovResult};
-use std::sync::{Arc, Mutex, OnceLock};
-use tokio::sync::mpsc;
+use crate::LiscovResult;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
+use tokio::sync::{broadcast, mpsc, RwLock};
 
 /// アプリケーション全体の状態イベント
 #[derive(Debug, Clone)]
@@ -130,40 +132,39 @@ impl Default for AppState {
 }
 
 /// イベント駆動状態マネージャー
+///
+/// 非ブロッキング設計:
+/// - RwLockにより読み取りは並行、書き込みは排他的
+/// - AtomicBoolでシンプルなフラグ管理
+/// - StateBroadcasterで状態変更をプッシュ通知
 pub struct StateManager {
-    state: Arc<Mutex<AppState>>,
+    /// アプリケーション状態（RwLockで非ブロッキング読み取り）
+    state: Arc<RwLock<AppState>>,
+    /// イベント送信チャネル
     event_sender: mpsc::UnboundedSender<AppEvent>,
-    is_started: Arc<Mutex<bool>>,
+    /// 開始フラグ（Atomicで非ブロッキング）
+    is_started: Arc<AtomicBool>,
 }
 
 impl StateManager {
     pub fn new() -> Self {
         let (event_sender, event_receiver) = mpsc::unbounded_channel();
 
-        let state = Arc::new(Mutex::new(AppState::default()));
-        let is_started = Arc::new(Mutex::new(false));
+        let state = Arc::new(RwLock::new(AppState::default()));
+        let is_started = Arc::new(AtomicBool::new(false));
 
         // イベント処理ループをすぐに開始
         let state_clone = Arc::clone(&state);
         let is_started_clone = Arc::clone(&is_started);
 
         tokio::spawn(async move {
-            {
-                let mut started = match is_started_clone.lock() {
-                    Ok(guard) => guard,
-                    Err(poisoned) => {
-                        tracing::error!("⚠️ Startup mutex poisoned, recovering");
-                        poisoned.into_inner()
-                    }
-                };
-                if *started {
-                    tracing::error!("🚨 [STATE_MGR] Event loop already started, returning");
-                    return; // 既に開始されている
-                }
-                *started = true;
+            // AtomicBoolでアトミックにフラグをチェック・設定
+            if is_started_clone.swap(true, Ordering::SeqCst) {
+                tracing::error!("🚨 [STATE_MGR] Event loop already started, returning");
+                return; // 既に開始されている
             }
 
-            tracing::info!("StateManager event loop starting");
+            tracing::info!("StateManager event loop starting (non-blocking version)");
             Self::run_event_loop(state_clone, event_receiver).await;
             tracing::info!("StateManager event loop ended");
         });
@@ -177,10 +178,10 @@ impl StateManager {
 
     /// イベント処理ループを実行
     async fn run_event_loop(
-        state: Arc<Mutex<AppState>>,
+        state: Arc<RwLock<AppState>>,
         mut event_receiver: mpsc::UnboundedReceiver<AppEvent>,
     ) {
-        tracing::debug!("StateManager event loop ready");
+        tracing::debug!("StateManager event loop ready (async RwLock)");
         let mut event_count = 0;
 
         while let Some(event) = event_receiver.recv().await {
@@ -190,36 +191,59 @@ impl StateManager {
                 event_count,
                 std::mem::discriminant(&event)
             );
-            Self::handle_event_static(&state, event);
+            Self::handle_event_async(&state, event).await;
         }
         tracing::debug!("Event loop stopped after {} events", event_count);
     }
 
-    /// 現在の状態を取得
+    /// 現在の状態を取得（非同期）
+    pub async fn get_state_async(&self) -> AppState {
+        self.state.read().await.clone()
+    }
+
+    /// 現在の状態を取得（ブロッキング - レガシー互換性のため）
+    /// 新しいコードでは get_state_async() を使用してください
     pub fn get_state(&self) -> LiscovResult<AppState> {
-        self.state.lock().map(|guard| guard.clone()).map_err(|_| {
-            GuiError::StateManagement("Failed to acquire state lock (mutex poisoned)".to_string())
-                .into()
-        })
+        // try_read()でブロッキングなしにロック取得を試みる
+        match self.state.try_read() {
+            Ok(guard) => Ok(guard.clone()),
+            Err(_) => {
+                // ロックが取得できない場合はブロッキングで待機
+                // 注意: これは非同期コンテキストでは使用しないでください
+                tracing::warn!("⚠️ [STATE_MGR] get_state() called with lock contention, consider using get_state_async()");
+                Ok(tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(async {
+                        self.state.read().await.clone()
+                    })
+                }))
+            }
+        }
     }
 
     /// 現在の状態を取得（非安全版・レガシー互換性のため）
-    /// 新しいコードでは get_state() を使用してください
+    /// 新しいコードでは get_state_async() を使用してください
     pub fn get_state_unchecked(&self) -> AppState {
         match self.get_state() {
             Ok(state) => state,
             Err(e) => {
-                tracing::error!("⚠️ State lock poisoned, returning default state: {}", e);
+                tracing::error!("⚠️ State lock error, returning default state: {}", e);
                 AppState::default()
             }
         }
     }
 
+    /// ブロードキャスターのサブスクリプションを取得
+    ///
+    /// 状態変更をリアルタイムで受信するためのReceiverを返す。
+    /// ポーリングの代わりにこれを使用することで、UIのブロッキングを回避できる。
+    pub fn subscribe(&self) -> broadcast::Receiver<StateChange> {
+        get_broadcaster().subscribe()
+    }
+
     #[cfg(test)]
-    pub fn reset_state_for_tests(&self) {
-        if let Ok(mut state) = self.state.lock() {
-            *state = AppState::default();
-        }
+    pub async fn reset_state_for_tests(&self) {
+        let mut state = self.state.write().await;
+        *state = AppState::default();
     }
 
     /// イベントを送信
@@ -247,21 +271,16 @@ impl StateManager {
         self.event_sender.send(event)
     }
 
-    /// イベントを処理して状態を更新（静的メソッド）
-    fn handle_event_static(state: &Arc<Mutex<AppState>>, event: AppEvent) {
+    /// イベントを処理して状態を更新（非同期メソッド）
+    async fn handle_event_async(state: &Arc<RwLock<AppState>>, event: AppEvent) {
         // 簡素化ログ：イベント処理開始
         tracing::debug!(
             "StateManager handling event: {:?}",
             std::mem::discriminant(&event)
         );
 
-        let mut state_guard = match state.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => {
-                tracing::error!("⚠️ State mutex poisoned during event handling, recovering data");
-                poisoned.into_inner()
-            }
-        };
+        let broadcaster = get_broadcaster();
+        let mut state_guard = state.write().await;
 
         match event {
             AppEvent::MessageAdded(mut message) => {
@@ -340,12 +359,25 @@ impl StateManager {
                     state_guard.stats.total_messages,
                     state_guard.stats.uptime_seconds
                 );
+
+                // ブロードキャスト: 新着メッセージを通知
+                broadcaster.broadcast(StateChange::MessageAdded {
+                    count: after_count,
+                    latest: Some(message),
+                });
             }
 
             AppEvent::MessagesAdded(messages) => {
-                tracing::debug!("📬 Added {} messages", messages.len());
+                let added_count = messages.len();
+                tracing::debug!("📬 Added {} messages", added_count);
                 state_guard.message_manager.add_messages_batch(messages);
                 Self::update_stats_static(&mut state_guard);
+
+                // ブロードキャスト: 複数メッセージ追加を通知
+                broadcaster.broadcast(StateChange::MessagesAdded {
+                    count: state_guard.message_manager.len(),
+                    added_count,
+                });
             }
 
             AppEvent::ConnectionChanged { is_connected } => {
@@ -364,21 +396,33 @@ impl StateManager {
                 } else if matches!(state_guard.service_state, ServiceState::Connected) {
                     state_guard.service_state = ServiceState::Idle;
                 }
+
+                // ブロードキャスト: 接続状態変更を通知
+                broadcaster.broadcast(StateChange::ConnectionChanged { is_connected });
             }
 
             AppEvent::ServiceStateChanged(new_state) => {
                 tracing::info!("🔄 Service state changed: {:?}", new_state);
-                state_guard.service_state = new_state;
+                state_guard.service_state = new_state.clone();
+
+                // ブロードキャスト: サービス状態変更を通知
+                broadcaster.broadcast(StateChange::ServiceStateChanged(new_state));
             }
 
             AppEvent::StoppingStateChanged { is_stopping } => {
                 tracing::info!("🛑 Stopping state changed: {}", is_stopping);
                 state_guard.is_stopping = is_stopping;
+
+                // ブロードキャスト: 停止状態変更を通知
+                broadcaster.broadcast(StateChange::StoppingChanged(is_stopping));
             }
 
             AppEvent::StatsUpdated(new_stats) => {
                 tracing::debug!("📊 Stats updated");
-                state_guard.stats = new_stats;
+                state_guard.stats = new_stats.clone();
+
+                // ブロードキャスト: 統計情報更新を通知
+                broadcaster.broadcast(StateChange::StatsUpdated(new_stats));
             }
 
             AppEvent::MessagesCleared => {
@@ -388,16 +432,22 @@ impl StateManager {
                 // コメント回数もリセット
                 state_guard.author_comment_counts.clear();
                 tracing::debug!("🔄 Author comment counts reset");
+
+                // ブロードキャスト: メッセージクリアを通知
+                broadcaster.broadcast(StateChange::MessagesCleared);
             }
 
             AppEvent::ContinuationTokenUpdated(token) => {
                 tracing::debug!("🔄 Continuation token updated");
-                state_guard.continuation_token = token;
+                state_guard.continuation_token = token.clone();
+
+                // ブロードキャスト: 継続トークン更新を通知
+                broadcaster.broadcast(StateChange::ContinuationTokenUpdated(token));
             }
 
             AppEvent::CurrentUrlUpdated(url) => {
                 tracing::debug!("🔗 Current URL updated: {:?}", url);
-                state_guard.current_url = url;
+                state_guard.current_url = url.clone();
                 // URL変更時は継続トークンをクリア（新しい配信のため）
                 if state_guard.current_url.is_some() {
                     state_guard.continuation_token = None;
@@ -405,6 +455,9 @@ impl StateManager {
                     state_guard.author_comment_counts.clear();
                     tracing::debug!("🔄 Author comment counts reset for new stream");
                 }
+
+                // ブロードキャスト: URL更新を通知
+                broadcaster.broadcast(StateChange::CurrentUrlUpdated(url));
             }
 
             AppEvent::UpdateSaveConfig(config) => {
@@ -420,6 +473,7 @@ impl StateManager {
                 tokio::spawn(async move {
                     service_clone.lock().await.update_save_config(config).await;
                 });
+                // 注意: SaveConfig変更はブロードキャストしない（サービス内部の処理のため）
             }
         }
     }
@@ -454,15 +508,9 @@ impl StateManager {
         }
     }
 
-    /// 状態マネージャーが開始されているかチェック
+    /// 状態マネージャーが開始されているかチェック（非ブロッキング）
     pub fn is_started(&self) -> bool {
-        match self.is_started.lock() {
-            Ok(guard) => *guard,
-            Err(poisoned) => {
-                tracing::error!("⚠️ Is-started mutex poisoned, assuming false");
-                *poisoned.into_inner()
-            }
-        }
+        self.is_started.load(Ordering::SeqCst)
     }
 }
 

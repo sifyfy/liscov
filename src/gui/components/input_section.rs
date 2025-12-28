@@ -1,3 +1,4 @@
+use crate::api::youtube::ChatMode;
 use crate::gui::{
     hooks::LiveChatHandle,
     styles::theme::{get_button_class, CssClasses},
@@ -150,6 +151,48 @@ pub fn CompactInputSection(live_chat_handle: LiveChatHandle) -> Element {
                             if auto_save_enabled() { "#16a34a" } else { "#d97706" }
                         ),
                         if auto_save_enabled() { "💾 ON" } else { "💾 OFF" }
+                    }
+
+                    // チャットモード切替ボタン
+                    {
+                        let current_mode = *live_chat_handle.chat_mode.read();
+                        let handle_for_mode = live_chat_handle.clone();
+                        let is_top_chat = matches!(current_mode, ChatMode::TopChat);
+
+                        rsx! {
+                            button {
+                                style: format!(
+                                    "
+                                        padding: 3px 8px;
+                                        border-radius: 4px;
+                                        font-size: 10px;
+                                        font-weight: 600;
+                                        background: {};
+                                        color: {};
+                                        border: 1px solid {};
+                                        cursor: pointer;
+                                        transition: all 0.2s ease;
+                                    ",
+                                    if is_top_chat { "#e0e7ff" } else { "#fef3c7" },
+                                    if is_top_chat { "#4338ca" } else { "#d97706" },
+                                    if is_top_chat { "#c7d2fe" } else { "#fcd34d" }
+                                ),
+                                title: if is_top_chat {
+                                    "トップチャット: 重要なメッセージのみ表示\nクリックですべてのチャットに切替"
+                                } else {
+                                    "すべてのチャット: 全メッセージ表示\nクリックでトップチャットに切替"
+                                },
+                                onclick: move |_| {
+                                    let new_mode = if is_top_chat {
+                                        ChatMode::AllChat
+                                    } else {
+                                        ChatMode::TopChat
+                                    };
+                                    handle_for_mode.set_chat_mode(new_mode);
+                                },
+                                if is_top_chat { "🔝 トップ" } else { "💬 全て" }
+                            }
+                        }
                     }
                 }
             }

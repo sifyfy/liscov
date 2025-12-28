@@ -39,7 +39,7 @@ pub fn TabNavigation(active_tab: ActiveTab, on_tab_change: EventHandler<ActiveTa
                 // 各タブボタン
                 for tab in tabs {
                     TabButton {
-                        key: format!("{:?}", tab),
+                        key: "{tab:?}",
                         tab: tab.clone(),
                         is_active: tab == active_tab,
                         on_click: {

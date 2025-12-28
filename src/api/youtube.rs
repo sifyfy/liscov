@@ -12,6 +12,72 @@ pub enum FetchError {
     Parse(#[from] serde_json::Error),
 }
 
+/// YouTubeライブチャットのモード
+///
+/// - TopChat: フィルタリングされた重要なメッセージのみ表示
+/// - AllChat: すべてのチャットメッセージを表示
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum ChatMode {
+    /// トップチャット（フィルタリングあり）
+    #[default]
+    TopChat,
+    /// すべてのチャット（フィルタリングなし）
+    AllChat,
+}
+
+impl ChatMode {
+    /// 表示用の日本語名を取得
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            ChatMode::TopChat => "トップチャット",
+            ChatMode::AllChat => "すべてのチャット",
+        }
+    }
+
+    /// 説明文を取得
+    pub fn description(&self) -> &'static str {
+        match self {
+            ChatMode::TopChat => "重要なメッセージのみ表示（YouTube推奨）",
+            ChatMode::AllChat => "すべてのメッセージを表示",
+        }
+    }
+}
+
+impl std::fmt::Display for ChatMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.display_name())
+    }
+}
+
+/// 両方のチャットモード用のcontinuation tokenを保持
+#[derive(Debug, Clone)]
+pub struct ChatContinuations {
+    /// トップチャット用のcontinuation token
+    pub top_chat: Option<Continuation>,
+    /// すべてのチャット用のcontinuation token
+    pub all_chat: Option<Continuation>,
+}
+
+impl ChatContinuations {
+    /// 指定されたモードに対応するcontinuation tokenを取得
+    pub fn get_for_mode(&self, mode: ChatMode) -> Option<&Continuation> {
+        match mode {
+            ChatMode::TopChat => self.top_chat.as_ref(),
+            ChatMode::AllChat => self.all_chat.as_ref(),
+        }
+    }
+
+    /// いずれかのトークンが存在するか確認
+    pub fn has_any(&self) -> bool {
+        self.top_chat.is_some() || self.all_chat.is_some()
+    }
+
+    /// デフォルトのトークンを取得（TopChat優先、なければAllChat）
+    pub fn get_default(&self) -> Option<&Continuation> {
+        self.top_chat.as_ref().or(self.all_chat.as_ref())
+    }
+}
+
 #[derive(Debug, Clone, derive_more::Display)]
 pub struct VideoId(pub String);
 
@@ -45,7 +111,49 @@ pub struct InnerTube {
     pub client_version: ClientVersion,
     pub gl: String,
     pub hl: String,
+    /// 現在使用中のcontinuation token
     pub continuation: Continuation,
+    /// 両方のチャットモード用のcontinuation tokens
+    pub chat_continuations: Option<ChatContinuations>,
+    /// 現在選択されているチャットモード
+    pub chat_mode: ChatMode,
+}
+
+impl InnerTube {
+    /// チャットモードを変更し、対応するcontinuation tokenに切り替える
+    pub fn set_chat_mode(&mut self, mode: ChatMode) -> bool {
+        if let Some(ref continuations) = self.chat_continuations {
+            if let Some(token) = continuations.get_for_mode(mode) {
+                self.chat_mode = mode;
+                self.continuation = token.clone();
+                return true;
+            }
+        }
+        false
+    }
+
+    /// 現在のチャットモードを取得
+    pub fn current_chat_mode(&self) -> ChatMode {
+        self.chat_mode
+    }
+
+    /// 利用可能なチャットモードを取得
+    pub fn available_chat_modes(&self) -> Vec<ChatMode> {
+        let mut modes = Vec::new();
+        if let Some(ref continuations) = self.chat_continuations {
+            if continuations.top_chat.is_some() {
+                modes.push(ChatMode::TopChat);
+            }
+            if continuations.all_chat.is_some() {
+                modes.push(ChatMode::AllChat);
+            }
+        }
+        if modes.is_empty() {
+            // デフォルトで現在のモードのみ
+            modes.push(self.chat_mode);
+        }
+        modes
+    }
 }
 
 pub fn extract_video_id(html: &str) -> Option<VideoId> {
@@ -86,6 +194,87 @@ pub fn extract_continuation(html: &str) -> Option<Continuation> {
         .map(|m| Continuation(m.as_str().to_string()))
 }
 
+/// HTMLから両方のチャットモード用continuation tokenを抽出
+///
+/// YouTubeのHTMLにはsubMenuItems内に2種類のモード用トークンが含まれている:
+/// - "トップチャット" (selected:true) → フィルタリングされたチャット
+/// - "チャット" (selected:false) → すべてのチャット
+///
+/// 注意: これらはreloadContinuationData内の短いトークンであり、
+/// モード切替時に使用する。初回メッセージ取得にはextract_continuation()の
+/// 長いトークンを使用すること。
+pub fn extract_chat_continuations(html: &str) -> ChatContinuations {
+    // subMenuItems形式を優先的に使用
+    // 日本語: "トップチャット" / "チャット"
+    // 英語: "Top chat" / "Live chat"
+    let (top_chat, all_chat) = extract_chat_continuations_from_submenu(html);
+
+    if top_chat.is_some() || all_chat.is_some() {
+        return ChatContinuations { top_chat, all_chat };
+    }
+
+    // フォールバック: selected パターン
+    let top_chat_pattern = Regex::new(
+        r#""selected"\s*:\s*true[^}]*"continuation"\s*:\s*\{\s*"reloadContinuationData"\s*:\s*\{\s*"continuation"\s*:\s*"([^"]+)""#
+    ).ok();
+
+    let all_chat_pattern = Regex::new(
+        r#""selected"\s*:\s*false[^}]*"continuation"\s*:\s*\{\s*"reloadContinuationData"\s*:\s*\{\s*"continuation"\s*:\s*"([^"]+)""#
+    ).ok();
+
+    let top_chat = top_chat_pattern
+        .and_then(|re| re.captures(html))
+        .and_then(|cap| cap.get(1))
+        .map(|m| Continuation(m.as_str().to_string()));
+
+    let all_chat = all_chat_pattern
+        .and_then(|re| re.captures(html))
+        .and_then(|cap| cap.get(1))
+        .map(|m| Continuation(m.as_str().to_string()));
+
+    ChatContinuations { top_chat, all_chat }
+}
+
+/// subMenuItems形式からチャットモード用トークンを抽出
+///
+/// 一部のYouTubeページでは以下の形式でトークンが含まれる:
+/// "subMenuItems":[{"title":"トップのチャット",...,"continuation":"TOKEN1"},{"title":"チャット",...,"continuation":"TOKEN2"}]
+fn extract_chat_continuations_from_submenu(html: &str) -> (Option<Continuation>, Option<Continuation>) {
+    // subMenuItems セクションを探す
+    let submenu_pattern = Regex::new(r#""subMenuItems"\s*:\s*\[([^\]]+)\]"#).ok();
+
+    if let Some(submenu_match) = submenu_pattern.and_then(|re| re.captures(html)) {
+        if let Some(submenu_content) = submenu_match.get(1) {
+            let content = submenu_content.as_str();
+
+            // 各アイテムからタイトルとcontinuationを抽出
+            // トップチャット: "title":"Top chat" または "title":"トップのチャット"
+            let top_pattern = Regex::new(
+                r#""title"\s*:\s*"(?:Top chat|トップのチャット|トップ チャット)"[^}]*"continuation"\s*:\s*"([^"]+)""#
+            ).ok();
+
+            // すべてのチャット: "title":"Live chat" または "title":"チャット"
+            let all_pattern = Regex::new(
+                r#""title"\s*:\s*"(?:Live chat|チャット)"[^}]*"continuation"\s*:\s*"([^"]+)""#
+            ).ok();
+
+            let top_chat = top_pattern
+                .and_then(|re| re.captures(content))
+                .and_then(|cap| cap.get(1))
+                .map(|m| Continuation(m.as_str().to_string()));
+
+            let all_chat = all_pattern
+                .and_then(|re| re.captures(content))
+                .and_then(|cap| cap.get(1))
+                .map(|m| Continuation(m.as_str().to_string()));
+
+            return (top_chat, all_chat);
+        }
+    }
+
+    (None, None)
+}
+
 fn extract_hl(html: &str) -> Option<String> {
     Regex::new(r#"['"]hl['"]:\s*['"](.+?)['"]"#)
         .unwrap()
@@ -103,6 +292,11 @@ fn extract_gl(html: &str) -> Option<String> {
 }
 
 pub async fn fetch_live_chat_page(url: &str) -> Result<InnerTube> {
+    fetch_live_chat_page_with_mode(url, ChatMode::default()).await
+}
+
+/// 指定したチャットモードでライブチャットページを取得
+pub async fn fetch_live_chat_page_with_mode(url: &str, preferred_mode: ChatMode) -> Result<InnerTube> {
     let response = reqwest::get(url).await?;
     let html = response.text().await?;
 
@@ -113,8 +307,33 @@ pub async fn fetch_live_chat_page(url: &str) -> Result<InnerTube> {
         extract_client_version(&html).ok_or_else(|| anyhow::anyhow!("client_version not found"))?;
     let gl = extract_gl(&html).unwrap_or_default();
     let hl = extract_hl(&html).unwrap_or_default();
-    let continuation =
-        extract_continuation(&html).ok_or_else(|| anyhow::anyhow!("continuation not found"))?;
+
+    // 両方のチャットモード用トークンを抽出
+    let chat_continuations = extract_chat_continuations(&html);
+
+    // 優先モードのトークンを取得、なければデフォルトまたはフォールバック
+    let (continuation, chat_mode) = if let Some(token) = chat_continuations.get_for_mode(preferred_mode) {
+        (token.clone(), preferred_mode)
+    } else if let Some(token) = chat_continuations.get_default() {
+        // 優先モードが利用できない場合はデフォルトを使用
+        let actual_mode = if chat_continuations.top_chat.is_some() {
+            ChatMode::TopChat
+        } else {
+            ChatMode::AllChat
+        };
+        (token.clone(), actual_mode)
+    } else {
+        // ChatContinuationsから取得できなかった場合は従来の方法でフォールバック
+        let fallback = extract_continuation(&html)
+            .ok_or_else(|| anyhow::anyhow!("continuation not found"))?;
+        (fallback, ChatMode::TopChat)
+    };
+
+    let chat_continuations = if chat_continuations.has_any() {
+        Some(chat_continuations)
+    } else {
+        None
+    };
 
     Ok(InnerTube {
         video_id,
@@ -124,6 +343,8 @@ pub async fn fetch_live_chat_page(url: &str) -> Result<InnerTube> {
         gl,
         hl,
         continuation,
+        chat_continuations,
+        chat_mode,
     })
 }
 
@@ -243,6 +464,8 @@ mod tests {
             gl: "JP".to_string(),
             hl: "ja".to_string(),
             continuation: Continuation("test_continuation".to_string()),
+            chat_continuations: None,
+            chat_mode: ChatMode::TopChat,
         };
 
         assert_eq!(inner_tube.video_id.0, "test_video");
@@ -252,6 +475,90 @@ mod tests {
         assert_eq!(inner_tube.gl, "JP");
         assert_eq!(inner_tube.hl, "ja");
         assert_eq!(inner_tube.continuation.0, "test_continuation");
+        assert_eq!(inner_tube.chat_mode, ChatMode::TopChat);
+    }
+
+    #[test]
+    fn test_chat_mode_display() {
+        assert_eq!(ChatMode::TopChat.display_name(), "トップチャット");
+        assert_eq!(ChatMode::AllChat.display_name(), "すべてのチャット");
+        assert_eq!(format!("{}", ChatMode::TopChat), "トップチャット");
+        assert_eq!(format!("{}", ChatMode::AllChat), "すべてのチャット");
+    }
+
+    #[test]
+    fn test_chat_mode_default() {
+        assert_eq!(ChatMode::default(), ChatMode::TopChat);
+    }
+
+    #[test]
+    fn test_chat_continuations() {
+        let continuations = ChatContinuations {
+            top_chat: Some(Continuation("top_token".to_string())),
+            all_chat: Some(Continuation("all_token".to_string())),
+        };
+
+        assert!(continuations.has_any());
+        assert_eq!(
+            continuations.get_for_mode(ChatMode::TopChat).unwrap().0,
+            "top_token"
+        );
+        assert_eq!(
+            continuations.get_for_mode(ChatMode::AllChat).unwrap().0,
+            "all_token"
+        );
+        assert_eq!(continuations.get_default().unwrap().0, "top_token");
+    }
+
+    #[test]
+    fn test_inner_tube_set_chat_mode() {
+        let mut inner_tube = InnerTube {
+            video_id: VideoId("test_video".to_string()),
+            api_key: ApiKey("test_key".to_string()),
+            is_replay: false,
+            client_version: ClientVersion("2.0".to_string()),
+            gl: "JP".to_string(),
+            hl: "ja".to_string(),
+            continuation: Continuation("top_token".to_string()),
+            chat_continuations: Some(ChatContinuations {
+                top_chat: Some(Continuation("top_token".to_string())),
+                all_chat: Some(Continuation("all_token".to_string())),
+            }),
+            chat_mode: ChatMode::TopChat,
+        };
+
+        // AllChatに切り替え
+        assert!(inner_tube.set_chat_mode(ChatMode::AllChat));
+        assert_eq!(inner_tube.chat_mode, ChatMode::AllChat);
+        assert_eq!(inner_tube.continuation.0, "all_token");
+
+        // TopChatに戻す
+        assert!(inner_tube.set_chat_mode(ChatMode::TopChat));
+        assert_eq!(inner_tube.chat_mode, ChatMode::TopChat);
+        assert_eq!(inner_tube.continuation.0, "top_token");
+    }
+
+    #[test]
+    fn test_inner_tube_available_chat_modes() {
+        let inner_tube = InnerTube {
+            video_id: VideoId("test_video".to_string()),
+            api_key: ApiKey("test_key".to_string()),
+            is_replay: false,
+            client_version: ClientVersion("2.0".to_string()),
+            gl: "JP".to_string(),
+            hl: "ja".to_string(),
+            continuation: Continuation("top_token".to_string()),
+            chat_continuations: Some(ChatContinuations {
+                top_chat: Some(Continuation("top_token".to_string())),
+                all_chat: Some(Continuation("all_token".to_string())),
+            }),
+            chat_mode: ChatMode::TopChat,
+        };
+
+        let modes = inner_tube.available_chat_modes();
+        assert_eq!(modes.len(), 2);
+        assert!(modes.contains(&ChatMode::TopChat));
+        assert!(modes.contains(&ChatMode::AllChat));
     }
 
     #[test]

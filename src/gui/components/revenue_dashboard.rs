@@ -1,6 +1,7 @@
 use crate::analytics::{RealtimeStats, RevenueAnalytics, RevenueSummary};
 use dioxus::prelude::*;
-use dioxus_charts::LineChart;
+// TODO: dioxus-charts is not compatible with Dioxus 0.7 yet
+// use dioxus_charts::LineChart;
 
 /// 収益ダッシュボードコンポーネント
 #[component]
@@ -548,26 +549,13 @@ fn HourlyRevenueCard(analytics: Signal<RevenueAnalytics>) -> Element {
                     "時間別データがまだありません"
                 }
             } else if hourly_data.len() >= 2 {
-                // dioxus-chartsのLineChartを使用
+                // TODO: dioxus-charts is not compatible with Dioxus 0.7 yet
+                // Placeholder for LineChart
                 div {
-                    style: "height: 300px; margin: 20px 0;",
-
-                    LineChart {
-                        padding_top: 30,
-                        padding_left: 70,
-                        padding_right: 50,
-                        padding_bottom: 50,
-                        series: vec![
-                            hourly_data
-                                .iter()
-                                .map(|h| h.super_chat_amount as f32)
-                                .collect::<Vec<f32>>()
-                        ],
-                        labels: hourly_data
-                            .iter()
-                            .map(|h| h.hour.format("%H:00").to_string())
-                            .collect::<Vec<String>>(),
-                        label_interpolation: (|v| format!("¥{:.0}", v)) as fn(f32) -> String,
+                    style: "height: 300px; margin: 20px 0; background: #f0f0f0; border-radius: 8px; display: flex; align-items: center; justify-content: center;",
+                    p {
+                        style: "color: #666; font-style: italic;",
+                        "📈 グラフ表示（dioxus-charts 0.7対応待ち）"
                     }
                 }
 

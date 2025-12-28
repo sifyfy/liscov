@@ -119,7 +119,7 @@ fn IntegratedHeaderTabs(active_tab: ActiveTab, on_tab_change: EventHandler<Activ
                 // 各タブボタン
                 for tab in tabs {
                     IntegratedTabButton {
-                        key: format!("{:?}", tab),
+                        key: "{tab:?}",
                         tab: tab.clone(),
                         is_active: tab == active_tab,
                         on_click: {

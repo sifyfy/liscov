@@ -34,6 +34,7 @@ pub use message_stream::{DisplayLimit, MessageStream, MessageStreamConfig, Messa
 
 // New state management modules
 pub mod live_chat_service;
+pub mod state_broadcaster;
 pub mod state_management;
 pub mod ui_sync_service;
 
@@ -55,6 +56,7 @@ pub mod events; // Event System - Phase 3.1で復活
                 // pub mod state; // 統合状態管理 - Signal互換性問題で一時無効化
 
 pub use live_chat_service::*;
+pub use state_broadcaster::{get_broadcaster, StateBroadcaster, StateChange};
 pub use state_management::{get_state_manager, AppEvent, StateManager};
 pub use ui_sync_service::*;
 

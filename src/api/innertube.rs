@@ -1,7 +1,8 @@
 pub mod get_live_chat;
 
+use crate::api::continuation_builder::{detect_chat_mode, modify_continuation_mode};
 use crate::api::innertube::get_live_chat::GetLiveChatResponse;
-use crate::api::youtube::{ApiKey, ClientVersion, Continuation, VideoId};
+use crate::api::youtube::{ApiKey, ChatContinuations, ChatMode, ClientVersion, Continuation, VideoId};
 use anyhow::Result;
 use reqwest;
 use serde::{Deserialize, Serialize};
@@ -32,6 +33,10 @@ pub struct InnerTube {
     pub continuation: Continuation,
     pub client_id: ClientId,
     pub http_client: reqwest::Client,
+    /// 両方のチャットモード用のcontinuation tokens
+    pub chat_continuations: Option<ChatContinuations>,
+    /// 現在選択されているチャットモード
+    pub chat_mode: ChatMode,
 }
 
 impl InnerTube {
@@ -51,12 +56,85 @@ impl InnerTube {
             continuation: Continuation("".to_string()),
             client_id,
             http_client: reqwest::Client::new(),
+            chat_continuations: None,
+            chat_mode: ChatMode::default(),
+        }
+    }
+
+    /// チャットモードを変更し、continuation tokenを更新する
+    ///
+    /// 既存のcontinuation tokenのchattypeフィールドを変更することで
+    /// モードを切り替える。これにより、APIリクエストで異なるフィルタリングが適用される。
+    ///
+    /// # Arguments
+    /// * `mode` - 新しいチャットモード
+    ///
+    /// # Returns
+    /// * `true` - モード変更成功
+    /// * `false` - モード変更失敗（トークンが空または変更できない場合）
+    pub fn set_chat_mode(&mut self, mode: ChatMode) -> bool {
+        if self.continuation.0.is_empty() {
+            tracing::warn!("Cannot change chat mode: continuation token is empty");
+            return false;
+        }
+
+        // 既に同じモードの場合は何もしない
+        if self.chat_mode == mode {
+            tracing::debug!("Chat mode already set to {:?}", mode);
+            return true;
+        }
+
+        // continuation tokenを変更してモードを切り替え
+        if let Some(new_token) = modify_continuation_mode(&self.continuation, mode) {
+            tracing::info!("Chat mode changed: {:?} -> {:?}", self.chat_mode, mode);
+            self.continuation = new_token;
+            self.chat_mode = mode;
+            true
+        } else {
+            tracing::warn!("Failed to modify continuation token for mode {:?}", mode);
+            false
+        }
+    }
+
+    /// 現在のチャットモードを取得
+    pub fn current_chat_mode(&self) -> ChatMode {
+        self.chat_mode
+    }
+
+    /// 利用可能なチャットモードを取得
+    ///
+    /// continuation tokenが有効な場合、両方のモードが利用可能
+    pub fn available_chat_modes(&self) -> Vec<ChatMode> {
+        if self.continuation.0.is_empty() {
+            vec![self.chat_mode]
+        } else {
+            // 有効なtokenがあれば両方のモードが利用可能
+            vec![ChatMode::TopChat, ChatMode::AllChat]
+        }
+    }
+
+    /// continuation tokenから現在のチャットモードを検出
+    pub fn detect_current_mode(&self) -> Option<ChatMode> {
+        if self.continuation.0.is_empty() {
+            None
+        } else {
+            detect_chat_mode(&self.continuation)
         }
     }
 }
 
+/// デフォルトのチャットモード（TopChat）でライブチャットページを取得
 pub async fn fetch_live_chat_page(url: &str) -> Result<InnerTube> {
-    tracing::info!("🌐 Fetching live chat page from URL: {}", url);
+    fetch_live_chat_page_with_mode(url, ChatMode::default()).await
+}
+
+/// 指定したチャットモードでライブチャットページを取得
+///
+/// 注意: YouTubeのチャットモード切替はreload continuation tokenを使用する。
+/// 初回接続時はメインのcontinuation tokenを使用し、モード切替用のtokenは
+/// chat_continuationsに保存される。
+pub async fn fetch_live_chat_page_with_mode(url: &str, preferred_mode: ChatMode) -> Result<InnerTube> {
+    tracing::info!("🌐 Fetching live chat page from URL: {} (mode: {})", url, preferred_mode);
 
     let client = reqwest::Client::new();
 
@@ -106,21 +184,54 @@ pub async fn fetch_live_chat_page(url: &str) -> Result<InnerTube> {
     })?;
     tracing::info!("📱 Extracted client_version: {}", client_version);
 
-    let continuation = crate::api::youtube::extract_continuation(&html).ok_or_else(|| {
+    // メインのcontinuation token（長い形式、メッセージ取得に使用）
+    let main_continuation = crate::api::youtube::extract_continuation(&html).ok_or_else(|| {
         tracing::error!("❌ continuation not found in HTML");
         anyhow::anyhow!("continuation not found")
     })?;
     tracing::info!(
-        "🔄 Extracted continuation token: {}...",
-        &continuation.to_string()[..20.min(continuation.to_string().len())]
+        "🔄 Extracted main continuation token (length: {}): {}...",
+        main_continuation.0.len(),
+        &main_continuation.to_string()[..30.min(main_continuation.to_string().len())]
     );
+
+    // モード切替用のreload tokensを抽出（subMenuItemsから）
+    let chat_continuations = crate::api::youtube::extract_chat_continuations(&html);
+
+    let chat_continuations_option = if chat_continuations.has_any() {
+        tracing::info!(
+            "📋 Mode switch tokens available: TopChat={}, AllChat={}",
+            chat_continuations.top_chat.is_some(),
+            chat_continuations.all_chat.is_some()
+        );
+        Some(chat_continuations)
+    } else {
+        tracing::warn!("⚠️ No mode switch tokens found in HTML");
+        None
+    };
 
     let mut inner_tube =
         InnerTube::new(video_id, api_key, client_version, ClientId("1".to_string()));
 
-    inner_tube.continuation = continuation;
+    // メインcontinuation tokenを設定
+    inner_tube.continuation = main_continuation;
+    inner_tube.chat_continuations = chat_continuations_option;
 
-    tracing::info!("✅ Successfully initialized InnerTube client");
+    // トークンから現在のモードを検出
+    let detected_mode = inner_tube.detect_current_mode().unwrap_or(ChatMode::TopChat);
+    inner_tube.chat_mode = detected_mode;
+    tracing::info!("🔍 Detected chat mode from token: {:?}", detected_mode);
+
+    // 希望するモードと異なる場合は切り替え
+    if preferred_mode != detected_mode {
+        if inner_tube.set_chat_mode(preferred_mode) {
+            tracing::info!("🔄 Switched chat mode to: {:?}", preferred_mode);
+        } else {
+            tracing::warn!("⚠️ Could not switch to preferred mode {:?}, using {:?}", preferred_mode, detected_mode);
+        }
+    }
+
+    tracing::info!("✅ Successfully initialized InnerTube client (mode: {:?})", inner_tube.chat_mode);
     Ok(inner_tube)
 }
 
