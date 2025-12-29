@@ -1,5 +1,6 @@
 pub mod get_live_chat;
 
+use crate::api::auth::{generate_sapisidhash, YouTubeCookies};
 use crate::api::continuation_builder::{detect_chat_mode, modify_continuation_mode};
 use crate::api::innertube::get_live_chat::GetLiveChatResponse;
 use crate::api::youtube::{ApiKey, ChatContinuations, ChatMode, ClientVersion, Continuation, VideoId};
@@ -37,6 +38,8 @@ pub struct InnerTube {
     pub chat_continuations: Option<ChatContinuations>,
     /// 現在選択されているチャットモード
     pub chat_mode: ChatMode,
+    /// 認証情報（メンバー限定配信用）
+    pub auth_cookies: Option<YouTubeCookies>,
 }
 
 impl InnerTube {
@@ -58,7 +61,44 @@ impl InnerTube {
             http_client: reqwest::Client::new(),
             chat_continuations: None,
             chat_mode: ChatMode::default(),
+            auth_cookies: None,
         }
+    }
+
+    /// 認証情報を設定
+    pub fn set_auth(&mut self, cookies: YouTubeCookies) {
+        self.auth_cookies = Some(cookies);
+    }
+
+    /// 認証情報をクリア
+    pub fn clear_auth(&mut self) {
+        self.auth_cookies = None;
+    }
+
+    /// 認証済みかどうかを確認
+    pub fn is_authenticated(&self) -> bool {
+        self.auth_cookies.is_some()
+    }
+
+    /// 認証ヘッダーを生成
+    ///
+    /// 認証情報が設定されている場合、以下のヘッダーを返す：
+    /// - Authorization: SAPISIDHASH {hash}
+    /// - Cookie: SID=...; HSID=...; ...
+    /// - X-Origin: https://www.youtube.com
+    /// - Origin: https://www.youtube.com
+    fn build_auth_headers(&self) -> Option<Vec<(String, String)>> {
+        let cookies = self.auth_cookies.as_ref()?;
+
+        let sapisidhash = generate_sapisidhash(&cookies.sapisid);
+        let cookie_header = cookies.to_cookie_header();
+
+        Some(vec![
+            ("Authorization".to_string(), format!("SAPISIDHASH {}", sapisidhash)),
+            ("Cookie".to_string(), cookie_header),
+            ("X-Origin".to_string(), "https://www.youtube.com".to_string()),
+            ("Origin".to_string(), "https://www.youtube.com".to_string()),
+        ])
     }
 
     /// チャットモードを変更し、continuation tokenを更新する
@@ -229,9 +269,21 @@ impl InnerTube {
     }
 }
 
+/// デバッグ用HTMLファイル保存
+fn save_debug_html(html: &str, reason: &str) {
+    if let Ok(temp_dir) = std::env::var("TEMP").or_else(|_| std::env::var("TMP")) {
+        let path = format!("{}/liscov_debug_html_{}.txt", temp_dir, reason);
+        if let Err(e) = std::fs::write(&path, html) {
+            tracing::error!("Failed to save debug HTML: {}", e);
+        } else {
+            tracing::info!("📁 Debug HTML saved to: {}", path);
+        }
+    }
+}
+
 /// デフォルトのチャットモード（TopChat）でライブチャットページを取得
 pub async fn fetch_live_chat_page(url: &str) -> Result<InnerTube> {
-    fetch_live_chat_page_with_mode(url, ChatMode::default()).await
+    fetch_live_chat_page_with_auth(url, ChatMode::default(), None).await
 }
 
 /// 指定したチャットモードでライブチャットページを取得
@@ -240,16 +292,80 @@ pub async fn fetch_live_chat_page(url: &str) -> Result<InnerTube> {
 /// 初回接続時はメインのcontinuation tokenを使用し、モード切替用のtokenは
 /// chat_continuationsに保存される。
 pub async fn fetch_live_chat_page_with_mode(url: &str, preferred_mode: ChatMode) -> Result<InnerTube> {
+    fetch_live_chat_page_with_auth(url, preferred_mode, None).await
+}
+
+/// 認証情報付きでライブチャットページを取得
+///
+/// メンバー限定配信など、認証が必要なコンテンツにアクセスする場合に使用。
+pub async fn fetch_live_chat_page_with_auth(
+    url: &str,
+    preferred_mode: ChatMode,
+    cookies: Option<&YouTubeCookies>,
+) -> Result<InnerTube> {
     tracing::info!("🌐 Fetching live chat page from URL: {} (mode: {})", url, preferred_mode);
+
+    if cookies.is_some() {
+        tracing::info!("🔐 Using authentication cookies for page fetch");
+    }
 
     let client = reqwest::Client::new();
 
-    let response = client
-        .get(url)
+    // URLからビデオIDを抽出
+    let video_id_from_url = crate::gui::utils::extract_video_id(url);
+
+    // live_chatページを直接取得するかどうかを決定
+    let fetch_url = if let Some(ref vid) = video_id_from_url {
+        // 認証がある場合はlive_chatポップアップページを直接取得
+        if cookies.is_some() {
+            // is_popout=1を追加してポップアップチャットウィンドウとして取得
+            let chat_url = format!("https://www.youtube.com/live_chat?is_popout=1&v={}", vid);
+            tracing::info!("🔄 Fetching live_chat popup page directly: {}", chat_url);
+            chat_url
+        } else {
+            url.to_string()
+        }
+    } else {
+        url.to_string()
+    };
+
+    let mut request = client
+        .get(&fetch_url)
         .header(
             "User-Agent",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         )
+        .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
+        .header("Accept-Language", "ja,en-US;q=0.7,en;q=0.3")
+        // Note: Accept-Encoding は設定しない（reqwestにgzip featureがないため圧縮レスポンスを処理できない）
+        .header("Sec-Fetch-Dest", "document")
+        .header("Sec-Fetch-Mode", "navigate")
+        .header("Sec-Fetch-Site", "none")
+        .header("Sec-Fetch-User", "?1")
+        .header("Upgrade-Insecure-Requests", "1");
+
+    // 認証Cookieを追加（ページナビゲーションではAuthorizationヘッダーは不要）
+    // ブラウザと同様にCookieのみを送信
+    if let Some(auth_cookies) = cookies {
+        let cookie_header = auth_cookies.to_cookie_header();
+
+        request = request.header("Cookie", cookie_header.clone());
+
+        tracing::info!("🍪 Added authentication cookies (length: {} chars)", cookie_header.len());
+
+        // Cookieの主要な値をログ（デバッグ用）
+        if cookie_header.contains("SAPISID=") {
+            tracing::info!("✅ SAPISID cookie is present");
+        }
+        if cookie_header.contains("LOGIN_INFO=") {
+            tracing::info!("✅ LOGIN_INFO cookie is present");
+        }
+        if cookie_header.contains("__Secure-1PSID=") || cookie_header.contains("__Secure-3PSID=") {
+            tracing::info!("✅ Secure PSID cookies are present");
+        }
+    }
+
+    let response = request
         .send()
         .await
         .map_err(|e| {
@@ -269,14 +385,32 @@ pub async fn fetch_live_chat_page_with_mode(url: &str, preferred_mode: ChatMode)
 
     tracing::debug!("📄 HTML response length: {} chars", html.len());
 
-    let video_id = crate::api::youtube::extract_video_id(&html).ok_or_else(|| {
-        tracing::error!("❌ video_id not found in HTML");
-        anyhow::anyhow!("video_id not found")
-    })?;
+    // live_chatポップアップページの場合はURLからvideo_idを使用（HTMLからは抽出できない）
+    let video_id = if let Some(ref vid) = video_id_from_url {
+        if cookies.is_some() {
+            // live_chatポップアップページからはvideo_idを直接抽出できないため、URLから取得したものを使用
+            tracing::info!("🎬 Using video_id from URL for live_chat popup: {}", vid);
+            crate::api::youtube::VideoId(vid.clone())
+        } else {
+            crate::api::youtube::extract_video_id(&html).ok_or_else(|| {
+                tracing::error!("❌ video_id not found in HTML");
+                // デバッグ用：HTMLをファイルに保存
+                save_debug_html(&html, "video_id_not_found");
+                anyhow::anyhow!("video_id not found")
+            })?
+        }
+    } else {
+        crate::api::youtube::extract_video_id(&html).ok_or_else(|| {
+            tracing::error!("❌ video_id not found in HTML");
+            save_debug_html(&html, "video_id_not_found");
+            anyhow::anyhow!("video_id not found")
+        })?
+    };
     tracing::info!("🎬 Extracted video_id: {}", video_id);
 
     let api_key = crate::api::youtube::extract_api_key(&html).ok_or_else(|| {
         tracing::error!("❌ api_key not found in HTML");
+        save_debug_html(&html, "api_key_not_found");
         anyhow::anyhow!("api_key not found")
     })?;
     tracing::info!(
@@ -293,6 +427,7 @@ pub async fn fetch_live_chat_page_with_mode(url: &str, preferred_mode: ChatMode)
     // メインのcontinuation token（長い形式、メッセージ取得に使用）
     let main_continuation = crate::api::youtube::extract_continuation(&html).ok_or_else(|| {
         tracing::error!("❌ continuation not found in HTML");
+        save_debug_html(&html, "continuation_not_found");
         anyhow::anyhow!("continuation not found")
     })?;
     tracing::info!(
@@ -379,14 +514,29 @@ pub async fn fetch_live_chat_messages(inner_tube: &InnerTube) -> Result<GetLiveC
         );
     }
 
-    let response = inner_tube
+    // リクエストビルダーを構築
+    let mut request = inner_tube
         .http_client
         .post(&url)
         .header("Content-Type", "application/json")
         .header(
             "User-Agent",
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        )
+        );
+
+    // 認証ヘッダーを追加（メンバー限定配信用）
+    if let Some(auth_headers) = inner_tube.build_auth_headers() {
+        tracing::debug!("🔐 Adding authentication headers for member-only content");
+        for (name, value) in auth_headers {
+            // Cookie値はログに出力しない
+            if name != "Cookie" {
+                tracing::trace!("  {}: {}", name, value);
+            }
+            request = request.header(&name, &value);
+        }
+    }
+
+    let response = request
         .json(&payload)
         .send()
         .await
@@ -709,5 +859,110 @@ mod tests {
         let client_id = ClientId("test_client_123".to_string());
         let display_str = format!("{}", client_id);
         assert_eq!(display_str, "test_client_123");
+    }
+
+    #[test]
+    fn test_inner_tube_auth_default() {
+        let inner_tube = InnerTube::new(
+            VideoId("test".to_string()),
+            ApiKey::new("key".to_string()),
+            ClientVersion::new("1.0".to_string()),
+            ClientId("1".to_string()),
+        );
+
+        assert!(!inner_tube.is_authenticated());
+        assert!(inner_tube.auth_cookies.is_none());
+    }
+
+    #[test]
+    fn test_inner_tube_set_auth() {
+        let mut inner_tube = InnerTube::new(
+            VideoId("test".to_string()),
+            ApiKey::new("key".to_string()),
+            ClientVersion::new("1.0".to_string()),
+            ClientId("1".to_string()),
+        );
+
+        let cookies = YouTubeCookies::new(
+            "sid".to_string(),
+            "hsid".to_string(),
+            "ssid".to_string(),
+            "apisid".to_string(),
+            "sapisid".to_string(),
+        );
+
+        inner_tube.set_auth(cookies);
+
+        assert!(inner_tube.is_authenticated());
+        assert!(inner_tube.auth_cookies.is_some());
+    }
+
+    #[test]
+    fn test_inner_tube_clear_auth() {
+        let mut inner_tube = InnerTube::new(
+            VideoId("test".to_string()),
+            ApiKey::new("key".to_string()),
+            ClientVersion::new("1.0".to_string()),
+            ClientId("1".to_string()),
+        );
+
+        let cookies = YouTubeCookies::new(
+            "sid".to_string(),
+            "hsid".to_string(),
+            "ssid".to_string(),
+            "apisid".to_string(),
+            "sapisid".to_string(),
+        );
+
+        inner_tube.set_auth(cookies);
+        assert!(inner_tube.is_authenticated());
+
+        inner_tube.clear_auth();
+        assert!(!inner_tube.is_authenticated());
+    }
+
+    #[test]
+    fn test_inner_tube_build_auth_headers() {
+        let mut inner_tube = InnerTube::new(
+            VideoId("test".to_string()),
+            ApiKey::new("key".to_string()),
+            ClientVersion::new("1.0".to_string()),
+            ClientId("1".to_string()),
+        );
+
+        // 認証なしの場合はNone
+        assert!(inner_tube.build_auth_headers().is_none());
+
+        // 認証設定後はSome
+        let cookies = YouTubeCookies::new(
+            "sid".to_string(),
+            "hsid".to_string(),
+            "ssid".to_string(),
+            "apisid".to_string(),
+            "sapisid".to_string(),
+        );
+        inner_tube.set_auth(cookies);
+
+        let headers = inner_tube.build_auth_headers();
+        assert!(headers.is_some());
+
+        let headers = headers.unwrap();
+        assert_eq!(headers.len(), 4);
+
+        // Authorizationヘッダーの確認
+        let auth_header = headers.iter().find(|(k, _)| k == "Authorization");
+        assert!(auth_header.is_some());
+        assert!(auth_header.unwrap().1.starts_with("SAPISIDHASH "));
+
+        // Cookieヘッダーの確認
+        let cookie_header = headers.iter().find(|(k, _)| k == "Cookie");
+        assert!(cookie_header.is_some());
+        assert!(cookie_header.unwrap().1.contains("SID="));
+        assert!(cookie_header.unwrap().1.contains("SAPISID="));
+
+        // X-Originヘッダーの確認
+        let origin_header = headers.iter().find(|(k, _)| k == "X-Origin");
+        assert!(origin_header.is_some());
+        assert_eq!(origin_header.unwrap().1, "https://www.youtube.com");
     }
 }

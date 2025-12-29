@@ -7,8 +7,9 @@ use tokio::sync::{mpsc, Mutex as TokioMutex};
 
 use super::models::GuiChatMessage;
 use super::stream_end_detector::{DetectionResult, StreamEndDetector};
+use crate::api::auth::{CookieManager, YouTubeCookies};
 use crate::api::innertube::{
-    fetch_live_chat_messages, fetch_live_chat_page_with_mode, get_next_continuation, InnerTube,
+    fetch_live_chat_messages, fetch_live_chat_page_with_auth, get_next_continuation, InnerTube,
 };
 use crate::api::youtube::{ChatMode, Continuation};
 use crate::get_live_chat::Action;
@@ -41,12 +42,21 @@ pub struct LiveChatService {
     last_url: Option<String>,
     /// 現在のチャットモード（トップチャット or すべてのチャット）
     chat_mode: ChatMode,
+    /// 認証情報（メンバー限定配信用）
+    auth_cookies: Option<YouTubeCookies>,
     #[cfg(test)]
     test_fetch_live_chat_page: Option<anyhow::Result<InnerTube>>,
 }
 
 impl LiveChatService {
     pub fn new() -> Self {
+        // 保存済み認証情報を読み込み
+        let auth_cookies = Self::load_saved_auth();
+
+        if auth_cookies.is_some() {
+            tracing::info!("🔐 Loaded saved authentication credentials");
+        }
+
         Self {
             inner_tube: Arc::new(TokioMutex::new(None)),
             state: Arc::new(TokioMutex::new(ServiceState::Idle)),
@@ -59,9 +69,66 @@ impl LiveChatService {
             stream_end_detector: Arc::new(TokioMutex::new(StreamEndDetector::new())),
             last_url: None,
             chat_mode: ChatMode::default(),
+            auth_cookies,
             #[cfg(test)]
             test_fetch_live_chat_page: None,
         }
+    }
+
+    /// 保存済み認証情報を読み込む
+    fn load_saved_auth() -> Option<YouTubeCookies> {
+        tracing::info!("🔑 Checking for saved authentication credentials...");
+        match CookieManager::with_default_dir() {
+            Ok(manager) => {
+                tracing::debug!("📁 Config path: {:?}", manager.config_path());
+                if manager.exists() {
+                    tracing::debug!("📄 Credentials file found");
+                    match manager.load() {
+                        Ok(cookies) if cookies.is_valid() => {
+                            tracing::info!("✓ Valid credentials loaded");
+                            Some(cookies)
+                        }
+                        Ok(_) => {
+                            tracing::warn!("⚠️ Saved credentials are invalid");
+                            None
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to load credentials: {}", e);
+                            None
+                        }
+                    }
+                } else {
+                    tracing::debug!("📄 No credentials file found");
+                    None
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Failed to initialize CookieManager: {}", e);
+                None
+            }
+        }
+    }
+
+    /// 認証情報を設定
+    pub fn set_auth(&mut self, cookies: YouTubeCookies) {
+        tracing::info!("🔐 Authentication credentials set");
+        self.auth_cookies = Some(cookies);
+    }
+
+    /// 認証情報をクリア
+    pub fn clear_auth(&mut self) {
+        tracing::info!("🔓 Authentication credentials cleared");
+        self.auth_cookies = None;
+    }
+
+    /// 認証済みかどうかを確認
+    pub fn is_authenticated(&self) -> bool {
+        self.auth_cookies.is_some()
+    }
+
+    /// 認証情報を取得
+    pub fn auth_cookies(&self) -> Option<&YouTubeCookies> {
+        self.auth_cookies.as_ref()
     }
 
     /// 現在のチャットモードを取得
@@ -151,21 +218,31 @@ impl LiveChatService {
             *file_path = output_file;
         }
 
-        // InnerTubeクライアントを初期化（チャットモードを指定）
+        // InnerTubeクライアントを初期化（チャットモードを指定、認証情報付き）
         let chat_mode = self.chat_mode;
+        let auth_cookies_ref = self.auth_cookies.as_ref();
         tracing::info!("🎯 Starting with chat mode: {}", chat_mode);
+        if auth_cookies_ref.is_some() {
+            tracing::info!("🔐 Using authentication for initial page fetch");
+        }
 
         #[cfg(test)]
         let fetch_result = if let Some(result) = self.test_fetch_live_chat_page.take() {
             result
         } else {
-            fetch_live_chat_page_with_mode(url, chat_mode).await
+            fetch_live_chat_page_with_auth(url, chat_mode, auth_cookies_ref).await
         };
         #[cfg(not(test))]
-        let fetch_result = fetch_live_chat_page_with_mode(url, chat_mode).await;
+        let fetch_result = fetch_live_chat_page_with_auth(url, chat_mode, auth_cookies_ref).await;
 
         match fetch_result {
-            Ok(inner_tube) => {
+            Ok(mut inner_tube) => {
+                // 認証情報を設定（後続のAPIリクエスト用）
+                if let Some(ref cookies) = self.auth_cookies {
+                    inner_tube.set_auth(cookies.clone());
+                    tracing::info!("🔐 Authentication applied to InnerTube client for API requests");
+                }
+
                 let mut inner_tube_guard = self.inner_tube.lock().await;
                 *inner_tube_guard = Some(inner_tube);
                 drop(inner_tube_guard);
@@ -347,10 +424,15 @@ impl LiveChatService {
         // InnerTubeクライアントの準備
         let mut inner_tube = self.inner_tube.lock().await;
         if inner_tube.is_none() {
-            // 新しいクライアントを作成（チャットモードを指定）
+            // 新しいクライアントを作成（チャットモードを指定、認証情報付き）
             let chat_mode = self.chat_mode;
+            let auth_cookies_ref = self.auth_cookies.as_ref();
             tracing::info!("🎯 Resuming with chat mode: {}", chat_mode);
-            let client = fetch_live_chat_page_with_mode(&url, chat_mode).await?;
+            let mut client = fetch_live_chat_page_with_auth(&url, chat_mode, auth_cookies_ref).await?;
+            // 認証情報を設定（後続のAPIリクエスト用）
+            if let Some(ref cookies) = self.auth_cookies {
+                client.set_auth(cookies.clone());
+            }
             *inner_tube = Some(client);
         }
 

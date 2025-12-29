@@ -140,6 +140,10 @@ fn main() -> LiscovResult<()> {
     let _plugin_manager = Arc::new(PluginManager::new());
     tracing::info!("🔌 Plugin system initialized");
 
+    // LiveChatServiceを早期初期化（認証情報の読み込み）
+    let _service = liscov::gui::services::get_global_service();
+    tracing::info!("🔌 LiveChatService initialized");
+
     // WebSocket APIサーバーを起動
     let ws_server = liscov::api::websocket_server::get_websocket_server();
     let ws_port = ws_server.port();

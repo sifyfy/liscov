@@ -1,4 +1,5 @@
 pub mod adapters; // 既存APIアダプター
+pub mod auth; // YouTube認証（メンバー限定配信対応）
 pub mod continuation_builder; // Continuation token生成
 pub mod generic; // ジェネリックAPI統一システム
 pub mod innertube;

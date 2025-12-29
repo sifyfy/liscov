@@ -278,6 +278,9 @@ fn SettingsContent() -> Element {
                 "Configure application settings and preferences."
             }
 
+            // メンバー限定配信認証
+            crate::gui::components::auth_panel::AuthPanel {}
+
             // チャット表示設定
             ChatDisplaySettings {}
 

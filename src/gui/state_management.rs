@@ -534,4 +534,8 @@ pub async fn initialize_state_manager() {
         "✅ StateManager is ready (started: {})",
         manager.is_started()
     );
+
+    // LiveChatServiceを早期初期化（認証情報の読み込み）
+    let _ = crate::gui::services::get_global_service();
+    tracing::info!("✅ LiveChatService initialized");
 }

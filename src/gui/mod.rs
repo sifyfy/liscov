@@ -1,4 +1,5 @@
 // Core modules
+pub mod auth_window; // YouTube認証ウィンドウ
 pub mod config_manager;
 pub mod memory_optimized; // メモリ効率最適化
 pub mod message_processor; // メッセージ処理パイプライン
