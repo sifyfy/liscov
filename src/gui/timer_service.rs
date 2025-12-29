@@ -1,6 +1,6 @@
 //! タイマーサービス（Phase 3.3）
 //!
-//! ハイライト自動クリアなどの時間ベース機能を精密制御
+//! 時間ベース機能を精密制御
 //! - タイマーライフサイクル管理
 //! - メモリリーク完全防止
 //! - 動的設定変更対応
@@ -18,8 +18,6 @@ pub type TimerId = String;
 /// タイマータスクの種類
 #[derive(Debug, Clone, PartialEq)]
 pub enum TimerTaskType {
-    /// ハイライト自動クリア
-    HighlightClear,
     /// 定期的なDOM更新
     DomUpdate,
     /// 統計更新
@@ -56,17 +54,6 @@ impl Default for TimerConfig {
 }
 
 impl TimerConfig {
-    /// ハイライト自動クリア用設定
-    pub fn highlight_clear(delay_secs: u64) -> Self {
-        Self {
-            delay: Duration::from_secs(delay_secs),
-            interval: None,
-            max_executions: Some(1),
-            priority: 50,
-            auto_cancel_after: Some(Duration::from_secs(60)),
-        }
-    }
-
     /// 定期実行用設定
     pub fn periodic(interval_secs: u64) -> Self {
         Self {
@@ -511,49 +498,4 @@ pub fn get_timer_service() -> Arc<TimerService> {
             Arc::new(TimerService::new())
         })
         .clone()
-}
-
-/// ハイライト自動クリア便利関数（Phase 3.3 簡略版）
-pub fn schedule_highlight_clear<F>(
-    highlight_ids: std::collections::HashSet<String>,
-    delay_secs: u64,
-    clear_callback: F,
-) -> Result<TimerId, String>
-where
-    F: Fn() + Send + Sync + 'static,
-{
-    let timer_service = get_timer_service();
-    let task_id = format!(
-        "highlight_clear_{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis()
-    );
-
-    let config = TimerConfig::highlight_clear(delay_secs);
-
-    timer_service.start_task(
-        task_id.clone(),
-        TimerTaskType::HighlightClear,
-        config,
-        move |_context| {
-            clear_callback();
-            TimerResult::Complete
-        },
-    )?;
-
-    tracing::info!(
-        "⏱️ [TIMER] Scheduled highlight clear: {} IDs in {}s",
-        highlight_ids.len(),
-        delay_secs
-    );
-
-    Ok(task_id)
-}
-
-/// 便利関数: 既存のハイライトクリアタスクをキャンセル
-pub fn cancel_highlight_clear_tasks() -> u32 {
-    let timer_service = get_timer_service();
-    timer_service.cancel_tasks_by_type(&TimerTaskType::HighlightClear)
 }

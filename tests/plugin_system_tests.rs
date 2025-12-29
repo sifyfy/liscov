@@ -265,7 +265,13 @@ mod plugin_system_tests {
     }
 
     fn create_test_message(content: &str) -> GuiChatMessage {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+
         GuiChatMessage {
+            id: format!("test_{}", id),
+            timestamp_usec: id.to_string(),
             timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
             message_type: MessageType::Text,
             author: "testuser".to_string(),
@@ -355,7 +361,13 @@ mod analytics_plugin_tests {
     }
 
     fn create_test_message_with_author(content: &str, author: &str) -> GuiChatMessage {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+
         GuiChatMessage {
+            id: format!("test_{}", id),
+            timestamp_usec: id.to_string(),
             timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
             message_type: MessageType::Text,
             author: author.to_string(),

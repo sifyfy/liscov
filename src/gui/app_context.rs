@@ -120,7 +120,6 @@ pub struct UiState {
     pub show_filter_panel: bool,
     pub auto_scroll_enabled: bool,
     pub show_timestamps: bool,
-    pub highlight_enabled: bool,
     pub message_font_size: f32,
 }
 
@@ -130,7 +129,6 @@ impl Default for UiState {
             show_filter_panel: false,
             auto_scroll_enabled: true,
             show_timestamps: true,
-            highlight_enabled: true,
             message_font_size: 14.0,
         }
     }

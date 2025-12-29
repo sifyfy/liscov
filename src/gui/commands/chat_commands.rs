@@ -26,46 +26,6 @@ impl Command for ScrollToBottomCommand {
     }
 }
 
-/// ハイライト実行コマンド（簡略版）
-#[derive(Debug, Clone)]
-pub struct HighlightMessagesCommand;
-
-impl Command for HighlightMessagesCommand {
-    fn execute(&self, _context: &CommandContext) -> Result<(), CommandError> {
-        tracing::info!("🎯 [COMMAND] HighlightMessages executed (Phase 3 stub)");
-        // Phase 3では実装なし - Phase 2の直接操作を使用
-        Ok(())
-    }
-
-    fn description(&self) -> &str {
-        "Highlight messages"
-    }
-
-    fn priority(&self) -> u8 {
-        90 // 中優先度
-    }
-}
-
-/// ハイライトクリアコマンド（簡略版）
-#[derive(Debug, Clone)]
-pub struct ClearHighlightCommand;
-
-impl Command for ClearHighlightCommand {
-    fn execute(&self, _context: &CommandContext) -> Result<(), CommandError> {
-        tracing::info!("🎯 [COMMAND] ClearHighlight executed (Phase 3 stub)");
-        // Phase 3では実装なし - Phase 2の直接操作を使用
-        Ok(())
-    }
-
-    fn description(&self) -> &str {
-        "Clear highlights"
-    }
-
-    fn priority(&self) -> u8 {
-        50 // 高優先度
-    }
-}
-
 /// フィルタ更新コマンド（簡略版）
 #[derive(Debug, Clone)]
 pub struct UpdateFilterCommand;
@@ -138,7 +98,7 @@ impl Command for ProcessNewMessagesCommand {
     }
 
     fn description(&self) -> &str {
-        "Process new messages (highlight + scroll)"
+        "Process new messages"
     }
 
     fn priority(&self) -> u8 {
@@ -148,18 +108,6 @@ impl Command for ProcessNewMessagesCommand {
 
 // 便利関数（Phase 3 簡略版）
 impl ScrollToBottomCommand {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-impl HighlightMessagesCommand {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-impl ClearHighlightCommand {
     pub fn new() -> Self {
         Self
     }

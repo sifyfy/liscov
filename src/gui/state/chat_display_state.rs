@@ -4,13 +4,9 @@
 
 use crate::{
     chat_management::MessageFilter,
-    gui::{
-        models::{ActiveTab, GuiChatMessage},
-        unified_config::HighlightConfig,
-    },
+    gui::models::{ActiveTab, GuiChatMessage},
 };
 use dioxus::prelude::*;
-use std::collections::HashSet;
 
 /// チャット表示の統合状態
 ///
@@ -37,18 +33,8 @@ pub struct ChatDisplayState {
     /// タイムスタンプ表示フラグ
     pub show_timestamps: Signal<bool>,
 
-    // === ハイライト機能状態 ===
-    /// ハイライト設定
-    pub highlight_config: Signal<HighlightConfig>,
-    /// ハイライト対象メッセージIDセット
-    pub highlighted_message_ids: Signal<HashSet<String>>,
-    /// ハイライト有効フラグ
-    pub highlight_enabled: Signal<bool>,
-    /// ハイライト継続時間（秒）
-    pub highlight_duration: Signal<u64>,
-
     // === 内部制御状態 ===
-    /// 最後に処理したメッセージ数（ハイライト計算用）
+    /// 最後に処理したメッセージ数
     pub last_message_count: Signal<usize>,
     /// 現在のスクロール位置
     pub scroll_position: Signal<f64>,
@@ -71,18 +57,6 @@ impl ChatDisplayState {
             current_tab: use_signal(|| ActiveTab::ChatMonitor),
             show_filter_panel: use_signal(|| false),
             show_timestamps: use_signal(|| true),
-
-            // ハイライト機能状態
-            highlight_config: use_signal(|| HighlightConfig {
-                enabled: true,
-                duration_seconds: 5,
-                max_messages: 10,
-                long_term_mode: false,
-                update_interval_ms: 300,
-            }),
-            highlighted_message_ids: use_signal(HashSet::new),
-            highlight_enabled: use_signal(|| true),
-            highlight_duration: use_signal(|| 5u64),
 
             // 内部制御状態
             last_message_count: use_signal(|| 0usize),
@@ -131,16 +105,9 @@ impl ChatDisplayState {
         *self.auto_scroll_enabled.read() && !*self.user_has_scrolled.read()
     }
 
-    /// ハイライト機能の実行条件をチェック
-    pub fn should_highlight(&self) -> bool {
-        let config = self.highlight_config.read();
-        config.enabled && *self.highlight_enabled.read()
-    }
-
     /// 状態の整合性をリセット（接続リセット時などに使用）
     pub fn reset_state(&mut self) {
         self.last_message_count.with_mut(|count| *count = 0);
-        self.highlighted_message_ids.with_mut(|ids| ids.clear());
         self.user_has_scrolled
             .with_mut(|scrolled| *scrolled = false);
         self.scroll_position.with_mut(|pos| *pos = 0.0);
@@ -154,12 +121,10 @@ impl ChatDisplayState {
         let last_count = *self.last_message_count.read();
         let auto_scroll = *self.auto_scroll_enabled.read();
         let user_scrolled = *self.user_has_scrolled.read();
-        let highlight_enabled = *self.highlight_enabled.read();
-        let highlight_count = self.highlighted_message_ids.read().len();
 
         tracing::debug!(
-            "🔍 [STATE_DEBUG] Messages: {}/{}, AutoScroll: {}, UserScrolled: {}, Highlight: {} ({})",
-            message_count, last_count, auto_scroll, user_scrolled, highlight_enabled, highlight_count
+            "🔍 [STATE_DEBUG] Messages: {}/{}, AutoScroll: {}, UserScrolled: {}",
+            message_count, last_count, auto_scroll, user_scrolled
         );
     }
 }
@@ -198,80 +163,6 @@ impl ChatDisplayState {
     }
 }
 
-/// ハイライト機能のための専用メソッド
-impl ChatDisplayState {
-    /// 新着メッセージのハイライトIDを生成
-    pub fn generate_highlight_ids(&self) -> Vec<String> {
-        let new_count = self.get_new_message_count();
-        if new_count == 0 {
-            return Vec::new();
-        }
-
-        let messages = self.filtered_messages.read();
-        let config = self.highlight_config.read();
-        let max_highlight = config.get_effective_max_messages().min(new_count);
-        let start_index = messages.len() - max_highlight;
-
-        messages
-            .iter()
-            .skip(start_index)
-            .take(max_highlight)
-            .map(|message| {
-                format!(
-                    "{}:{}:{}",
-                    message.timestamp,
-                    message.author,
-                    message.content.chars().take(20).collect::<String>()
-                )
-            })
-            .collect()
-    }
-
-    /// ハイライトIDセットを更新
-    pub fn update_highlighted_ids(&mut self, new_ids: Vec<String>) {
-        let new_ids_set: HashSet<String> = new_ids.iter().cloned().collect();
-        self.highlighted_message_ids
-            .with_mut(|ids| *ids = new_ids_set);
-
-        tracing::info!(
-            "🎯 [HIGHLIGHT] Updated highlight IDs: {} messages",
-            new_ids.len()
-        );
-    }
-
-    /// 指定されたIDのハイライトをクリア
-    pub fn clear_highlight_ids(&mut self, ids_to_clear: &HashSet<String>) {
-        self.highlighted_message_ids.with_mut(|ids| {
-            for id in ids_to_clear {
-                ids.remove(id);
-            }
-        });
-
-        tracing::debug!(
-            "🎯 [HIGHLIGHT] Cleared {} highlight IDs",
-            ids_to_clear.len()
-        );
-    }
-
-    /// ハイライト設定を動的更新
-    pub fn update_highlight_config(&mut self, enabled: bool, duration: u64) {
-        self.highlight_enabled.with_mut(|en| *en = enabled);
-        self.highlight_duration.with_mut(|dur| *dur = duration);
-
-        // 設定変更をHighlightConfigにも反映
-        self.highlight_config.with_mut(|config| {
-            config.enabled = enabled;
-            config.duration_seconds = duration;
-        });
-
-        tracing::info!(
-            "🎯 [HIGHLIGHT] Config updated: enabled={}, duration={}s",
-            enabled,
-            duration
-        );
-    }
-}
-
 impl Default for ChatDisplayState {
     fn default() -> Self {
         Self::new()
@@ -287,11 +178,6 @@ impl std::fmt::Debug for ChatDisplayState {
             .field("last_message_count", &*self.last_message_count.read())
             .field("auto_scroll_enabled", &*self.auto_scroll_enabled.read())
             .field("user_has_scrolled", &*self.user_has_scrolled.read())
-            .field("highlight_enabled", &*self.highlight_enabled.read())
-            .field(
-                "highlighted_ids_count",
-                &self.highlighted_message_ids.read().len(),
-            )
             .finish()
     }
 }

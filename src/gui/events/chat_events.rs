@@ -92,29 +92,6 @@ impl Event for ScrollStateChangedEvent {
     }
 }
 
-/// ハイライト設定変更イベント
-#[derive(Debug, Clone)]
-pub struct HighlightConfigChangedEvent {
-    /// ハイライト有効フラグ
-    pub enabled: bool,
-    /// ハイライト継続時間（秒）
-    pub duration_seconds: u64,
-    /// 最大ハイライト数
-    pub max_messages: usize,
-    /// 変更タイムスタンプ
-    pub timestamp: std::time::Instant,
-}
-
-impl Event for HighlightConfigChangedEvent {
-    fn event_name(&self) -> &'static str {
-        "HighlightConfigChanged"
-    }
-
-    fn priority(&self) -> u8 {
-        50 // 中低優先度
-    }
-}
-
 /// フィルタ変更イベント
 #[derive(Debug, Clone)]
 pub struct FilterChangedEvent {
@@ -197,8 +174,6 @@ pub struct UiStateResetEvent {
 pub enum UiResetScope {
     /// 全て
     All,
-    /// ハイライト関連のみ
-    HighlightOnly,
     /// スクロール関連のみ
     ScrollOnly,
     /// フィルター関連のみ

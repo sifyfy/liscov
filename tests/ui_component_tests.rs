@@ -13,6 +13,8 @@ use std::time::{Duration, Instant};
 /// テスト用のダミーメッセージを生成
 fn create_test_message(id: usize) -> GuiChatMessage {
     GuiChatMessage {
+        id: format!("test_{}", id),
+        timestamp_usec: id.to_string(),
         author: format!("TestUser{}", id % 10),
         content: format!("Test message content #{}", id),
         timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),

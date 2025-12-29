@@ -14,65 +14,6 @@ use tracing::{debug, info, warn};
 use super::traits::{ConfigError, ConfigurationManager};
 use crate::io::SaveConfig;
 
-/// ハイライト設定
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct HighlightConfig {
-    /// ハイライト機能の有効/無効
-    pub enabled: bool,
-    /// ハイライト表示時間（秒）
-    pub duration_seconds: u64,
-    /// 同時ハイライト最大メッセージ数
-    pub max_messages: usize,
-    /// 長時間稼働モード（負荷軽減設定）
-    pub long_term_mode: bool,
-    /// 統一処理間隔（ミリ秒）
-    pub update_interval_ms: u64,
-}
-
-impl Default for HighlightConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true, // デフォルトは有効
-            duration_seconds: 8,
-            max_messages: 20,
-            long_term_mode: false,   // デフォルトは通常モード
-            update_interval_ms: 300, // デフォルト300ms
-        }
-    }
-}
-
-impl HighlightConfig {
-    /// 補完ハイライトの最大数を自動計算（メイン設定の50%切り上げ）
-    pub fn get_backup_max_messages(&self) -> usize {
-        ((self.max_messages as f32) * 0.5).ceil() as usize
-    }
-
-    /// 統一処理間隔を取得（長時間稼働モードに応じて調整）
-    pub fn get_update_interval_ms(&self) -> u64 {
-        if self.long_term_mode {
-            // 長時間稼働モードでは間隔を延長
-            self.update_interval_ms.max(500)
-        } else {
-            self.update_interval_ms
-        }
-    }
-
-    /// 長時間稼働モード用の最大ハイライト数制限
-    pub fn get_effective_max_messages(&self) -> usize {
-        if self.long_term_mode {
-            // 長時間稼働モードでは上限を制限
-            self.max_messages.min(10)
-        } else {
-            self.max_messages
-        }
-    }
-
-    /// 補完チェック間隔を取得（固定値500ms）
-    pub fn get_backup_check_interval_ms(&self) -> u64 {
-        500
-    }
-}
-
 /// チャット表示設定
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ChatDisplayConfig {
@@ -82,8 +23,6 @@ pub struct ChatDisplayConfig {
     pub show_timestamps: bool,
     /// 自動スクロール有効
     pub auto_scroll_enabled: bool,
-    /// ハイライト機能有効
-    pub highlight_enabled: bool,
 }
 
 impl Default for ChatDisplayConfig {
@@ -92,7 +31,6 @@ impl Default for ChatDisplayConfig {
             message_font_size: 13, // デフォルトサイズ13px
             show_timestamps: true,
             auto_scroll_enabled: true,
-            highlight_enabled: true,
         }
     }
 }

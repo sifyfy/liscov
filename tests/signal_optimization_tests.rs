@@ -36,7 +36,7 @@ mod signal_optimization_tests {
 
         graph.register_signal(
             "test_signal_2".to_string(),
-            SignalType::HighlightEnabled,
+            SignalType::MessageFontSize,
             "TestComponent".to_string(),
         );
 
@@ -91,7 +91,7 @@ mod signal_optimization_tests {
 
         graph.register_signal(
             "highlight_1".to_string(),
-            SignalType::HighlightEnabled,
+            SignalType::MessageFontSize,
             "Component1".to_string(),
         );
 
@@ -162,7 +162,7 @@ mod signal_optimization_tests {
         );
         graph.register_signal(
             "used".to_string(),
-            SignalType::HighlightEnabled,
+            SignalType::MessageFontSize,
             "Comp4".to_string(),
         );
 
@@ -550,7 +550,7 @@ mod performance_tests {
                 if i % 3 == 0 {
                     SignalType::AutoScrollEnabled
                 } else if i % 3 == 1 {
-                    SignalType::HighlightEnabled
+                    SignalType::MessageFontSize
                 } else {
                     SignalType::ShowTimestamps
                 },
@@ -594,7 +594,7 @@ mod integration_tests {
         );
         register_signal(
             "integration_test_2",
-            SignalType::HighlightEnabled,
+            SignalType::MessageFontSize,
             "IntegrationTest",
         );
 
