@@ -14,8 +14,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **API**: YouTube InnerTube (非公式)
 
 ### プロジェクト状況
-- **移行中**: Slint → Dioxus 0.6.3 (Phase 0-1完了、Phase 2進行中)
-- **⚠️ 注意**: 現在 `src/gui/components/chat_display.rs:1487` に構文エラーがあり、コンパイルできない状態
+- **移行完了**: Slint → Dioxus 0.6.3 への移行は完了
+- 現在はビルド・テストが正常に通る状態
 
 ## 開発コマンド
 
@@ -82,14 +82,23 @@ cargo run --bin liscov -- --log-level debug
 ```
 src/
 ├── analytics/          # 収益分析・エクスポート機能
+│   └── export/         # CSV/Excel/JSON エクスポーター
 ├── api/               # YouTube InnerTube API統合
+│   └── innertube/     # InnerTube API実装
+├── bin/               # バイナリエントリーポイント
 ├── chat_management/   # チャット管理・フィルタリング
 ├── database/          # SQLiteデータベース操作
 ├── gui/               # Dioxus 0.6.3 GUI実装
+│   ├── commands/      # チャットコマンド処理
 │   ├── components/    # UIコンポーネント
+│   ├── events/        # イベント定義・処理
 │   ├── hooks/         # カスタムフック
-│   ├── plugins/       # プラグインシステム
-│   └── state/         # 状態管理
+│   ├── plugins/       # プラグイン実装
+│   ├── state/         # 状態管理
+│   ├── styles/        # テーマ・CSS
+│   ├── services.rs    # ライブチャットサービス統合
+│   ├── signal_manager.rs    # シグナル管理
+│   └── state_management.rs  # 状態管理コア
 └── io/                # ファイルI/O・NDJSON処理
 ```
 
@@ -129,8 +138,11 @@ LISCOV_API_DEBUG=true
 ### feature フラグ
 - `debug-tokio`: tokio-console統合
 - `debug-full`: 全デバッグ機能有効
-- `desktop`: デスクトップ機能（デフォルト）
+- `desktop`: デスクトップ機能
+- `web`: Web機能（将来対応予定）
 - `testing`: テスト専用機能
+
+**注意**: デフォルトでは機能フラグは有効化されていません（`default = []`）。デスクトップビルド時は `dioxus` クレートの `desktop` 機能が依存関係で自動的に有効になります。
 
 ## 開発ガイドライン
 
@@ -140,10 +152,10 @@ LISCOV_API_DEBUG=true
 - 機能変更時のドキュメント更新必須
 - クリーンコード維持
 
-### 移行作業における注意点
-- Slint → Dioxus移行中のため、一部コードに古い実装が残存
-- `chat_display.rs` 等で構文エラーが発生中
-- 新機能実装前に既存エラーの修正を推奨
+### コード品質の維持
+- Dioxus 0.6.3 への移行は完了済み
+- 既存のアーキテクチャパターンを踏襲すること
+- シグナルベースの状態管理（`signal_manager.rs`）を活用
 
 ### パフォーマンス考慮事項
 - メモリ効率: 循環バッファによるメッセージ管理
@@ -152,10 +164,12 @@ LISCOV_API_DEBUG=true
 
 ## よくある作業
 
-### コンパイルエラー修正
-1. `cargo check` でエラー箇所特定
-2. 主に `src/gui/components/chat_display.rs` を確認
-3. 括弧・セミコロンの不整合を修正
+### ビルド確認
+```bash
+cargo check   # 構文チェック
+cargo build   # ビルド
+cargo test    # テスト実行
+```
 
 ### 新機能追加
 1. 適切なモジュール（`analytics/`, `gui/components/` 等）を選択

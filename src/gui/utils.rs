@@ -15,11 +15,13 @@ pub fn validate_youtube_url(url: &str) -> bool {
     url.starts_with("https://youtube.com/watch?v=")
         || url.starts_with("https://www.youtube.com/watch?v=")
         || url.starts_with("https://youtu.be/")
+        || url.starts_with("https://youtube.com/live/")
+        || url.starts_with("https://www.youtube.com/live/")
 }
 
 /// ビデオIDをURLから抽出
 pub fn extract_video_id(url: &str) -> Option<String> {
-    // 簡単な実装（Phase 1用）
+    // youtube.com/watch?v=xxx 形式
     if let Some(start) = url.find("v=") {
         let id_part = &url[start + 2..];
         if let Some(end) = id_part.find('&') {
@@ -27,10 +29,25 @@ pub fn extract_video_id(url: &str) -> Option<String> {
         } else {
             Some(id_part.to_string())
         }
+    // youtu.be/xxx 形式
     } else if url.contains("youtu.be/") {
         if let Some(start) = url.rfind('/') {
             let id_part = &url[start + 1..];
             if let Some(end) = id_part.find('?') {
+                Some(id_part[..end].to_string())
+            } else {
+                Some(id_part.to_string())
+            }
+        } else {
+            None
+        }
+    // youtube.com/live/xxx 形式
+    } else if url.contains("/live/") {
+        if let Some(start) = url.find("/live/") {
+            let id_part = &url[start + 6..];
+            if let Some(end) = id_part.find('?') {
+                Some(id_part[..end].to_string())
+            } else if let Some(end) = id_part.find('/') {
                 Some(id_part[..end].to_string())
             } else {
                 Some(id_part.to_string())
@@ -495,6 +512,13 @@ mod tests {
             "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
         ));
         assert!(validate_youtube_url("https://youtu.be/dQw4w9WgXcQ"));
+        // /live/ 形式
+        assert!(validate_youtube_url(
+            "https://youtube.com/live/VPqN9idSf2o"
+        ));
+        assert!(validate_youtube_url(
+            "https://www.youtube.com/live/VPqN9idSf2o"
+        ));
         assert!(!validate_youtube_url("https://example.com"));
     }
 
@@ -507,6 +531,15 @@ mod tests {
         assert_eq!(
             extract_video_id("https://youtu.be/dQw4w9WgXcQ"),
             Some("dQw4w9WgXcQ".to_string())
+        );
+        // /live/ 形式
+        assert_eq!(
+            extract_video_id("https://www.youtube.com/live/VPqN9idSf2o"),
+            Some("VPqN9idSf2o".to_string())
+        );
+        assert_eq!(
+            extract_video_id("https://youtube.com/live/VPqN9idSf2o?feature=share"),
+            Some("VPqN9idSf2o".to_string())
         );
         assert_eq!(extract_video_id("https://example.com"), None);
     }
