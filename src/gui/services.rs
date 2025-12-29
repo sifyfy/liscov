@@ -9,7 +9,8 @@ use super::models::GuiChatMessage;
 use super::stream_end_detector::{DetectionResult, StreamEndDetector};
 use crate::api::auth::{CookieManager, YouTubeCookies};
 use crate::api::innertube::{
-    fetch_live_chat_messages, fetch_live_chat_page_with_auth, get_next_continuation, InnerTube,
+    fetch_live_chat_messages, fetch_live_chat_page_with_auth,
+    get_next_continuation_with_timeout, InnerTube,
 };
 use crate::api::youtube::{ChatMode, Continuation};
 use crate::get_live_chat::Action;
@@ -575,22 +576,29 @@ impl LiveChatService {
         let message_sender = Arc::clone(&self.message_sender);
 
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(2));
             let mut request_count = 0;
             let mut consecutive_errors = 0;
             let mut last_successful_request = std::time::Instant::now();
             let _start_time = std::time::Instant::now();
             const HEALTH_CHECK_INTERVAL_SECS: u64 = 30;
+            const DEFAULT_POLL_INTERVAL_MS: u64 = 1500; // デフォルト1.5秒
+            const MIN_POLL_INTERVAL_MS: u64 = 300;      // 最小300ms（高速チャット対応）
+            const MAX_POLL_INTERVAL_MS: u64 = 1500;     // 最大1.5秒（取りこぼし防止）
 
-            tracing::info!("🚀 Message receiver task started");
+            // 次のポーリングまでの待機時間（初回は即座に実行）
+            let mut next_poll_delay_ms: u64 = 0;
+
+            tracing::info!("🚀 Message receiver task started (dynamic polling enabled)");
 
             loop {
+                // 動的な待機時間でスリープ（シャットダウンシグナルも監視）
+                let sleep_future = tokio::time::sleep(tokio::time::Duration::from_millis(next_poll_delay_ms));
                 tokio::select! {
                     _ = shutdown_receiver.recv() => {
                         tracing::info!("🛑 Shutdown signal received, stopping message receiver");
                         break;
                     }
-                    _ = interval.tick() => {
+                    _ = sleep_future => {
                         request_count += 1;
                         let request_start = std::time::Instant::now();
 
@@ -664,19 +672,41 @@ impl LiveChatService {
                                         );
                                     }
 
-                                    // 継続トークンを更新
-                                    if let Some(next_continuation) = get_next_continuation(&response) {
-                                        if should_log_request {
-                                            tracing::debug!("🔄 Updating continuation token");
+                                    // 継続トークンとポーリング間隔を更新
+                                    if let Some(continuation_info) = get_next_continuation_with_timeout(&response) {
+                                        // 動的ポーリング間隔を設定（処理時間を差し引く）
+                                        let target_interval_ms = continuation_info
+                                            .timeout_ms
+                                            .map(|ms| ms.clamp(MIN_POLL_INTERVAL_MS, MAX_POLL_INTERVAL_MS))
+                                            .unwrap_or(DEFAULT_POLL_INTERVAL_MS);
+
+                                        // 処理時間を差し引いて実際の待機時間を計算
+                                        let elapsed_ms = request_start.elapsed().as_millis() as u64;
+                                        next_poll_delay_ms = target_interval_ms.saturating_sub(elapsed_ms);
+
+                                        // 最小でも100ms待機（CPUビジーループ防止）
+                                        if next_poll_delay_ms < 100 {
+                                            next_poll_delay_ms = 100;
                                         }
-                                        inner_tube_client.continuation = Continuation(next_continuation.clone());
+
+                                        if should_log_request {
+                                            tracing::debug!(
+                                                "🔄 Updating continuation token (next poll in {}ms, target {}ms, elapsed {}ms)",
+                                                next_poll_delay_ms,
+                                                target_interval_ms,
+                                                elapsed_ms
+                                            );
+                                        }
+
+                                        inner_tube_client.continuation = Continuation(continuation_info.continuation.clone());
 
                                         // StateManagerにも継続トークンを保存
                                         use crate::gui::state_management::{get_state_manager, AppEvent};
-                                        let _ = get_state_manager().send_event(AppEvent::ContinuationTokenUpdated(Some(next_continuation)));
+                                        let _ = get_state_manager().send_event(AppEvent::ContinuationTokenUpdated(Some(continuation_info.continuation)));
                                     } else {
                                         tracing::warn!("⚠️ No next continuation token found in response #{}", request_count);
-                                        // 継続トークンがない場合は警告レベルで記録
+                                        // 継続トークンがない場合はデフォルト間隔を使用
+                                        next_poll_delay_ms = DEFAULT_POLL_INTERVAL_MS;
                                     }
 
                                     // アクションを処理
@@ -816,6 +846,9 @@ impl LiveChatService {
                                     let request_duration = request_start.elapsed();
                                     let error_str = e.to_string();
 
+                                    // エラー時はデフォルト間隔を使用
+                                    next_poll_delay_ms = DEFAULT_POLL_INTERVAL_MS;
+
                                     // エラーは必ずログ出力
                                     tracing::error!(
                                         "❌ [API_SERVICE] API Error (#{}, consecutive: {}, took {:?}): {}",
@@ -864,6 +897,9 @@ impl LiveChatService {
                                 Err(_timeout_error) => {
                                     consecutive_errors += 1;
                                     let request_duration = request_start.elapsed();
+
+                                    // タイムアウト時はデフォルト間隔を使用
+                                    next_poll_delay_ms = DEFAULT_POLL_INTERVAL_MS;
 
                                     tracing::error!(
                                         "⏰ [API_SERVICE] Request #{} timed out after {:?} (consecutive timeouts: {})",

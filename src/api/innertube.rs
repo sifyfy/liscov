@@ -597,6 +597,41 @@ pub fn get_next_continuation(response: &GetLiveChatResponse) -> Option<String> {
         .map(|s| s.to_string())
 }
 
+/// 継続情報（トークンとポーリング間隔）
+#[derive(Debug, Clone)]
+pub struct ContinuationInfo {
+    /// 継続トークン
+    pub continuation: String,
+    /// 推奨ポーリング間隔（ミリ秒）
+    pub timeout_ms: Option<u64>,
+}
+
+/// 継続トークンとtimeoutMs（推奨ポーリング間隔）を取得
+///
+/// YouTubeのAPIはチャットの活発さに応じて推奨ポーリング間隔を返す。
+/// 活発な時は短い間隔（数百ms）、静かな時は長い間隔（数秒）となる。
+pub fn get_next_continuation_with_timeout(response: &GetLiveChatResponse) -> Option<ContinuationInfo> {
+    response
+        .continuation_contents
+        .live_chat_continuation
+        .continuations
+        .first()
+        .and_then(|v| {
+            // 優先順位: invalidationContinuationData > timedContinuationData > reloadContinuationData
+            v.get("invalidationContinuationData")
+                .or_else(|| v.get("timedContinuationData"))
+                .or_else(|| v.get("reloadContinuationData"))
+        })
+        .and_then(|data| {
+            let continuation = data.get("continuation")?.as_str()?.to_string();
+            let timeout_ms = data.get("timeoutMs").and_then(|v| v.as_u64());
+            Some(ContinuationInfo {
+                continuation,
+                timeout_ms,
+            })
+        })
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub id: String,

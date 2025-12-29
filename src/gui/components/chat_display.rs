@@ -6,7 +6,6 @@ use crate::gui::performance_monitor::{record_performance_event, PerformanceEvent
 use crate::gui::signal_optimizer::{process_batch_updates, queue_batch_update, BatchUpdateType}; // Phase 4.2
 use crate::gui::signal_optimizer::{record_signal_update, register_signal, SignalType}; // Phase 4.1
 use crate::gui::styles::theme::CssClasses;
-use crate::gui::timer_service::cancel_highlight_clear_tasks; // Phase 3.3
 
 // Message streaming integration
 use crate::gui::message_stream::{DisplayLimit, MessageStream, MessageStreamConfig};
@@ -59,10 +58,12 @@ pub fn ChatDisplay(
     // MessageStream統計表示用
     let stream_stats = use_signal(|| message_stream.read().stats());
 
+    // MessageStreamに同期済みのメッセージ数を追跡
+    let synced_message_count = use_signal(|| 0usize);
+
     // 基本状態の初期化
     let user_has_scrolled = use_signal(|| false);
     let mut show_filter_panel = use_signal(|| false);
-    let highlighted_message_ids = use_signal(|| std::collections::HashSet::<String>::new());
     let last_message_count = use_signal(|| 0usize);
     let _last_effect_time = use_signal(|| std::time::Instant::now()); // 未使用
 
@@ -79,61 +80,51 @@ pub fn ChatDisplay(
     // 個別設定値は統合設定から派生（再レンダリング最小化）
     let auto_scroll_enabled = use_memo(move || chat_config.read().auto_scroll_enabled);
     let show_timestamps = use_memo(move || chat_config.read().show_timestamps);
-    let highlight_enabled = use_memo(move || chat_config.read().highlight_enabled);
     let message_font_size = use_memo(move || chat_config.read().message_font_size);
 
     // 🎯 Phase 2.4: イベント駆動型MessageStream同期（ポーリング廃止）
     // LiveChatHandleのシグナルを監視し、変更時にMessageStreamを更新
+    // 修正: 複数メッセージが同時に到着した場合も全て同期する
     use_effect({
         let live_chat_handle = live_chat_handle.clone();
         let mut message_stream = message_stream.clone();
         let mut stream_stats = stream_stats.clone();
-        let mut highlighted_message_ids = highlighted_message_ids.clone();
+        let mut synced_message_count = synced_message_count.clone();
 
         move || {
             // message_added_eventシグナルの変更を監視
             let event_count = (live_chat_handle.message_added_event)();
             let messages = live_chat_handle.messages.read();
             let current_message_count = messages.len();
+            let already_synced = *synced_message_count.read();
 
             tracing::debug!(
-                "🔄 [EVENT_CHAT_SYNC] Event triggered: event_count={}, message_count={}",
+                "🔄 [EVENT_CHAT_SYNC] Event triggered: event_count={}, message_count={}, synced={}",
                 event_count,
-                current_message_count
+                current_message_count,
+                already_synced
             );
 
-            // 新着メッセージがある場合、MessageStreamを更新
-            if let Some(new_msg) = live_chat_handle.new_message.read().as_ref() {
+            // 未同期のメッセージがある場合、全て同期
+            if current_message_count > already_synced {
+                let new_messages_count = current_message_count - already_synced;
+
                 message_stream.with_mut(|stream| {
-                    stream.push_message(new_msg.clone());
-
-                    // ハイライト処理
-                    if highlight_enabled() {
-                        let message_id = format!(
-                            "{}:{}:{}",
-                            new_msg.timestamp,
-                            new_msg.author,
-                            new_msg.content.chars().take(20).collect::<String>()
-                        );
-
-                        highlighted_message_ids.with_mut(|ids| {
-                            ids.insert(message_id.clone());
-                            // 最大5件のハイライトを維持
-                            if ids.len() > 5 {
-                                let oldest_key = ids.iter().next().cloned();
-                                if let Some(key) = oldest_key {
-                                    ids.remove(&key);
-                                }
-                            }
-                        });
+                    // 新しいメッセージのみをMessageStreamに追加
+                    for msg in messages.iter().skip(already_synced) {
+                        stream.push_message(msg.clone());
                     }
                 });
+
+                // 同期済みカウントを更新
+                synced_message_count.set(current_message_count);
 
                 // 統計情報を更新
                 stream_stats.set(message_stream.read().stats());
 
                 tracing::debug!(
-                    "📦 [EVENT_CHAT_SYNC] MessageStream updated: display={}, archived={}",
+                    "📦 [EVENT_CHAT_SYNC] MessageStream updated: {} new messages, display={}, archived={}",
+                    new_messages_count,
                     message_stream.read().display_count(),
                     message_stream.read().archived_count()
                 );
@@ -146,7 +137,7 @@ pub fn ChatDisplay(
         let live_chat_handle = live_chat_handle.clone();
         let mut message_stream = message_stream.clone();
         let mut stream_stats = stream_stats.clone();
-        let mut highlighted_message_ids = highlighted_message_ids.clone();
+        let mut synced_message_count = synced_message_count.clone();
 
         move || {
             let messages = live_chat_handle.messages.read();
@@ -155,33 +146,11 @@ pub fn ChatDisplay(
             if messages.is_empty() && message_stream.read().total_count() > 0 {
                 tracing::info!("🗑️ [EVENT_CHAT_SYNC] Messages cleared, resetting MessageStream");
                 message_stream.with_mut(|stream| stream.clear());
-                highlighted_message_ids.with_mut(|ids| ids.clear());
                 stream_stats.set(message_stream.read().stats());
+                synced_message_count.set(0);
             }
         }
     });
-
-    // 従来のハイライト自動クリア処理はコメントアウト（後で別の方法で実装）
-    /*
-    // ハイライト自動クリア処理
-    {
-        let mut highlighted_message_ids_clear = highlighted_message_ids.clone();
-        spawn(async move {
-            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-            highlighted_message_ids_clear.with_mut(|ids| {
-                ids.remove(&new_message_id);
-            });
-            tracing::debug!("🎯 [HIGHLIGHT] Auto-cleared message: {}", new_message_id);
-        });
-    }
-
-    tracing::debug!(
-        "📦 [MessageStream] Added 1 message, display: {}, archived: {}, stream_total: {}",
-        message_stream.read().display_count(),
-        message_stream.read().archived_count(),
-        message_stream.read().total_count()
-    );
-    */ // コメント終了
 
     // 🚀 **Dioxus memo_chain最適化**: 効率的なフィルタリング処理
     // Step 1: 差分更新システム連携 - 新着メッセージのフィルタリング
@@ -320,16 +289,6 @@ pub fn ChatDisplay(
             "ChatDisplay",
         );
         register_signal(
-            "chat_highlight_enabled",
-            SignalType::HighlightEnabled,
-            "ChatDisplay",
-        );
-        register_signal(
-            "chat_highlighted_message_ids",
-            SignalType::HighlightedMessageIds,
-            "ChatDisplay",
-        );
-        register_signal(
             "chat_last_message_count",
             SignalType::LastMessageCount,
             "ChatDisplay",
@@ -361,17 +320,6 @@ pub fn ChatDisplay(
     };
 
     // Phase 3.2: DOM制御モジュール（各場所で直接作成に変更）
-
-    // Phase 3.3: コンポーネントアンマウント時のタイマークリーンアップ
-    use_drop(move || {
-        let cancelled = cancel_highlight_clear_tasks();
-        if cancelled > 0 {
-            tracing::info!(
-                "⏱️ [TIMER] Cleanup: Cancelled {} highlight tasks",
-                cancelled
-            );
-        }
-    });
 
     // 🚀 無限ループ回避版：メッセージカウント監視
     use_effect({
@@ -635,46 +583,6 @@ pub fn ChatDisplay(
                             style: "width: 14px; height: 14px;",
                         }
                         "タイムスタンプ"
-                    }
-
-                                        // ハイライト切り替え
-                    label {
-                        class: CssClasses::CHECKBOX_LABEL,
-                        style: "
-                            display: flex;
-                            align-items: center;
-                            gap: 4px !important;
-                            font-size: 12px !important;
-                            color: #4a5568;
-                            cursor: pointer;
-                            user-select: none;
-                        ",
-                        input {
-                            r#type: "checkbox",
-                            checked: highlight_enabled(),
-                            onchange: {
-                                let mut app_state = app_state.clone();
-
-                                move |event: dioxus::events::FormEvent| {
-                                    let enabled = event.checked();
-                                    app_state.with_mut(|state| {
-                                        state.chat_display_config.highlight_enabled = enabled;
-                                    });
-
-                                    // Phase 4.3: 統合記録処理
-                                    record_signal_update("chat_highlight_enabled");
-                                    queue_batch_update("chat_highlight_enabled", BatchUpdateType::Normal);
-                                    record_performance_event(PerformanceEventType::SignalUpdate, "ChatDisplay");
-
-                                    // 軽量版: ハイライト無効化時の処理
-                                    if !enabled {
-                                        tracing::debug!("🎯 [HIGHLIGHT] Highlight disabled by user");
-                                    }
-                                }
-                            },
-                            style: "width: 14px; height: 14px;",
-                        }
-                        "ハイライト"
                     }
 
                     // MessageStream設定グループ
@@ -1097,12 +1005,6 @@ pub fn ChatDisplay(
                         "📉 削減: {stream_stats.read().effective_reduction_percent}%"
                     }
                 }
-
-                if highlight_enabled() {
-                    span {
-                        "🎯 ハイライト: {highlighted_message_ids.read().len()}"
-                    }
-                }
             }
 
             // メッセージリスト
@@ -1117,219 +1019,9 @@ pub fn ChatDisplay(
                     scroll-behavior: smooth;
                 ",
 
-                                // メッセージ表示（修復版） - 一時的にコメントアウト
-                /*
-                for message in filtered_messages.read().iter() {
-                    rsx! {
-                        div {
-                            key: "{message.timestamp}-{message.author}",
-                            class: {
-                                let mut classes = vec![CssClasses::CHAT_MESSAGE];
-                                if message.is_member {
-                                    classes.push("member");
-                                }
-                                let message_id = format!("{}:{}:{}",
-                                    message.timestamp,
-                                    message.author,
-                                    message.content.chars().take(20).collect::<String>()
-                                );
-                                if highlighted_message_ids.read().contains(&message_id) {
-                                    classes.push("liscov-highlight-animation");
-                                }
-                                classes.join(" ")
-                            },
-                            style: {
-                                let message_id = format!("{}:{}:{}",
-                                    message.timestamp,
-                                    message.author,
-                                    message.content.chars().take(20).collect::<String>()
-                                );
-                                let is_highlighted = highlighted_message_ids.read().contains(&message_id);
-                                if is_highlighted {
-                                    format!("
-                                        margin-bottom: 4px;
-                                        padding: 4px 8px;
-                                        border-radius: 4px;
-                                        background: #fef3c7;
-                                        border-left: 3px solid #f59e0b;
-                                        font-size: {}px;
-                                        line-height: 1.4;
-                                        animation: highlight-pulse 2s ease-in-out;
-                                    ", message_font_size())
-                                } else {
-                                    format!("
-                                        margin-bottom: 4px;
-                                        padding: 4px 8px;
-                                        border-radius: 4px;
-                                        font-size: {}px;
-                                        line-height: 1.4;
-                                    ", message_font_size())
-                                }
-                            },
-
-                            // 1行目：メタデータ行
-                            div {
-                                style: "
-                                        display: flex;
-                                        align-items: center;
-                                        gap: 8px;
-                                        margin-bottom: 2px;
-                                        font-size: 11px;
-                                    ",
-
-                                // タイムスタンプ
-                                if show_timestamps() {
-                                    span {
-                                        style: "
-                                                color: #64748b;
-                                                font-size: 10px;
-                                                white-space: nowrap;
-                                            ",
-                                        "{message.timestamp}"
-                                    }
-                                }
-
-                                // 投稿者アイコン
-                                if let Some(icon_url) = &message.author_icon_url {
-                                    img {
-                                        src: "{icon_url}",
-                                        alt: "{message.author}のアイコン",
-                                        style: "
-                                                width: 20px;
-                                                height: 20px;
-                                                border-radius: 50%;
-                                                object-fit: cover;
-                                                flex-shrink: 0;
-                                            ",
-                                    }
-                                }
-
-                                // ユーザー名
-                                span {
-                                    class: "message-author",
-                                    style: if message.is_member {
-                                        "
-                                                font-weight: 600;
-                                                color: #059669;
-                                                white-space: nowrap;
-                                            "
-                                    } else {
-                                        "
-                                                font-weight: 600;
-                                                color: #2563eb;
-                                                white-space: nowrap;
-                                            "
-                                    },
-                                    "{message.author}"
-                                }
-
-                                // バッジ表示
-                                if let Some(metadata) = &message.metadata {
-                                    for badge in &metadata.badge_info {
-                                        if let Some(image_url) = &badge.image_url {
-                                            // 画像バッジ
-                                            img {
-                                                src: "{image_url}",
-                                                alt: "{badge.tooltip}",
-                                                title: "{badge.tooltip}",
-                                                style: "
-                                                        width: 16px;
-                                                        height: 16px;
-                                                        border-radius: 2px;
-                                                        vertical-align: middle;
-                                                    ",
-                                            }
-                                        } else if badge.tooltip.contains("メンバー") || badge.tooltip.contains("Member") {
-                                            // フォールバック：テキストバッジ（メンバーのみ）
-                                            span {
-                                                style: "
-                                                        background: #10b981;
-                                                        color: white;
-                                                        font-size: 9px;
-                                                        padding: 1px 4px;
-                                                        border-radius: 3px;
-                                                        white-space: nowrap;
-                                                    ",
-                                                "メンバー"
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // コメント回数表示
-                                div {
-                                    style: if let Some(count) = message.comment_count {
-                                        if count == 1 {
-                                            "
-                                                    flex: 1;
-                                                    color: #dc2626;
-                                                    font-size: 10px;
-                                                    font-weight: bold;
-                                                    text-align: right;
-                                                    white-space: nowrap;
-                                                    background: #fef2f2;
-                                                    padding: 1px 4px;
-                                                    border-radius: 3px;
-                                                    border: 1px solid #fecaca;
-                                                "
-                                        } else {
-                                            "
-                                                    flex: 1;
-                                                    color: #9ca3af;
-                                                    font-size: 10px;
-                                                    text-align: right;
-                                                    white-space: nowrap;
-                                                "
-                                        }
-                                    } else {
-                                        "
-                                                flex: 1;
-                                                color: #9ca3af;
-                                                font-size: 10px;
-                                                text-align: right;
-                                                white-space: nowrap;
-                                            "
-                                    },
-                                    {
-                                        if let Some(count) = message.comment_count {
-                                            if count == 1 {
-                                                "🎉#1".to_string()
-                                            } else {
-                                                format!("#{}", count)
-                                            }
-                                        } else {
-                                            "".to_string()
-                                        }
-                                    }
-                                }
-                            }
-
-                            // 2行目：メッセージ本文
-                            div {
-                                style: "
-                                        color: #1a202c;
-                                        padding-left: 4px;
-                                        line-height: 1.3;
-                                        word-wrap: break-word;
-                                    ",
-                                "{message.content}"
-                            }
-                        }
-                    }
-                }
-                */
-
-                                // Step 4: ハイライト機能付きメッセージ表示
+                // メッセージ表示
                 for message in filtered_messages.read().iter() {
                     {
-                        // メッセージIDの計算（ハイライト判定用）
-                        let message_id = format!("{}:{}:{}",
-                            message.timestamp,
-                            message.author,
-                            message.content.chars().take(20).collect::<String>()
-                        );
-                        let is_highlighted = highlighted_message_ids.read().contains(&message_id);
-
                         rsx! {
                             div {
                                 key: "{message.timestamp}-{message.author}",
@@ -1338,31 +1030,15 @@ pub fn ChatDisplay(
                                     if message.is_member {
                                         classes.push("member");
                                     }
-                                    if is_highlighted {
-                                        classes.push("liscov-highlight-animation");
-                                    }
                                     classes.join(" ")
                                 },
-                                style: if is_highlighted {
-                                    format!("
-                                        margin-bottom: 4px;
-                                        padding: 4px 8px;
-                                        border-radius: 4px;
-                                        background: #fef3c7;
-                                        border-left: 3px solid #f59e0b;
-                                        font-size: {}px;
-                                        line-height: 1.4;
-                                        animation: highlight-pulse 2s ease-in-out;
-                                    ", message_font_size())
-                                } else {
-                                    format!("
-                                        margin-bottom: 4px;
-                                        padding: 4px 8px;
-                                        border-radius: 4px;
-                                        font-size: {}px;
-                                        line-height: 1.4;
-                                    ", message_font_size())
-                                },
+                                style: format!("
+                                    margin-bottom: 4px;
+                                    padding: 4px 8px;
+                                    border-radius: 4px;
+                                    font-size: {}px;
+                                    line-height: 1.4;
+                                ", message_font_size()),
 
                                                                 // 1行目：メタデータ行（時刻、アイコン、ユーザー名、バッジ、コメント回数）
                                 div {

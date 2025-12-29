@@ -230,9 +230,9 @@ impl BatchUpdateManager {
             }
         }
 
-        // DOM更新を先に実行
+        // DOM更新を先に実行（非ブロッキング - デッドロック防止）
         if !dom_updates.is_empty() {
-            self.execute_dom_updates(&dom_updates).await?;
+            self.execute_dom_updates_sync(&dom_updates);
         }
 
         // Signal更新を後に実行
@@ -243,15 +243,19 @@ impl BatchUpdateManager {
         Ok(())
     }
 
-    /// DOM更新の実行
-    async fn execute_dom_updates(&self, items: &[&BatchUpdateItem]) -> Result<(), String> {
-        tracing::debug!("🎨 [BATCH] Executing {} DOM updates", items.len());
+    /// DOM更新の実行（非ブロッキング版）
+    ///
+    /// 注意: eval().awaitはUIスレッドに依存するため、デッドロックを引き起こす可能性がある。
+    /// そのため、evalは発火するだけで結果を待たない（fire-and-forget）。
+    fn execute_dom_updates_sync(&self, items: &[&BatchUpdateItem]) {
+        tracing::debug!("🎨 [BATCH] Executing {} DOM updates (non-blocking)", items.len());
 
         for item in items {
-            // DOM操作のbatch処理
+            // DOM操作のbatch処理（非ブロッキング）
             match item.signal_id.as_str() {
                 "chat_scroll" => {
-                    // スクロール処理のbatch化
+                    // スクロール処理のbatch化 - 結果を待たずに発火
+                    // Note: evalの結果はdropされるが、JavaScript自体は実行される
                     let _ = dioxus::document::eval(
                         r#"
                         if (!window.liscovBatchScrollPending) {
@@ -265,45 +269,12 @@ impl BatchUpdateManager {
                             });
                         }
                     "#,
-                    )
-                    .await;
-                }
-                "highlight_update" => {
-                    // ハイライト処理のbatch化 - 強化版（エラーハンドリング・タイムアウト付き）
-                    let _ = dioxus::document::eval(r#"
-                        if (!window.liscovBatchHighlightPending) {
-                            window.liscovBatchHighlightPending = true;
-                            
-                            // タイムアウト保護（100ms以内に完了）
-                            const timeout = setTimeout(() => {
-                                console.warn('🚨 [BATCH] Highlight update timeout, resetting flag');
-                                window.liscovBatchHighlightPending = false;
-                            }, 100);
-                            
-                            requestAnimationFrame(() => {
-                                try {
-                                    // ハイライト処理をbatch実行
-                                    const highlighted = document.querySelectorAll('.liscov-highlight-animation');
-                                    if (highlighted.length > 0) {
-                                        highlighted.forEach(el => {
-                                            el.style.animation = 'highlight-pulse 2s ease-in-out';
-                                        });
-                                    }
-                                } catch (error) {
-                                    console.error('🚨 [BATCH] Highlight update error:', error);
-                                } finally {
-                                    clearTimeout(timeout);
-                                    window.liscovBatchHighlightPending = false;
-                                }
-                            });
-                        }
-                    "#).await;
+                    );
+                    // .await を削除 - デッドロック防止
                 }
                 _ => {}
             }
         }
-
-        Ok(())
     }
 
     /// Signal更新の実行
@@ -429,11 +400,6 @@ pub enum SignalType {
     ShowFilterPanel,
     ShowTimestamps,
     MessageFontSize,
-
-    // ハイライト
-    HighlightEnabled,
-    HighlightDuration,
-    HighlightedMessageIds,
 
     // 内部制御
     LastMessageCount,
