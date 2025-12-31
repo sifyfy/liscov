@@ -6,6 +6,22 @@ use crate::io::SaveConfig;
 use dioxus::prelude::*;
 use std::path::PathBuf;
 
+/// 相対パスを絶対パスに変換（データディレクトリ基準）
+fn resolve_file_path(file_path: &str) -> String {
+    if std::path::Path::new(file_path).is_absolute() {
+        file_path.to_string()
+    } else {
+        directories::ProjectDirs::from("dev", "sifyfy", "liscov")
+            .map(|dirs| {
+                dirs.data_dir()
+                    .join(file_path)
+                    .to_string_lossy()
+                    .to_string()
+            })
+            .unwrap_or_else(|| file_path.to_string())
+    }
+}
+
 /// レスポンス保存設定コンポーネント
 #[component]
 pub fn RawResponseSettings() -> Element {
@@ -17,6 +33,9 @@ pub fn RawResponseSettings() -> Element {
     let mut file_path = use_signal(|| current_state.raw_response_file.clone());
     let mut max_file_size = use_signal(|| current_state.max_raw_file_size_mb);
     let mut rotation_enabled = use_signal(|| current_state.enable_file_rotation);
+
+    // 実際の保存先パス（相対パスの場合はデータディレクトリを基準に解決）
+    let actual_path = use_memo(move || resolve_file_path(&file_path()));
 
     rsx! {
         div {
@@ -170,10 +189,10 @@ pub fn RawResponseSettings() -> Element {
                 div {
                     class: "current-path-info",
                     p {
-                        strong { "💾 現在の保存先: " }
+                        strong { "💾 実際の保存先: " }
                         span {
                             class: "current-path",
-                            "{file_path()}"
+                            "{actual_path()}"
                         }
                     }
                 }

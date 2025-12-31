@@ -247,7 +247,7 @@ impl LiscovDatabase {
             "super-sticker" => crate::gui::models::MessageType::SuperSticker {
                 amount: amount.map(|a| format!("¥{}", a)).unwrap_or_default(),
             },
-            "membership" => crate::gui::models::MessageType::Membership,
+            "membership" | "membership-milestone" => crate::gui::models::MessageType::Membership { milestone_months: None },
             "system" => crate::gui::models::MessageType::System,
             _ => crate::gui::models::MessageType::Text,
         };

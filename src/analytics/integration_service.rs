@@ -305,7 +305,7 @@ impl AnalyticsIntegrationService {
                 is_moderator: false,
                 is_member: matches!(
                     msg.message_type,
-                    crate::gui::models::MessageType::Membership
+                    crate::gui::models::MessageType::Membership { .. }
                 ),
                 is_verified: false,
                 badges: vec![],

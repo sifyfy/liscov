@@ -383,7 +383,7 @@ impl BlockingProcessor {
                 crate::gui::models::MessageType::SuperSticker { amount: _ } => {
                     // スーパーステッカーの処理
                 }
-                crate::gui::models::MessageType::Membership => {
+                crate::gui::models::MessageType::Membership { .. } => {
                     // メンバーシップメッセージの処理
                 }
                 crate::gui::models::MessageType::System => {

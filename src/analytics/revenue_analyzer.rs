@@ -138,7 +138,7 @@ impl RevenueAnalytics {
                     self.realtime_engine.process_super_chat(amount_value);
                 }
             }
-            MessageType::Membership => {
+            MessageType::Membership { .. } => {
                 self.add_membership(message);
                 self.realtime_engine.process_membership();
             }
@@ -485,7 +485,7 @@ mod tests {
             "NewMember",
             "member123",
             "New member!",
-            MessageType::Membership,
+            MessageType::Membership { milestone_months: None },
             true,
         );
 

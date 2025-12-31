@@ -276,7 +276,7 @@ impl MessageProcessor for DefaultMessageProcessor {
         if !filter_config.include_membership {
             if matches!(
                 message.message_type,
-                crate::gui::models::MessageType::Membership
+                crate::gui::models::MessageType::Membership { .. }
             ) {
                 return false;
             }
@@ -338,7 +338,7 @@ impl MessageProcessor for DefaultMessageProcessor {
                     stats.total_revenue += amount_value;
                 }
             }
-            crate::gui::models::MessageType::Membership => {
+            crate::gui::models::MessageType::Membership { .. } => {
                 stats.membership_count += 1;
             }
             _ => {}

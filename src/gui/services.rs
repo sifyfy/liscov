@@ -14,6 +14,7 @@ use crate::api::innertube::{
 };
 use crate::api::youtube::{ChatMode, Continuation};
 use crate::get_live_chat::Action;
+use crate::gui::config_manager::get_current_config;
 use crate::io::{RawResponseSaver, SaveConfig};
 use tracing;
 
@@ -58,15 +59,49 @@ impl LiveChatService {
             tracing::info!("🔐 Loaded saved authentication credentials");
         }
 
+        // 設定ファイルから保存設定を読み込み
+        let save_config = if let Some(config) = get_current_config() {
+            // データディレクトリの絶対パスを取得
+            let file_path = if std::path::Path::new(&config.raw_response_file).is_absolute() {
+                config.raw_response_file.clone()
+            } else {
+                // 相対パスの場合はデータディレクトリを基準にする
+                directories::ProjectDirs::from("dev", "sifyfy", "liscov")
+                    .map(|dirs| {
+                        let data_dir = dirs.data_dir();
+                        // データディレクトリを作成
+                        if let Err(e) = std::fs::create_dir_all(data_dir) {
+                            tracing::warn!("⚠️ Failed to create data directory: {}", e);
+                        }
+                        data_dir.join(&config.raw_response_file).to_string_lossy().to_string()
+                    })
+                    .unwrap_or_else(|| config.raw_response_file.clone())
+            };
+
+            tracing::info!(
+                "📁 Loaded save config from file: enabled={}, file={}",
+                config.save_raw_responses,
+                file_path
+            );
+            SaveConfig {
+                enabled: config.save_raw_responses,
+                file_path,
+                max_file_size_mb: config.max_raw_file_size_mb,
+                enable_rotation: config.enable_file_rotation,
+                max_backup_files: 5,
+            }
+        } else {
+            tracing::warn!("⚠️ Failed to load config, using default save settings");
+            SaveConfig::default()
+        };
+
         Self {
             inner_tube: Arc::new(TokioMutex::new(None)),
             state: Arc::new(TokioMutex::new(ServiceState::Idle)),
             shutdown_sender: None,
             message_sender: Arc::new(TokioMutex::new(None)),
             output_file: Arc::new(TokioMutex::new(None)),
-            response_saver: Arc::new(TokioMutex::new(
-                RawResponseSaver::new(SaveConfig::default()),
-            )),
+            response_saver: Arc::new(TokioMutex::new(RawResponseSaver::new(save_config))),
             stream_end_detector: Arc::new(TokioMutex::new(StreamEndDetector::new())),
             last_url: None,
             chat_mode: ChatMode::default(),

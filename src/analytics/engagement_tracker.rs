@@ -737,7 +737,7 @@ impl EngagementMetrics {
                     session.total_super_chat += amount_value;
                 }
             }
-            MessageType::Membership => {
+            MessageType::Membership { .. } => {
                 session.is_member = true;
 
                 let event = EngagementEvent {

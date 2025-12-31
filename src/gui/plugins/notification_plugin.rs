@@ -151,7 +151,7 @@ impl NotificationPlugin {
         }
 
         // メンバーシップ通知
-        if matches!(message.message_type, MessageType::Membership) {
+        if matches!(message.message_type, MessageType::Membership { .. }) {
             notifications.push(NotificationType::NewMember {
                 username: message.author.clone(),
             });

@@ -96,7 +96,7 @@ impl Default for AppConfig {
             url: "https://youtube.com/watch?v=".to_string(),
             auto_save_enabled: false, // デフォルトは無効
             output_file: "live_chat.ndjson".to_string(),
-            save_raw_responses: false,
+            save_raw_responses: true, // 生レスポンスはデフォルトで保存（デバッグ・検証用）
             raw_response_file: "raw_responses.ndjson".to_string(),
             max_raw_file_size_mb: 100,
             enable_file_rotation: true,

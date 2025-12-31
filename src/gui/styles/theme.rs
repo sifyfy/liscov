@@ -73,7 +73,7 @@ pub fn get_message_class(message_type: &MessageType) -> String {
         MessageType::System => "system",
         MessageType::SuperChat { .. } => "superchat",
         MessageType::SuperSticker { .. } => "superchat",
-        MessageType::Membership => "system",
+        MessageType::Membership { .. } => "system",
     };
     format!("{} {}", base_class, type_class)
 }

@@ -244,7 +244,7 @@ impl SystemMessageGenerator {
                 MessageType::SuperChat { .. } | MessageType::SuperSticker { .. } => {
                     superchat_count += 1;
                 }
-                MessageType::Membership => {
+                MessageType::Membership { .. } => {
                     membership_count += 1;
                 }
                 _ => {}

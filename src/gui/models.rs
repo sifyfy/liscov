@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 
 /// GUI用のチャットメッセージ構造体
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -92,7 +93,12 @@ pub enum MessageType {
     SuperSticker {
         amount: String,
     },
-    Membership,
+    /// メンバーシップ関連メッセージ
+    /// - milestone_months: None = 新規メンバー加入
+    /// - milestone_months: Some(n) = n ヶ月継続のマイルストーン
+    Membership {
+        milestone_months: Option<u32>,
+    },
     System,
 }
 
@@ -102,7 +108,13 @@ impl MessageType {
             MessageType::Text => "text".to_string(),
             MessageType::SuperChat { .. } => "super-chat".to_string(),
             MessageType::SuperSticker { .. } => "super-sticker".to_string(),
-            MessageType::Membership => "membership".to_string(),
+            MessageType::Membership { milestone_months } => {
+                if milestone_months.is_some() {
+                    "membership-milestone".to_string()
+                } else {
+                    "membership".to_string()
+                }
+            }
             MessageType::System => "system".to_string(),
         }
     }
@@ -215,6 +227,43 @@ impl From<crate::get_live_chat::ChatItem> for GuiChatMessage {
                 // タイムスタンプ変換（マイクロ秒 → 表示用）
                 let display_timestamp = timestamp_usec_to_display(&renderer.timestamp_usec);
 
+                // メッセージ内容とrunsを構築（絵文字対応）
+                let mut runs = Vec::new();
+                let mut content_parts = Vec::new();
+
+                if let Some(msg) = &renderer.message {
+                    for run in &msg.runs {
+                        if let Some(text) = run.get_text() {
+                            runs.push(MessageRun::Text {
+                                content: text.to_string(),
+                            });
+                            content_parts.push(text.to_string());
+                        } else if let Some(emoji) = run.get_emoji() {
+                            let image_url = emoji
+                                .image
+                                .thumbnails
+                                .first()
+                                .map(|t| t.url.clone())
+                                .unwrap_or_default();
+                            let alt_text =
+                                if let Some(accessibility) = &emoji.image.accessibility {
+                                    accessibility.accessibility_data.label.clone()
+                                } else {
+                                    format!(":{}: ", emoji.emoji_id)
+                                };
+
+                            runs.push(MessageRun::Emoji {
+                                emoji_id: emoji.emoji_id.clone(),
+                                image_url,
+                                alt_text: alt_text.clone(),
+                            });
+                            content_parts.push(alt_text);
+                        }
+                    }
+                }
+
+                let content = content_parts.join("");
+
                 Self {
                     id: renderer.id.clone(),
                     timestamp: display_timestamp,
@@ -225,18 +274,8 @@ impl From<crate::get_live_chat::ChatItem> for GuiChatMessage {
                     author: renderer.author_name.simple_text.clone(),
                     author_icon_url,
                     channel_id: renderer.author_external_channel_id.clone(),
-                    content: renderer
-                        .message
-                        .as_ref()
-                        .map(|msg| {
-                            msg.runs
-                                .iter()
-                                .filter_map(|run| run.get_text().map(|t| t.to_string()))
-                                .collect::<Vec<_>>()
-                                .join("")
-                        })
-                        .unwrap_or_default(),
-                    runs: Vec::new(), // SuperChatは通常テキストのみ
+                    content,
+                    runs,
                     metadata: Some(MessageMetadata {
                         amount: Some(renderer.purchase_amount_text.simple_text.clone()),
                         badges,
@@ -304,16 +343,94 @@ impl From<crate::get_live_chat::ChatItem> for GuiChatMessage {
                 // タイムスタンプ変換（マイクロ秒 → 表示用）
                 let display_timestamp = timestamp_usec_to_display(&renderer.timestamp_usec);
 
+                // header_primary_text からメンバーシップ情報を抽出
+                let header_primary = renderer
+                    .header_primary_text
+                    .as_ref()
+                    .map(|msg| extract_message_text(&msg.runs))
+                    .unwrap_or_default();
+
+                // header_subtext からサブテキストを抽出
+                let header_sub = renderer
+                    .header_subtext
+                    .as_ref()
+                    .map(|msg| extract_message_text(&msg.runs))
+                    .unwrap_or_default();
+
+                // message からユーザーメッセージを抽出
+                let user_message = renderer
+                    .message
+                    .as_ref()
+                    .map(|msg| extract_message_text(&msg.runs))
+                    .unwrap_or_default();
+
+                // マイルストーン月数を抽出（「メンバー歴 X か月」などのパターン）
+                let milestone_months = extract_milestone_months(&header_primary, &header_sub);
+
+                // デバッグログ: マイルストーンチャット検証用
+                debug!(
+                    author = %renderer.author_name.simple_text,
+                    header_primary = %header_primary,
+                    header_sub = %header_sub,
+                    user_message = %user_message,
+                    milestone_months = ?milestone_months,
+                    "Membership message received"
+                );
+
+                // コンテンツを生成
+                let content = build_membership_content(
+                    &header_primary,
+                    &header_sub,
+                    &user_message,
+                    milestone_months,
+                );
+
+                // runs を構築（ユーザーメッセージがある場合）
+                let runs = if let Some(msg) = &renderer.message {
+                    msg.runs
+                        .iter()
+                        .filter_map(|run| {
+                            if let Some(text) = run.get_text() {
+                                Some(MessageRun::Text {
+                                    content: text.to_string(),
+                                })
+                            } else if let Some(emoji) = run.get_emoji() {
+                                let image_url = emoji
+                                    .image
+                                    .thumbnails
+                                    .first()
+                                    .map(|t| t.url.clone())
+                                    .unwrap_or_default();
+                                let alt_text =
+                                    if let Some(accessibility) = &emoji.image.accessibility {
+                                        accessibility.accessibility_data.label.clone()
+                                    } else {
+                                        format!("Emoji: {}", emoji.emoji_id)
+                                    };
+                                Some(MessageRun::Emoji {
+                                    emoji_id: emoji.emoji_id.clone(),
+                                    image_url,
+                                    alt_text,
+                                })
+                            } else {
+                                None
+                            }
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+
                 Self {
                     id: renderer.id.clone(),
                     timestamp: display_timestamp,
                     timestamp_usec: renderer.timestamp_usec.clone(),
-                    message_type: MessageType::Membership,
+                    message_type: MessageType::Membership { milestone_months },
                     author: renderer.author_name.simple_text.clone(),
                     author_icon_url,
                     channel_id: renderer.author_external_channel_id.clone(),
-                    content: "New member!".to_string(),
-                    runs: Vec::new(), // Membershipは固定テキスト
+                    content,
+                    runs,
                     metadata: Some(MessageMetadata {
                         amount: None,
                         badges,
@@ -426,6 +543,112 @@ fn extract_badge_info(
     }
 
     (badges, badge_info, is_member, is_moderator, is_verified)
+}
+
+/// Message の runs からテキストを連結して抽出
+fn extract_message_text(runs: &[crate::get_live_chat::MessageRun]) -> String {
+    runs.iter()
+        .filter_map(|run| run.get_text().map(|s| s.to_string()))
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+/// マイルストーン月数を抽出
+/// 日本語: 「メンバー歴 X か月」「X か月のメンバー」など
+/// 英語: "Member for X months", "X month membership milestone" など
+fn extract_milestone_months(header_primary: &str, header_sub: &str) -> Option<u32> {
+    // 日本語パターン: 数字 + 「か月」「ヶ月」「カ月」
+    let japanese_patterns = [
+        r"(\d+)\s*か月",
+        r"(\d+)\s*ヶ月",
+        r"(\d+)\s*カ月",
+        r"メンバー歴\s*(\d+)",
+    ];
+
+    // 英語パターン
+    let english_patterns = [
+        r"(\d+)\s*month",
+        r"(\d+)\s*year",
+        r"member\s+for\s+(\d+)",
+    ];
+
+    let combined_text = format!("{} {}", header_primary, header_sub);
+    let lower_text = combined_text.to_lowercase();
+
+    // 日本語パターンをチェック
+    for pattern in &japanese_patterns {
+        if let Ok(re) = regex::Regex::new(pattern) {
+            if let Some(caps) = re.captures(&combined_text) {
+                if let Some(num_str) = caps.get(1) {
+                    if let Ok(months) = num_str.as_str().parse::<u32>() {
+                        if months > 0 {
+                            return Some(months);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 英語パターンをチェック
+    for pattern in &english_patterns {
+        if let Ok(re) = regex::Regex::new(pattern) {
+            if let Some(caps) = re.captures(&lower_text) {
+                if let Some(num_str) = caps.get(1) {
+                    if let Ok(num) = num_str.as_str().parse::<u32>() {
+                        // year パターンの場合は12倍
+                        if pattern.contains("year") && num > 0 {
+                            return Some(num * 12);
+                        } else if num > 0 {
+                            return Some(num);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// メンバーシップコンテンツを構築
+fn build_membership_content(
+    header_primary: &str,
+    header_sub: &str,
+    user_message: &str,
+    milestone_months: Option<u32>,
+) -> String {
+    let mut parts = Vec::new();
+
+    // ヘッダープライマリテキスト（「メンバー歴 X か月」など）
+    if !header_primary.is_empty() {
+        parts.push(header_primary.to_string());
+    }
+
+    // ヘッダーサブテキスト
+    if !header_sub.is_empty() {
+        parts.push(header_sub.to_string());
+    }
+
+    // ユーザーメッセージ
+    if !user_message.is_empty() {
+        if !parts.is_empty() {
+            parts.push(format!(": {}", user_message));
+        } else {
+            parts.push(user_message.to_string());
+        }
+    }
+
+    // コンテンツが空の場合はデフォルトメッセージ
+    if parts.is_empty() {
+        if milestone_months.is_some() {
+            "Membership milestone!".to_string()
+        } else {
+            "New member!".to_string()
+        }
+    } else {
+        parts.join(" ")
+    }
 }
 
 /// アプリケーション状態
@@ -542,5 +765,302 @@ impl ActiveTab {
             ActiveTab::DataExport => "Export and save chat data in various formats",
             ActiveTab::Settings => "Application settings and configuration",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_milestone_months_japanese_patterns() {
+        // 「X か月」パターン
+        assert_eq!(
+            extract_milestone_months("メンバー歴 12 か月", ""),
+            Some(12)
+        );
+        assert_eq!(extract_milestone_months("メンバー歴 1 か月", ""), Some(1));
+        assert_eq!(extract_milestone_months("6か月", ""), Some(6));
+
+        // 「X ヶ月」パターン
+        assert_eq!(extract_milestone_months("メンバー歴 24 ヶ月", ""), Some(24));
+        assert_eq!(extract_milestone_months("12ヶ月のメンバー", ""), Some(12));
+
+        // 「X カ月」パターン
+        assert_eq!(extract_milestone_months("メンバー歴 3 カ月", ""), Some(3));
+
+        // ヘッダーサブテキストに含まれるパターン
+        assert_eq!(
+            extract_milestone_months("", "メンバー歴 6 か月"),
+            Some(6)
+        );
+
+        // 両方に情報がある場合（header_primaryを優先）
+        assert_eq!(
+            extract_milestone_months("メンバー歴 12 か月", "メンバー歴 6 か月"),
+            Some(12)
+        );
+    }
+
+    #[test]
+    fn test_extract_milestone_months_english_patterns() {
+        // "X months" パターン
+        assert_eq!(
+            extract_milestone_months("Member for 12 months", ""),
+            Some(12)
+        );
+        assert_eq!(extract_milestone_months("6 month milestone", ""), Some(6));
+        assert_eq!(extract_milestone_months("1 month", ""), Some(1));
+
+        // "X year(s)" パターン（12倍される）
+        assert_eq!(extract_milestone_months("Member for 1 year", ""), Some(12));
+        assert_eq!(
+            extract_milestone_months("2 year membership milestone", ""),
+            Some(24)
+        );
+
+        // 大文字小文字を区別しない
+        assert_eq!(
+            extract_milestone_months("MEMBER FOR 3 MONTHS", ""),
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn test_extract_milestone_months_no_match() {
+        // マイルストーンではないパターン（新規メンバー）
+        assert_eq!(
+            extract_milestone_months("", "Welcome to the channel!"),
+            None
+        );
+        assert_eq!(
+            extract_milestone_months("新規メンバー", "チャンネルへようこそ"),
+            None
+        );
+
+        // 空の入力
+        assert_eq!(extract_milestone_months("", ""), None);
+    }
+
+    #[test]
+    fn test_build_membership_content_new_member() {
+        // 新規メンバー（マイルストーンなし）
+        let content = build_membership_content("", "", "", None);
+        assert_eq!(content, "New member!");
+
+        // サブテキストのみ
+        let content =
+            build_membership_content("", "Welcome to the channel!", "", None);
+        assert_eq!(content, "Welcome to the channel!");
+    }
+
+    #[test]
+    fn test_build_membership_content_milestone() {
+        // マイルストーン（ヘッダープライマリ + サブテキスト）
+        let content = build_membership_content(
+            "メンバー歴 12 か月",
+            "おめでとうございます",
+            "",
+            Some(12),
+        );
+        assert_eq!(content, "メンバー歴 12 か月 おめでとうございます");
+
+        // マイルストーン + ユーザーメッセージ
+        let content = build_membership_content(
+            "メンバー歴 6 か月",
+            "",
+            "いつもありがとう！",
+            Some(6),
+        );
+        assert_eq!(content, "メンバー歴 6 か月 : いつもありがとう！");
+
+        // マイルストーンでテキストが空の場合
+        let content = build_membership_content("", "", "", Some(12));
+        assert_eq!(content, "Membership milestone!");
+    }
+
+    #[test]
+    fn test_message_type_as_string() {
+        // 新規メンバー
+        let msg_type = MessageType::Membership {
+            milestone_months: None,
+        };
+        assert_eq!(msg_type.as_string(), "membership");
+
+        // マイルストーン
+        let msg_type = MessageType::Membership {
+            milestone_months: Some(12),
+        };
+        assert_eq!(msg_type.as_string(), "membership-milestone");
+
+        // その他のタイプ
+        assert_eq!(MessageType::Text.as_string(), "text");
+        assert_eq!(
+            MessageType::SuperChat {
+                amount: "¥500".to_string()
+            }
+            .as_string(),
+            "super-chat"
+        );
+    }
+
+    /// 実際のYouTubeレスポンスデータを使ったスーパーチャット変換テスト
+    /// このテストは2024年12月の実際の配信から取得したデータを使用
+    #[test]
+    fn test_superchat_with_emoji_only_message_from_real_data() {
+        // 実際のスーパーチャットデータ（絵文字のみのメッセージ）
+        let json = r#"{
+            "id": "ChwKGkNQS2Ywb3FjNVpFREZUckN3Z1FkNC00QUFB",
+            "message": {
+                "runs": [
+                    {
+                        "text": null,
+                        "emoji": {
+                            "emojiId": "🍼",
+                            "image": {
+                                "thumbnails": [
+                                    {
+                                        "url": "https://fonts.gstatic.com/s/e/notoemoji/15.1/1f37c/72.png",
+                                        "width": null,
+                                        "height": null
+                                    }
+                                ],
+                                "accessibility": {
+                                    "accessibilityData": {
+                                        "label": "🍼"
+                                    }
+                                }
+                            },
+                            "searchTerms": ["baby", "bottle"],
+                            "shortcuts": [":baby_bottle:"],
+                            "isCustomEmoji": false
+                        }
+                    }
+                ]
+            },
+            "authorName": { "simpleText": "@なんた-r5v" },
+            "authorPhoto": {
+                "thumbnails": [
+                    { "url": "https://example.com/photo.jpg", "width": 32, "height": 32 }
+                ]
+            },
+            "timestampUsec": "1767094535233715",
+            "authorExternalChannelId": "UCS4XO7apDrR8MDp2KYHfKLw",
+            "purchaseAmountText": { "simpleText": "¥200" },
+            "authorBadges": [
+                {
+                    "liveChatAuthorBadgeRenderer": {
+                        "accessibility": {
+                            "accessibilityData": { "label": "Member (1 year)" }
+                        },
+                        "tooltip": "Member (1 year)",
+                        "customThumbnail": {
+                            "thumbnails": [
+                                { "url": "https://example.com/badge.png", "width": 16, "height": 16 }
+                            ],
+                            "accessibility": null
+                        }
+                    }
+                }
+            ],
+            "trackingParams": "test",
+            "headerBackgroundColor": 4278237396,
+            "headerTextColor": 4278190080,
+            "bodyBackgroundColor": 4278248959,
+            "bodyTextColor": 4278190080
+        }"#;
+
+        let renderer: crate::get_live_chat::LiveChatPaidMessageRenderer =
+            serde_json::from_str(json).expect("Failed to parse SuperChat JSON");
+
+        let chat_item = crate::get_live_chat::ChatItem::PaidMessage { renderer };
+        let gui_message = GuiChatMessage::from(chat_item);
+
+        // 検証: メッセージタイプがSuperChatで金額が正しい
+        assert!(matches!(
+            gui_message.message_type,
+            MessageType::SuperChat { ref amount } if amount == "¥200"
+        ));
+
+        // 検証: 著者名が正しい
+        assert_eq!(gui_message.author, "@なんた-r5v");
+
+        // 検証: runsに絵文字が含まれている（修正前は空だった）
+        assert_eq!(gui_message.runs.len(), 1);
+        assert!(matches!(
+            &gui_message.runs[0],
+            MessageRun::Emoji { emoji_id, alt_text, .. }
+            if emoji_id == "🍼" && alt_text == "🍼"
+        ));
+
+        // 検証: contentに絵文字のalt_textが含まれている
+        assert!(gui_message.content.contains("🍼"));
+
+        // 検証: メンバーとして認識されている
+        assert!(gui_message.is_member);
+    }
+
+    /// 実際のYouTubeレスポンスデータを使ったスーパーステッカー変換テスト
+    #[test]
+    fn test_supersticker_from_real_data() {
+        // 実際のスーパーステッカーデータ
+        let json = r#"{
+            "id": "ChwKGkNOU0oySS1iNVpFREZmUEN3Z1FkeHhVZGZB",
+            "authorName": { "simpleText": "@しょうや-x5y" },
+            "authorPhoto": {
+                "thumbnails": [
+                    { "url": "https://example.com/photo.jpg", "width": 32, "height": 32 }
+                ]
+            },
+            "timestampUsec": "1767094289588094",
+            "authorExternalChannelId": "UCj8UiIHFrFLwFGcYKeB3Rtg",
+            "purchaseAmountText": { "simpleText": "¥140" },
+            "sticker": {
+                "thumbnails": [
+                    { "url": "https://example.com/sticker.png", "width": 40, "height": 40 }
+                ]
+            },
+            "authorBadges": [
+                {
+                    "liveChatAuthorBadgeRenderer": {
+                        "accessibility": {
+                            "accessibilityData": { "label": "Member (6 months)" }
+                        },
+                        "tooltip": "Member (6 months)",
+                        "customThumbnail": {
+                            "thumbnails": [
+                                { "url": "https://example.com/badge.png", "width": 16, "height": 16 }
+                            ],
+                            "accessibility": null
+                        }
+                    }
+                }
+            ],
+            "trackingParams": "test",
+            "moneyChipBackgroundColor": 4280191205,
+            "moneyChipTextColor": 4294967295
+        }"#;
+
+        let renderer: crate::get_live_chat::LiveChatPaidStickerRenderer =
+            serde_json::from_str(json).expect("Failed to parse SuperSticker JSON");
+
+        let chat_item = crate::get_live_chat::ChatItem::PaidSticker { renderer };
+        let gui_message = GuiChatMessage::from(chat_item);
+
+        // 検証: メッセージタイプがSuperStickerで金額が正しい
+        assert!(matches!(
+            gui_message.message_type,
+            MessageType::SuperSticker { ref amount } if amount == "¥140"
+        ));
+
+        // 検証: 著者名が正しい
+        assert_eq!(gui_message.author, "@しょうや-x5y");
+
+        // 検証: contentにSuperStickerと金額が含まれている
+        assert!(gui_message.content.contains("Super Sticker"));
+        assert!(gui_message.content.contains("¥140"));
+
+        // 検証: メンバーとして認識されている
+        assert!(gui_message.is_member);
     }
 }

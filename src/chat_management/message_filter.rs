@@ -261,9 +261,9 @@ impl MessageFilter {
 
             // メンバーかどうかの判定：
             // 1. メッセージのis_memberフィールド（バッジベース）
-            // 2. MessageType::Membership（新規メンバー加入）
+            // 2. MessageType::Membership（新規メンバー加入またはマイルストーン）
             let is_member =
-                message.is_member || matches!(message.message_type, GuiMessageType::Membership);
+                message.is_member || matches!(message.message_type, GuiMessageType::Membership { .. });
 
             if membership_required != is_member {
                 return false;
@@ -298,7 +298,7 @@ impl MessageFilter {
         }
 
         // メンバーシップ
-        if matches!(message.message_type, GuiMessageType::Membership) {
+        if matches!(message.message_type, GuiMessageType::Membership { .. }) {
             return MessageType::Membership;
         }
 
@@ -501,7 +501,7 @@ mod tests {
             id,
             timestamp: "12:00:00".to_string(),
             timestamp_usec,
-            message_type: MessageType::Membership,
+            message_type: MessageType::Membership { milestone_months: None },
             author: author.to_string(),
             author_icon_url: None,
             channel_id: "test_channel".to_string(),
