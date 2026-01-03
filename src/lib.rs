@@ -297,7 +297,7 @@ mod tests {
         let continuation = Continuation("test".to_string());
         assert_eq!(continuation.0, "test");
 
-        let message = Message { runs: vec![] };
+        let message = Message { runs: vec![], simple_text: None };
         assert!(message.runs.is_empty());
 
         let simple_text = SimpleText {

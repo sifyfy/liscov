@@ -49,10 +49,52 @@ pub struct LiveChatContinuation {
 pub struct Continuation(pub String);
 
 /// A message containing a sequence of text and/or emoji runs.
+/// Supports both `runs` format and `simpleText` format from YouTube API.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
     /// Sequence of text fragments and emojis that make up the message
+    #[serde(default)]
     pub runs: Vec<MessageRun>,
+    /// Simple text content (alternative to runs, used in headerSubtext etc.)
+    #[serde(rename = "simpleText", skip_serializing_if = "Option::is_none")]
+    pub simple_text: Option<String>,
+}
+
+impl Message {
+    /// Get text content from either simpleText or runs
+    pub fn get_text(&self) -> String {
+        if let Some(text) = &self.simple_text {
+            text.clone()
+        } else {
+            self.runs
+                .iter()
+                .filter_map(|run| run.get_text().map(|s| s.to_string()))
+                .collect::<Vec<_>>()
+                .join("")
+        }
+    }
+
+    /// Get text content including emoji alt text (emoji_id)
+    pub fn get_text_with_emoji(&self) -> String {
+        if let Some(text) = &self.simple_text {
+            text.clone()
+        } else {
+            self.runs
+                .iter()
+                .filter_map(|run| {
+                    if let Some(text) = run.get_text() {
+                        Some(text.to_string())
+                    } else if let Some(emoji) = run.get_emoji() {
+                        // Use emoji_id as alt text (e.g., "👊")
+                        Some(emoji.emoji_id.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("")
+        }
+    }
 }
 
 /// A fragment of a message, containing either text or an emoji.
@@ -1471,7 +1513,7 @@ mod tests {
     fn test_chat_item_type_detection() {
         let text_renderer = LiveChatTextMessageRenderer {
             id: "test_id".to_string(),
-            message: Message { runs: vec![] },
+            message: Message { runs: vec![], simple_text: None },
             author_name: AuthorName {
                 simple_text: "Test User".to_string(),
             },
@@ -1495,7 +1537,7 @@ mod tests {
         let chat_item = ChatItem::TextMessage {
             renderer: LiveChatTextMessageRenderer {
                 id: "test_id".to_string(),
-                message: Message { runs: vec![] },
+                message: Message { runs: vec![], simple_text: None },
                 author_name: AuthorName {
                     simple_text: "Test User".to_string(),
                 },

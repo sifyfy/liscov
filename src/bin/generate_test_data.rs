@@ -25,6 +25,7 @@ fn main() -> anyhow::Result<()> {
                                                 text: Some("Hello, world!".to_string()),
                                                 emoji: None,
                                             }],
+                                            simple_text: None,
                                         },
                                         author_name: AuthorName {
                                             simple_text: "TestUser1".to_string(),
@@ -66,6 +67,7 @@ fn main() -> anyhow::Result<()> {
                                                 text: Some("Thanks for the stream!".to_string()),
                                                 emoji: None,
                                             }],
+                                            simple_text: None,
                                         }),
                                         author_name: AuthorName {
                                             simple_text: "Supporter1".to_string(),

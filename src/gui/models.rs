@@ -508,24 +508,26 @@ impl From<crate::get_live_chat::ChatItem> for GuiChatMessage {
                 let display_timestamp = timestamp_usec_to_display(&renderer.timestamp_usec);
 
                 // header_primary_text からメンバーシップ情報を抽出
+                // Message::get_text()を使用してsimpleText形式にも対応
                 let header_primary = renderer
                     .header_primary_text
                     .as_ref()
-                    .map(|msg| extract_message_text(&msg.runs))
+                    .map(|msg| msg.get_text())
                     .unwrap_or_default();
 
                 // header_subtext からサブテキストを抽出
+                // simpleText形式（例: "コントリビューター"）にも対応
                 let header_sub = renderer
                     .header_subtext
                     .as_ref()
-                    .map(|msg| extract_message_text(&msg.runs))
+                    .map(|msg| msg.get_text())
                     .unwrap_or_default();
 
-                // message からユーザーメッセージを抽出
+                // message からユーザーメッセージを抽出（絵文字を含む場合はget_text_with_emojiを使用）
                 let user_message = renderer
                     .message
                     .as_ref()
-                    .map(|msg| extract_message_text(&msg.runs))
+                    .map(|msg| msg.get_text_with_emoji())
                     .unwrap_or_default();
 
                 // マイルストーン月数を抽出（「メンバー歴 X か月」などのパターン）
@@ -839,10 +841,19 @@ fn extract_badge_info(
     (badges, badge_info, is_member, is_moderator, is_verified)
 }
 
-/// Message の runs からテキストを連結して抽出
+/// Message の runs からテキストを連結して抽出（絵文字も含む）
 fn extract_message_text(runs: &[crate::get_live_chat::MessageRun]) -> String {
     runs.iter()
-        .filter_map(|run| run.get_text().map(|s| s.to_string()))
+        .filter_map(|run| {
+            if let Some(text) = run.get_text() {
+                Some(text.to_string())
+            } else if let Some(emoji) = run.get_emoji() {
+                // 絵文字のemojiIdをテキストとして含める（例: "👊"）
+                Some(emoji.emoji_id.clone())
+            } else {
+                None
+            }
+        })
         .collect::<Vec<_>>()
         .join("")
 }

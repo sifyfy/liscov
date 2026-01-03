@@ -663,6 +663,7 @@ mod tests {
                 color: Some("#ff0000".to_string()),
                 is_moderator: false,
                 is_verified: false,
+                superchat_colors: None,
             }),
             is_member: true,
             comment_count: None,
@@ -766,6 +767,7 @@ mod tests {
                         color: Some("#0000ff".to_string()),
                         is_moderator: false,
                         is_verified: false,
+                superchat_colors: None,
                     })
                 } else {
                     None
