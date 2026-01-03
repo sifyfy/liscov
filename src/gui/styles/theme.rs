@@ -74,6 +74,7 @@ pub fn get_message_class(message_type: &MessageType) -> String {
         MessageType::SuperChat { .. } => "superchat",
         MessageType::SuperSticker { .. } => "superchat",
         MessageType::Membership { .. } => "system",
+        MessageType::MembershipGift { .. } => "membership-gift",
     };
     format!("{} {}", base_class, type_class)
 }

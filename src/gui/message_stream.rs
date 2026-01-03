@@ -21,7 +21,7 @@ pub enum DisplayLimit {
 
 impl Default for DisplayLimit {
     fn default() -> Self {
-        Self::Fixed(100) // デフォルトは100件制限
+        Self::Unlimited // デフォルトは無制限
     }
 }
 

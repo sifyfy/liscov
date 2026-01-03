@@ -99,6 +99,11 @@ pub enum MessageType {
     Membership {
         milestone_months: Option<u32>,
     },
+    /// メンバーシップギフト
+    /// - gift_count: ギフトしたメンバーシップの数
+    MembershipGift {
+        gift_count: u32,
+    },
     System,
 }
 
@@ -115,6 +120,7 @@ impl MessageType {
                     "membership".to_string()
                 }
             }
+            MessageType::MembershipGift { .. } => "membership-gift".to_string(),
             MessageType::System => "system".to_string(),
         }
     }
@@ -127,6 +133,145 @@ pub struct BadgeInfo {
     pub image_url: Option<String>, // バッジ画像URL
 }
 
+/// スーパーチャット/スーパーステッカーの色情報（YouTubeから取得）
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct SuperChatColors {
+    /// ヘッダー背景色 (hex形式: #RRGGBB)
+    pub header_background: String,
+    /// ヘッダーテキスト色
+    pub header_text: String,
+    /// ボディ背景色
+    pub body_background: String,
+    /// ボディテキスト色
+    pub body_text: String,
+}
+
+/// 金額文字列から日本語の通貨名を取得
+/// 日本円の場合はNoneを返す（表示不要のため）
+pub fn get_currency_name_ja(amount: &str) -> Option<&'static str> {
+    let amount = amount.trim();
+
+    // 日本円は表示不要
+    if amount.starts_with('¥') || amount.starts_with('￥') || amount.ends_with("JPY") {
+        return None;
+    }
+
+    // プレフィックス付き通貨（より具体的なものを先にチェック）
+    if amount.starts_with("CA$") || amount.starts_with("C$") {
+        return Some("カナダドル");
+    }
+    if amount.starts_with("A$") || amount.starts_with("AU$") || amount.starts_with("AUD") {
+        return Some("豪ドル");
+    }
+    if amount.starts_with("HK$") || amount.starts_with("HKD") {
+        return Some("香港ドル");
+    }
+    if amount.starts_with("NT$") || amount.starts_with("NTD") || amount.starts_with("TWD") {
+        return Some("台湾ドル");
+    }
+    if amount.starts_with("S$") || amount.starts_with("SGD") {
+        return Some("シンガポールドル");
+    }
+    if amount.starts_with("NZ$") || amount.starts_with("NZD") {
+        return Some("NZドル");
+    }
+    if amount.starts_with("MX$") || amount.starts_with("MXN") {
+        return Some("メキシコペソ");
+    }
+    if amount.starts_with("R$") || amount.starts_with("BRL") {
+        return Some("ブラジルレアル");
+    }
+
+    // 単一記号通貨
+    if amount.starts_with('$') || amount.starts_with("USD") {
+        return Some("米ドル");
+    }
+    if amount.starts_with('€') || amount.starts_with("EUR") {
+        return Some("ユーロ");
+    }
+    if amount.starts_with('£') || amount.starts_with("GBP") {
+        return Some("英ポンド");
+    }
+    if amount.starts_with('₩') || amount.starts_with("KRW") {
+        return Some("韓国ウォン");
+    }
+    if amount.starts_with('₹') || amount.starts_with("INR") {
+        return Some("インドルピー");
+    }
+    if amount.starts_with('₱') || amount.starts_with("PHP") {
+        return Some("フィリピンペソ");
+    }
+    if amount.starts_with('฿') || amount.starts_with("THB") {
+        return Some("タイバーツ");
+    }
+    if amount.starts_with("RM") || amount.starts_with("MYR") {
+        return Some("マレーシアリンギット");
+    }
+    if amount.starts_with("Rp") || amount.starts_with("IDR") {
+        return Some("インドネシアルピア");
+    }
+    if amount.starts_with("CHF") {
+        return Some("スイスフラン");
+    }
+    if amount.starts_with("SEK") {
+        return Some("スウェーデンクローナ");
+    }
+    if amount.starts_with("NOK") {
+        return Some("ノルウェークローネ");
+    }
+    if amount.starts_with("DKK") {
+        return Some("デンマーククローネ");
+    }
+    if amount.starts_with("PLN") || amount.starts_with("zł") {
+        return Some("ポーランドズロチ");
+    }
+    if amount.starts_with("CZK") || amount.starts_with("Kč") {
+        return Some("チェココルナ");
+    }
+    if amount.starts_with("HUF") || amount.starts_with("Ft") {
+        return Some("ハンガリーフォリント");
+    }
+    if amount.starts_with("RUB") || amount.starts_with('₽') {
+        return Some("ロシアルーブル");
+    }
+    if amount.starts_with("TRY") || amount.starts_with('₺') {
+        return Some("トルコリラ");
+    }
+    if amount.starts_with("ZAR") {
+        return Some("南アフリカランド");
+    }
+    if amount.starts_with("ARS") {
+        return Some("アルゼンチンペソ");
+    }
+    if amount.starts_with("CLP") {
+        return Some("チリペソ");
+    }
+    if amount.starts_with("COP") {
+        return Some("コロンビアペソ");
+    }
+    if amount.starts_with("PEN") {
+        return Some("ペルーソル");
+    }
+    if amount.starts_with("VND") || amount.starts_with('₫') {
+        return Some("ベトナムドン");
+    }
+    if amount.starts_with("EGP") {
+        return Some("エジプトポンド");
+    }
+    if amount.starts_with("SAR") {
+        return Some("サウジアラビアリヤル");
+    }
+    if amount.starts_with("AED") {
+        return Some("UAEディルハム");
+    }
+    if amount.starts_with("ILS") || amount.starts_with('₪') {
+        return Some("イスラエルシェケル");
+    }
+
+    // 不明な通貨（日本円以外で認識できない通貨）
+    Some("不明な外貨")
+}
+
 /// メッセージメタデータ
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct MessageMetadata {
@@ -136,6 +281,8 @@ pub struct MessageMetadata {
     pub color: Option<String>,
     pub is_moderator: bool, // モデレーターかどうか
     pub is_verified: bool,  // 認証済みかどうか
+    /// スーパーチャット/スーパーステッカーの色情報
+    pub superchat_colors: Option<SuperChatColors>,
 }
 
 /// 既存のliscovライブラリからGUI用メッセージへの変換
@@ -208,6 +355,7 @@ impl From<crate::get_live_chat::ChatItem> for GuiChatMessage {
                         color: None,
                         is_moderator,
                         is_verified,
+                        superchat_colors: None,
                     }),
                     is_member,
                     comment_count: None, // StateManagerで後から設定される
@@ -264,6 +412,14 @@ impl From<crate::get_live_chat::ChatItem> for GuiChatMessage {
 
                 let content = content_parts.join("");
 
+                // YouTubeから提供された色情報を抽出
+                let superchat_colors = extract_superchat_colors(
+                    renderer.header_background_color,
+                    renderer.header_text_color,
+                    renderer.body_background_color,
+                    renderer.body_text_color,
+                );
+
                 Self {
                     id: renderer.id.clone(),
                     timestamp: display_timestamp,
@@ -283,6 +439,7 @@ impl From<crate::get_live_chat::ChatItem> for GuiChatMessage {
                         color: None,
                         is_moderator,
                         is_verified,
+                        superchat_colors: Some(superchat_colors),
                     }),
                     is_member,
                     comment_count: None, // StateManagerで後から設定される
@@ -301,6 +458,12 @@ impl From<crate::get_live_chat::ChatItem> for GuiChatMessage {
 
                 // タイムスタンプ変換（マイクロ秒 → 表示用）
                 let display_timestamp = timestamp_usec_to_display(&renderer.timestamp_usec);
+
+                // YouTubeから提供された色情報を抽出
+                let superchat_colors = extract_supersticker_colors(
+                    renderer.money_chip_background_color,
+                    renderer.money_chip_text_color,
+                );
 
                 Self {
                     id: renderer.id.clone(),
@@ -324,6 +487,7 @@ impl From<crate::get_live_chat::ChatItem> for GuiChatMessage {
                         color: None,
                         is_moderator,
                         is_verified,
+                        superchat_colors: Some(superchat_colors),
                     }),
                     is_member,
                     comment_count: None, // StateManagerで後から設定される
@@ -438,9 +602,100 @@ impl From<crate::get_live_chat::ChatItem> for GuiChatMessage {
                         color: None,
                         is_moderator,
                         is_verified,
+                        superchat_colors: None,
                     }),
                     is_member: true,     // メンバーシップアイテムは常にメンバー
                     comment_count: None, // StateManagerで後から設定される
+                }
+            }
+            crate::get_live_chat::ChatItem::SponsorshipsGiftPurchaseAnnouncement { renderer } => {
+                let (badges, badge_info, is_member, is_moderator, is_verified) =
+                    extract_badge_info(&renderer.author_badges);
+
+                // アイコンURL抽出
+                let author_icon_url = renderer
+                    .author_photo
+                    .thumbnails
+                    .first()
+                    .map(|thumbnail| thumbnail.url.clone());
+
+                // タイムスタンプ変換
+                let display_timestamp = timestamp_usec_to_display(&renderer.timestamp_usec);
+
+                // header からギフト情報を抽出
+                let header_text = extract_message_text(&renderer.header.runs);
+
+                // ギフト数を抽出（「X 人にメンバーシップをギフト購入しました」などのパターン）
+                let gift_count = extract_gift_count(&header_text);
+
+                debug!(
+                    author = %renderer.author_name.simple_text,
+                    header_text = %header_text,
+                    gift_count = gift_count,
+                    "MembershipGift message received"
+                );
+
+                Self {
+                    id: renderer.id.clone(),
+                    timestamp: display_timestamp,
+                    timestamp_usec: renderer.timestamp_usec.clone(),
+                    message_type: MessageType::MembershipGift { gift_count },
+                    author: renderer.author_name.simple_text.clone(),
+                    author_icon_url,
+                    channel_id: renderer.author_external_channel_id.clone(),
+                    content: header_text,
+                    runs: Vec::new(),
+                    metadata: Some(MessageMetadata {
+                        amount: None,
+                        badges,
+                        badge_info,
+                        color: None,
+                        is_moderator,
+                        is_verified,
+                        superchat_colors: None,
+                    }),
+                    is_member,
+                    comment_count: None,
+                }
+            }
+            crate::get_live_chat::ChatItem::SponsorshipsGiftRedemptionAnnouncement { renderer } => {
+                // ギフトメンバーシップを受け取った人（新規メンバーとして扱う）
+                let (badges, badge_info, _is_member, is_moderator, is_verified) =
+                    extract_badge_info(&renderer.author_badges);
+
+                let author_icon_url = renderer
+                    .author_photo
+                    .thumbnails
+                    .first()
+                    .map(|thumbnail| thumbnail.url.clone());
+
+                let display_timestamp = timestamp_usec_to_display(&renderer.timestamp_usec);
+
+                let message_text = extract_message_text(&renderer.message.runs);
+
+                Self {
+                    id: renderer.id.clone(),
+                    timestamp: display_timestamp,
+                    timestamp_usec: renderer.timestamp_usec.clone(),
+                    message_type: MessageType::Membership {
+                        milestone_months: None,
+                    },
+                    author: renderer.author_name.simple_text.clone(),
+                    author_icon_url,
+                    channel_id: renderer.author_external_channel_id.clone(),
+                    content: message_text,
+                    runs: Vec::new(),
+                    metadata: Some(MessageMetadata {
+                        amount: None,
+                        badges,
+                        badge_info,
+                        color: None,
+                        is_moderator,
+                        is_verified,
+                        superchat_colors: None,
+                    }),
+                    is_member: true,
+                    comment_count: None,
                 }
             }
             _ => {
@@ -481,6 +736,45 @@ fn timestamp_usec_to_display(timestamp_usec: &str) -> String {
     }
     // パース失敗時は現在時刻を使用
     chrono::Local::now().format("%H:%M:%S").to_string()
+}
+
+/// ARGB u64値をhex文字列に変換
+fn argb_to_hex(argb: u64) -> String {
+    let r = (argb >> 16) & 0xFF;
+    let g = (argb >> 8) & 0xFF;
+    let b = argb & 0xFF;
+    format!("#{:02x}{:02x}{:02x}", r, g, b)
+}
+
+/// SuperChat/SuperStickerの色情報を抽出（SuperChat用）
+fn extract_superchat_colors(
+    header_background_color: u64,
+    header_text_color: u64,
+    body_background_color: u64,
+    body_text_color: u64,
+) -> SuperChatColors {
+    SuperChatColors {
+        header_background: argb_to_hex(header_background_color),
+        header_text: argb_to_hex(header_text_color),
+        body_background: argb_to_hex(body_background_color),
+        body_text: argb_to_hex(body_text_color),
+    }
+}
+
+/// SuperSticker用の色情報を抽出
+fn extract_supersticker_colors(
+    money_chip_background_color: u64,
+    money_chip_text_color: u64,
+) -> SuperChatColors {
+    // SuperStickerはmoneyChipの色のみなので、header/bodyを同じ色で設定
+    let bg = argb_to_hex(money_chip_background_color);
+    let text = argb_to_hex(money_chip_text_color);
+    SuperChatColors {
+        header_background: bg.clone(),
+        header_text: text.clone(),
+        body_background: bg,
+        body_text: text,
+    }
 }
 
 /// バッジ情報からメンバーシップ・モデレーター・認証情報を抽出
@@ -609,6 +903,51 @@ fn extract_milestone_months(header_primary: &str, header_sub: &str) -> Option<u3
     }
 
     None
+}
+
+/// ギフト数を抽出
+/// 日本語: 「X 人にメンバーシップをギフト購入しました」など
+/// 英語: "Gifted X memberships" など
+fn extract_gift_count(header_text: &str) -> u32 {
+    // 日本語パターン: 数字 + 「人」
+    let japanese_patterns = [r"(\d+)\s*人に"];
+
+    // 英語パターン
+    let english_patterns = [r"[Gg]ifted\s+(\d+)", r"(\d+)\s+membership"];
+
+    // 日本語パターンをチェック
+    for pattern in &japanese_patterns {
+        if let Ok(re) = regex::Regex::new(pattern) {
+            if let Some(caps) = re.captures(header_text) {
+                if let Some(num_str) = caps.get(1) {
+                    if let Ok(count) = num_str.as_str().parse::<u32>() {
+                        if count > 0 {
+                            return count;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 英語パターンをチェック
+    let lower_text = header_text.to_lowercase();
+    for pattern in &english_patterns {
+        if let Ok(re) = regex::Regex::new(pattern) {
+            if let Some(caps) = re.captures(&lower_text) {
+                if let Some(num_str) = caps.get(1) {
+                    if let Ok(count) = num_str.as_str().parse::<u32>() {
+                        if count > 0 {
+                            return count;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // パターンが見つからない場合はデフォルト1
+    1
 }
 
 /// メンバーシップコンテンツを構築

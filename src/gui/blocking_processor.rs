@@ -386,6 +386,9 @@ impl BlockingProcessor {
                 crate::gui::models::MessageType::Membership { .. } => {
                     // メンバーシップメッセージの処理
                 }
+                crate::gui::models::MessageType::MembershipGift { .. } => {
+                    // メンバーシップギフトの処理
+                }
                 crate::gui::models::MessageType::System => {
                     // システムメッセージの処理
                 }

@@ -9,7 +9,7 @@ use crate::gui::styles::theme::CssClasses;
 
 // Message streaming integration
 use crate::gui::message_stream::{DisplayLimit, MessageStream, MessageStreamConfig};
-use crate::gui::models::GuiChatMessage;
+use crate::gui::models::{get_currency_name_ja, GuiChatMessage, MessageType};
 
 // Phase 4.3: クロージャ最適化
 use crate::gui::closure_optimizer::{
@@ -45,8 +45,8 @@ pub fn ChatDisplay(
     // MessageStream初期化（新規追加）
     let message_stream = use_signal(|| {
         let config = MessageStreamConfig {
-            display_limit: DisplayLimit::Fixed(100), // デフォルト100件制限
-            max_display_count: 100,
+            display_limit: DisplayLimit::Unlimited, // デフォルト無制限
+            max_display_count: usize::MAX,
             enable_virtual_scroll: true,
             target_fps: 60,
             enable_archive: true,
@@ -1022,33 +1022,47 @@ pub fn ChatDisplay(
                 // メッセージ表示
                 for message in filtered_messages.read().iter() {
                     {
+                        // メッセージタイプに応じたスタイルを決定（YouTubeの実際の色を使用）
+                        let (type_style, type_header, text_color) = get_message_type_style_with_colors(message);
+                        let is_special_message = !matches!(message.message_type, MessageType::Text | MessageType::System);
+                        // テキスト色（YouTubeの色があればそれを使用、なければデフォルト黒）
+                        let content_text_color = text_color.unwrap_or_else(|| "#1a202c".to_string());
+
                         rsx! {
                             div {
                                 key: "{message.timestamp}-{message.author}",
                                 class: {
+                                    let type_class = message.message_type.as_string();
                                     let mut classes = vec![CssClasses::CHAT_MESSAGE];
                                     if message.is_member {
                                         classes.push("member");
                                     }
+                                    classes.push(&type_class);
                                     classes.join(" ")
                                 },
-                                style: format!("
+                                style: "
                                     margin-bottom: 4px;
-                                    padding: 4px 8px;
                                     border-radius: 4px;
-                                    font-size: {}px;
-                                    line-height: 1.4;
-                                ", message_font_size()),
+                                    overflow: hidden;
+                                ",
 
-                                                                // 1行目：メタデータ行（時刻、アイコン、ユーザー名、バッジ、コメント回数）
+                                // 特殊メッセージタイプのヘッダー行
+                                if is_special_message {
+                                    {render_type_header_with_colors(message, type_header, message_font_size().into())}
+                                }
+
+                                // 1行目：メタデータ行（時刻、アイコン、ユーザー名、バッジ、コメント回数）
+                                // 白背景で常に読みやすく
                                 div {
-                                    style: "
+                                    style: format!("
                                         display: flex;
                                         align-items: center;
                                         gap: 8px;
-                                        margin-bottom: 2px;
-                                        font-size: 11px;
-                                    ",
+                                        margin-bottom: 0;
+                                        padding: 4px 8px;
+                                        font-size: {}px;
+                                        background: white;
+                                    ", message_font_size()),
 
                                     // タイムスタンプ
                                     if show_timestamps() {
@@ -1177,19 +1191,189 @@ pub fn ChatDisplay(
                                     }
                                 }
 
-                                // 2行目：メッセージ本文
+                                // 2行目：メッセージ本文（SuperChat/SuperStickerはYouTubeの色を使用）
                                 div {
-                                    style: "
-                                        color: #1a202c;
-                                        padding-left: 4px;
-                                        line-height: 1.3;
+                                    style: format!("
+                                        color: {};
+                                        padding: 8px;
+                                        line-height: 1.4;
                                         word-wrap: break-word;
-                                    ",
+                                        font-size: {}px;
+                                        {}
+                                    ", content_text_color, message_font_size(), type_style),
                                     "{message.content}"
                                 }
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+/// メッセージからYouTubeの実際の色を使用してスタイルとヘッダー情報を返す
+/// 戻り値: (背景スタイル, ヘッダー情報, テキスト色)
+fn get_message_type_style_with_colors(message: &GuiChatMessage) -> (String, (&'static str, &'static str, Option<String>), Option<String>) {
+    match &message.message_type {
+        MessageType::SuperChat { amount } => {
+            // YouTubeの実際の色を使用
+            if let Some(colors) = message.metadata.as_ref().and_then(|m| m.superchat_colors.as_ref()) {
+                (
+                    format!(
+                        "background: linear-gradient(135deg, {} 0%, {} 100%); border-left: 4px solid {};",
+                        colors.header_background, colors.body_background, colors.header_background
+                    ),
+                    ("💰", "Super Chat", Some(amount.clone())),
+                    Some(colors.body_text.clone()),
+                )
+            } else {
+                // フォールバック（色情報がない場合）
+                (
+                    "background: linear-gradient(135deg, #fff7ed 0%, #fed7aa 100%); border-left: 4px solid #f6ad55;".to_string(),
+                    ("💰", "Super Chat", Some(amount.clone())),
+                    None,
+                )
+            }
+        }
+        MessageType::SuperSticker { amount } => {
+            // YouTubeの実際の色を使用
+            if let Some(colors) = message.metadata.as_ref().and_then(|m| m.superchat_colors.as_ref()) {
+                (
+                    format!(
+                        "background: {}; border-left: 4px solid {};",
+                        colors.body_background, colors.header_background
+                    ),
+                    ("🎨", "Super Sticker", Some(amount.clone())),
+                    Some(colors.body_text.clone()),
+                )
+            } else {
+                // フォールバック
+                (
+                    "background: #fef2f2; border-left: 4px solid #fc8181;".to_string(),
+                    ("🎨", "Super Sticker", Some(amount.clone())),
+                    None,
+                )
+            }
+        }
+        MessageType::Membership { milestone_months } => {
+            if let Some(months) = milestone_months {
+                (
+                    // パープルグラデーション（マイルストーン）
+                    "background: linear-gradient(135deg, #faf5ff 0%, #e9d5ff 100%); border-left: 4px solid #9f7aea;".to_string(),
+                    ("🏆", "マイルストーン", Some(format!("{}ヶ月", months))),
+                    None,
+                )
+            } else {
+                (
+                    // グリーングラデーション（新規メンバー）
+                    "background: linear-gradient(135deg, #f0fff4 0%, #c6f6d5 100%); border-left: 4px solid #48bb78;".to_string(),
+                    ("🎉", "メンバー加入", None),
+                    None,
+                )
+            }
+        }
+        MessageType::MembershipGift { gift_count } => (
+            // ブルーグラデーション
+            "background: linear-gradient(135deg, #eff6ff 0%, #bfdbfe 100%); border-left: 4px solid #4299e1;".to_string(),
+            ("🎁", "メンバーシップギフト", Some(format!("{}人", *gift_count))),
+            None,
+        ),
+        MessageType::Text | MessageType::System => (
+            // 通常スタイル
+            String::new(),
+            ("", "", None),
+            None,
+        ),
+    }
+}
+
+/// メッセージタイプのヘッダー行をレンダリング
+/// ヘッダー行は白背景なので、YouTubeのheader_background色をテキストに使用（特徴的な色で識別しやすい）
+fn render_type_header_with_colors(
+    message: &GuiChatMessage,
+    header_info: (&'static str, &'static str, Option<String>),
+    font_size: u32,
+) -> Element {
+    let (icon, label, badge_text) = header_info;
+
+    // ヘッダーテキスト色、バッジ背景色、バッジテキスト色を決定
+    // 白背景なので、YouTubeのheader_background色（特徴的な色）をテキストに使用
+    let (header_color, badge_bg, badge_text_color): (String, String, &str) = match &message.message_type {
+        MessageType::SuperChat { .. } | MessageType::SuperSticker { .. } => {
+            if let Some(colors) = message.metadata.as_ref().and_then(|m| m.superchat_colors.as_ref()) {
+                // header_background色をテキストに使用（赤、オレンジ、青など特徴的な色）
+                // バッジ背景は同じ色、バッジテキストは白
+                (colors.header_background.clone(), colors.header_background.clone(), "white")
+            } else {
+                // フォールバック
+                ("#c2410c".to_string(), "#c2410c".to_string(), "white")
+            }
+        }
+        MessageType::Membership { milestone_months } => {
+            if milestone_months.is_some() {
+                ("#6b21a8".to_string(), "#6b21a8".to_string(), "white") // パープル（マイルストーン）
+            } else {
+                ("#166534".to_string(), "#166534".to_string(), "white") // グリーン（新規メンバー）
+            }
+        }
+        MessageType::MembershipGift { .. } => ("#1d4ed8".to_string(), "#1d4ed8".to_string(), "white"), // ブルー
+        _ => ("#374151".to_string(), "#e5e7eb".to_string(), "#374151"), // デフォルト
+    };
+
+    // 通貨名を取得（日本円以外の場合）
+    let currency_name: Option<&'static str> = match &message.message_type {
+        MessageType::SuperChat { amount } | MessageType::SuperSticker { amount } => {
+            get_currency_name_ja(amount)
+        }
+        _ => None,
+    };
+
+    // バッジテキストに通貨名を追加
+    let badge_display = badge_text.map(|text| {
+        if let Some(currency) = currency_name {
+            format!("{} ({})", text, currency)
+        } else {
+            text
+        }
+    });
+
+    rsx! {
+        div {
+            style: format!("
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                padding: 6px 8px;
+                font-size: {}px;
+                font-weight: 600;
+                color: {};
+                background: white;
+            ", font_size, header_color),
+
+            // アイコン
+            span {
+                style: format!("font-size: {}px;", font_size + 2),
+                "{icon}"
+            }
+
+            // ラベル
+            span {
+                "{label}"
+            }
+
+            // バッジ（金額・月数など）
+            if let Some(text) = badge_display {
+                span {
+                    style: format!("
+                        background: {};
+                        color: {};
+                        padding: 4px 12px;
+                        border-radius: 16px;
+                        font-size: {}px;
+                        font-weight: 700;
+                    ", badge_bg, badge_text_color, font_size),
+                    "{text}"
                 }
             }
         }
