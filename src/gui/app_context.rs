@@ -349,6 +349,15 @@ async fn handle_unified_event(
                 service_clone.lock().await.update_save_config(config).await;
             });
         }
+
+        AppEvent::BroadcasterChannelIdUpdated(broadcaster_id) => {
+            tracing::debug!(
+                "📺 [APP_CONTEXT] Broadcaster channel ID updated: {:?}",
+                broadcaster_id
+            );
+            // 配信者チャンネルIDはStateManagerで処理される
+            // ここでは追加の処理は不要
+        }
     }
 }
 

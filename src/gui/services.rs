@@ -279,6 +279,17 @@ impl LiveChatService {
                     tracing::info!("🔐 Authentication applied to InnerTube client for API requests");
                 }
 
+                // 配信者チャンネルIDをStateManagerに通知
+                if let Some(ref broadcaster_id) = inner_tube.broadcaster_channel_id {
+                    tracing::info!("📺 Notifying broadcaster channel ID: {}", broadcaster_id);
+                    let state_manager = crate::gui::state_management::get_state_manager();
+                    let _ = state_manager.send_event(
+                        crate::gui::state_management::AppEvent::BroadcasterChannelIdUpdated(
+                            Some(broadcaster_id.clone())
+                        )
+                    );
+                }
+
                 let mut inner_tube_guard = self.inner_tube.lock().await;
                 *inner_tube_guard = Some(inner_tube);
                 drop(inner_tube_guard);

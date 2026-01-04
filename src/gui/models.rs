@@ -1118,6 +1118,45 @@ impl ActiveTab {
     }
 }
 
+/// 選択された視聴者情報（右ペインに表示）
+#[derive(Debug, Clone, PartialEq)]
+pub struct SelectedViewer {
+    /// 配信者のYouTubeチャンネルID
+    pub broadcaster_channel_id: String,
+    /// 視聴者のYouTubeチャンネルID
+    pub viewer_channel_id: String,
+    /// 視聴者の表示名
+    pub display_name: String,
+    /// クリックされたメッセージ
+    pub message: GuiChatMessage,
+    /// DBから取得したカスタム情報
+    pub custom_info: Option<crate::database::ViewerCustomInfo>,
+}
+
+impl SelectedViewer {
+    /// 新しいSelectedViewerを作成
+    pub fn new(
+        broadcaster_channel_id: String,
+        viewer_channel_id: String,
+        display_name: String,
+        message: GuiChatMessage,
+        custom_info: Option<crate::database::ViewerCustomInfo>,
+    ) -> Self {
+        Self {
+            broadcaster_channel_id,
+            viewer_channel_id,
+            display_name,
+            message,
+            custom_info,
+        }
+    }
+
+    /// 読み仮名を取得（custom_infoから）
+    pub fn reading(&self) -> Option<&str> {
+        self.custom_info.as_ref().and_then(|info| info.reading.as_deref())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

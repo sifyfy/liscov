@@ -309,6 +309,61 @@ fn extract_hl(html: &str) -> Option<String> {
         .map(|m| m.as_str().to_string())
 }
 
+/// 配信者のチャンネルIDをHTMLから抽出
+///
+/// YouTubeのHTMLから配信者（動画の所有者）のチャンネルIDを抽出する。
+/// チャンネルIDは以下の場所に存在する可能性がある:
+/// - ytInitialPlayerResponse.videoDetails.channelId
+/// - browseEndpoint.browseId (UC prefix)
+/// - videoOwnerRenderer.navigationEndpoint
+///
+/// # Arguments
+/// * `html` - YouTubeページのHTML
+///
+/// # Returns
+/// * `Some(String)` - チャンネルID (UC で始まる24文字の文字列)
+/// * `None` - チャンネルIDが見つからない場合
+pub fn extract_broadcaster_channel_id(html: &str) -> Option<String> {
+    // 優先度1: videoDetails.channelId (最も信頼性が高い)
+    // パターン: "channelId":"UCxxxxxxxxxx..."
+    if let Some(cap) = Regex::new(r#""channelId"\s*:\s*"(UC[a-zA-Z0-9_-]{22})""#)
+        .ok()?
+        .captures(html)
+    {
+        if let Some(m) = cap.get(1) {
+            tracing::debug!("Broadcaster channel ID found via channelId: {}", m.as_str());
+            return Some(m.as_str().to_string());
+        }
+    }
+
+    // 優先度2: externalChannelId (ytInitialData内)
+    // パターン: "externalChannelId":"UCxxxxxxxxxx..."
+    if let Some(cap) = Regex::new(r#""externalChannelId"\s*:\s*"(UC[a-zA-Z0-9_-]{22})""#)
+        .ok()?
+        .captures(html)
+    {
+        if let Some(m) = cap.get(1) {
+            tracing::debug!("Broadcaster channel ID found via externalChannelId: {}", m.as_str());
+            return Some(m.as_str().to_string());
+        }
+    }
+
+    // 優先度3: browseEndpoint.browseId (チャンネルページへのリンク)
+    // パターン: "browseId":"UCxxxxxxxxxx..."
+    if let Some(cap) = Regex::new(r#""browseId"\s*:\s*"(UC[a-zA-Z0-9_-]{22})""#)
+        .ok()?
+        .captures(html)
+    {
+        if let Some(m) = cap.get(1) {
+            tracing::debug!("Broadcaster channel ID found via browseId: {}", m.as_str());
+            return Some(m.as_str().to_string());
+        }
+    }
+
+    tracing::debug!("Broadcaster channel ID not found in HTML");
+    None
+}
+
 fn extract_gl(html: &str) -> Option<String> {
     Regex::new(r#"['"]gl['"]:\s*['"](.+?)['"]"#)
         .unwrap()
@@ -746,5 +801,73 @@ mod tests {
         assert!(continuations.all_chat.is_some(), "AllChat token should be extracted from real YouTube HTML");
         assert_eq!(continuations.top_chat.unwrap().0, "op2w0wQOGgBAAXIICAQYACAAKAE%3D");
         assert_eq!(continuations.all_chat.unwrap().0, "op2w0wQOGgBAAXIICAEYACAAKAE%3D");
+    }
+
+    // ========================================
+    // 配信者チャンネルID抽出のテスト
+    // ========================================
+
+    #[test]
+    fn test_extract_broadcaster_channel_id_from_channel_id() {
+        // videoDetails.channelId パターン
+        let html = r#"{"videoDetails":{"videoId":"abc123","channelId":"UCabcdefghij1234567890AB","title":"Test Stream"}}"#;
+        let result = extract_broadcaster_channel_id(html);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), "UCabcdefghij1234567890AB");
+    }
+
+    #[test]
+    fn test_extract_broadcaster_channel_id_from_external_channel_id() {
+        // externalChannelId パターン (UC + 22文字 = 24文字)
+        let html = r#"{"externalChannelId":"UCexternal_channel123456"}"#;
+        let result = extract_broadcaster_channel_id(html);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), "UCexternal_channel123456");
+    }
+
+    #[test]
+    fn test_extract_broadcaster_channel_id_from_browse_id() {
+        // browseId パターン (UC + 22文字 = 24文字)
+        let html = r#"{"browseEndpoint":{"browseId":"UCbrowse_endpoint_id1234"}}"#;
+        let result = extract_broadcaster_channel_id(html);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), "UCbrowse_endpoint_id1234");
+    }
+
+    #[test]
+    fn test_extract_broadcaster_channel_id_priority() {
+        // 複数パターンがある場合、channelIdが優先される (UC + 22文字 = 24文字)
+        let html = r#"{"channelId":"UCpriority_first_chan001","externalChannelId":"UCsecond_priority_cha02","browseId":"UCthird_priority_chan03"}"#;
+        let result = extract_broadcaster_channel_id(html);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), "UCpriority_first_chan001");
+    }
+
+    #[test]
+    fn test_extract_broadcaster_channel_id_not_found() {
+        let html = r#"<html><body>No channel ID here</body></html>"#;
+        let result = extract_broadcaster_channel_id(html);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_extract_broadcaster_channel_id_invalid_format() {
+        // UCで始まらない、または長さが不正
+        let html = r#"{"channelId":"NOT_UC_prefix_12345678901"}"#;
+        let result = extract_broadcaster_channel_id(html);
+        assert!(result.is_none());
+
+        let html_short = r#"{"channelId":"UCtooshort"}"#;
+        let result_short = extract_broadcaster_channel_id(html_short);
+        assert!(result_short.is_none());
+    }
+
+    #[test]
+    fn test_extract_broadcaster_channel_id_with_special_chars() {
+        // ハイフンとアンダースコアを含むチャンネルID (UC + 22文字 = 24文字)
+        let html = r#"{"channelId":"UC_special-chars_id-1234"}"#;
+        let result = extract_broadcaster_channel_id(html);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), "UC_special-chars_id-1234");
     }
 }

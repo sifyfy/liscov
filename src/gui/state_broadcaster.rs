@@ -55,6 +55,9 @@ pub enum StateChange {
 
     /// 現在のURLが更新された
     CurrentUrlUpdated(Option<String>),
+
+    /// 配信者チャンネルIDが更新された
+    BroadcasterChannelIdUpdated(Option<String>),
 }
 
 /// 状態変更のブロードキャスター

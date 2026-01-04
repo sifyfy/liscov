@@ -91,6 +91,20 @@ CREATE TABLE IF NOT EXISTS contributor_stats (
     UNIQUE(session_id, channel_id)
 );
 
+-- 視聴者カスタム情報テーブル：配信者チャンネル単位での視聴者情報を管理
+-- 読み仮名など、配信者ごとにカスタマイズ可能な視聴者情報を保存
+CREATE TABLE IF NOT EXISTS viewer_custom_info (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    broadcaster_channel_id TEXT NOT NULL,  -- 配信者のYouTubeチャンネルID
+    viewer_channel_id TEXT NOT NULL,       -- 視聴者のYouTubeチャンネルID
+    reading TEXT,                          -- 視聴者名の読み仮名
+    notes TEXT,                            -- メモ（将来の拡張用）
+    custom_data TEXT,                      -- JSON形式でカスタムデータを保存（将来の拡張用）
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(broadcaster_channel_id, viewer_channel_id)
+);
+
 -- インデックス作成：パフォーマンス向上のため
 CREATE INDEX IF NOT EXISTS idx_messages_session_timestamp ON messages(session_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_messages_channel_id ON messages(channel_id);
@@ -99,6 +113,8 @@ CREATE INDEX IF NOT EXISTS idx_questions_session ON questions(session_id);
 CREATE INDEX IF NOT EXISTS idx_questions_category ON questions(category);
 CREATE INDEX IF NOT EXISTS idx_hourly_revenue_session ON hourly_revenue(session_id);
 CREATE INDEX IF NOT EXISTS idx_contributor_stats_session ON contributor_stats(session_id);
+CREATE INDEX IF NOT EXISTS idx_viewer_custom_info_lookup ON viewer_custom_info(broadcaster_channel_id, viewer_channel_id);
+CREATE INDEX IF NOT EXISTS idx_viewer_custom_info_broadcaster ON viewer_custom_info(broadcaster_channel_id);
 
 -- トリガー：updated_atの自動更新
 CREATE TRIGGER IF NOT EXISTS update_sessions_timestamp 
@@ -113,8 +129,14 @@ CREATE TRIGGER IF NOT EXISTS update_viewer_profiles_timestamp
         UPDATE viewer_profiles SET updated_at = CURRENT_TIMESTAMP WHERE channel_id = NEW.channel_id;
     END;
 
-CREATE TRIGGER IF NOT EXISTS update_contributor_stats_timestamp 
+CREATE TRIGGER IF NOT EXISTS update_contributor_stats_timestamp
     AFTER UPDATE ON contributor_stats
     BEGIN
         UPDATE contributor_stats SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+    END;
+
+CREATE TRIGGER IF NOT EXISTS update_viewer_custom_info_timestamp
+    AFTER UPDATE ON viewer_custom_info
+    BEGIN
+        UPDATE viewer_custom_info SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
     END; 

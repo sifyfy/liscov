@@ -40,6 +40,8 @@ pub struct InnerTube {
     pub chat_mode: ChatMode,
     /// 認証情報（メンバー限定配信用）
     pub auth_cookies: Option<YouTubeCookies>,
+    /// 配信者のYouTubeチャンネルID
+    pub broadcaster_channel_id: Option<String>,
 }
 
 impl InnerTube {
@@ -62,6 +64,7 @@ impl InnerTube {
             chat_continuations: None,
             chat_mode: ChatMode::default(),
             auth_cookies: None,
+            broadcaster_channel_id: None,
         }
     }
 
@@ -314,6 +317,39 @@ pub async fn fetch_live_chat_page_with_auth(
     // URLからビデオIDを抽出
     let video_id_from_url = crate::gui::utils::extract_video_id(url);
 
+    // 認証がある場合、まず動画ページから配信者チャンネルIDを取得
+    let mut broadcaster_channel_id_prefetch: Option<String> = None;
+    if cookies.is_some() {
+        if let Some(ref vid) = video_id_from_url {
+            let video_page_url = format!("https://www.youtube.com/watch?v={}", vid);
+            tracing::info!("📺 Pre-fetching video page to get broadcaster channel ID: {}", video_page_url);
+
+            match client
+                .get(&video_page_url)
+                .header(
+                    "User-Agent",
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                )
+                .send()
+                .await
+            {
+                Ok(response) => {
+                    if let Ok(video_html) = response.text().await {
+                        broadcaster_channel_id_prefetch = crate::api::youtube::extract_broadcaster_channel_id(&video_html);
+                        if let Some(ref id) = broadcaster_channel_id_prefetch {
+                            tracing::info!("📺 Pre-fetched broadcaster channel ID: {}", id);
+                        } else {
+                            tracing::warn!("⚠️ Could not extract broadcaster channel ID from video page");
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("⚠️ Failed to pre-fetch video page for broadcaster ID: {}", e);
+                }
+            }
+        }
+    }
+
     // live_chatページを直接取得するかどうかを決定
     let fetch_url = if let Some(ref vid) = video_id_from_url {
         // 認証がある場合はlive_chatポップアップページを直接取得
@@ -451,12 +487,27 @@ pub async fn fetch_live_chat_page_with_auth(
         None
     };
 
+    // 配信者チャンネルIDを抽出（事前取得したものを優先）
+    let broadcaster_channel_id = if broadcaster_channel_id_prefetch.is_some() {
+        tracing::info!("📺 Using pre-fetched broadcaster channel ID");
+        broadcaster_channel_id_prefetch
+    } else {
+        let extracted = crate::api::youtube::extract_broadcaster_channel_id(&html);
+        if let Some(ref id) = extracted {
+            tracing::info!("📺 Extracted broadcaster channel ID from chat page: {}", id);
+        } else {
+            tracing::warn!("⚠️ Could not extract broadcaster channel ID from HTML");
+        }
+        extracted
+    };
+
     let mut inner_tube =
         InnerTube::new(video_id, api_key, client_version, ClientId("1".to_string()));
 
     // メインcontinuation tokenを設定
     inner_tube.continuation = main_continuation;
     inner_tube.chat_continuations = chat_continuations_option;
+    inner_tube.broadcaster_channel_id = broadcaster_channel_id;
 
     // トークンから現在のモードを検出
     let detected_mode = inner_tube.detect_current_mode().unwrap_or(ChatMode::TopChat);

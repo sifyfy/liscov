@@ -4,7 +4,8 @@ use rusqlite::{params, Row};
 use serde_json;
 use uuid::Uuid;
 
-use super::{LiscovDatabase, Question, Session, ViewerProfile};
+use super::{LiscovDatabase, Question, Session, ViewerCustomInfo, ViewerProfile};
+use std::collections::HashMap;
 use crate::gui::models::GuiChatMessage;
 
 impl LiscovDatabase {
@@ -468,6 +469,226 @@ impl LiscovDatabase {
             notes: row.get("notes")?,
         })
     }
+
+    // ========================================
+    // 視聴者カスタム情報 CRUD操作
+    // ========================================
+
+    /// 視聴者カスタム情報を取得
+    ///
+    /// 配信者チャンネルIDと視聴者チャンネルIDで一意に特定される情報を取得する。
+    pub fn get_viewer_custom_info(
+        &self,
+        broadcaster_channel_id: &str,
+        viewer_channel_id: &str,
+    ) -> Result<Option<ViewerCustomInfo>> {
+        let mut stmt = self.connection.prepare(
+            "SELECT id, broadcaster_channel_id, viewer_channel_id, reading, notes, custom_data, created_at, updated_at
+             FROM viewer_custom_info
+             WHERE broadcaster_channel_id = ?1 AND viewer_channel_id = ?2",
+        )?;
+
+        let result = stmt.query_row(
+            params![broadcaster_channel_id, viewer_channel_id],
+            |row| {
+                Ok(ViewerCustomInfo {
+                    id: Some(row.get("id")?),
+                    broadcaster_channel_id: row.get("broadcaster_channel_id")?,
+                    viewer_channel_id: row.get("viewer_channel_id")?,
+                    reading: row.get("reading")?,
+                    notes: row.get("notes")?,
+                    custom_data: row.get("custom_data")?,
+                    created_at: row.get("created_at")?,
+                    updated_at: row.get("updated_at")?,
+                })
+            },
+        );
+
+        match result {
+            Ok(info) => Ok(Some(info)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// 視聴者カスタム情報を作成または更新（Upsert）
+    ///
+    /// 既存のレコードがあれば更新し、なければ新規作成する。
+    pub fn upsert_viewer_custom_info(&mut self, info: &ViewerCustomInfo) -> Result<i64> {
+        self.connection.execute(
+            "INSERT INTO viewer_custom_info
+             (broadcaster_channel_id, viewer_channel_id, reading, notes, custom_data)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(broadcaster_channel_id, viewer_channel_id) DO UPDATE SET
+             reading = excluded.reading,
+             notes = excluded.notes,
+             custom_data = excluded.custom_data",
+            params![
+                info.broadcaster_channel_id,
+                info.viewer_channel_id,
+                info.reading,
+                info.notes,
+                info.custom_data,
+            ],
+        )?;
+
+        Ok(self.connection.last_insert_rowid())
+    }
+
+    /// 配信者チャンネルに紐づくすべての視聴者カスタム情報を取得
+    ///
+    /// 配信接続時にキャッシュをプリロードするために使用する。
+    /// キーは視聴者チャンネルID。
+    pub fn get_all_viewer_custom_info_for_broadcaster(
+        &self,
+        broadcaster_channel_id: &str,
+    ) -> Result<HashMap<String, ViewerCustomInfo>> {
+        let mut stmt = self.connection.prepare(
+            "SELECT id, broadcaster_channel_id, viewer_channel_id, reading, notes, custom_data, created_at, updated_at
+             FROM viewer_custom_info
+             WHERE broadcaster_channel_id = ?1",
+        )?;
+
+        let rows = stmt.query_map(params![broadcaster_channel_id], |row| {
+            Ok(ViewerCustomInfo {
+                id: Some(row.get("id")?),
+                broadcaster_channel_id: row.get("broadcaster_channel_id")?,
+                viewer_channel_id: row.get("viewer_channel_id")?,
+                reading: row.get("reading")?,
+                notes: row.get("notes")?,
+                custom_data: row.get("custom_data")?,
+                created_at: row.get("created_at")?,
+                updated_at: row.get("updated_at")?,
+            })
+        })?;
+
+        let mut result = HashMap::new();
+        for row in rows {
+            let info = row?;
+            result.insert(info.viewer_channel_id.clone(), info);
+        }
+
+        Ok(result)
+    }
+
+    /// 視聴者カスタム情報を削除
+    pub fn delete_viewer_custom_info(
+        &mut self,
+        broadcaster_channel_id: &str,
+        viewer_channel_id: &str,
+    ) -> Result<bool> {
+        let affected = self.connection.execute(
+            "DELETE FROM viewer_custom_info WHERE broadcaster_channel_id = ?1 AND viewer_channel_id = ?2",
+            params![broadcaster_channel_id, viewer_channel_id],
+        )?;
+
+        Ok(affected > 0)
+    }
+}
+
+// ============================================================================
+// スタンドアロン関数（rusqlite::Connectionを直接受け取る）
+// use_live_chat.rs などからの呼び出し用
+// ============================================================================
+
+/// 視聴者カスタム情報を取得（スタンドアロン版）
+pub fn get_viewer_custom_info(
+    conn: &rusqlite::Connection,
+    broadcaster_channel_id: &str,
+    viewer_channel_id: &str,
+) -> Result<Option<ViewerCustomInfo>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, broadcaster_channel_id, viewer_channel_id, reading, notes, custom_data, created_at, updated_at
+         FROM viewer_custom_info
+         WHERE broadcaster_channel_id = ?1 AND viewer_channel_id = ?2",
+    )?;
+
+    let result = stmt.query_row(params![broadcaster_channel_id, viewer_channel_id], |row| {
+        Ok(ViewerCustomInfo {
+            id: Some(row.get(0)?),
+            broadcaster_channel_id: row.get(1)?,
+            viewer_channel_id: row.get(2)?,
+            reading: row.get(3)?,
+            notes: row.get(4)?,
+            custom_data: row.get(5)?,
+            created_at: row.get(6)?,
+            updated_at: row.get(7)?,
+        })
+    });
+
+    match result {
+        Ok(info) => Ok(Some(info)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// 視聴者カスタム情報を保存または更新（スタンドアロン版）
+pub fn upsert_viewer_custom_info(conn: &rusqlite::Connection, info: &ViewerCustomInfo) -> Result<i64> {
+    conn.execute(
+        "INSERT INTO viewer_custom_info (broadcaster_channel_id, viewer_channel_id, reading, notes, custom_data)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(broadcaster_channel_id, viewer_channel_id) DO UPDATE SET
+             reading = excluded.reading,
+             notes = excluded.notes,
+             custom_data = excluded.custom_data",
+        params![
+            info.broadcaster_channel_id,
+            info.viewer_channel_id,
+            info.reading,
+            info.notes,
+            info.custom_data,
+        ],
+    )?;
+
+    Ok(conn.last_insert_rowid())
+}
+
+/// 指定した配信者の全視聴者カスタム情報を取得（スタンドアロン版）
+pub fn get_all_viewer_custom_info_for_broadcaster(
+    conn: &rusqlite::Connection,
+    broadcaster_channel_id: &str,
+) -> Result<HashMap<String, ViewerCustomInfo>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, broadcaster_channel_id, viewer_channel_id, reading, notes, custom_data, created_at, updated_at
+         FROM viewer_custom_info
+         WHERE broadcaster_channel_id = ?1",
+    )?;
+
+    let rows = stmt.query_map(params![broadcaster_channel_id], |row| {
+        Ok(ViewerCustomInfo {
+            id: Some(row.get(0)?),
+            broadcaster_channel_id: row.get(1)?,
+            viewer_channel_id: row.get(2)?,
+            reading: row.get(3)?,
+            notes: row.get(4)?,
+            custom_data: row.get(5)?,
+            created_at: row.get(6)?,
+            updated_at: row.get(7)?,
+        })
+    })?;
+
+    let mut result = HashMap::new();
+    for row in rows {
+        let info = row?;
+        result.insert(info.viewer_channel_id.clone(), info);
+    }
+
+    Ok(result)
+}
+
+/// 視聴者カスタム情報を削除（スタンドアロン版）
+pub fn delete_viewer_custom_info(
+    conn: &rusqlite::Connection,
+    broadcaster_channel_id: &str,
+    viewer_channel_id: &str,
+) -> Result<bool> {
+    let affected = conn.execute(
+        "DELETE FROM viewer_custom_info WHERE broadcaster_channel_id = ?1 AND viewer_channel_id = ?2",
+        params![broadcaster_channel_id, viewer_channel_id],
+    )?;
+
+    Ok(affected > 0)
 }
 
 #[cfg(test)]
@@ -875,6 +1096,169 @@ mod tests {
         let db_guard = db_mutex.lock().unwrap();
         let all_messages = db_guard.get_session_messages(&session_id, None)?;
         assert_eq!(all_messages.len(), 20);
+
+        Ok(())
+    }
+
+    // ========================================
+    // 視聴者カスタム情報のテスト
+    // ========================================
+
+    #[test]
+    fn test_viewer_custom_info_create_and_read() -> Result<()> {
+        let mut db = LiscovDatabase::new_in_memory()?;
+
+        let broadcaster_id = "UC_broadcaster_123";
+        let viewer_id = "UC_viewer_456";
+
+        // 新規作成
+        let info = ViewerCustomInfo::new(broadcaster_id.to_string(), viewer_id.to_string())
+            .with_reading("やまだたろう");
+
+        db.upsert_viewer_custom_info(&info)?;
+
+        // 読み取り
+        let retrieved = db
+            .get_viewer_custom_info(broadcaster_id, viewer_id)?
+            .expect("情報が存在するはず");
+
+        assert_eq!(retrieved.broadcaster_channel_id, broadcaster_id);
+        assert_eq!(retrieved.viewer_channel_id, viewer_id);
+        assert_eq!(retrieved.reading, Some("やまだたろう".to_string()));
+        assert!(retrieved.id.is_some());
+        assert!(retrieved.created_at.is_some());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_viewer_custom_info_upsert() -> Result<()> {
+        let mut db = LiscovDatabase::new_in_memory()?;
+
+        let broadcaster_id = "UC_broadcaster_upsert";
+        let viewer_id = "UC_viewer_upsert";
+
+        // 最初の作成
+        let info1 = ViewerCustomInfo::new(broadcaster_id.to_string(), viewer_id.to_string())
+            .with_reading("最初の読み");
+
+        db.upsert_viewer_custom_info(&info1)?;
+
+        // 更新（Upsert）
+        let info2 = ViewerCustomInfo::new(broadcaster_id.to_string(), viewer_id.to_string())
+            .with_reading("更新後の読み")
+            .with_notes("メモ追加");
+
+        db.upsert_viewer_custom_info(&info2)?;
+
+        // 確認
+        let retrieved = db
+            .get_viewer_custom_info(broadcaster_id, viewer_id)?
+            .expect("情報が存在するはず");
+
+        assert_eq!(retrieved.reading, Some("更新後の読み".to_string()));
+        assert_eq!(retrieved.notes, Some("メモ追加".to_string()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_viewer_custom_info_isolation_by_broadcaster() -> Result<()> {
+        let mut db = LiscovDatabase::new_in_memory()?;
+
+        let broadcaster1 = "UC_broadcaster_A";
+        let broadcaster2 = "UC_broadcaster_B";
+        let viewer = "UC_common_viewer";
+
+        // 同じ視聴者に対して異なる配信者で異なる読みを設定
+        let info1 = ViewerCustomInfo::new(broadcaster1.to_string(), viewer.to_string())
+            .with_reading("読みA");
+
+        let info2 = ViewerCustomInfo::new(broadcaster2.to_string(), viewer.to_string())
+            .with_reading("読みB");
+
+        db.upsert_viewer_custom_info(&info1)?;
+        db.upsert_viewer_custom_info(&info2)?;
+
+        // 配信者ごとに異なる読みが取得できることを確認
+        let from_a = db
+            .get_viewer_custom_info(broadcaster1, viewer)?
+            .expect("情報が存在するはず");
+        let from_b = db
+            .get_viewer_custom_info(broadcaster2, viewer)?
+            .expect("情報が存在するはず");
+
+        assert_eq!(from_a.reading, Some("読みA".to_string()));
+        assert_eq!(from_b.reading, Some("読みB".to_string()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_viewer_custom_info_bulk_read() -> Result<()> {
+        let mut db = LiscovDatabase::new_in_memory()?;
+
+        let broadcaster = "UC_broadcaster_bulk";
+
+        // 複数の視聴者情報を登録
+        for i in 0..5 {
+            let viewer = format!("UC_viewer_{}", i);
+            let reading = format!("よみがな{}", i);
+            let info =
+                ViewerCustomInfo::new(broadcaster.to_string(), viewer).with_reading(reading);
+            db.upsert_viewer_custom_info(&info)?;
+        }
+
+        // 一括取得
+        let all_info = db.get_all_viewer_custom_info_for_broadcaster(broadcaster)?;
+
+        assert_eq!(all_info.len(), 5);
+        assert!(all_info.contains_key("UC_viewer_0"));
+        assert!(all_info.contains_key("UC_viewer_4"));
+        assert_eq!(
+            all_info.get("UC_viewer_2").unwrap().reading,
+            Some("よみがな2".to_string())
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_viewer_custom_info_not_found() -> Result<()> {
+        let db = LiscovDatabase::new_in_memory()?;
+
+        let result = db.get_viewer_custom_info("nonexistent_broadcaster", "nonexistent_viewer")?;
+
+        assert!(result.is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_viewer_custom_info_delete() -> Result<()> {
+        let mut db = LiscovDatabase::new_in_memory()?;
+
+        let broadcaster = "UC_broadcaster_del";
+        let viewer = "UC_viewer_del";
+
+        // 作成
+        let info = ViewerCustomInfo::new(broadcaster.to_string(), viewer.to_string())
+            .with_reading("削除テスト");
+        db.upsert_viewer_custom_info(&info)?;
+
+        // 存在確認
+        assert!(db.get_viewer_custom_info(broadcaster, viewer)?.is_some());
+
+        // 削除
+        let deleted = db.delete_viewer_custom_info(broadcaster, viewer)?;
+        assert!(deleted);
+
+        // 削除確認
+        assert!(db.get_viewer_custom_info(broadcaster, viewer)?.is_none());
+
+        // 存在しないものを削除
+        let deleted_again = db.delete_viewer_custom_info(broadcaster, viewer)?;
+        assert!(!deleted_again);
 
         Ok(())
     }

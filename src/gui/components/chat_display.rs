@@ -1,7 +1,8 @@
 use crate::chat_management::MessageFilter;
-use crate::gui::components::{ChatHeader, FilterPanel};
+use crate::gui::components::{ChatHeader, FilterPanel, ViewerInfoPanel};
 use crate::gui::dom_controller::utils::create_chat_controller; // Phase 3.2
 use crate::gui::hooks::use_live_chat::LiveChatHandle;
+use crate::gui::models::SelectedViewer;
 use crate::gui::performance_monitor::{record_performance_event, PerformanceEventType}; // Phase 5.2
 use crate::gui::signal_optimizer::{process_batch_updates, queue_batch_update, BatchUpdateType}; // Phase 4.2
 use crate::gui::signal_optimizer::{record_signal_update, register_signal, SignalType}; // Phase 4.1
@@ -62,7 +63,6 @@ pub fn ChatDisplay(
     let synced_message_count = use_signal(|| 0usize);
 
     // 基本状態の初期化
-    let user_has_scrolled = use_signal(|| false);
     let mut show_filter_panel = use_signal(|| false);
     let last_message_count = use_signal(|| 0usize);
     let _last_effect_time = use_signal(|| std::time::Instant::now()); // 未使用
@@ -73,6 +73,10 @@ pub fn ChatDisplay(
     let mut search_type = use_signal(|| ArchiveSearchType::Content);
     let search_results = use_signal(|| Vec::<GuiChatMessage>::new());
     let is_searching = use_signal(|| false);
+
+    // 視聴者情報パネル用の状態
+    let mut selected_viewer = use_signal(|| None::<SelectedViewer>);
+    let mut show_viewer_panel = use_signal(|| false);
 
     // 最適化版：統合設定Signalで4回のAppStateアクセスを1回に削減
     let chat_config = use_memo(move || app_state.read().chat_display_config.clone());
@@ -279,11 +283,6 @@ pub fn ChatDisplay(
             "ChatDisplay",
         );
         register_signal(
-            "chat_user_has_scrolled",
-            SignalType::UserHasScrolled,
-            "ChatDisplay",
-        );
-        register_signal(
             "chat_show_filter_panel",
             SignalType::ShowFilterPanel,
             "ChatDisplay",
@@ -339,7 +338,8 @@ pub fn ChatDisplay(
             );
 
             // Phase 4.2: 新着メッセージ時のBatch処理スクロール
-            if auto_scroll_enabled() && !*user_has_scrolled.read() {
+            // auto_scroll_enabled のみで制御（user_has_scrolled はボタン表示用）
+            if auto_scroll_enabled() {
                 queue_batch_update("chat_scroll", BatchUpdateType::DomUpdate);
 
                 spawn(async move {
@@ -365,9 +365,9 @@ pub fn ChatDisplay(
     });
 
     // Phase 3.2: DOM操作（DomController版）
+    // スクロール位置監視はonscrollイベントで実施（eval recvが機能しないため）
     use_effect({
         let auto_scroll_enabled = auto_scroll_enabled.clone();
-        let user_has_scrolled = user_has_scrolled.clone();
 
         move || {
             spawn(async move {
@@ -381,13 +381,21 @@ pub fn ChatDisplay(
                     return;
                 }
 
+                // グローバル変数を初期化
+                let init_js = r#"
+                    window.liscovScrollDistance = 0;
+                    window.liscovIsFarFromBottom = false;
+                "#;
+                let _ = document::eval(init_js);
+
                 tracing::info!("🎮 [DOM] Phase 3.2 Controller ready");
 
-                // 定期的な自動スクロール（高精度）
+                // 定期的な自動スクロール
                 loop {
                     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
-                    if auto_scroll_enabled() && !*user_has_scrolled.read() {
+                    // 自動スクロール（auto_scroll_enabled のみで制御）
+                    if auto_scroll_enabled() {
                         // Phase 3.2: 高精度自動スクロール
                         if let Err(e) = controller.scroll_to_bottom(false).await {
                             tracing::debug!("📜 [DOM] Auto-scroll skipped: {}", e);
@@ -489,40 +497,34 @@ pub fn ChatDisplay(
                         }
                     }
 
-                    // 最新に戻るボタン
-                    if *user_has_scrolled.read() {
-                        button {
-                            class: "px-2 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-xs ml-1",
-                            style: "font-size: 11px; min-height: 26px;",
-                            onclick: {
-                                let mut user_has_scrolled = user_has_scrolled.clone();
-                            let optimized_handler = create_optimized_handler("chat_user_has_scrolled");
-                                move |_| {
-                                    user_has_scrolled.set(false);
+                    // 最新に戻るボタン（常に表示）
+                    button {
+                        class: "px-2 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-xs ml-1",
+                        style: "font-size: 11px; min-height: 26px;",
+                        onclick: {
+                            let mut app_state = app_state.clone();
+                            move |_| {
+                                // 自動スクロールをONにして最新にスクロール
+                                app_state.with_mut(|state| {
+                                    state.chat_display_config.auto_scroll_enabled = true;
+                                });
 
-                                    // Phase 4.1: Signal更新記録
-                                    record_signal_update("chat_user_has_scrolled");
+                                // Phase 4.1: Signal更新記録
+                                record_signal_update("chat_auto_scroll_enabled");
 
-                                    // Phase 4.2: スクロール状態更新をBatch処理
-                                    queue_batch_update("chat_user_has_scrolled", BatchUpdateType::HighPriority);
+                                // Phase 4.2: スクロール状態更新をBatch処理
+                                queue_batch_update("chat_auto_scroll_enabled", BatchUpdateType::HighPriority);
 
-                                // Phase 4.3: 最適化されたハンドラー実行
-                                optimized_handler();
-
-                                    spawn(async move {
-                                        // Phase 3.2: DomController使用
-                                        let controller = create_chat_controller("liscov-message-list");
-                                        if let Err(e) = controller.reset_user_scroll().await {
-                                            tracing::warn!("🔄 [DOM] Reset scroll failed: {}", e);
-                                        }
-                                        if let Err(e) = controller.scroll_to_bottom(true).await {
-                                            tracing::warn!("📜 [DOM] Force scroll failed: {}", e);
-                                        }
-                                    });
-                                }
-                            },
-                            "📍 最新に戻る"
-                        }
+                                spawn(async move {
+                                    // Phase 3.2: DomController使用
+                                    let controller = create_chat_controller("liscov-message-list");
+                                    if let Err(e) = controller.scroll_to_bottom(true).await {
+                                        tracing::warn!("📜 [DOM] Force scroll failed: {}", e);
+                                    }
+                                });
+                            }
+                        },
+                        "📍 最新に戻る"
                     }
 
                     // 自動スクロール切り替え
@@ -1028,9 +1030,31 @@ pub fn ChatDisplay(
                         // テキスト色（YouTubeの色があればそれを使用、なければデフォルト黒）
                         let content_text_color = text_color.unwrap_or_else(|| "#1a202c".to_string());
 
+                        // メッセージクリック時のハンドラを作成
+                        let msg_for_click = message.clone();
+                        let live_chat_handle_click = live_chat_handle.clone();
+
+                        // 選択中のメッセージかどうかを判定
+                        let is_selected = selected_viewer
+                            .read()
+                            .as_ref()
+                            .map(|v| v.message.id == message.id)
+                            .unwrap_or(false);
+
+                        // 選択中の場合は枠線を追加
+                        let selected_style = if is_selected {
+                            "border: 2px solid #5865f2; box-shadow: 0 0 8px rgba(88, 101, 242, 0.5);"
+                        } else {
+                            "border: 2px solid transparent; box-shadow: none;"
+                        };
+
+                        // スクロール用のメッセージID
+                        let message_id_attr = message.id.clone();
+
                         rsx! {
                             div {
                                 key: "{message.timestamp}-{message.author}",
+                                "data-message-id": "{message_id_attr}",
                                 class: {
                                     let type_class = message.message_type.as_string();
                                     let mut classes = vec![CssClasses::CHAT_MESSAGE];
@@ -1044,7 +1068,32 @@ pub fn ChatDisplay(
                                     margin-bottom: 4px;
                                     border-radius: 4px;
                                     overflow: hidden;
+                                    cursor: pointer;
+                                    {selected_style}
                                 ",
+                                onclick: move |_| {
+                                    // 配信者チャンネルIDを取得
+                                    let broadcaster_id = live_chat_handle_click.get_broadcaster_channel_id()
+                                        .unwrap_or_else(|| "unknown".to_string());
+
+                                    // 視聴者のカスタム情報をキャッシュから取得
+                                    let custom_info = live_chat_handle_click.viewer_info_cache
+                                        .read()
+                                        .get(&msg_for_click.channel_id)
+                                        .cloned();
+
+                                    // 選択された視聴者情報を設定
+                                    let viewer = SelectedViewer::new(
+                                        broadcaster_id,
+                                        msg_for_click.channel_id.clone(),
+                                        msg_for_click.author.clone(),
+                                        msg_for_click.clone(),
+                                        custom_info,
+                                    );
+
+                                    selected_viewer.set(Some(viewer));
+                                    show_viewer_panel.set(true);
+                                },
 
                                 // 特殊メッセージタイプのヘッダー行
                                 if is_special_message {
@@ -1108,6 +1157,18 @@ pub fn ChatDisplay(
                                             "
                                         },
                                         "{message.author}"
+                                    }
+
+                                    // 読み仮名（登録されている場合）
+                                    if let Some(reading) = live_chat_handle.get_viewer_reading(&message.channel_id) {
+                                        span {
+                                            style: "
+                                                color: #6b7280;
+                                                font-size: 11px;
+                                                white-space: nowrap;
+                                            ",
+                                            "({reading})"
+                                        }
                                     }
 
                                     // バッジ表示（メンバーバッジ、スタンプ等）
@@ -1204,6 +1265,74 @@ pub fn ChatDisplay(
                                     "{message.content}"
                                 }
                             }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 視聴者情報パネル（選択されている場合のみ表示）
+        if *show_viewer_panel.read() {
+            if let Some(viewer) = selected_viewer.read().as_ref() {
+                {
+                    // コメント選択時のハンドラ用にクローン
+                    let live_chat_handle_for_panel = live_chat_handle.clone();
+                    let viewer_clone = viewer.clone();
+
+                    // 自動スクロール設定更新用
+                    let mut app_state_for_panel = app_state.clone();
+
+                    rsx! {
+                        ViewerInfoPanel {
+                            selected_viewer: viewer_clone,
+                            on_close: move |_| {
+                                // パネルを閉じるが、選択状態は維持（最後にクリックしたコメントが分かるように）
+                                show_viewer_panel.set(false);
+                            },
+                            live_chat_handle: live_chat_handle.clone(),
+                            on_message_select: Some(EventHandler::new(move |message: GuiChatMessage| {
+                                // 自動スクロールを無効化
+                                app_state_for_panel.with_mut(|state| {
+                                    state.chat_display_config.auto_scroll_enabled = false;
+                                });
+
+                                // 配信者チャンネルIDを取得
+                                let broadcaster_id = live_chat_handle_for_panel.get_broadcaster_channel_id()
+                                    .unwrap_or_else(|| "unknown".to_string());
+
+                                // 視聴者のカスタム情報をキャッシュから取得
+                                let custom_info = live_chat_handle_for_panel.viewer_info_cache
+                                    .read()
+                                    .get(&message.channel_id)
+                                    .cloned();
+
+                                // 選択された視聴者情報を更新
+                                let new_viewer = SelectedViewer::new(
+                                    broadcaster_id,
+                                    message.channel_id.clone(),
+                                    message.author.clone(),
+                                    message.clone(),
+                                    custom_info,
+                                );
+                                selected_viewer.set(Some(new_viewer));
+
+                                // JavaScriptでメッセージまでスクロール
+                                let message_id = message.id.clone();
+                                spawn(async move {
+                                    let js = format!(
+                                        r#"
+                                        (function() {{
+                                            const el = document.querySelector('[data-message-id="{}"]');
+                                            if (el) {{
+                                                el.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
+                                            }}
+                                        }})();
+                                        "#,
+                                        message_id
+                                    );
+                                    let _ = document::eval(&js).await;
+                                });
+                            })),
                         }
                     }
                 }

@@ -31,6 +31,8 @@ pub enum AppEvent {
     CurrentUrlUpdated(Option<String>),
     /// 保存設定が更新された
     UpdateSaveConfig(SaveConfig),
+    /// 配信者チャンネルIDが更新された
+    BroadcasterChannelIdUpdated(Option<String>),
 }
 
 /// チャット統計情報
@@ -474,6 +476,17 @@ impl StateManager {
                     service_clone.lock().await.update_save_config(config).await;
                 });
                 // 注意: SaveConfig変更はブロードキャストしない（サービス内部の処理のため）
+            }
+
+            AppEvent::BroadcasterChannelIdUpdated(broadcaster_id) => {
+                if let Some(ref id) = broadcaster_id {
+                    tracing::info!("📺 Broadcaster channel ID updated: {}", id);
+                } else {
+                    tracing::info!("📺 Broadcaster channel ID cleared");
+                }
+
+                // ブロードキャスト: 配信者IDを通知
+                broadcaster.broadcast(StateChange::BroadcasterChannelIdUpdated(broadcaster_id));
             }
         }
     }

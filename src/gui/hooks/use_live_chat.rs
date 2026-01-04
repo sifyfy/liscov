@@ -3,9 +3,11 @@
 //! Phase 3実装: 既存LiveChatServiceとDioxusコンポーネントの統合
 
 use dioxus::prelude::*;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::api::youtube::ChatMode;
+use crate::database::ViewerCustomInfo;
 use crate::gui::{
     models::{GuiChatMessage, MessageType},
     services::{LiveChatService, ServiceState},
@@ -43,6 +45,10 @@ pub struct LiveChatHandle {
     pub is_stopping: Signal<bool>,
     /// 現在のチャットモード（トップチャット or すべてのチャット）
     pub chat_mode: Signal<ChatMode>,
+    /// 配信者のYouTubeチャンネルID（視聴者情報の分離に使用）
+    pub broadcaster_channel_id: Signal<Option<String>>,
+    /// 視聴者カスタム情報のキャッシュ（viewer_channel_id -> ViewerCustomInfo）
+    pub viewer_info_cache: Signal<HashMap<String, ViewerCustomInfo>>,
 }
 
 impl PartialEq for LiveChatHandle {
@@ -395,6 +401,90 @@ impl LiveChatHandle {
     pub fn get_chat_mode(&self) -> ChatMode {
         *self.chat_mode.read()
     }
+
+    /// 配信者チャンネルIDを設定し、視聴者情報キャッシュをロード
+    pub fn set_broadcaster_channel_id(&self, broadcaster_id: String) {
+        let mut broadcaster_channel_id = self.broadcaster_channel_id;
+        let mut viewer_info_cache = self.viewer_info_cache;
+
+        tracing::info!("📺 Setting broadcaster channel ID: {}", broadcaster_id);
+        broadcaster_channel_id.set(Some(broadcaster_id.clone()));
+
+        // DBからこの配信者の視聴者情報をロード
+        spawn(async move {
+            match crate::database::get_connection().await {
+                Ok(conn) => {
+                    match crate::database::get_all_viewer_custom_info_for_broadcaster(
+                        &conn,
+                        &broadcaster_id,
+                    ) {
+                        Ok(cache) => {
+                            tracing::info!(
+                                "📥 Loaded {} viewer info entries for broadcaster {}",
+                                cache.len(),
+                                broadcaster_id
+                            );
+                            viewer_info_cache.set(cache);
+                        }
+                        Err(e) => {
+                            tracing::error!("❌ Failed to load viewer info cache: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("❌ Failed to get DB connection: {}", e);
+                }
+            }
+        });
+    }
+
+    /// 視聴者の読み仮名を取得（キャッシュから）
+    pub fn get_viewer_reading(&self, viewer_channel_id: &str) -> Option<String> {
+        self.viewer_info_cache
+            .read()
+            .get(viewer_channel_id)
+            .and_then(|info| info.reading.clone())
+    }
+
+    /// 視聴者情報を更新（キャッシュとDB）
+    pub fn update_viewer_info(&self, info: ViewerCustomInfo) {
+        let mut viewer_info_cache = self.viewer_info_cache;
+        let viewer_channel_id = info.viewer_channel_id.clone();
+        let info_clone = info.clone();
+
+        // キャッシュを即時更新
+        viewer_info_cache.with_mut(|cache| {
+            cache.insert(viewer_channel_id.clone(), info.clone());
+        });
+
+        // DBに永続化（非同期）
+        spawn(async move {
+            match crate::database::get_connection().await {
+                Ok(conn) => {
+                    match crate::database::upsert_viewer_custom_info(&conn, &info_clone) {
+                        Ok(id) => {
+                            tracing::info!(
+                                "💾 Saved viewer info for {} (id: {})",
+                                viewer_channel_id,
+                                id
+                            );
+                        }
+                        Err(e) => {
+                            tracing::error!("❌ Failed to save viewer info: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("❌ Failed to get DB connection: {}", e);
+                }
+            }
+        });
+    }
+
+    /// 現在の配信者チャンネルIDを取得
+    pub fn get_broadcaster_channel_id(&self) -> Option<String> {
+        self.broadcaster_channel_id.read().clone()
+    }
 }
 
 /// LiveChatサービス用カスタムフック
@@ -452,6 +542,16 @@ pub fn use_live_chat() -> LiveChatHandle {
         ChatMode::default()
     });
 
+    // 視聴者情報管理用のSignal初期化
+    let broadcaster_channel_id = use_signal(|| {
+        tracing::debug!("📺 Initializing broadcaster_channel_id signal");
+        None::<String>
+    });
+    let viewer_info_cache = use_signal(|| {
+        tracing::debug!("📋 Initializing viewer_info_cache signal");
+        HashMap::<String, ViewerCustomInfo>::new()
+    });
+
     tracing::debug!("✅ All signals initialized (optimized)");
 
     // Phase 2.3: 最適化されたSignal管理システムを初期化
@@ -466,6 +566,8 @@ pub fn use_live_chat() -> LiveChatHandle {
         let mut is_connected_clone = is_connected;
         let mut stats_clone = stats;
         let mut is_stopping_clone = is_stopping;
+        let mut broadcaster_channel_id_clone = broadcaster_channel_id;
+        let mut viewer_info_cache_clone = viewer_info_cache;
 
         tracing::info!("🎯 [EVENT_SYNC] Event-driven sync initialized (no polling)");
 
@@ -570,6 +672,47 @@ pub fn use_live_chat() -> LiveChatHandle {
                                     event_count
                                 );
                             }
+
+                            StateChange::BroadcasterChannelIdUpdated(broadcaster_id) => {
+                                tracing::info!(
+                                    "📺 [EVENT_SYNC] BroadcasterChannelIdUpdated event #{}: {:?}",
+                                    event_count,
+                                    broadcaster_id
+                                );
+
+                                // シグナルを更新
+                                broadcaster_channel_id_clone.set(broadcaster_id.clone());
+
+                                // 配信者IDが設定された場合、視聴者情報キャッシュをDBからロード
+                                if let Some(ref id) = broadcaster_id {
+                                    let broadcaster_id_for_load = id.clone();
+                                    match crate::database::get_connection().await {
+                                        Ok(conn) => {
+                                            match crate::database::get_all_viewer_custom_info_for_broadcaster(
+                                                &conn,
+                                                &broadcaster_id_for_load,
+                                            ) {
+                                                Ok(cache) => {
+                                                    tracing::info!(
+                                                        "📥 [EVENT_SYNC] Loaded {} viewer info entries",
+                                                        cache.len()
+                                                    );
+                                                    viewer_info_cache_clone.set(cache);
+                                                }
+                                                Err(e) => {
+                                                    tracing::error!("❌ Failed to load viewer info cache: {}", e);
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            tracing::error!("❌ Failed to get DB connection: {}", e);
+                                        }
+                                    }
+                                } else {
+                                    // 配信者IDがクリアされた場合、キャッシュもクリア
+                                    viewer_info_cache_clone.set(HashMap::new());
+                                }
+                            }
                         }
 
                         // 100イベントごとのステータスログ
@@ -618,6 +761,8 @@ pub fn use_live_chat() -> LiveChatHandle {
         stats,
         is_stopping,
         chat_mode,
+        broadcaster_channel_id,
+        viewer_info_cache,
     }
 }
 
