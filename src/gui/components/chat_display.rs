@@ -10,7 +10,7 @@ use crate::gui::styles::theme::CssClasses;
 
 // Message streaming integration
 use crate::gui::message_stream::{DisplayLimit, MessageStream, MessageStreamConfig};
-use crate::gui::models::{get_currency_name_ja, GuiChatMessage, MessageType};
+use crate::gui::models::{get_currency_name_ja, GuiChatMessage, MessageRun, MessageType};
 
 // Phase 4.3: クロージャ最適化
 use crate::gui::closure_optimizer::{
@@ -1262,7 +1262,7 @@ pub fn ChatDisplay(
                                         font-size: {}px;
                                         {}
                                     ", content_text_color, message_font_size(), type_style),
-                                    "{message.content}"
+                                    {render_message_content(&message.runs, &message.content, message_font_size())}
                                 }
                             }
                         }
@@ -1503,6 +1503,47 @@ fn render_type_header_with_colors(
                         font-weight: 700;
                     ", badge_bg, badge_text_color, font_size),
                     "{text}"
+                }
+            }
+        }
+    }
+}
+
+/// メッセージコンテンツをレンダリング（テキストとスタンプ画像を混在表示）
+fn render_message_content(
+    runs: &[MessageRun],
+    content_fallback: &str,
+    font_size: u8,
+) -> Element {
+    let emoji_size = u32::from(font_size) + 4;
+    // runsが空の場合はcontent_fallbackを使用
+    if runs.is_empty() {
+        return rsx! {
+            span { "{content_fallback}" }
+        };
+    }
+
+    rsx! {
+        for (index, run) in runs.iter().enumerate() {
+            {
+                match run {
+                    MessageRun::Text { content } => rsx! {
+                        span { key: "text-{index}", "{content}" }
+                    },
+                    MessageRun::Emoji { image_url, alt_text, .. } => rsx! {
+                        img {
+                            key: "emoji-{index}",
+                            src: "{image_url}",
+                            alt: "{alt_text}",
+                            title: "{alt_text}",
+                            style: format!("
+                                height: {}px;
+                                width: auto;
+                                vertical-align: middle;
+                                margin: 0 2px;
+                            ", emoji_size),
+                        }
+                    },
                 }
             }
         }
