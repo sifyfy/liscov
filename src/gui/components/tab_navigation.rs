@@ -281,6 +281,9 @@ fn SettingsContent() -> Element {
             // メンバー限定配信認証
             crate::gui::components::auth_panel::AuthPanel {}
 
+            // TTS読み上げ設定
+            crate::gui::components::tts_settings::TtsSettings {}
+
             // チャット表示設定
             ChatDisplaySettings {}
 

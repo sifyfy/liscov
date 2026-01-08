@@ -8,6 +8,7 @@ pub mod models; // 既存のデータ構造は継続使用
 pub mod plugin_system; // プラグインアーキテクチャ
 pub mod plugins; // サンプルプラグイン
 pub mod services; // 既存のAPIサービスは継続使用
+pub mod tts_manager; // TTS読み上げマネージャー
 pub mod stream_end_detector; // 配信終了検出機能
 pub mod system_messages; // システムメッセージ生成機能
 pub mod traits; // トレイトベース設計

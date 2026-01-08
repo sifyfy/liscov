@@ -245,10 +245,14 @@ pub fn MainWindow() -> Element {
     // AppStateコンテキストを提供
     use_context_provider(|| app_state.clone());
 
-    // アプリケーション終了時に設定を自動保存
+    // アプリケーション終了時の処理
     use_drop(move || {
         let state = app_state.read().clone();
         tokio::spawn(async move {
+            // TTS終了処理
+            crate::gui::tts_manager::shutdown_tts().await;
+
+            // 設定を自動保存
             use crate::gui::config_manager::save_app_state_async;
             save_app_state_async(state);
             tracing::info!("💾 Configuration auto-saved on application exit");

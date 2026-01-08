@@ -14,6 +14,7 @@ pub mod revenue_dashboard;
 pub mod signal_analyzer; // Phase 4.1: Signal分析パネル
 pub mod status_panel;
 pub mod tab_navigation;
+pub mod tts_settings; // TTS読み上げ設定
 pub mod viewer_info_panel; // 視聴者情報管理パネル
 
 // Re-exports for convenience - 新アーキテクチャのみ

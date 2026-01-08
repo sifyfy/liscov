@@ -451,10 +451,18 @@ impl LiveChatHandle {
         let mut viewer_info_cache = self.viewer_info_cache;
         let viewer_channel_id = info.viewer_channel_id.clone();
         let info_clone = info.clone();
+        let info_for_tts = info.clone();
 
         // キャッシュを即時更新
         viewer_info_cache.with_mut(|cache| {
             cache.insert(viewer_channel_id.clone(), info.clone());
+        });
+
+        // TTSマネージャーにも同期
+        spawn(async move {
+            let tts_manager = crate::gui::tts_manager::get_tts_manager();
+            let mut mgr = tts_manager.write().await;
+            mgr.update_viewer_info(info_for_tts);
         });
 
         // DBに永続化（非同期）

@@ -2,6 +2,7 @@ use crate::gui::memory_optimized::{ComprehensiveStats, OptimizedMessageManager};
 use crate::gui::models::GuiChatMessage;
 use crate::gui::services::ServiceState;
 use crate::gui::state_broadcaster::{get_broadcaster, StateChange};
+use crate::gui::tts_manager::get_tts_manager;
 use crate::io::SaveConfig;
 use crate::LiscovResult;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -365,7 +366,15 @@ impl StateManager {
                 // ブロードキャスト: 新着メッセージを通知
                 broadcaster.broadcast(StateChange::MessageAdded {
                     count: after_count,
-                    latest: Some(message),
+                    latest: Some(message.clone()),
+                });
+
+                // TTS読み上げ（非同期で実行）
+                let tts_message = message;
+                tokio::spawn(async move {
+                    let tts_manager = get_tts_manager();
+                    let mgr = tts_manager.read().await;
+                    mgr.speak_message(&tts_message).await;
                 });
             }
 
@@ -481,6 +490,14 @@ impl StateManager {
             AppEvent::BroadcasterChannelIdUpdated(broadcaster_id) => {
                 if let Some(ref id) = broadcaster_id {
                     tracing::info!("📺 Broadcaster channel ID updated: {}", id);
+
+                    // TTSマネージャーに配信者IDを設定（視聴者情報キャッシュをロード）
+                    let id_clone = id.clone();
+                    tokio::spawn(async move {
+                        let tts_manager = get_tts_manager();
+                        let mut mgr = tts_manager.write().await;
+                        mgr.set_broadcaster_channel_id(id_clone).await;
+                    });
                 } else {
                     tracing::info!("📺 Broadcaster channel ID cleared");
                 }
