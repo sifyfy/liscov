@@ -2,7 +2,7 @@
 
 ## 📖 概要
 
-**liscov** は YouTube Live Chat Monitor として設計された Rust + Dioxus 0.6.3 ベースのデスクトップアプリケーションです。リアルタイムでYouTubeライブチャットを監視・分析し、収益トラッキング、視聴者エンゲージメント分析、Q&A検出などの機能を提供します。
+**liscov** は YouTube Live Chat Monitor として設計された Rust + Dioxus 0.7 ベースのデスクトップアプリケーションです。リアルタイムでYouTubeライブチャットを監視・分析し、収益トラッキング、視聴者エンゲージメント分析、Q&A検出などの機能を提供します。
 
 ## 🎯 プロジェクトビジョン
 
@@ -25,7 +25,7 @@
 ### 詳細ドキュメント
 
 - [システム全体図](./system-overview.md) - 全体アーキテクチャとデータフロー
-- [GUI アーキテクチャ](./gui-architecture.md) - Dioxus 0.6.3 コンポーネント設計
+- [GUI アーキテクチャ](./gui-architecture.md) - Dioxus 0.7 コンポーネント設計
 - [API アーキテクチャ](./api-architecture.md) - YouTube InnerTube API統合
 - [データ アーキテクチャ](./data-architecture.md) - データベース設計とモデル
 - [状態管理システム](./state-management.md) - イベント駆動状態管理
@@ -50,7 +50,7 @@
                       │
 ┌─────────────────────▼───────────────────────────────────┐
 │                GUI Layer                                │
-│            (Dioxus 0.6.3)                              │
+│            (Dioxus 0.7)                              │
 │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐      │
 │  │MainWindow│ │Chat     │ │Revenue  │ │Export   │      │
 │  │         │ │Display  │ │Dashboard│ │Panel    │      │
@@ -88,7 +88,7 @@
 ### コア技術
 
 - **Language**: Rust 2021 Edition
-- **GUI Framework**: Dioxus 0.6.3 (Desktop)
+- **GUI Framework**: Dioxus 0.7 (Desktop)
 - **Runtime**: Tokio (非同期ランタイム)
 - **Database**: SQLite (rusqlite)
 - **HTTP Client**: reqwest
@@ -108,6 +108,7 @@
 - **Export Formats**: CSV, Excel (rust_xlsxwriter), JSON
 - **File Dialogs**: rfd (Native file dialogs)
 - **Charts**: dioxus-charts
+- **TTS**: 棒読みちゃん / VOICEVOX (外部アプリ連携)
 
 ## 📊 主要機能
 
@@ -135,26 +136,34 @@
 - カスタムフィルタリング
 - バッチ処理機能
 
+### 5. TTS読み上げ
+
+- 棒読みちゃん/VOICEVOX対応
+- 優先度キュー（SuperChat > Membership > 通常）
+- 自動起動/終了機能
+- 視聴者読み仮名対応
+
 ## 🚧 現在の開発状況
 
-### Migration Phase: Slint → Dioxus 0.6.3
+### Migration Phase: Slint → Dioxus 0.7
 
 - **Phase 0-1**: 技術検証・基本構造 ✅ **完了**
-- **Phase 2**: コンポーネント移行 🚧 **進行中**
-- **Phase 3**: 高度な機能実装 📋 **計画中**
+- **Phase 2**: コンポーネント移行 ✅ **完了**
+- **Phase 3**: 高度な機能実装 ✅ **完了**
 
 ### 現在利用可能な機能
 
 - ✅ 基本的なライブチャット表示
 - ✅ 接続管理・継続トークン処理
-- ✅ 基本的な収益ダッシュボード
+- ✅ 収益ダッシュボード
 - ✅ メッセージフィルタリング
 - ✅ SQLite データベース統合
-- ✅ ファイルエクスポート機能
+- ✅ ファイルエクスポート機能（CSV/Excel/JSON）
+- ✅ TTS読み上げ機能（棒読みちゃん/VOICEVOX対応）
+- ✅ 視聴者情報管理
 
 ### 開発中の機能
 
-- 🚧 プラグインシステム完全実装
 - 🚧 高度なアナリティクス機能
 - 🚧 パフォーマンス最適化
 - 🚧 UI/UX改善
@@ -167,9 +176,9 @@
 
 ---
 
-**最終更新**: 2025-06-25  
-**バージョン**: 0.1.0  
-**移行状況**: Phase 0-1 完了
+**最終更新**: 2025-01-08
+**バージョン**: 0.1.0
+**移行状況**: 完了（TTS機能追加済み）
 
 ### Analytics テストデータの注意
 

@@ -4,17 +4,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## プロジェクト概要
 
-**liscov** は YouTube Live Chat Monitor として設計された Rust + Dioxus 0.6.3 ベースのデスクトップアプリケーション。リアルタイムでYouTubeライブチャットを監視・分析し、収益トラッキング、視聴者エンゲージメント分析、Q&A検出などの機能を提供する。
+**liscov** は YouTube Live Chat Monitor として設計された Rust + Dioxus 0.7 ベースのデスクトップアプリケーション。リアルタイムでYouTubeライブチャットを監視・分析し、収益トラッキング、視聴者エンゲージメント分析、TTS読み上げなどの機能を提供する。
 
 ### 技術スタック
-- **GUI Framework**: Dioxus 0.6.3 (Desktop)
+- **GUI Framework**: Dioxus 0.7 (Desktop)
 - **Runtime**: Tokio (非同期ランタイム)
 - **Database**: SQLite (rusqlite)
 - **HTTP Client**: reqwest
 - **API**: YouTube InnerTube (非公式)
+- **TTS**: 棒読みちゃん / VOICEVOX 対応
+- **File Dialog**: rfd (Native file dialogs)
 
 ### プロジェクト状況
-- **移行完了**: Slint → Dioxus 0.6.3 への移行は完了
+- **移行完了**: Slint → Dioxus への移行は完了
+- **TTS機能**: 棒読みちゃん/VOICEVOX対応の読み上げ機能実装済み
 - 現在はビルド・テストが正常に通る状態
 
 ## 開発コマンド
@@ -84,21 +87,29 @@ src/
 ├── analytics/          # 収益分析・エクスポート機能
 │   └── export/         # CSV/Excel/JSON エクスポーター
 ├── api/               # YouTube InnerTube API統合
+│   ├── auth/          # 認証関連
 │   └── innertube/     # InnerTube API実装
 ├── bin/               # バイナリエントリーポイント
 ├── chat_management/   # チャット管理・フィルタリング
 ├── database/          # SQLiteデータベース操作
-├── gui/               # Dioxus 0.6.3 GUI実装
+├── gui/               # Dioxus 0.7 GUI実装
 │   ├── commands/      # チャットコマンド処理
 │   ├── components/    # UIコンポーネント
 │   ├── events/        # イベント定義・処理
+│   ├── features/      # 機能モジュール
 │   ├── hooks/         # カスタムフック
 │   ├── plugins/       # プラグイン実装
+│   │   └── tts_plugin/    # TTS読み上げプラグイン
+│   │       ├── backends/  # 棒読みちゃん/VOICEVOX バックエンド
+│   │       ├── config.rs  # TTS設定
+│   │       ├── queue.rs   # 優先度キュー
+│   │       └── launcher.rs # アプリ自動起動
 │   ├── state/         # 状態管理
 │   ├── styles/        # テーマ・CSS
-│   ├── services.rs    # ライブチャットサービス統合
-│   ├── signal_manager.rs    # シグナル管理
-│   └── state_management.rs  # 状態管理コア
+│   ├── config_manager.rs   # 設定管理
+│   ├── tts_manager.rs      # グローバルTTSマネージャー
+│   ├── signal_manager.rs   # シグナル管理
+│   └── state_management.rs # 状態管理コア
 └── io/                # ファイルI/O・NDJSON処理
 ```
 
@@ -112,6 +123,10 @@ src/
 #### プラグインシステム
 - `gui/plugin_system.rs`: 拡張可能なプラグインアーキテクチャ
 - `gui/plugins/`: 個別プラグイン実装
+  - `tts_plugin/`: TTS読み上げ（棒読みちゃん/VOICEVOX）
+  - `analytics_plugin.rs`: 分析機能
+  - `message_filter_plugin.rs`: メッセージフィルタ
+  - `notification_plugin.rs`: 通知機能
 - 動的機能拡張が可能
 
 #### YouTube API統合
@@ -153,7 +168,7 @@ LISCOV_API_DEBUG=true
 - クリーンコード維持
 
 ### コード品質の維持
-- Dioxus 0.6.3 への移行は完了済み
+- Dioxus 0.7 への移行は完了済み
 - 既存のアーキテクチャパターンを踏襲すること
 - シグナルベースの状態管理（`signal_manager.rs`）を活用
 
@@ -173,7 +188,7 @@ cargo test    # テスト実行
 
 ### 新機能追加
 1. 適切なモジュール（`analytics/`, `gui/components/` 等）を選択
-2. Dioxus 0.6.3の`use_signal`パターンに従う
+2. Dioxus 0.7の`use_signal`パターンに従う
 3. エラーハンドリングで `LiscovError` を使用
 4. テストコード追加
 
@@ -182,8 +197,17 @@ cargo test    # テスト実行
 - `analytics/export/` でCSV/Excel/JSON エクスポート
 - `database/models.rs` でデータモデル定義
 
+### TTS機能拡張
+- `gui/plugins/tts_plugin/`: TTS読み上げプラグイン
+  - `backends/`: 棒読みちゃん/VOICEVOXバックエンド実装
+  - `config.rs`: TTS設定構造体
+  - `queue.rs`: 優先度付きキュー（SuperChat > Membership > Normal）
+  - `launcher.rs`: アプリ自動起動/終了
+- `gui/tts_manager.rs`: グローバルTTSマネージャー
+- `gui/components/tts_settings.rs`: TTS設定UI
+
 ## 参考ドキュメント
 
 - [アーキテクチャ詳細](docs/architecture/README.md)
-- [Dioxus 0.6.3ドキュメント](https://dioxuslabs.com/learn/0.6/)
+- [Dioxus 0.7ドキュメント](https://dioxuslabs.com/learn/0.7/)
 - [プロジェクト設定](Dioxus.toml)
