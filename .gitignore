@@ -1,4 +1,5 @@
 /target/
 /.kanban/
+/.temp/
 /COMMIT_MESSAGE
 /dist/
