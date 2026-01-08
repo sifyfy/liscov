@@ -1,5 +1,5 @@
 use crate::chat_management::MessageFilter;
-use crate::gui::components::{ChatHeader, FilterPanel, ViewerInfoPanel};
+use crate::gui::components::{FilterPanel, ViewerInfoPanel};
 use crate::gui::dom_controller::utils::create_chat_controller; // Phase 3.2
 use crate::gui::hooks::use_live_chat::LiveChatHandle;
 use crate::gui::models::SelectedViewer;
@@ -406,11 +406,6 @@ pub fn ChatDisplay(
         }
     });
 
-    let is_connecting = matches!(
-        *live_chat_handle.state.read(),
-        crate::gui::services::ServiceState::Connecting
-    );
-
     rsx! {
         div {
             class: CssClasses::CHAT_DISPLAY,
@@ -420,12 +415,6 @@ pub fn ChatDisplay(
                 flex-direction: column;
                 overflow: hidden;
             ",
-
-            // チャットヘッダー（コンポーネント化）
-            ChatHeader {
-                live_chat_handle: live_chat_handle.clone(),
-                is_connecting: is_connecting,
-            }
 
             // チャット制御
             div {

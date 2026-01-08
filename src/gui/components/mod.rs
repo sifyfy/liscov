@@ -20,7 +20,6 @@ pub mod viewer_info_panel; // 視聴者情報管理パネル
 // Re-exports for convenience - 新アーキテクチャのみ
 pub use auth_panel::{AuthContext, AuthPanel};
 pub use chat_display::ChatDisplay;
-pub use chat_header::ChatHeader;
 pub use export_panel::ExportPanel;
 pub use filter_panel::FilterPanel;
 pub use input_section::{CompactInputSection, InputSection};

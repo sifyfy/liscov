@@ -184,21 +184,23 @@ fn main() -> LiscovResult<()> {
     let mut launch_builder = dioxus::LaunchBuilder::desktop();
 
     // ウィンドウ設定を適用
+    let window_builder = dioxus::desktop::tao::window::WindowBuilder::new()
+        .with_title("liscov - YouTube Live Chat Monitor")
+        .with_inner_size(dioxus::desktop::tao::dpi::LogicalSize::new(
+            config.window.width as f64,
+            config.window.height as f64,
+        ))
+        .with_position(dioxus::desktop::tao::dpi::LogicalPosition::new(
+            config.window.x as f64,
+            config.window.y as f64,
+        ))
+        .with_maximized(config.window.maximized)
+        .with_resizable(true);
+
     launch_builder = launch_builder.with_cfg(
-        dioxus::desktop::Config::new().with_window(
-            dioxus::desktop::tao::window::WindowBuilder::new()
-                .with_title("liscov - YouTube Live Chat Monitor")
-                .with_inner_size(dioxus::desktop::tao::dpi::LogicalSize::new(
-                    config.window.width as f64,
-                    config.window.height as f64,
-                ))
-                .with_position(dioxus::desktop::tao::dpi::LogicalPosition::new(
-                    config.window.x as f64,
-                    config.window.y as f64,
-                ))
-                .with_maximized(config.window.maximized)
-                .with_resizable(true),
-        ),
+        dioxus::desktop::Config::new()
+            .with_menu(None) // メニューバーを非表示
+            .with_window(window_builder),
     );
 
     // Ctrl+Cシグナルハンドラー
