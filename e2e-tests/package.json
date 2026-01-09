@@ -1,0 +1,32 @@
+{
+  "name": "liscov-e2e-tests",
+  "version": "1.0.0",
+  "description": "E2E tests for liscov desktop app using Playwright + CDP",
+  "type": "commonjs",
+  "scripts": {
+    "test": "npx playwright test",
+    "test:headed": "npx playwright test --headed",
+    "test:debug": "npx playwright test --debug",
+    "test:ui": "npx playwright test --ui",
+    "test:viewer-management": "npx tsx scripts/run-viewer-management-test.ts",
+    "test:viewer-management:skip-build": "npx tsx scripts/run-viewer-management-test.ts --skip-build",
+    "db:setup": "npx tsx scripts/setup-test-db.ts setup",
+    "db:cleanup": "npx tsx scripts/setup-test-db.ts cleanup",
+    "db:backup": "npx tsx scripts/setup-test-db.ts backup",
+    "db:restore": "npx tsx scripts/setup-test-db.ts restore",
+    "report": "npx playwright show-report"
+  },
+  "keywords": [
+    "e2e",
+    "playwright",
+    "dioxus",
+    "webview2"
+  ],
+  "devDependencies": {
+    "@playwright/test": "^1.57.0",
+    "@types/node": "^22.0.0",
+    "playwright": "^1.57.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.0.0"
+  }
+}

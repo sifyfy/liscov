@@ -288,6 +288,30 @@ impl LiveChatService {
                             Some(broadcaster_id.clone())
                         )
                     );
+
+                    // 配信者プロフィールをDBに保存
+                    let profile = crate::database::BroadcasterProfile {
+                        channel_id: broadcaster_id.clone(),
+                        channel_name: inner_tube.broadcaster_channel_name.clone(),
+                        handle: inner_tube.broadcaster_handle.clone(),
+                        thumbnail_url: None,
+                        created_at: None,
+                        updated_at: None,
+                    };
+                    if let Ok(conn) = crate::database::get_connection().await {
+                        match crate::database::upsert_broadcaster_profile(&conn, &profile) {
+                            Ok(_) => {
+                                tracing::info!(
+                                    "💾 Saved broadcaster profile: {} ({:?})",
+                                    broadcaster_id,
+                                    profile.channel_name
+                                );
+                            }
+                            Err(e) => {
+                                tracing::warn!("⚠️ Failed to save broadcaster profile: {}", e);
+                            }
+                        }
+                    }
                 }
 
                 let mut inner_tube_guard = self.inner_tube.lock().await;

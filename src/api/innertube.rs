@@ -42,6 +42,10 @@ pub struct InnerTube {
     pub auth_cookies: Option<YouTubeCookies>,
     /// 配信者のYouTubeチャンネルID
     pub broadcaster_channel_id: Option<String>,
+    /// 配信者のチャンネル名
+    pub broadcaster_channel_name: Option<String>,
+    /// 配信者のYouTubeハンドル (@xxx)
+    pub broadcaster_handle: Option<String>,
 }
 
 impl InnerTube {
@@ -65,6 +69,8 @@ impl InnerTube {
             chat_mode: ChatMode::default(),
             auth_cookies: None,
             broadcaster_channel_id: None,
+            broadcaster_channel_name: None,
+            broadcaster_handle: None,
         }
     }
 
@@ -487,19 +493,27 @@ pub async fn fetch_live_chat_page_with_auth(
         None
     };
 
-    // 配信者チャンネルIDを抽出（事前取得したものを優先）
+    // 配信者情報を抽出（事前取得したチャンネルIDを優先）
+    let broadcaster_info = crate::api::youtube::extract_broadcaster_info(&html);
     let broadcaster_channel_id = if broadcaster_channel_id_prefetch.is_some() {
         tracing::info!("📺 Using pre-fetched broadcaster channel ID");
         broadcaster_channel_id_prefetch
     } else {
-        let extracted = crate::api::youtube::extract_broadcaster_channel_id(&html);
-        if let Some(ref id) = extracted {
+        if let Some(ref id) = broadcaster_info.channel_id {
             tracing::info!("📺 Extracted broadcaster channel ID from chat page: {}", id);
         } else {
             tracing::warn!("⚠️ Could not extract broadcaster channel ID from HTML");
         }
-        extracted
+        broadcaster_info.channel_id.clone()
     };
+
+    // チャンネル名とハンドルもログ出力
+    if let Some(ref name) = broadcaster_info.channel_name {
+        tracing::info!("📺 Broadcaster channel name: {}", name);
+    }
+    if let Some(ref handle) = broadcaster_info.handle {
+        tracing::info!("📺 Broadcaster handle: {}", handle);
+    }
 
     let mut inner_tube =
         InnerTube::new(video_id, api_key, client_version, ClientId("1".to_string()));
@@ -508,6 +522,8 @@ pub async fn fetch_live_chat_page_with_auth(
     inner_tube.continuation = main_continuation;
     inner_tube.chat_continuations = chat_continuations_option;
     inner_tube.broadcaster_channel_id = broadcaster_channel_id;
+    inner_tube.broadcaster_channel_name = broadcaster_info.channel_name;
+    inner_tube.broadcaster_handle = broadcaster_info.handle;
 
     // トークンから現在のモードを検出
     let detected_mode = inner_tube.detect_current_mode().unwrap_or(ChatMode::TopChat);

@@ -1060,6 +1060,9 @@ pub enum ActiveTab {
     RevenueAnalytics,
     DataExport,
     Settings,
+
+    // 視聴者管理タブ
+    ViewerManagement,
 }
 
 impl Default for ActiveTab {
@@ -1082,6 +1085,9 @@ impl ActiveTab {
             ActiveTab::RevenueAnalytics => "Revenue",
             ActiveTab::DataExport => "Export",
             ActiveTab::Settings => "Settings",
+
+            // 視聴者管理タブ
+            ActiveTab::ViewerManagement => "視聴者管理",
         }
     }
 
@@ -1098,6 +1104,9 @@ impl ActiveTab {
             ActiveTab::RevenueAnalytics => "💰",
             ActiveTab::DataExport => "📥",
             ActiveTab::Settings => "⚙️",
+
+            // 視聴者管理タブ
+            ActiveTab::ViewerManagement => "👥",
         }
     }
 
@@ -1114,6 +1123,9 @@ impl ActiveTab {
             ActiveTab::RevenueAnalytics => "Track SuperChat revenue and membership earnings",
             ActiveTab::DataExport => "Export and save chat data in various formats",
             ActiveTab::Settings => "Application settings and configuration",
+
+            // 視聴者管理タブ
+            ActiveTab::ViewerManagement => "視聴者データの一覧・編集・管理",
         }
     }
 }

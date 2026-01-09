@@ -16,6 +16,7 @@ pub mod status_panel;
 pub mod tab_navigation;
 pub mod tts_settings; // TTS読み上げ設定
 pub mod viewer_info_panel; // 視聴者情報管理パネル
+pub mod viewer_management; // 視聴者管理タブ
 
 // Re-exports for convenience - 新アーキテクチャのみ
 pub use auth_panel::{AuthContext, AuthPanel};
@@ -28,3 +29,4 @@ pub use revenue_dashboard::RevenueDashboard;
 pub use status_panel::{CompactStatusPanel, StatusPanel};
 pub use tab_navigation::{TabContent, TabNavigation};
 pub use viewer_info_panel::ViewerInfoPanel;
+pub use viewer_management::ViewerManagementTab;

@@ -1,5 +1,5 @@
 use crate::gui::memory_optimized::{ComprehensiveStats, OptimizedMessageManager};
-use crate::gui::models::GuiChatMessage;
+use crate::gui::models::{GuiChatMessage, MessageType};
 use crate::gui::services::ServiceState;
 use crate::gui::state_broadcaster::{get_broadcaster, StateChange};
 use crate::gui::tts_manager::get_tts_manager;
@@ -59,6 +59,8 @@ pub struct AppState {
     pub current_url: Option<String>,
     /// 投稿者ごとのコメント回数（この配信で何回目かをカウント）
     pub author_comment_counts: std::collections::HashMap<String, u32>,
+    /// 現在監視中の配信者チャンネルID
+    pub current_broadcaster_id: Option<String>,
 }
 
 impl Clone for AppState {
@@ -81,6 +83,7 @@ impl Clone for AppState {
             continuation_token: self.continuation_token.clone(),
             current_url: self.current_url.clone(),
             author_comment_counts: self.author_comment_counts.clone(),
+            current_broadcaster_id: self.current_broadcaster_id.clone(),
         }
     }
 }
@@ -130,6 +133,7 @@ impl Default for AppState {
             continuation_token: None,
             current_url: None,
             author_comment_counts: std::collections::HashMap::new(),
+            current_broadcaster_id: None,
         }
     }
 }
@@ -370,11 +374,54 @@ impl StateManager {
                 });
 
                 // TTS読み上げ（非同期で実行）
-                let tts_message = message;
+                let tts_message = message.clone();
                 tokio::spawn(async move {
                     let tts_manager = get_tts_manager();
                     let mgr = tts_manager.read().await;
                     mgr.speak_message(&tts_message).await;
+                });
+
+                // DB保存（非同期で実行）- 視聴者プロフィールを更新
+                let db_message = message;
+                let current_broadcaster = state_guard.current_broadcaster_id.clone();
+                tokio::spawn(async move {
+                    if let Ok(conn) = crate::database::get_connection().await {
+                        // 貢献額を計算
+                        let amount = match &db_message.message_type {
+                            MessageType::SuperChat { amount } | MessageType::SuperSticker { amount } => {
+                                parse_amount_for_viewer_profile(amount)
+                            }
+                            _ => 0.0,
+                        };
+
+                        // viewer_profiles に保存
+                        if let Err(e) = conn.execute(
+                            "INSERT INTO viewer_profiles (channel_id, display_name, first_seen, last_seen, message_count, total_contribution)
+                             VALUES (?1, ?2, datetime('now'), datetime('now'), 1, ?3)
+                             ON CONFLICT(channel_id) DO UPDATE SET
+                                 display_name = ?2,
+                                 last_seen = datetime('now'),
+                                 message_count = message_count + 1,
+                                 total_contribution = total_contribution + ?3",
+                            rusqlite::params![db_message.channel_id, db_message.author, amount],
+                        ) {
+                            tracing::warn!("⚠️ Failed to save viewer profile: {}", e);
+                        } else {
+                            tracing::debug!("💾 Viewer profile saved: {} ({})", db_message.author, db_message.channel_id);
+                        }
+
+                        // viewer_custom_info に保存（配信者-視聴者の関係）
+                        if let Some(broadcaster_id) = current_broadcaster {
+                            if let Err(e) = conn.execute(
+                                "INSERT INTO viewer_custom_info (broadcaster_channel_id, viewer_channel_id)
+                                 VALUES (?1, ?2)
+                                 ON CONFLICT(broadcaster_channel_id, viewer_channel_id) DO NOTHING",
+                                rusqlite::params![broadcaster_id, db_message.channel_id],
+                            ) {
+                                tracing::warn!("⚠️ Failed to save viewer_custom_info: {}", e);
+                            }
+                        }
+                    }
                 });
             }
 
@@ -488,6 +535,9 @@ impl StateManager {
             }
 
             AppEvent::BroadcasterChannelIdUpdated(broadcaster_id) => {
+                // 状態に配信者IDを保存
+                state_guard.current_broadcaster_id = broadcaster_id.clone();
+
                 if let Some(ref id) = broadcaster_id {
                     tracing::info!("📺 Broadcaster channel ID updated: {}", id);
 
@@ -497,6 +547,14 @@ impl StateManager {
                         let tts_manager = get_tts_manager();
                         let mut mgr = tts_manager.write().await;
                         mgr.set_broadcaster_channel_id(id_clone).await;
+                    });
+
+                    // 配信者プロフィールをYouTubeから取得してDBに保存
+                    let id_for_profile = id.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = fetch_and_save_broadcaster_profile(&id_for_profile).await {
+                            tracing::warn!("⚠️ Failed to fetch broadcaster profile: {}", e);
+                        }
                     });
                 } else {
                     tracing::info!("📺 Broadcaster channel ID cleared");
@@ -568,4 +626,78 @@ pub async fn initialize_state_manager() {
     // LiveChatServiceを早期初期化（認証情報の読み込み）
     let _ = crate::gui::services::get_global_service();
     tracing::info!("✅ LiveChatService initialized");
+}
+
+/// 金額文字列をf64に変換（視聴者プロフィール用）
+fn parse_amount_for_viewer_profile(amount_str: &str) -> f64 {
+    // "¥500" や "$5.00" などの形式をパース
+    let cleaned = amount_str
+        .replace(['¥', '$', '€', '£', ',', ' '], "")
+        .replace("￥", "");
+    cleaned.parse::<f64>().unwrap_or(0.0)
+}
+
+/// 配信者プロフィールをYouTubeから取得してDBに保存
+async fn fetch_and_save_broadcaster_profile(channel_id: &str) -> anyhow::Result<()> {
+    tracing::info!("🔍 Fetching broadcaster profile for: {}", channel_id);
+
+    // YouTubeチャンネルページから情報を取得
+    let channel_url = format!("https://www.youtube.com/channel/{}", channel_id);
+
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        .build()?;
+
+    let response = client.get(&channel_url).send().await?;
+
+    if !response.status().is_success() {
+        tracing::warn!(
+            "⚠️ Failed to fetch channel page: HTTP {}",
+            response.status()
+        );
+        return Ok(());
+    }
+
+    let html = response.text().await?;
+
+    let channel_name = crate::api::youtube::extract_broadcaster_channel_name(&html);
+    let handle = crate::api::youtube::extract_broadcaster_handle(&html);
+
+    if channel_name.is_none() && handle.is_none() {
+        tracing::warn!("⚠️ Could not extract broadcaster info from channel page");
+        return Ok(());
+    }
+
+    tracing::info!(
+        "✅ Broadcaster info fetched: name={:?}, handle={:?}",
+        channel_name,
+        handle
+    );
+
+    // DBに保存
+    if let Ok(conn) = crate::database::get_connection().await {
+        let profile = crate::database::BroadcasterProfile {
+            channel_id: channel_id.to_string(),
+            channel_name: channel_name.clone(),
+            handle: handle.clone(),
+            thumbnail_url: None,
+            created_at: None,
+            updated_at: None,
+        };
+
+        match crate::database::upsert_broadcaster_profile(&conn, &profile) {
+            Ok(_) => {
+                tracing::info!(
+                    "💾 Broadcaster profile saved: {} ({:?})",
+                    channel_id,
+                    channel_name
+                );
+            }
+            Err(e) => {
+                tracing::warn!("⚠️ Failed to save broadcaster profile: {}", e);
+            }
+        }
+    }
+
+    Ok(())
 }

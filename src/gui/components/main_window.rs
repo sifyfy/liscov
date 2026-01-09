@@ -13,6 +13,7 @@ fn IntegratedHeaderTabs(active_tab: ActiveTab, on_tab_change: EventHandler<Activ
         ActiveTab::ChatMonitor,
         ActiveTab::RevenueAnalytics,
         ActiveTab::DataExport,
+        ActiveTab::ViewerManagement, // 視聴者管理タブ
         ActiveTab::Settings,
         ActiveTab::SignalAnalysis,
     ];

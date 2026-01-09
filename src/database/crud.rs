@@ -95,7 +95,7 @@ impl LiscovDatabase {
             ])?;
 
         // 視聴者プロフィールを更新
-        self.upsert_viewer_profile(&message.channel_id, &message.author, amount)?;
+        self.upsert_viewer_profile(&message.channel_id, &message.author)?;
 
         Ok(message_id)
     }
@@ -105,7 +105,6 @@ impl LiscovDatabase {
         &mut self,
         channel_id: &str,
         display_name: &str,
-        contribution: f64,
     ) -> Result<()> {
         let now = Utc::now().to_rfc3339();
 
@@ -118,20 +117,19 @@ impl LiscovDatabase {
         if exists {
             // 更新
             self.connection.execute(
-                "UPDATE viewer_profiles 
-                 SET display_name = ?1, last_seen = ?2, 
-                     message_count = message_count + 1,
-                     total_contribution = total_contribution + ?3
-                 WHERE channel_id = ?4",
-                params![display_name, now, contribution, channel_id],
+                "UPDATE viewer_profiles
+                 SET display_name = ?1, last_seen = ?2,
+                     message_count = message_count + 1
+                 WHERE channel_id = ?3",
+                params![display_name, now, channel_id],
             )?;
         } else {
             // 新規作成
             self.connection.execute(
-                "INSERT INTO viewer_profiles 
-                 (channel_id, display_name, first_seen, last_seen, message_count, total_contribution) 
-                 VALUES (?1, ?2, ?3, ?4, 1, ?5)",
-                params![channel_id, display_name, now, now, contribution],
+                "INSERT INTO viewer_profiles
+                 (channel_id, display_name, first_seen, last_seen, message_count)
+                 VALUES (?1, ?2, ?3, ?4, 1)",
+                params![channel_id, display_name, now, now],
             )?;
         }
 
@@ -208,7 +206,7 @@ impl LiscovDatabase {
              INNER JOIN messages m ON vp.channel_id = m.channel_id
              WHERE m.session_id = ?1
              GROUP BY vp.channel_id
-             ORDER BY vp.total_contribution DESC
+             ORDER BY vp.message_count DESC
              LIMIT ?2",
         )?;
 
@@ -689,6 +687,323 @@ pub fn delete_viewer_custom_info(
     )?;
 
     Ok(affected > 0)
+}
+
+// ============================================================================
+// 視聴者管理機能用 CRUD 関数
+// ============================================================================
+
+use super::{BroadcasterChannel, BroadcasterProfile, ViewerWithCustomInfo};
+
+// ============================================================================
+// 配信者プロフィール CRUD 関数
+// ============================================================================
+
+/// 配信者プロフィールを取得
+pub fn get_broadcaster_profile(
+    conn: &rusqlite::Connection,
+    channel_id: &str,
+) -> Result<Option<BroadcasterProfile>> {
+    let mut stmt = conn.prepare(
+        "SELECT channel_id, channel_name, handle, thumbnail_url, created_at, updated_at
+         FROM broadcaster_profiles
+         WHERE channel_id = ?1",
+    )?;
+
+    let result = stmt.query_row(params![channel_id], |row| {
+        Ok(BroadcasterProfile {
+            channel_id: row.get(0)?,
+            channel_name: row.get(1)?,
+            handle: row.get(2)?,
+            thumbnail_url: row.get(3)?,
+            created_at: row.get(4)?,
+            updated_at: row.get(5)?,
+        })
+    });
+
+    match result {
+        Ok(profile) => Ok(Some(profile)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// 配信者プロフィールを挿入または更新
+pub fn upsert_broadcaster_profile(
+    conn: &rusqlite::Connection,
+    profile: &BroadcasterProfile,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO broadcaster_profiles (channel_id, channel_name, handle, thumbnail_url)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(channel_id) DO UPDATE SET
+             channel_name = COALESCE(excluded.channel_name, broadcaster_profiles.channel_name),
+             handle = COALESCE(excluded.handle, broadcaster_profiles.handle),
+             thumbnail_url = COALESCE(excluded.thumbnail_url, broadcaster_profiles.thumbnail_url)",
+        params![
+            profile.channel_id,
+            profile.channel_name,
+            profile.handle,
+            profile.thumbnail_url,
+        ],
+    )?;
+    Ok(())
+}
+
+/// 配信者チャンネル一覧を取得（ドロップダウン用）
+/// viewer_custom_info テーブルと broadcaster_profiles テーブルの両方から取得
+/// 視聴者データがない配信者も表示される
+pub fn get_distinct_broadcaster_channels(
+    conn: &rusqlite::Connection,
+) -> Result<Vec<BroadcasterChannel>> {
+    // viewer_custom_info から視聴者がいる配信者と、
+    // broadcaster_profiles から視聴者がいない配信者を UNION で結合
+    let mut stmt = conn.prepare(
+        "SELECT channel_id, channel_name, handle, viewer_count FROM (
+            -- 視聴者データがある配信者
+            SELECT vci.broadcaster_channel_id as channel_id,
+                   bp.channel_name,
+                   bp.handle,
+                   COUNT(DISTINCT vci.viewer_channel_id) as viewer_count
+            FROM viewer_custom_info vci
+            LEFT JOIN broadcaster_profiles bp ON vci.broadcaster_channel_id = bp.channel_id
+            GROUP BY vci.broadcaster_channel_id
+
+            UNION
+
+            -- 視聴者データがないが broadcaster_profiles に登録されている配信者
+            SELECT bp.channel_id,
+                   bp.channel_name,
+                   bp.handle,
+                   0 as viewer_count
+            FROM broadcaster_profiles bp
+            WHERE bp.channel_id NOT IN (
+                SELECT DISTINCT broadcaster_channel_id FROM viewer_custom_info
+            )
+         )
+         ORDER BY viewer_count DESC, channel_name ASC",
+    )?;
+
+    let channels = stmt
+        .query_map([], |row| {
+            Ok(BroadcasterChannel {
+                channel_id: row.get(0)?,
+                channel_name: row.get(1)?,
+                handle: row.get(2)?,
+                viewer_count: row.get::<_, i64>(3)? as usize,
+            })
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(channels)
+}
+
+/// 配信者単位で視聴者一覧を取得（検索・ページネーション対応）
+/// viewer_profiles と viewer_custom_info を LEFT JOIN して取得
+pub fn get_viewers_for_broadcaster(
+    conn: &rusqlite::Connection,
+    broadcaster_channel_id: &str,
+    search_query: Option<&str>,
+    limit: usize,
+    offset: usize,
+) -> Result<Vec<ViewerWithCustomInfo>> {
+    // 検索クエリがある場合は LIKE 句を追加
+    let (query, params_vec): (String, Vec<Box<dyn rusqlite::ToSql>>) = if let Some(q) = search_query
+    {
+        if q.trim().is_empty() {
+            (
+                "SELECT COALESCE(vp.channel_id, vci.viewer_channel_id) as channel_id,
+                        COALESCE(vp.display_name, vci.viewer_channel_id) as display_name,
+                        vp.first_seen, vp.last_seen,
+                        vp.message_count, vp.total_contribution, vp.membership_level, vp.tags,
+                        vci.reading, vci.notes, vci.custom_data
+                 FROM viewer_custom_info vci
+                 LEFT JOIN viewer_profiles vp ON vci.viewer_channel_id = vp.channel_id
+                 WHERE vci.broadcaster_channel_id = ?1
+                 ORDER BY vp.last_seen DESC
+                 LIMIT ?2 OFFSET ?3"
+                    .to_string(),
+                vec![
+                    Box::new(broadcaster_channel_id.to_string()),
+                    Box::new(limit as i64),
+                    Box::new(offset as i64),
+                ],
+            )
+        } else {
+            let search_pattern = format!("%{}%", q.trim());
+            (
+                "SELECT COALESCE(vp.channel_id, vci.viewer_channel_id) as channel_id,
+                        COALESCE(vp.display_name, vci.viewer_channel_id) as display_name,
+                        vp.first_seen, vp.last_seen,
+                        vp.message_count, vp.total_contribution, vp.membership_level, vp.tags,
+                        vci.reading, vci.notes, vci.custom_data
+                 FROM viewer_custom_info vci
+                 LEFT JOIN viewer_profiles vp ON vci.viewer_channel_id = vp.channel_id
+                 WHERE vci.broadcaster_channel_id = ?1
+                   AND (vp.display_name LIKE ?2 OR vci.reading LIKE ?2 OR vci.notes LIKE ?2)
+                 ORDER BY vp.last_seen DESC
+                 LIMIT ?3 OFFSET ?4"
+                    .to_string(),
+                vec![
+                    Box::new(broadcaster_channel_id.to_string()),
+                    Box::new(search_pattern),
+                    Box::new(limit as i64),
+                    Box::new(offset as i64),
+                ],
+            )
+        }
+    } else {
+        (
+            "SELECT COALESCE(vp.channel_id, vci.viewer_channel_id) as channel_id,
+                    COALESCE(vp.display_name, vci.viewer_channel_id) as display_name,
+                    vp.first_seen, vp.last_seen,
+                    vp.message_count, vp.total_contribution, vp.membership_level, vp.tags,
+                    vci.reading, vci.notes, vci.custom_data
+             FROM viewer_custom_info vci
+             LEFT JOIN viewer_profiles vp ON vci.viewer_channel_id = vp.channel_id
+             WHERE vci.broadcaster_channel_id = ?1
+             ORDER BY vp.last_seen DESC
+             LIMIT ?2 OFFSET ?3"
+                .to_string(),
+            vec![
+                Box::new(broadcaster_channel_id.to_string()),
+                Box::new(limit as i64),
+                Box::new(offset as i64),
+            ],
+        )
+    };
+
+    let mut stmt = conn.prepare(&query)?;
+    let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+
+    let viewers = stmt
+        .query_map(params_refs.as_slice(), |row| {
+            let tags_str: Option<String> = row.get(7)?;
+            let tags = tags_str
+                .map(|s| s.split(',').map(|t| t.trim().to_string()).collect())
+                .unwrap_or_default();
+
+            Ok(ViewerWithCustomInfo {
+                channel_id: row.get::<_, Option<String>>(0)?.unwrap_or_default(),
+                display_name: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                first_seen: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                last_seen: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                message_count: row.get::<_, Option<i64>>(4)?.unwrap_or(0),
+                total_contribution: row.get::<_, Option<f64>>(5)?.unwrap_or(0.0),
+                membership_level: row.get(6)?,
+                tags,
+                reading: row.get(8)?,
+                notes: row.get(9)?,
+                custom_data: row.get(10)?,
+            })
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(viewers)
+}
+
+/// 配信者単位の視聴者総数を取得
+pub fn get_viewer_count_for_broadcaster(
+    conn: &rusqlite::Connection,
+    broadcaster_channel_id: &str,
+) -> Result<usize> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM viewer_custom_info WHERE broadcaster_channel_id = ?1",
+        params![broadcaster_channel_id],
+        |row| row.get(0),
+    )?;
+
+    Ok(count as usize)
+}
+
+/// viewer_profiles の tags と membership_level を更新
+/// レコードが存在しない場合は新規作成する
+pub fn update_viewer_profile_metadata(
+    conn: &rusqlite::Connection,
+    channel_id: &str,
+    tags: Option<&[String]>,
+    membership_level: Option<&str>,
+) -> Result<bool> {
+    let tags_str = tags.map(|t| t.join(","));
+
+    // まずUPDATEを試行
+    let affected = conn.execute(
+        "UPDATE viewer_profiles
+         SET tags = COALESCE(?1, tags),
+             membership_level = COALESCE(?2, membership_level)
+         WHERE channel_id = ?3",
+        params![tags_str, membership_level, channel_id],
+    )?;
+
+    // レコードが存在しない場合はINSERT
+    if affected == 0 {
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO viewer_profiles
+             (channel_id, display_name, first_seen, last_seen, message_count, total_contribution, tags, membership_level)
+             VALUES (?1, ?1, ?2, ?2, 0, 0.0, ?3, ?4)",
+            params![channel_id, now, tags_str, membership_level],
+        )?;
+        return Ok(true);
+    }
+
+    Ok(affected > 0)
+}
+
+/// 視聴者データを削除
+/// delete_profile が true の場合は viewer_profiles も削除
+pub fn delete_viewer_data(
+    conn: &rusqlite::Connection,
+    broadcaster_channel_id: &str,
+    viewer_channel_id: &str,
+    delete_profile: bool,
+) -> Result<bool> {
+    // viewer_custom_info を削除
+    let custom_deleted = conn.execute(
+        "DELETE FROM viewer_custom_info WHERE broadcaster_channel_id = ?1 AND viewer_channel_id = ?2",
+        params![broadcaster_channel_id, viewer_channel_id],
+    )? > 0;
+
+    // プロフィールも削除する場合
+    let profile_deleted = if delete_profile {
+        conn.execute(
+            "DELETE FROM viewer_profiles WHERE channel_id = ?1",
+            params![viewer_channel_id],
+        )? > 0
+    } else {
+        false
+    };
+
+    Ok(custom_deleted || profile_deleted)
+}
+
+/// 配信者データを削除（関連する視聴者カスタム情報も一緒に削除）
+/// 戻り値: (配信者が削除されたか, 削除された視聴者カスタム情報の件数)
+pub fn delete_broadcaster_data(
+    conn: &rusqlite::Connection,
+    broadcaster_channel_id: &str,
+) -> Result<(bool, usize)> {
+    // まず関連する視聴者カスタム情報を削除
+    let viewer_deleted = conn.execute(
+        "DELETE FROM viewer_custom_info WHERE broadcaster_channel_id = ?1",
+        params![broadcaster_channel_id],
+    )?;
+
+    // 配信者プロフィールを削除
+    let broadcaster_deleted = conn.execute(
+        "DELETE FROM broadcaster_profiles WHERE channel_id = ?1",
+        params![broadcaster_channel_id],
+    )? > 0;
+
+    tracing::info!(
+        "🗑️ Broadcaster deleted: {} (viewers: {})",
+        broadcaster_channel_id,
+        viewer_deleted
+    );
+
+    Ok((broadcaster_deleted, viewer_deleted))
 }
 
 #[cfg(test)]
@@ -1259,6 +1574,304 @@ mod tests {
         // 存在しないものを削除
         let deleted_again = db.delete_viewer_custom_info(broadcaster, viewer)?;
         assert!(!deleted_again);
+
+        Ok(())
+    }
+
+    // ========================================
+    // 視聴者管理機能のテスト
+    // ========================================
+
+    #[test]
+    fn test_get_distinct_broadcaster_channels() -> Result<()> {
+        let db = LiscovDatabase::new_in_memory()?;
+
+        // 複数の配信者のデータを登録
+        let info1 =
+            ViewerCustomInfo::new("broadcaster_A".to_string(), "viewer_1".to_string());
+        upsert_viewer_custom_info(&db.connection, &info1)?;
+
+        let info2 =
+            ViewerCustomInfo::new("broadcaster_A".to_string(), "viewer_2".to_string());
+        upsert_viewer_custom_info(&db.connection, &info2)?;
+
+        let info3 =
+            ViewerCustomInfo::new("broadcaster_B".to_string(), "viewer_3".to_string());
+        upsert_viewer_custom_info(&db.connection, &info3)?;
+
+        // 配信者一覧取得
+        let channels = get_distinct_broadcaster_channels(&db.connection)?;
+
+        assert_eq!(channels.len(), 2);
+
+        // viewer_count 降順でソートされているはず
+        assert_eq!(channels[0].channel_id, "broadcaster_A");
+        assert_eq!(channels[0].viewer_count, 2);
+        assert_eq!(channels[1].channel_id, "broadcaster_B");
+        assert_eq!(channels[1].viewer_count, 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_viewers_for_broadcaster() -> Result<()> {
+        let mut db = LiscovDatabase::new_in_memory()?;
+
+        let broadcaster = "broadcaster_test";
+
+        // viewer_profiles を先に作成
+        db.upsert_viewer_profile("viewer_alice", "Alice")?;
+        db.upsert_viewer_profile("viewer_bob", "Bob")?;
+
+        // viewer_custom_info を登録
+        let info1 = ViewerCustomInfo::new(broadcaster.to_string(), "viewer_alice".to_string())
+            .with_reading("ありす");
+        upsert_viewer_custom_info(&db.connection, &info1)?;
+
+        let info2 = ViewerCustomInfo::new(broadcaster.to_string(), "viewer_bob".to_string())
+            .with_reading("ぼぶ")
+            .with_notes("テストメモ");
+        upsert_viewer_custom_info(&db.connection, &info2)?;
+
+        // 一覧取得（検索なし）
+        let viewers = get_viewers_for_broadcaster(&db.connection, broadcaster, None, 50, 0)?;
+        assert_eq!(viewers.len(), 2);
+
+        // 検索（名前）
+        let viewers_alice =
+            get_viewers_for_broadcaster(&db.connection, broadcaster, Some("Alice"), 50, 0)?;
+        assert_eq!(viewers_alice.len(), 1);
+        assert_eq!(viewers_alice[0].display_name, "Alice");
+
+        // 検索（読み仮名）
+        let viewers_bob =
+            get_viewers_for_broadcaster(&db.connection, broadcaster, Some("ぼぶ"), 50, 0)?;
+        assert_eq!(viewers_bob.len(), 1);
+        assert_eq!(viewers_bob[0].reading, Some("ぼぶ".to_string()));
+
+        // ページネーション
+        let viewers_page1 =
+            get_viewers_for_broadcaster(&db.connection, broadcaster, None, 1, 0)?;
+        assert_eq!(viewers_page1.len(), 1);
+
+        let viewers_page2 =
+            get_viewers_for_broadcaster(&db.connection, broadcaster, None, 1, 1)?;
+        assert_eq!(viewers_page2.len(), 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_viewer_count_for_broadcaster() -> Result<()> {
+        let db = LiscovDatabase::new_in_memory()?;
+
+        let broadcaster = "broadcaster_count";
+
+        // データなしの場合
+        let count = get_viewer_count_for_broadcaster(&db.connection, broadcaster)?;
+        assert_eq!(count, 0);
+
+        // データ追加
+        let info1 =
+            ViewerCustomInfo::new(broadcaster.to_string(), "viewer_1".to_string());
+        upsert_viewer_custom_info(&db.connection, &info1)?;
+
+        let info2 =
+            ViewerCustomInfo::new(broadcaster.to_string(), "viewer_2".to_string());
+        upsert_viewer_custom_info(&db.connection, &info2)?;
+
+        let count = get_viewer_count_for_broadcaster(&db.connection, broadcaster)?;
+        assert_eq!(count, 2);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_update_viewer_profile_metadata() -> Result<()> {
+        let mut db = LiscovDatabase::new_in_memory()?;
+
+        // viewer_profile 作成
+        db.upsert_viewer_profile("viewer_meta", "MetaUser")?;
+
+        // メタデータ更新（タグ）
+        let tags = vec!["tag1".to_string(), "tag2".to_string()];
+        let updated = update_viewer_profile_metadata(
+            &db.connection,
+            "viewer_meta",
+            Some(&tags),
+            None,
+        )?;
+        assert!(updated);
+
+        // 更新確認（viewer_profiles を直接クエリ）
+        let tags_str: Option<String> = db.connection.query_row(
+            "SELECT tags FROM viewer_profiles WHERE channel_id = ?1",
+            params!["viewer_meta"],
+            |row| row.get(0),
+        )?;
+        assert_eq!(tags_str, Some("tag1,tag2".to_string()));
+
+        // メンバーシップレベル更新
+        let updated = update_viewer_profile_metadata(
+            &db.connection,
+            "viewer_meta",
+            None,
+            Some("Gold"),
+        )?;
+        assert!(updated);
+
+        let level: Option<String> = db.connection.query_row(
+            "SELECT membership_level FROM viewer_profiles WHERE channel_id = ?1",
+            params!["viewer_meta"],
+            |row| row.get(0),
+        )?;
+        assert_eq!(level, Some("Gold".to_string()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_delete_viewer_data_custom_info_only() -> Result<()> {
+        let mut db = LiscovDatabase::new_in_memory()?;
+
+        let broadcaster = "broadcaster_del";
+        let viewer = "viewer_del";
+
+        // viewer_profile 作成
+        db.upsert_viewer_profile(viewer, "DeleteUser")?;
+
+        // viewer_custom_info 作成
+        let info = ViewerCustomInfo::new(broadcaster.to_string(), viewer.to_string())
+            .with_reading("よみ");
+        upsert_viewer_custom_info(&db.connection, &info)?;
+
+        // カスタム情報のみ削除
+        let deleted = delete_viewer_data(&db.connection, broadcaster, viewer, false)?;
+        assert!(deleted);
+
+        // custom_info は削除されている
+        let custom = get_viewer_custom_info(&db.connection, broadcaster, viewer)?;
+        assert!(custom.is_none());
+
+        // profile は残っている
+        let profile: i64 = db.connection.query_row(
+            "SELECT COUNT(*) FROM viewer_profiles WHERE channel_id = ?1",
+            params![viewer],
+            |row| row.get(0),
+        )?;
+        assert_eq!(profile, 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_delete_viewer_data_with_profile() -> Result<()> {
+        let mut db = LiscovDatabase::new_in_memory()?;
+
+        let broadcaster = "broadcaster_del2";
+        let viewer = "viewer_del2";
+
+        // viewer_profile 作成
+        db.upsert_viewer_profile(viewer, "DeleteUser2")?;
+
+        // viewer_custom_info 作成
+        let info = ViewerCustomInfo::new(broadcaster.to_string(), viewer.to_string())
+            .with_reading("よみ2");
+        upsert_viewer_custom_info(&db.connection, &info)?;
+
+        // プロフィールも含めて削除
+        let deleted = delete_viewer_data(&db.connection, broadcaster, viewer, true)?;
+        assert!(deleted);
+
+        // custom_info は削除されている
+        let custom = get_viewer_custom_info(&db.connection, broadcaster, viewer)?;
+        assert!(custom.is_none());
+
+        // profile も削除されている
+        let profile: i64 = db.connection.query_row(
+            "SELECT COUNT(*) FROM viewer_profiles WHERE channel_id = ?1",
+            params![viewer],
+            |row| row.get(0),
+        )?;
+        assert_eq!(profile, 0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_delete_broadcaster_data() -> Result<()> {
+        let db = LiscovDatabase::new_in_memory()?;
+
+        let broadcaster = "broadcaster_to_delete";
+        let viewer1 = "viewer_bd_1";
+        let viewer2 = "viewer_bd_2";
+        let other_broadcaster = "other_broadcaster";
+        let viewer3 = "viewer_other";
+
+        // 配信者プロフィールを登録
+        upsert_broadcaster_profile(
+            &db.connection,
+            &BroadcasterProfile {
+                channel_id: broadcaster.to_string(),
+                channel_name: Some("削除対象配信者".to_string()),
+                handle: Some("@delete_target".to_string()),
+                ..Default::default()
+            },
+        )?;
+        upsert_broadcaster_profile(
+            &db.connection,
+            &BroadcasterProfile {
+                channel_id: other_broadcaster.to_string(),
+                channel_name: Some("他の配信者".to_string()),
+                handle: Some("@other".to_string()),
+                ..Default::default()
+            },
+        )?;
+
+        // 視聴者カスタム情報を登録
+        let mut info1 = ViewerCustomInfo::new(broadcaster.to_string(), viewer1.to_string());
+        info1.reading = Some("しちょうしゃ1".to_string());
+        upsert_viewer_custom_info(&db.connection, &info1)?;
+
+        let mut info2 = ViewerCustomInfo::new(broadcaster.to_string(), viewer2.to_string());
+        info2.reading = Some("しちょうしゃ2".to_string());
+        upsert_viewer_custom_info(&db.connection, &info2)?;
+
+        // 他の配信者の視聴者も登録
+        let info3 = ViewerCustomInfo::new(other_broadcaster.to_string(), viewer3.to_string());
+        upsert_viewer_custom_info(&db.connection, &info3)?;
+
+        // 削除前の確認
+        let channels = get_distinct_broadcaster_channels(&db.connection)?;
+        assert_eq!(channels.len(), 2);
+
+        let viewer_count = get_viewer_count_for_broadcaster(&db.connection, broadcaster)?;
+        assert_eq!(viewer_count, 2);
+
+        // 配信者データを削除
+        let (broadcaster_deleted, viewers_deleted) =
+            delete_broadcaster_data(&db.connection, broadcaster)?;
+
+        assert!(broadcaster_deleted);
+        assert_eq!(viewers_deleted, 2);
+
+        // 削除後の確認
+        let channels = get_distinct_broadcaster_channels(&db.connection)?;
+        assert_eq!(channels.len(), 1);
+        assert_eq!(channels[0].channel_id, other_broadcaster);
+
+        // 削除した配信者の視聴者情報も消えている
+        let viewer_count = get_viewer_count_for_broadcaster(&db.connection, broadcaster)?;
+        assert_eq!(viewer_count, 0);
+
+        // 他の配信者の視聴者情報は残っている
+        let other_viewer_count = get_viewer_count_for_broadcaster(&db.connection, other_broadcaster)?;
+        assert_eq!(other_viewer_count, 1);
+
+        // 存在しない配信者を削除しても問題なし
+        let (deleted, count) = delete_broadcaster_data(&db.connection, "nonexistent")?;
+        assert!(!deleted);
+        assert_eq!(count, 0);
 
         Ok(())
     }

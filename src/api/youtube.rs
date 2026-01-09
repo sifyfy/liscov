@@ -364,6 +364,188 @@ pub fn extract_broadcaster_channel_id(html: &str) -> Option<String> {
     None
 }
 
+/// 配信者のチャンネル名をHTMLから抽出
+///
+/// YouTubeのHTMLから配信者（動画の所有者）のチャンネル名を抽出する。
+/// チャンネル名は以下の場所に存在する可能性がある:
+/// - ytInitialPlayerResponse.videoDetails.author
+/// - ownerChannelName
+///
+/// # Arguments
+/// * `html` - YouTubeページのHTML
+///
+/// # Returns
+/// * `Some(String)` - チャンネル名
+/// * `None` - チャンネル名が見つからない場合
+pub fn extract_broadcaster_channel_name(html: &str) -> Option<String> {
+    // 優先度1: videoDetails.author (最も信頼性が高い - 動画ページ用)
+    // パターン: "author":"チャンネル名"
+    if let Some(cap) = Regex::new(r#""author"\s*:\s*"([^"]+)""#)
+        .ok()?
+        .captures(html)
+    {
+        if let Some(m) = cap.get(1) {
+            let name = m.as_str().to_string();
+            // Unicode エスケープをデコード
+            let decoded = decode_unicode_escapes(&name);
+            tracing::debug!("Broadcaster channel name found via author: {}", decoded);
+            return Some(decoded);
+        }
+    }
+
+    // 優先度2: ownerChannelName (動画ページ用)
+    // パターン: "ownerChannelName":"チャンネル名"
+    if let Some(cap) = Regex::new(r#""ownerChannelName"\s*:\s*"([^"]+)""#)
+        .ok()?
+        .captures(html)
+    {
+        if let Some(m) = cap.get(1) {
+            let name = m.as_str().to_string();
+            let decoded = decode_unicode_escapes(&name);
+            tracing::debug!(
+                "Broadcaster channel name found via ownerChannelName: {}",
+                decoded
+            );
+            return Some(decoded);
+        }
+    }
+
+    // 優先度3: channelMetadataRenderer.title (チャンネルページ用)
+    // パターン: "channelMetadataRenderer":{"title":"チャンネル名"
+    if let Some(cap) =
+        Regex::new(r#""channelMetadataRenderer"\s*:\s*\{\s*"title"\s*:\s*"([^"]+)""#)
+            .ok()?
+            .captures(html)
+    {
+        if let Some(m) = cap.get(1) {
+            let name = m.as_str().to_string();
+            let decoded = decode_unicode_escapes(&name);
+            tracing::debug!(
+                "Broadcaster channel name found via channelMetadataRenderer: {}",
+                decoded
+            );
+            return Some(decoded);
+        }
+    }
+
+    // 優先度4: c4TabbedHeaderRenderer.title (チャンネルページ用)
+    // パターン: "c4TabbedHeaderRenderer":{"channelId":"...","title":"チャンネル名"
+    if let Some(cap) = Regex::new(r#""c4TabbedHeaderRenderer"\s*:\s*\{[^}]*"title"\s*:\s*"([^"]+)""#)
+        .ok()?
+        .captures(html)
+    {
+        if let Some(m) = cap.get(1) {
+            let name = m.as_str().to_string();
+            let decoded = decode_unicode_escapes(&name);
+            tracing::debug!(
+                "Broadcaster channel name found via c4TabbedHeaderRenderer: {}",
+                decoded
+            );
+            return Some(decoded);
+        }
+    }
+
+    // 優先度5: <title>タグから抽出 (チャンネルページ用)
+    // パターン: <title>チャンネル名 - YouTube</title>
+    if let Some(cap) = Regex::new(r#"<title>([^<]+)\s*-\s*YouTube</title>"#)
+        .ok()?
+        .captures(html)
+    {
+        if let Some(m) = cap.get(1) {
+            let name = m.as_str().trim().to_string();
+            // @で始まる場合はハンドルなのでスキップ
+            if !name.starts_with('@') && !name.is_empty() {
+                tracing::debug!("Broadcaster channel name found via title tag: {}", name);
+                return Some(name);
+            }
+        }
+    }
+
+    tracing::debug!("Broadcaster channel name not found in HTML");
+    None
+}
+
+/// 配信者のYouTubeハンドルをHTMLから抽出
+///
+/// YouTubeのHTMLから配信者（動画の所有者）のハンドル（@xxx）を抽出する。
+///
+/// # Arguments
+/// * `html` - YouTubeページのHTML
+///
+/// # Returns
+/// * `Some(String)` - ハンドル（@を含む）
+/// * `None` - ハンドルが見つからない場合
+pub fn extract_broadcaster_handle(html: &str) -> Option<String> {
+    // パターン: "canonicalBaseUrl":"/@handle"
+    if let Some(cap) = Regex::new(r#""canonicalBaseUrl"\s*:\s*"/(@[a-zA-Z0-9_-]+)""#)
+        .ok()?
+        .captures(html)
+    {
+        if let Some(m) = cap.get(1) {
+            tracing::debug!("Broadcaster handle found via canonicalBaseUrl: {}", m.as_str());
+            return Some(m.as_str().to_string());
+        }
+    }
+
+    // 代替パターン: "vanityChannelUrl":"http://www.youtube.com/@handle"
+    if let Some(cap) = Regex::new(r#""vanityChannelUrl"\s*:\s*"https?://(?:www\.)?youtube\.com/(@[a-zA-Z0-9_-]+)""#)
+        .ok()?
+        .captures(html)
+    {
+        if let Some(m) = cap.get(1) {
+            tracing::debug!("Broadcaster handle found via vanityChannelUrl: {}", m.as_str());
+            return Some(m.as_str().to_string());
+        }
+    }
+
+    tracing::debug!("Broadcaster handle not found in HTML");
+    None
+}
+
+/// Unicodeエスケープシーケンスをデコード
+fn decode_unicode_escapes(s: &str) -> String {
+    let mut result = String::new();
+    let mut chars = s.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == '\\' && chars.peek() == Some(&'u') {
+            chars.next(); // 'u' をスキップ
+            let hex: String = chars.by_ref().take(4).collect();
+            if let Ok(code_point) = u32::from_str_radix(&hex, 16) {
+                if let Some(decoded_char) = char::from_u32(code_point) {
+                    result.push(decoded_char);
+                    continue;
+                }
+            }
+            // デコードに失敗した場合は元の文字列を追加
+            result.push('\\');
+            result.push('u');
+            result.push_str(&hex);
+        } else {
+            result.push(c);
+        }
+    }
+
+    result
+}
+
+/// 配信者情報をまとめて抽出
+#[derive(Debug, Clone, Default)]
+pub struct BroadcasterInfo {
+    pub channel_id: Option<String>,
+    pub channel_name: Option<String>,
+    pub handle: Option<String>,
+}
+
+/// 配信者情報をHTMLからまとめて抽出
+pub fn extract_broadcaster_info(html: &str) -> BroadcasterInfo {
+    BroadcasterInfo {
+        channel_id: extract_broadcaster_channel_id(html),
+        channel_name: extract_broadcaster_channel_name(html),
+        handle: extract_broadcaster_handle(html),
+    }
+}
+
 fn extract_gl(html: &str) -> Option<String> {
     Regex::new(r#"['"]gl['"]:\s*['"](.+?)['"]"#)
         .unwrap()

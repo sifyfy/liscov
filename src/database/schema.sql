@@ -91,6 +91,16 @@ CREATE TABLE IF NOT EXISTS contributor_stats (
     UNIQUE(session_id, channel_id)
 );
 
+-- 配信者プロフィールテーブル：配信者チャンネルの情報を管理
+CREATE TABLE IF NOT EXISTS broadcaster_profiles (
+    channel_id TEXT PRIMARY KEY,           -- YouTubeチャンネルID (UCxxxxxx)
+    channel_name TEXT,                     -- チャンネル表示名
+    handle TEXT,                           -- YouTubeハンドル (@handle)
+    thumbnail_url TEXT,                    -- サムネイルURL（将来用）
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 -- 視聴者カスタム情報テーブル：配信者チャンネル単位での視聴者情報を管理
 -- 読み仮名など、配信者ごとにカスタマイズ可能な視聴者情報を保存
 CREATE TABLE IF NOT EXISTS viewer_custom_info (
@@ -139,4 +149,10 @@ CREATE TRIGGER IF NOT EXISTS update_viewer_custom_info_timestamp
     AFTER UPDATE ON viewer_custom_info
     BEGIN
         UPDATE viewer_custom_info SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+    END;
+
+CREATE TRIGGER IF NOT EXISTS update_broadcaster_profiles_timestamp
+    AFTER UPDATE ON broadcaster_profiles
+    BEGIN
+        UPDATE broadcaster_profiles SET updated_at = CURRENT_TIMESTAMP WHERE channel_id = NEW.channel_id;
     END; 

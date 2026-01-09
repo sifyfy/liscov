@@ -86,3 +86,86 @@ impl ViewerCustomInfo {
         self
     }
 }
+
+/// 配信者プロフィールモデル
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct BroadcasterProfile {
+    /// YouTubeチャンネルID (UCxxxxxx)
+    pub channel_id: String,
+    /// チャンネル表示名
+    pub channel_name: Option<String>,
+    /// YouTubeハンドル (@handle)
+    pub handle: Option<String>,
+    /// サムネイルURL
+    pub thumbnail_url: Option<String>,
+    /// 作成日時
+    pub created_at: Option<String>,
+    /// 更新日時
+    pub updated_at: Option<String>,
+}
+
+impl BroadcasterProfile {
+    /// 新規作成
+    pub fn new(channel_id: String) -> Self {
+        Self {
+            channel_id,
+            ..Default::default()
+        }
+    }
+
+    /// チャンネル名を設定
+    pub fn with_channel_name(mut self, name: impl Into<String>) -> Self {
+        self.channel_name = Some(name.into());
+        self
+    }
+
+    /// ハンドルを設定
+    pub fn with_handle(mut self, handle: impl Into<String>) -> Self {
+        self.handle = Some(handle.into());
+        self
+    }
+}
+
+/// 配信者チャンネル情報（ドロップダウン用）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BroadcasterChannel {
+    /// 配信者のYouTubeチャンネルID
+    pub channel_id: String,
+    /// チャンネル表示名
+    pub channel_name: Option<String>,
+    /// YouTubeハンドル (@handle)
+    pub handle: Option<String>,
+    /// この配信者に紐づく視聴者数
+    pub viewer_count: usize,
+}
+
+/// 視聴者情報（viewer_profiles + viewer_custom_info 結合モデル）
+/// 視聴者管理画面で使用
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct ViewerWithCustomInfo {
+    // viewer_profiles フィールド
+    /// 視聴者のYouTubeチャンネルID
+    pub channel_id: String,
+    /// 表示名
+    pub display_name: String,
+    /// 初見日時
+    pub first_seen: String,
+    /// 最終確認日時
+    pub last_seen: String,
+    /// メッセージ数
+    pub message_count: i64,
+    /// 総貢献額
+    pub total_contribution: f64,
+    /// メンバーシップレベル
+    pub membership_level: Option<String>,
+    /// タグ
+    pub tags: Vec<String>,
+
+    // viewer_custom_info フィールド
+    /// 読み仮名
+    pub reading: Option<String>,
+    /// メモ
+    pub notes: Option<String>,
+    /// カスタムデータ（JSON）
+    pub custom_data: Option<String>,
+}
