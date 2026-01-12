@@ -71,9 +71,17 @@ pub enum ServerState {
     Stopping,
 }
 
+/// ポート候補の開始番号
+const DEFAULT_PORT_START: u16 = 8765;
+/// ポート候補の終了番号
+const DEFAULT_PORT_END: u16 = 8774;
+
 /// WebSocketサーバー
 pub struct WebSocketServer {
-    port: u16,
+    /// 希望ポート（開始ポート）
+    preferred_port: u16,
+    /// 実際に使用中のポート
+    actual_port: Arc<RwLock<Option<u16>>>,
     state: Arc<RwLock<ServerState>>,
     clients: Arc<RwLock<HashMap<ClientId, tokio::sync::mpsc::UnboundedSender<Message>>>>,
     message_tx: broadcast::Sender<ServerMessage>,
@@ -83,10 +91,14 @@ pub struct WebSocketServer {
 
 impl WebSocketServer {
     /// 新しいWebSocketサーバーを作成
+    ///
+    /// `port`は希望するポート番号。サーバー起動時にこのポートが使用中の場合、
+    /// 自動的に次のポート番号を試行する。
     pub fn new(port: u16) -> Self {
         let (message_tx, _) = broadcast::channel(1024);
         Self {
-            port,
+            preferred_port: port,
+            actual_port: Arc::new(RwLock::new(None)),
             state: Arc::new(RwLock::new(ServerState::Stopped)),
             clients: Arc::new(RwLock::new(HashMap::new())),
             message_tx,
@@ -96,6 +108,8 @@ impl WebSocketServer {
     }
 
     /// サーバーを起動
+    ///
+    /// 希望ポートが使用中の場合、自動的に次のポート（最大10ポート）を試行する。
     pub async fn start(&self) -> anyhow::Result<()> {
         {
             let mut state = self.state.write().await;
@@ -108,23 +122,26 @@ impl WebSocketServer {
 
         self.shutdown.store(false, Ordering::SeqCst);
 
-        let addr = format!("127.0.0.1:{}", self.port);
-        tracing::debug!("Attempting to bind WebSocket server to {}", addr);
+        // ポートを順番に試行
+        let port_range_end = self.preferred_port.saturating_add(DEFAULT_PORT_END - DEFAULT_PORT_START);
+        let (listener, bound_port) = self.try_bind_ports(self.preferred_port, port_range_end).await?;
 
-        let listener = match TcpListener::bind(&addr).await {
-            Ok(l) => {
-                tracing::debug!("Successfully bound to {}", addr);
-                l
-            }
-            Err(e) => {
-                tracing::error!("❌ Failed to bind WebSocket server to {}: {}", addr, e);
-                let mut state = self.state.write().await;
-                *state = ServerState::Stopped;
-                return Err(anyhow::anyhow!("Failed to bind to {}: {}", addr, e));
-            }
-        };
+        // 実際に使用するポートを記録
+        {
+            let mut actual = self.actual_port.write().await;
+            *actual = Some(bound_port);
+        }
 
-        tracing::info!("🌐 WebSocket server listening on ws://{}", addr);
+        let addr = format!("127.0.0.1:{}", bound_port);
+        if bound_port != self.preferred_port {
+            tracing::info!(
+                "🌐 WebSocket server listening on ws://{} (preferred port {} was unavailable)",
+                addr,
+                self.preferred_port
+            );
+        } else {
+            tracing::info!("🌐 WebSocket server listening on ws://{}", addr);
+        }
 
         {
             let mut state = self.state.write().await;
@@ -174,6 +191,52 @@ impl WebSocketServer {
         Ok(())
     }
 
+    /// 指定範囲のポートを順番に試行してバインド
+    async fn try_bind_ports(
+        &self,
+        start_port: u16,
+        end_port: u16,
+    ) -> anyhow::Result<(TcpListener, u16)> {
+        let mut last_error = None;
+
+        for port in start_port..=end_port {
+            let addr = format!("127.0.0.1:{}", port);
+            tracing::debug!("Attempting to bind WebSocket server to {}", addr);
+
+            match TcpListener::bind(&addr).await {
+                Ok(listener) => {
+                    tracing::debug!("Successfully bound to {}", addr);
+                    return Ok((listener, port));
+                }
+                Err(e) => {
+                    tracing::debug!("Port {} unavailable: {}", port, e);
+                    last_error = Some(e);
+                }
+            }
+        }
+
+        // すべてのポートが使用中
+        let err = last_error.unwrap_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::AddrInUse, "No ports available")
+        });
+        tracing::error!(
+            "❌ Failed to bind WebSocket server to any port in range {}-{}: {}",
+            start_port,
+            end_port,
+            err
+        );
+
+        let mut state = self.state.write().await;
+        *state = ServerState::Stopped;
+
+        Err(anyhow::anyhow!(
+            "Failed to bind to any port in range {}-{}: {}",
+            start_port,
+            end_port,
+            err
+        ))
+    }
+
     /// サーバーを停止
     pub async fn stop(&self) {
         tracing::info!("🛑 Stopping WebSocket server...");
@@ -184,6 +247,12 @@ impl WebSocketServer {
         }
 
         self.shutdown.store(true, Ordering::SeqCst);
+
+        // 実際に使用中のポートをクリア
+        {
+            let mut actual = self.actual_port.write().await;
+            *actual = None;
+        }
 
         // すべてのクライアントを切断
         let mut clients = self.clients.write().await;
@@ -230,9 +299,22 @@ impl WebSocketServer {
         *self.state.read().await == ServerState::Running
     }
 
-    /// ポート番号を取得
+    /// 希望ポート番号を取得
+    pub fn preferred_port(&self) -> u16 {
+        self.preferred_port
+    }
+
+    /// 実際に使用中のポート番号を取得
+    ///
+    /// サーバーが起動していない場合はNoneを返す
+    pub async fn actual_port(&self) -> Option<u16> {
+        *self.actual_port.read().await
+    }
+
+    /// 後方互換性のため：実際のポートまたは希望ポートを返す
+    #[deprecated(note = "Use actual_port() or preferred_port() instead")]
     pub fn port(&self) -> u16 {
-        self.port
+        self.preferred_port
     }
 }
 
@@ -665,5 +747,84 @@ mod tests {
             }
         }
         None
+    }
+
+    /// 自動ポート選択テスト：希望ポートが使用中の場合、次のポートを使用
+    #[tokio::test]
+    async fn test_auto_port_selection() {
+        // まず最初のポートを占有
+        let base_port = find_available_port().await.expect("No available port found");
+        let _blocker = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", base_port))
+            .await
+            .expect("Should bind to base port");
+
+        // 同じポートでサーバーを起動 → 自動的に次のポートを使用するはず
+        let server = WebSocketServer::new(base_port);
+        let result = server.start().await;
+        assert!(result.is_ok(), "Server should start on alternative port");
+
+        // サーバーが起動するまで待つ
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        // 実際に使用中のポートを確認
+        let actual = server.actual_port().await;
+        assert!(actual.is_some(), "Should have actual port set");
+        let actual_port = actual.unwrap();
+
+        // 実際のポートは希望ポートとは異なるはず（希望ポートは占有済み）
+        assert_ne!(
+            actual_port, base_port,
+            "Should use different port than preferred"
+        );
+        // 実際のポートは希望ポートより大きい（次の利用可能なポートを使用）
+        assert!(
+            actual_port > base_port,
+            "Should use a port greater than preferred: actual={}, preferred={}",
+            actual_port,
+            base_port
+        );
+
+        // 希望ポートは変わらない
+        assert_eq!(server.preferred_port(), base_port);
+
+        // クライアントが実際のポートに接続できることを確認
+        let url = format!("ws://127.0.0.1:{}", actual_port);
+        let connect_result = tokio_tungstenite::connect_async(&url).await;
+        assert!(
+            connect_result.is_ok(),
+            "Client should connect to actual port"
+        );
+
+        server.stop().await;
+    }
+
+    /// actual_port()がサーバー停止後にNoneを返すことをテスト
+    #[tokio::test]
+    async fn test_actual_port_cleared_on_stop() {
+        let port = find_available_port().await.expect("No available port found");
+        let server = WebSocketServer::new(port);
+
+        // 起動前はNone
+        assert!(
+            server.actual_port().await.is_none(),
+            "actual_port should be None before start"
+        );
+
+        server.start().await.expect("Server should start");
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        // 起動後はSome
+        assert!(
+            server.actual_port().await.is_some(),
+            "actual_port should be Some after start"
+        );
+
+        server.stop().await;
+
+        // 停止後はNone
+        assert!(
+            server.actual_port().await.is_none(),
+            "actual_port should be None after stop"
+        );
     }
 }

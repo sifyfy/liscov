@@ -149,13 +149,25 @@ fn main() -> LiscovResult<()> {
 
     // WebSocket APIサーバーを起動
     let ws_server = liscov::api::websocket_server::get_websocket_server();
-    let ws_port = ws_server.port();
+    let preferred_port = ws_server.preferred_port();
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
         rt.block_on(async {
             if let Err(e) = ws_server.start().await {
                 tracing::error!("❌ Failed to start WebSocket server: {}", e);
                 return;
+            }
+            // 実際に使用中のポートをログに出力
+            if let Some(actual_port) = ws_server.actual_port().await {
+                if actual_port != preferred_port {
+                    tracing::info!(
+                        "🌐 WebSocket API server started on ws://127.0.0.1:{} (port {} was unavailable)",
+                        actual_port,
+                        preferred_port
+                    );
+                } else {
+                    tracing::info!("🌐 WebSocket API server started on ws://127.0.0.1:{}", actual_port);
+                }
             }
             // サーバーが停止するまで待機（shutdownシグナルを待つ）
             loop {
@@ -166,7 +178,6 @@ fn main() -> LiscovResult<()> {
             }
         });
     });
-    tracing::info!("🌐 WebSocket API server started on ws://127.0.0.1:{}", ws_port);
 
     // ウィンドウ位置をデスクトップ範囲内に調整
     utils::validate_window_bounds(&mut config.window);
