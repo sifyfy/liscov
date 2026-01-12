@@ -36,7 +36,7 @@ use crate::gui::models::GuiChatMessage;
 type ClientId = u64;
 
 /// サーバーからクライアントへのメッセージ
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", content = "data")]
 pub enum ServerMessage {
     /// チャットメッセージ
@@ -53,7 +53,7 @@ pub enum ServerMessage {
 }
 
 /// クライアントからサーバーへのメッセージ
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type")]
 pub enum ClientMessage {
     /// Ping
@@ -100,6 +100,7 @@ impl WebSocketServer {
         {
             let mut state = self.state.write().await;
             if *state != ServerState::Stopped {
+                tracing::warn!("WebSocket server is already in state: {:?}", *state);
                 return Err(anyhow::anyhow!("Server is already running or starting"));
             }
             *state = ServerState::Starting;
@@ -108,7 +109,20 @@ impl WebSocketServer {
         self.shutdown.store(false, Ordering::SeqCst);
 
         let addr = format!("127.0.0.1:{}", self.port);
-        let listener = TcpListener::bind(&addr).await?;
+        tracing::debug!("Attempting to bind WebSocket server to {}", addr);
+
+        let listener = match TcpListener::bind(&addr).await {
+            Ok(l) => {
+                tracing::debug!("Successfully bound to {}", addr);
+                l
+            }
+            Err(e) => {
+                tracing::error!("❌ Failed to bind WebSocket server to {}: {}", addr, e);
+                let mut state = self.state.write().await;
+                *state = ServerState::Stopped;
+                return Err(anyhow::anyhow!("Failed to bind to {}: {}", addr, e));
+            }
+        };
 
         tracing::info!("🌐 WebSocket server listening on ws://{}", addr);
 
@@ -366,5 +380,290 @@ mod tests {
         let message = GuiChatMessage::default();
         // クライアントがいなくてもエラーにならない
         server.broadcast_message(&message).await;
+    }
+
+    /// WebSocketサーバーの起動テスト
+    #[tokio::test]
+    async fn test_server_start_and_stop() {
+        // ランダムポートでサーバーを作成（0を指定するとOSがポートを割り当て）
+        // ただし、実際にはポート0ではバインドできないため、未使用ポートを探す
+        let port = find_available_port().await.expect("No available port found");
+        let server = WebSocketServer::new(port);
+
+        // サーバー起動
+        let result = server.start().await;
+        assert!(result.is_ok(), "Server should start successfully: {:?}", result);
+
+        // 状態がRunningになるまで少し待つ
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        assert_eq!(server.get_state().await, ServerState::Running);
+
+        // サーバー停止
+        server.stop().await;
+
+        // 停止処理が完了するまで待つ
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+        assert_eq!(server.get_state().await, ServerState::Stopped);
+    }
+
+    /// WebSocketクライアント接続テスト
+    #[tokio::test]
+    async fn test_client_connection() {
+        let port = find_available_port().await.expect("No available port found");
+        let server = WebSocketServer::new(port);
+        server.start().await.expect("Server should start");
+
+        // サーバーが起動するまで待つ
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        // クライアント接続
+        let url = format!("ws://127.0.0.1:{}", port);
+        let connect_result = tokio_tungstenite::connect_async(&url).await;
+
+        assert!(
+            connect_result.is_ok(),
+            "Client should connect successfully: {:?}",
+            connect_result.err()
+        );
+
+        let (ws_stream, _response) = connect_result.unwrap();
+        let (mut _write, mut read) = ws_stream.split();
+
+        // 接続確認メッセージを受信
+        let msg = tokio::time::timeout(
+            tokio::time::Duration::from_secs(5),
+            read.next()
+        ).await;
+
+        assert!(msg.is_ok(), "Should receive message within timeout");
+        let msg = msg.unwrap();
+        assert!(msg.is_some(), "Should receive a message");
+
+        if let Some(Ok(Message::Text(text))) = msg {
+            let server_msg: Result<ServerMessage, _> = serde_json::from_str(&text);
+            assert!(server_msg.is_ok(), "Should deserialize ServerMessage");
+            if let Ok(ServerMessage::Connected { client_id }) = server_msg {
+                assert!(client_id > 0, "Client ID should be positive");
+            } else {
+                panic!("Expected Connected message, got: {:?}", server_msg);
+            }
+        } else {
+            panic!("Expected text message, got: {:?}", msg);
+        }
+
+        // クリーンアップ
+        server.stop().await;
+    }
+
+    /// メッセージブロードキャストテスト
+    #[tokio::test]
+    async fn test_message_broadcast() {
+        let port = find_available_port().await.expect("No available port found");
+        let server = WebSocketServer::new(port);
+        server.start().await.expect("Server should start");
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        // クライアント接続
+        let url = format!("ws://127.0.0.1:{}", port);
+        let (ws_stream, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .expect("Client should connect");
+
+        let (_write, mut read) = ws_stream.split();
+
+        // 接続確認メッセージをスキップ
+        let _ = read.next().await;
+
+        // 接続が安定するまで少し待つ
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        // テストメッセージを作成
+        let test_message = GuiChatMessage {
+            id: "test_123".to_string(),
+            timestamp: "12:34:56".to_string(),
+            timestamp_usec: "1234567890".to_string(),
+            message_type: crate::gui::models::MessageType::Text,
+            author: "TestUser".to_string(),
+            author_icon_url: None,
+            channel_id: "UC123".to_string(),
+            content: "Hello, WebSocket!".to_string(),
+            runs: vec![],
+            metadata: None,
+            is_member: false,
+            comment_count: None,
+        };
+
+        // メッセージをブロードキャスト
+        server.broadcast_message(&test_message).await;
+
+        // ブロードキャストメッセージを受信
+        let msg = tokio::time::timeout(
+            tokio::time::Duration::from_secs(5),
+            read.next()
+        ).await;
+
+        assert!(msg.is_ok(), "Should receive broadcast within timeout");
+        let msg = msg.unwrap();
+        assert!(msg.is_some(), "Should receive a broadcast message");
+
+        if let Some(Ok(Message::Text(text))) = msg {
+            let server_msg: Result<ServerMessage, _> = serde_json::from_str(&text);
+            assert!(server_msg.is_ok(), "Should deserialize ServerMessage: {}", text);
+            if let Ok(ServerMessage::ChatMessage(received_msg)) = server_msg {
+                assert_eq!(received_msg.id, "test_123");
+                assert_eq!(received_msg.author, "TestUser");
+                assert_eq!(received_msg.content, "Hello, WebSocket!");
+            } else {
+                panic!("Expected ChatMessage, got: {:?}", server_msg);
+            }
+        } else {
+            panic!("Expected text message, got: {:?}", msg);
+        }
+
+        server.stop().await;
+    }
+
+    /// Ping/Pongテスト
+    #[tokio::test]
+    async fn test_ping_pong() {
+        let port = find_available_port().await.expect("No available port found");
+        let server = WebSocketServer::new(port);
+        server.start().await.expect("Server should start");
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        let url = format!("ws://127.0.0.1:{}", port);
+        let (ws_stream, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .expect("Client should connect");
+
+        let (mut write, mut read) = ws_stream.split();
+
+        // 接続確認メッセージをスキップ
+        let _ = read.next().await;
+
+        // Pingメッセージを送信
+        let ping_msg = ClientMessage::Ping;
+        let ping_json = serde_json::to_string(&ping_msg).unwrap();
+        write.send(Message::Text(ping_json.into())).await.expect("Should send ping");
+
+        // Pongを受信（サーバーはPongを返す）
+        let msg = tokio::time::timeout(
+            tokio::time::Duration::from_secs(5),
+            read.next()
+        ).await;
+
+        assert!(msg.is_ok(), "Should receive pong within timeout");
+        let msg = msg.unwrap();
+        assert!(msg.is_some(), "Should receive a pong message");
+
+        // Pongメッセージを確認
+        if let Some(Ok(Message::Pong(_))) = msg {
+            // OK
+        } else {
+            panic!("Expected Pong message, got: {:?}", msg);
+        }
+
+        server.stop().await;
+    }
+
+    /// GetInfoリクエストテスト
+    #[tokio::test]
+    async fn test_get_info() {
+        let port = find_available_port().await.expect("No available port found");
+        let server = WebSocketServer::new(port);
+        server.start().await.expect("Server should start");
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        let url = format!("ws://127.0.0.1:{}", port);
+        let (ws_stream, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .expect("Client should connect");
+
+        let (mut write, mut read) = ws_stream.split();
+
+        // 接続確認メッセージをスキップ
+        let _ = read.next().await;
+
+        // GetInfoリクエストを送信
+        let get_info_msg = ClientMessage::GetInfo;
+        let json = serde_json::to_string(&get_info_msg).unwrap();
+        write.send(Message::Text(json.into())).await.expect("Should send GetInfo");
+
+        // ServerInfoレスポンスを受信
+        let msg = tokio::time::timeout(
+            tokio::time::Duration::from_secs(5),
+            read.next()
+        ).await;
+
+        assert!(msg.is_ok(), "Should receive response within timeout");
+        let msg = msg.unwrap();
+        assert!(msg.is_some(), "Should receive a response");
+
+        if let Some(Ok(Message::Text(text))) = msg {
+            let server_msg: Result<ServerMessage, _> = serde_json::from_str(&text);
+            assert!(server_msg.is_ok(), "Should deserialize ServerMessage");
+            if let Ok(ServerMessage::ServerInfo { version, connected_clients }) = server_msg {
+                assert!(!version.is_empty(), "Version should not be empty");
+                assert!(connected_clients >= 1, "Should have at least 1 connected client");
+            } else {
+                panic!("Expected ServerInfo, got: {:?}", server_msg);
+            }
+        } else {
+            panic!("Expected text message, got: {:?}", msg);
+        }
+
+        server.stop().await;
+    }
+
+    /// 複数クライアント接続テスト
+    #[tokio::test]
+    async fn test_multiple_clients() {
+        let port = find_available_port().await.expect("No available port found");
+        let server = WebSocketServer::new(port);
+        server.start().await.expect("Server should start");
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        let url = format!("ws://127.0.0.1:{}", port);
+
+        // 3つのクライアントを接続
+        let mut clients = Vec::new();
+        for _ in 0..3 {
+            let (ws_stream, _) = tokio_tungstenite::connect_async(&url)
+                .await
+                .expect("Client should connect");
+            clients.push(ws_stream);
+        }
+
+        // 接続数を確認
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        let client_count = server.connected_clients().await;
+        assert_eq!(client_count, 3, "Should have 3 connected clients");
+
+        // クライアントを切断
+        for client in clients {
+            drop(client);
+        }
+
+        // 切断処理が完了するまで待つ
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        let client_count = server.connected_clients().await;
+        assert_eq!(client_count, 0, "All clients should be disconnected");
+
+        server.stop().await;
+    }
+
+    /// 利用可能なポートを見つけるヘルパー関数
+    async fn find_available_port() -> Option<u16> {
+        for port in 49152..65535 {
+            if let Ok(listener) = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", port)).await {
+                drop(listener);
+                return Some(port);
+            }
+        }
+        None
     }
 }
