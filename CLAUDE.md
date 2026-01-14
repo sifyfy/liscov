@@ -7,7 +7,7 @@ liscov-tauri プロジェクトの開発ガイド
 **liscov-tauri** は YouTube Live Chat Monitor の Tauri + SvelteKit 版。元の liscov (Rust + Dioxus) から移行したバージョン。
 
 ### 技術スタック
-- **Backend**: Tauri v2 + Rust
+- **Backend**: Tauri v2 + Rust 2024 Edition
 - **Frontend**: SvelteKit + Tailwind CSS + Svelte 5 Runes
 - **Database**: SQLite (rusqlite)
 - **TTS**: 棒読みちゃん / VOICEVOX 対応
@@ -17,53 +17,51 @@ liscov-tauri プロジェクトの開発ガイド
 ### フロントエンド
 
 ```bash
-# 開発サーバー
-pnpm dev
-
-# ビルド
-pnpm build
-
-# 型チェック
-pnpm check
-
-# E2Eテスト
-pnpm test:e2e
+pnpm dev          # 開発サーバー
+pnpm build        # ビルド
+pnpm check        # 型チェック
+pnpm test:e2e     # E2Eテスト
 ```
 
 ### Rust (バックエンド)
 
-**重要**: Git Bash から直接 `cargo` を実行すると、Git の `link.exe` と Visual Studio の `link.exe` が競合してビルドが失敗する場合がある。
-
-#### 解決方法: Developer PowerShell を使用
-
-```powershell
-# PowerShell から Visual Studio DevShell を起動してビルド
-powershell -NoProfile -Command "& {
-    Import-Module 'C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\Microsoft.VisualStudio.DevShell.dll'
-    Enter-VsDevShell -VsInstallPath 'C:\Program Files\Microsoft Visual Studio\2022\Community' -SkipAutomaticLocation
-    Set-Location 'C:\Users\cat\dev\liscov-tauri'
-    cargo check --manifest-path src-tauri/Cargo.toml
-}"
-```
-
-または、バッチファイルを使用:
-
-```batch
-@echo off
-call "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat" -no_logo
-cd /d C:\Users\cat\dev\liscov-tauri
+```bash
+# 通常のcargoコマンドで実行可能
+cargo check --manifest-path src-tauri/Cargo.toml
 cargo build --manifest-path src-tauri/Cargo.toml
 ```
+
+> **Note**: Git Bash環境でのlink.exe競合問題は `.cargo/config.toml` で明示的にリンカパスを指定することで解決済み。Developer PowerShellは不要。
 
 ### Tauri
 
 ```bash
-# 開発モード（フロントエンド + バックエンド同時起動）
-pnpm tauri dev
-
-# リリースビルド
-pnpm tauri build
+pnpm tauri dev    # 開発モード（フロントエンド + バックエンド同時起動）
+pnpm tauri build  # リリースビルド
 ```
+
+### モックサーバー
+
+E2Eテスト用のYouTube InnerTube APIモックサーバー。
+
+```bash
+# 基本起動
+cargo run --manifest-path src-tauri/Cargo.toml --bin mock_server
+
+# NDJSONファイルからリプレイ
+cargo run --manifest-path src-tauri/Cargo.toml --bin mock_server -- -f replay.ndjson
+
+# オプション
+#   -p, --port <PORT>        ポート番号 (default: 3456)
+#   -f, --file <FILE>        NDJSONリプレイファイル
+#   -s, --speed <SPEED>      リプレイ速度 (default: 1.0)
+#   -l, --loop               リプレイをループ
+#   --generate <PATH>        サンプルNDJSON生成
+```
+
+**認証テスト用エンドポイント**:
+- `POST /set_auth_state` - 認証状態を制御
+- `GET /auth_status` - 現在の認証状態を取得
 
 ## プロジェクト構造
 
@@ -71,10 +69,12 @@ pnpm tauri build
 liscov-tauri/
 ├── src-tauri/                    # Rust Backend
 │   ├── src/
+│   │   ├── bin/                  # スタンドアロンバイナリ
+│   │   │   └── mock_server.rs    # E2Eテスト用モックサーバー
 │   │   ├── commands/             # Tauri commands
-│   │   ├── core/                 # コアモジュール
-│   │   │   └── models/           # データモデル
-│   │   └── services/             # バックグラウンドサービス
+│   │   ├── core/                 # コアモジュール・モデル
+│   │   ├── database/             # SQLiteデータベース操作
+│   │   └── tts/                  # TTS (棒読みちゃん/VOICEVOX)
 │   └── Cargo.toml
 ├── src/                          # SvelteKit Frontend
 │   ├── lib/
@@ -84,19 +84,25 @@ liscov-tauri/
 │   │   └── types/                # TypeScript型定義
 │   └── routes/
 ├── e2e/                          # E2Eテスト (Playwright)
+├── docs/                         # ドキュメント
+│   ├── specs/                    # 機能仕様書
+│   └── decisions/                # アーキテクチャ決定記録 (ADR)
 └── package.json
 ```
 
-## 元liscovとの対応
+## ドキュメント
 
-元の liscov の機能を移行する際は、以下のディレクトリを参照:
+- **機能仕様**: `docs/specs/` - 認証、チャット、WebSocket、TTS、収益分析等
+- **ADR**: `docs/decisions/` - セキュアストレージ、認証インジケータ等の設計判断
+
+## 元liscovとの対応
 
 | 元liscov | liscov-tauri |
 |----------|--------------|
 | `src/gui/components/` | `src/lib/components/` |
 | `src/gui/models.rs` | `src-tauri/src/commands/chat.rs` + `src/lib/types/` |
-| `src/database/` | `src-tauri/src/core/` |
-| `src/api/` | `src-tauri/src/services/` |
+| `src/database/` | `src-tauri/src/database/` |
+| `src/api/` | `src-tauri/src/core/` |
 
 ## 重要な注意事項
 

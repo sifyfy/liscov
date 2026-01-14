@@ -28,9 +28,8 @@
   async function handleLogout() {
     if (confirm('ログアウトしてよろしいですか？')) {
       try {
-        // Clear WebView cookies
-        await invoke('auth_clear_webview');
         // Delete saved credentials
+        // Note: WebView cookies cannot be cleared in Tauri v2 (auth_clear_webview is deprecated)
         await authStore.deleteCredentials();
       } catch (error) {
         console.error('Logout failed:', error);

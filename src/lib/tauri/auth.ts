@@ -44,9 +44,3 @@ export async function authUseFallbackStorage(): Promise<boolean> {
 export async function authOpenWindow(): Promise<void> {
   await invoke('auth_open_window');
 }
-
-// Deprecated - kept for backward compatibility
-export async function authGetCredentialsPath(): Promise<string> {
-  console.warn('authGetCredentialsPath is deprecated. Use authGetStatus().storage_type instead.');
-  return invoke('auth_get_credentials_path');
-}
