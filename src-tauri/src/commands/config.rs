@@ -105,11 +105,16 @@ impl ConfigState {
     }
 }
 
+/// Get the app name for directory paths (can be overridden via LISCOV_APP_NAME env var for testing)
+fn get_app_name() -> String {
+    std::env::var("LISCOV_APP_NAME").unwrap_or_else(|_| "liscov".to_string())
+}
+
 /// Get config file path
 fn get_config_path() -> Result<PathBuf, String> {
     let config_dir = dirs::config_dir()
         .ok_or_else(|| "Failed to determine config directory".to_string())?;
-    Ok(config_dir.join("liscov").join("config.toml"))
+    Ok(config_dir.join(get_app_name()).join("config.toml"))
 }
 
 /// Load config from file

@@ -59,12 +59,17 @@ impl Database {
     }
 }
 
+/// Get the app name for directory paths (can be overridden via LISCOV_APP_NAME env var for testing)
+fn get_app_name() -> String {
+    std::env::var("LISCOV_APP_NAME").unwrap_or_else(|_| "liscov".to_string())
+}
+
 /// Get the database file path
 fn get_database_path() -> Result<PathBuf> {
     let data_dir = dirs::data_dir()
         .ok_or_else(|| anyhow::anyhow!("Could not find data directory"))?;
 
-    Ok(data_dir.join("liscov").join("liscov.db"))
+    Ok(data_dir.join(get_app_name()).join("liscov.db"))
 }
 
 /// Get the backup directory path
@@ -72,5 +77,5 @@ pub fn get_backup_dir() -> Result<PathBuf> {
     let data_dir = dirs::data_dir()
         .ok_or_else(|| anyhow::anyhow!("Could not find data directory"))?;
 
-    Ok(data_dir.join("liscov").join("backups"))
+    Ok(data_dir.join(get_app_name()).join("backups"))
 }

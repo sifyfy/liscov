@@ -7,6 +7,7 @@ license = "MIT"
 repository = ""
 edition = "2024"
 rust-version = "1.85.0"
+default-run = "liscov-tauri"
 
 [lib]
 name = "app_lib"
@@ -58,7 +59,7 @@ url = "2.5"
 # Authentication
 sha1 = "0.10"
 hex = "0.4"
-keyring = "3"
+keyring = { version = "3", features = ["windows-native"] }
 
 # Logging
 log = "0.4"

@@ -14,7 +14,7 @@ pub use state::AppState;
 use commands::{
     // Auth (spec: 01_auth.md)
     auth_get_status, auth_load_credentials, auth_save_raw_cookies, auth_save_credentials,
-    auth_delete_credentials, auth_validate_credentials,
+    auth_delete_credentials, auth_clear_webview_cookies, auth_validate_credentials,
     auth_open_window, auth_check_session_validity, auth_use_fallback_storage,
     // Chat (spec: 02_chat.md)
     connect_to_stream, disconnect_stream, get_chat_messages, set_chat_mode,
@@ -68,6 +68,7 @@ pub fn run() {
             auth_save_raw_cookies,
             auth_save_credentials,
             auth_delete_credentials,
+            auth_clear_webview_cookies,
             auth_validate_credentials,
             auth_open_window,
             auth_check_session_validity,

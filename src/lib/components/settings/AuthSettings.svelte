@@ -15,8 +15,11 @@
     loginError = null;
     try {
       await invoke('auth_open_window');
-      // Refresh status after successful login
       await authStore.refreshStatus();
+      // Check session validity after login to update indicator state
+      if (authStore.isAuthenticated) {
+        authStore.checkSessionValidity();
+      }
     } catch (error) {
       console.error('Login failed:', error);
       loginError = error instanceof Error ? error.message : String(error);

@@ -10,10 +10,22 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::RwLock;
 use tauri::State;
 
-const KEYRING_SERVICE: &str = "liscov";
+const KEYRING_SERVICE_DEFAULT: &str = "liscov";
 const KEYRING_USER: &str = "youtube_credentials";
+
+/// Get keyring service name (can be overridden via LISCOV_KEYRING_SERVICE env var for testing)
+fn get_keyring_service() -> String {
+    std::env::var("LISCOV_KEYRING_SERVICE").unwrap_or_else(|_| KEYRING_SERVICE_DEFAULT.to_string())
+}
+
+/// In-memory cache for credentials to work around keyring issues on Windows
+/// The keyring crate may fail to read credentials from a new Entry instance
+/// even immediately after writing, despite verification succeeding within
+/// the same Entry instance. This cache provides a reliable fallback.
+static CREDENTIALS_CACHE: RwLock<Option<YouTubeCookies>> = RwLock::new(None);
 
 /// Storage type for credentials
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -121,11 +133,16 @@ impl From<&YouTubeCookies> for YouTubeCookiesConfig {
     }
 }
 
+/// Get the app name for directory paths (can be overridden via LISCOV_APP_NAME env var for testing)
+fn get_app_name() -> String {
+    std::env::var("LISCOV_APP_NAME").unwrap_or_else(|_| "liscov".to_string())
+}
+
 /// Get credentials file path (for fallback mode)
 fn get_credentials_path() -> Result<PathBuf, String> {
     let config_dir = dirs::config_dir()
         .ok_or_else(|| "Failed to determine config directory".to_string())?;
-    Ok(config_dir.join("liscov").join("credentials.toml"))
+    Ok(config_dir.join(get_app_name()).join("credentials.toml"))
 }
 
 /// Check if credentials file exists
@@ -141,14 +158,20 @@ fn credentials_file_exists() -> bool {
 
 /// Load cookies from secure storage (keyring)
 fn load_cookies_from_secure_storage() -> Result<YouTubeCookies, String> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER)
+    log::info!("📂 Loading from secure storage...");
+    let entry = keyring::Entry::new(&get_keyring_service(), KEYRING_USER)
         .map_err(|e| format!("Failed to access secure storage: {}", e))?;
 
     let secret = entry.get_password()
-        .map_err(|e| match e {
-            keyring::Error::NoEntry => "No credentials found in secure storage".to_string(),
-            _ => format!("Failed to read from secure storage: {}", e),
+        .map_err(|e| {
+            let msg = match e {
+                keyring::Error::NoEntry => "No credentials found in secure storage".to_string(),
+                _ => format!("Failed to read from secure storage: {}", e),
+            };
+            log::info!("📂 Load error: {}", msg);
+            msg
         })?;
+    log::info!("📂 Load success");
 
     let json: CredentialsJson = serde_json::from_str(&secret)
         .map_err(|e| format!("Failed to parse credentials: {}", e))?;
@@ -164,7 +187,8 @@ fn load_cookies_from_secure_storage() -> Result<YouTubeCookies, String> {
 
 /// Save cookies to secure storage (keyring)
 fn save_cookies_to_secure_storage(cookies: &YouTubeCookies) -> Result<(), String> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER)
+    log::info!("📝 Saving to secure storage...");
+    let entry = keyring::Entry::new(&get_keyring_service(), KEYRING_USER)
         .map_err(|e| format!("Failed to access secure storage: {}", e))?;
 
     let json: CredentialsJson = cookies.into();
@@ -175,12 +199,28 @@ fn save_cookies_to_secure_storage(cookies: &YouTubeCookies) -> Result<(), String
         .map_err(|e| format!("Failed to save to secure storage: {}", e))?;
 
     log::info!("Credentials saved to secure storage");
+
+    // Verify the save immediately
+    match entry.get_password() {
+        Ok(read_back) => {
+            if read_back == secret {
+                log::info!("✅ Verified: credentials can be read back");
+            } else {
+                log::warn!("⚠️ Mismatch: written and read data differ");
+            }
+        }
+        Err(e) => {
+            log::error!("❌ Verification failed: could not read back: {}", e);
+            return Err(format!("Credentials saved but cannot be read back: {}", e));
+        }
+    }
+
     Ok(())
 }
 
 /// Delete credentials from secure storage
 fn delete_from_secure_storage() -> Result<(), String> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER)
+    let entry = keyring::Entry::new(&get_keyring_service(), KEYRING_USER)
         .map_err(|e| format!("Failed to access secure storage: {}", e))?;
 
     match entry.delete_credential() {
@@ -198,7 +238,7 @@ fn delete_from_secure_storage() -> Result<(), String> {
 
 /// Check if secure storage is available
 fn is_secure_storage_available() -> bool {
-    match keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER) {
+    match keyring::Entry::new(&get_keyring_service(), KEYRING_USER) {
         Ok(entry) => {
             // Try to access the entry (read or write test)
             match entry.get_password() {
@@ -311,12 +351,33 @@ fn delete_credentials_file() -> Result<(), String> {
 
 /// Load cookies based on storage mode
 fn load_cookies(storage_mode: &StorageMode) -> Result<YouTubeCookies, String> {
+    // First, check in-memory cache (workaround for keyring Windows issues)
+    if let Ok(cache) = CREDENTIALS_CACHE.read() {
+        if let Some(ref cached_cookies) = *cache {
+            log::info!("📦 Returning credentials from memory cache");
+            return Ok(cached_cookies.clone());
+        }
+    }
+
     match storage_mode {
-        StorageMode::Fallback => load_cookies_from_file(),
+        StorageMode::Fallback => {
+            let cookies = load_cookies_from_file()?;
+            // Update cache
+            if let Ok(mut cache) = CREDENTIALS_CACHE.write() {
+                *cache = Some(cookies.clone());
+            }
+            Ok(cookies)
+        }
         StorageMode::Secure => {
             // Try secure storage first
             match load_cookies_from_secure_storage() {
-                Ok(cookies) => Ok(cookies),
+                Ok(cookies) => {
+                    // Update cache
+                    if let Ok(mut cache) = CREDENTIALS_CACHE.write() {
+                        *cache = Some(cookies.clone());
+                    }
+                    Ok(cookies)
+                }
                 Err(e) => {
                     // Check if it's a "no entry" error vs storage failure
                     if e.contains("No credentials found") {
@@ -328,6 +389,10 @@ fn load_cookies(storage_mode: &StorageMode) -> Result<YouTubeCookies, String> {
                             if save_cookies_to_secure_storage(&cookies).is_ok() {
                                 // Successfully migrated, delete the file
                                 let _ = delete_credentials_file();
+                            }
+                            // Update cache
+                            if let Ok(mut cache) = CREDENTIALS_CACHE.write() {
+                                *cache = Some(cookies.clone());
                             }
                             return Ok(cookies);
                         }
@@ -341,6 +406,12 @@ fn load_cookies(storage_mode: &StorageMode) -> Result<YouTubeCookies, String> {
 
 /// Save cookies based on storage mode
 fn save_cookies(cookies: &YouTubeCookies, storage_mode: &StorageMode) -> Result<(), String> {
+    // Always update in-memory cache first (workaround for keyring Windows issues)
+    if let Ok(mut cache) = CREDENTIALS_CACHE.write() {
+        *cache = Some(cookies.clone());
+        log::info!("📦 Credentials cached in memory");
+    }
+
     match storage_mode {
         StorageMode::Fallback => save_cookies_to_file(cookies),
         StorageMode::Secure => save_cookies_to_secure_storage(cookies),
@@ -349,6 +420,12 @@ fn save_cookies(cookies: &YouTubeCookies, storage_mode: &StorageMode) -> Result<
 
 /// Delete credentials based on storage mode
 fn delete_credentials(storage_mode: &StorageMode) -> Result<(), String> {
+    // Clear in-memory cache
+    if let Ok(mut cache) = CREDENTIALS_CACHE.write() {
+        *cache = None;
+        log::info!("📦 Credentials cache cleared");
+    }
+
     match storage_mode {
         StorageMode::Fallback => delete_credentials_file(),
         StorageMode::Secure => {
@@ -381,7 +458,15 @@ fn generate_sapisidhash(sapisid: &str) -> String {
 
 /// Check session validity by making a test request to YouTube API
 async fn check_session_validity_internal(cookies: &YouTubeCookies) -> SessionValidity {
+    use std::time::Duration;
+
     let checked_at = Utc::now().to_rfc3339();
+
+    // Allow overriding the session check URL for E2E tests
+    let session_check_url = std::env::var("LISCOV_SESSION_CHECK_URL")
+        .unwrap_or_else(|_| "https://www.youtube.com/youtubei/v1/account/account_menu".to_string());
+
+    log::info!("🌐 Making session validity check request to: {}", session_check_url);
 
     // Generate authentication header
     let sapisidhash = generate_sapisidhash(&cookies.sapisid);
@@ -392,10 +477,14 @@ async fn check_session_validity_internal(cookies: &YouTubeCookies) -> SessionVal
         cookies.sid, cookies.hsid, cookies.ssid, cookies.apisid, cookies.sapisid
     );
 
-    // Make request to YouTube InnerTube API
-    let client = reqwest::Client::new();
+    // Make request to YouTube InnerTube API with timeout
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
     let result = client
-        .post("https://www.youtube.com/youtubei/v1/account/account_menu")
+        .post(&session_check_url)
         .header("Authorization", format!("SAPISIDHASH {}", sapisidhash))
         .header("Cookie", cookie_string)
         .header("X-Origin", "https://www.youtube.com")
@@ -408,6 +497,7 @@ async fn check_session_validity_internal(cookies: &YouTubeCookies) -> SessionVal
     match result {
         Ok(response) => {
             let status = response.status();
+            log::info!("🌐 YouTube API response: {}", status);
             if status.is_success() {
                 SessionValidity {
                     is_valid: true,
@@ -428,11 +518,14 @@ async fn check_session_validity_internal(cookies: &YouTubeCookies) -> SessionVal
                 }
             }
         }
-        Err(e) => SessionValidity {
-            is_valid: false,
-            checked_at,
-            error: Some(format!("Network error: {}", e)),
-        },
+        Err(e) => {
+            log::error!("🌐 YouTube API error: {}", e);
+            SessionValidity {
+                is_valid: false,
+                checked_at,
+                error: Some(format!("Network error: {}", e)),
+            }
+        }
     }
 }
 
@@ -446,8 +539,10 @@ pub async fn auth_get_status(
     _state: State<'_, AppState>,
     config_state: State<'_, ConfigState>,
 ) -> Result<AuthStatus, String> {
+    log::info!("🔍 auth_get_status called");
     let config = config_state.get();
     let storage_mode = &config.storage.mode;
+    log::info!("📦 Storage mode: {:?}", storage_mode);
 
     // Check for storage errors in secure mode
     let storage_error = if *storage_mode == StorageMode::Secure && !is_secure_storage_available() {
@@ -465,6 +560,13 @@ pub async fn auth_get_status(
     let credentials_result = load_cookies(storage_mode);
     let has_saved = credentials_result.is_ok();
     let is_authenticated = has_saved;
+
+    log::info!(
+        "🔐 Auth status: is_authenticated={}, has_saved={}, storage_error={:?}",
+        is_authenticated,
+        has_saved,
+        storage_error
+    );
 
     Ok(AuthStatus {
         is_authenticated,
@@ -556,6 +658,29 @@ pub async fn auth_delete_credentials(
     Ok(())
 }
 
+/// Clear WebView cookies (logout from YouTube)
+#[tauri::command]
+pub async fn auth_clear_webview_cookies(
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    use tauri::Manager;
+
+    log::info!("🧹 Clearing WebView cookies...");
+
+    // Get the main webview window
+    if let Some(window) = app.get_webview_window("main") {
+        // Clear all browsing data (includes cookies)
+        window
+            .clear_all_browsing_data()
+            .map_err(|e| format!("Failed to clear browsing data: {}", e))?;
+        log::info!("✅ WebView cookies cleared successfully");
+    } else {
+        log::warn!("⚠️ Main window not found, skipping WebView cookie clear");
+    }
+
+    Ok(())
+}
+
 /// Validate current credentials (local check only)
 #[tauri::command]
 pub async fn auth_validate_credentials(
@@ -573,10 +698,14 @@ pub async fn auth_validate_credentials(
 pub async fn auth_check_session_validity(
     config_state: State<'_, ConfigState>,
 ) -> Result<SessionValidity, String> {
+    log::info!("🔍 auth_check_session_validity called");
     let config = config_state.get();
     let cookies = load_cookies(&config.storage.mode)?;
+    log::info!("🔍 Checking session validity...");
 
-    Ok(check_session_validity_internal(&cookies).await)
+    let result = check_session_validity_internal(&cookies).await;
+    log::info!("🔍 Session validity result: is_valid={}, error={:?}", result.is_valid, result.error);
+    Ok(result)
 }
 
 /// Switch to fallback storage mode
@@ -618,10 +747,27 @@ pub async fn auth_use_fallback_storage(
 
 /// Open authentication window (WebView-based login)
 #[tauri::command]
-pub async fn auth_open_window(app: tauri::AppHandle) -> Result<(), String> {
+pub async fn auth_open_window(
+    app: tauri::AppHandle,
+    config_state: State<'_, ConfigState>,
+) -> Result<(), String> {
     match auth_window::open_auth_window(app).await {
-        Ok(_cookies) => {
+        Ok(cookies) => {
             log::info!("Authentication successful via WebView");
+
+            // Save the cookies using the current storage mode
+            let config = config_state.get();
+            save_cookies(&cookies, &config.storage.mode)?;
+
+            // Wait for Windows Credential Manager to persist the entry
+            // See: https://docs.rs/keyring/latest/x86_64-pc-windows-msvc/keyring/windows/index.html
+            // "setting a password on one thread and then immediately spawning another
+            // to get the password may return a NoEntry error"
+            log::info!("⏳ Waiting 500ms for credential persistence...");
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            log::info!("⏳ Wait complete");
+
+            log::info!("Credentials saved after WebView authentication");
             Ok(())
         }
         Err(e) => {

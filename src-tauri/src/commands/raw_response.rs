@@ -67,6 +67,11 @@ pub fn raw_response_update_config(
     Ok(())
 }
 
+/// Get the app name for directory paths (can be overridden via LISCOV_APP_NAME env var for testing)
+fn get_app_name() -> String {
+    std::env::var("LISCOV_APP_NAME").unwrap_or_else(|_| "liscov".to_string())
+}
+
 /// Get resolved file path (resolves relative paths to data directory)
 /// (spec: 05_raw_response.md)
 #[tauri::command]
@@ -77,7 +82,8 @@ pub fn raw_response_resolve_path(file_path: String) -> Result<String, String> {
         Ok(file_path)
     } else {
         // Use app data directory
-        if let Some(proj_dirs) = directories::ProjectDirs::from("dev", "sifyfy", "liscov") {
+        let app_name = get_app_name();
+        if let Some(proj_dirs) = directories::ProjectDirs::from("dev", "sifyfy", &app_name) {
             let data_dir = proj_dirs.data_dir();
             std::fs::create_dir_all(data_dir).map_err(|e| e.to_string())?;
             Ok(data_dir.join(&file_path).to_string_lossy().to_string())

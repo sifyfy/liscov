@@ -40,6 +40,33 @@ pnpm tauri dev    # 開発モード（フロントエンド + バックエンド
 pnpm tauri build  # リリースビルド
 ```
 
+### E2Eテスト
+
+認証機能のE2Eテストは `e2e-tauri/` ディレクトリにあります。
+
+```bash
+# 1. モックサーバーを起動（別ターミナル）
+cargo run --manifest-path src-tauri/Cargo.toml --bin mock_server
+
+# 2. E2Eテストを実行（アプリは自動起動・終了）
+pnpm exec playwright test --config e2e-tauri/playwright.config.ts
+```
+
+**テスト分離**: E2Eテストは本番データと分離された専用の名前空間を使用します。
+
+| 環境変数 | デフォルト | テスト時 | 用途 |
+|---------|-----------|---------|------|
+| `LISCOV_APP_NAME` | `liscov` | `liscov-test` | 設定・DB・ログのディレクトリ名 |
+| `LISCOV_KEYRING_SERVICE` | `liscov` | `liscov-test` | Windows資格情報マネージャーのサービス名 |
+| `LISCOV_AUTH_URL` | YouTube URL | mock server | 認証ウィンドウのURL |
+| `LISCOV_SESSION_CHECK_URL` | YouTube API | mock server | セッション検証エンドポイント |
+
+テスト実行時、`beforeAll`フックで以下が自動実行されます：
+1. 既存のTauriアプリを終了
+2. テストデータディレクトリ (`%APPDATA%/liscov-test`) を削除
+3. テスト用認証情報を削除
+4. テスト用名前空間でアプリを起動
+
 ### モックサーバー
 
 E2Eテスト用のYouTube InnerTube APIモックサーバー。
@@ -62,6 +89,8 @@ cargo run --manifest-path src-tauri/Cargo.toml --bin mock_server -- -f replay.nd
 **認証テスト用エンドポイント**:
 - `POST /set_auth_state` - 認証状態を制御
 - `GET /auth_status` - 現在の認証状態を取得
+- `GET /status` - サーバー状態（`login_page_visits`含む）
+- `POST /reset` - サーバー状態をリセット
 
 ## プロジェクト構造
 
@@ -83,7 +112,9 @@ liscov-tauri/
 │   │   ├── tauri/                # Tauri API wrappers
 │   │   └── types/                # TypeScript型定義
 │   └── routes/
-├── e2e/                          # E2Eテスト (Playwright)
+├── e2e-tauri/                    # Tauri E2Eテスト (Playwright + CDP)
+│   ├── auth-flow.spec.ts         # 認証フローテスト
+│   └── playwright.config.ts      # Playwright設定
 ├── docs/                         # ドキュメント
 │   ├── specs/                    # 機能仕様書
 │   └── decisions/                # アーキテクチャ決定記録 (ADR)

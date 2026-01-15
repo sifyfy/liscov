@@ -15,7 +15,7 @@ use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::time::Instant;
-use warp::Filter;
+use warp::{Filter, Reply};
 
 #[derive(Parser, Debug)]
 #[command(name = "mock_server")]
@@ -46,6 +46,7 @@ struct ServerState {
     replay_state: Mutex<ReplayState>,
     request_count: AtomicU64,
     message_counter: AtomicU64,
+    login_page_visits: AtomicU64,  // Track login page visits for cookie clearing verification
     auth_state: Mutex<AuthState>,
 }
 
@@ -110,6 +111,7 @@ async fn main() {
         message_queue: Mutex::new(VecDeque::new()),
         replay_state: Mutex::new(ReplayState { current_index: 0, start_time: None, base_timestamp: None }),
         request_count: AtomicU64::new(0), message_counter: AtomicU64::new(0),
+        login_page_visits: AtomicU64::new(0),
         auth_state: Mutex::new(AuthState::default()),
     });
     let routes = build_routes(state);
@@ -119,6 +121,57 @@ async fn main() {
 }
 
 fn build_routes(state: Arc<ServerState>) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+    // ログインページ（認証ウィンドウE2Eテスト用）
+    // GET / または GET /login でアクセス
+    let slp = Arc::clone(&state);
+    let login_page = warp::path::end().or(warp::path("login")).unify().and(warp::get()).map(move || {
+        slp.login_page_visits.fetch_add(1, Ordering::SeqCst);
+        warp::reply::html(gen_login_html())
+    });
+
+    // ログイン処理（Cookieを設定してリダイレクト）
+    // POST /do_login でCookieを設定してURLフラグメントにも含める
+    let do_login = warp::path("do_login").and(warp::post()).map(|| {
+        let cookies = [
+            ("SID", "mock_sid_12345"),
+            ("HSID", "mock_hsid_12345"),
+            ("SSID", "mock_ssid_12345"),
+            ("APISID", "mock_apisid_12345"),
+            ("SAPISID", "mock_sapisid_12345"),
+        ];
+
+        // Cookieを文字列に変換してURLフラグメントに含める
+        let cookie_str = cookies.iter()
+            .map(|(k, v)| format!("{}={}", k, v))
+            .collect::<Vec<_>>()
+            .join("; ");
+
+        // リダイレクトでCookieをフラグメントに含める
+        let redirect_url = format!("/logged_in#LISCOV_AUTH:{}", cookie_str);
+
+        let mut resp = warp::reply::Response::new(warp::hyper::Body::empty());
+        *resp.status_mut() = warp::http::StatusCode::SEE_OTHER;
+        resp.headers_mut().insert(
+            "Location",
+            redirect_url.parse().unwrap(),
+        );
+
+        // Set-Cookie ヘッダーを追加
+        for (name, value) in cookies {
+            resp.headers_mut().append(
+                "Set-Cookie",
+                format!("{}={}; Path=/; SameSite=Lax", name, value).parse().unwrap(),
+            );
+        }
+
+        resp
+    });
+
+    // ログイン完了ページ
+    let logged_in = warp::path("logged_in").and(warp::get()).map(|| {
+        warp::reply::html(gen_logged_in_html())
+    });
+
     let sw = Arc::clone(&state);
     let watch = warp::path("watch").and(warp::query::<WQ>()).map(move |q: WQ| {
         let vid = q.v.as_deref().unwrap_or(&sw.config.video_id);
@@ -155,11 +208,12 @@ fn build_routes(state: Arc<ServerState>) -> impl Filter<Extract = impl warp::Rep
     let sst = Arc::clone(&state);
     let status = warp::path("status").and(warp::get()).map(move || {
         let c = sst.request_count.load(Ordering::SeqCst);
+        let lpv = sst.login_page_visits.load(Ordering::SeqCst);
         let q = sst.message_queue.lock().unwrap().len();
         let r = sst.replay_state.lock().unwrap();
         let a = sst.auth_state.lock().unwrap();
         let rp = if !sst.config.replay_entries.is_empty() { Some(format!("{}/{}", r.current_index, sst.config.replay_entries.len())) } else { None };
-        warp::reply::json(&json!({"request_count":c,"queued_messages":q,"replay_progress":rp,"video_id":sst.config.video_id,"auth":{"session_valid":a.session_valid}}))
+        warp::reply::json(&json!({"request_count":c,"login_page_visits":lpv,"queued_messages":q,"replay_progress":rp,"video_id":sst.config.video_id,"auth":{"session_valid":a.session_valid}}))
     });
     let sad = Arc::clone(&state);
     let add = warp::path("add_message").and(warp::post()).and(warp::body::json())
@@ -168,9 +222,10 @@ fn build_routes(state: Arc<ServerState>) -> impl Filter<Extract = impl warp::Rep
     let reset = warp::path("reset").and(warp::post()).map(move || {
         let mut r = srs.replay_state.lock().unwrap(); r.current_index = 0; r.start_time = None; r.base_timestamp = None;
         srs.message_queue.lock().unwrap().clear(); *srs.auth_state.lock().unwrap() = AuthState::default();
+        srs.login_page_visits.store(0, Ordering::SeqCst);
         warp::reply::json(&json!({"status":"ok"}))
     });
-    watch.or(chat).or(acct).or(setauth).or(authst).or(status).or(add).or(reset)
+    login_page.or(do_login).or(logged_in).or(watch).or(chat).or(acct).or(setauth).or(authst).or(status).or(add).or(reset)
 }
 
 #[derive(Debug, Deserialize)] struct WQ { v: Option<String> }
@@ -203,6 +258,79 @@ fn gen_html(_vid: &str, cid: &str, cn: &str, t: &str) -> String {
     let ct = format!("mock_cont_{}", rand::random::<u32>());
     let d = json!({"contents":{"twoColumnWatchNextResults":{"results":{"results":{"contents":[{"videoPrimaryInfoRenderer":{"title":{"runs":[{"text":t}]}}},{"videoSecondaryInfoRenderer":{"owner":{"videoOwnerRenderer":{"title":{"runs":[{"text":cn}]},"navigationEndpoint":{"browseEndpoint":{"browseId":cid}}}}}}]}},"conversationBar":{"liveChatRenderer":{"continuations":[{"reloadContinuationData":{"continuation":ct}}],"isReplay":false}}}}});
     format!("<!DOCTYPE html><html><head><title>{}</title></head><body><script>var ytInitialData = {};</script></body></html>", t, serde_json::to_string(&d).unwrap())
+}
+
+/// ログインページのHTML生成（E2Eテスト用）
+fn gen_login_html() -> String {
+    r#"<!DOCTYPE html>
+<html>
+<head>
+    <title>Mock YouTube Login</title>
+    <style>
+        body { font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f1f1f1; }
+        .login-box { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); text-align: center; }
+        h1 { color: #c4302b; margin-bottom: 20px; }
+        button { background: #c4302b; color: white; border: none; padding: 12px 24px; font-size: 16px; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #a02520; }
+        #auto-login { margin-top: 20px; font-size: 12px; color: #666; }
+    </style>
+</head>
+<body>
+    <div class="login-box">
+        <h1>Mock YouTube Login</h1>
+        <p>E2Eテスト用のモックログインページです</p>
+        <form action="/do_login" method="POST">
+            <button type="submit" id="login-button">ログイン</button>
+        </form>
+        <p id="auto-login">自動ログインが有効な場合、このページは自動的にログインします</p>
+    </div>
+    <script>
+        // E2Eテスト用: auto_loginクエリパラメータがあれば自動ログイン
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('auto_login') === 'true') {
+            document.querySelector('form').submit();
+        }
+    </script>
+</body>
+</html>"#.to_string()
+}
+
+/// ログイン完了後のHTML生成（E2Eテスト用）
+fn gen_logged_in_html() -> String {
+    r#"<!DOCTYPE html>
+<html>
+<head>
+    <title>Mock YouTube - Logged In</title>
+    <style>
+        body { font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f1f1f1; }
+        .success-box { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); text-align: center; }
+        h1 { color: #4CAF50; margin-bottom: 20px; }
+        .cookies { background: #f5f5f5; padding: 10px; border-radius: 4px; font-family: monospace; font-size: 12px; text-align: left; margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <div class="success-box">
+        <h1>✓ ログイン完了</h1>
+        <p>認証情報が設定されました</p>
+        <div class="cookies">
+            <strong>設定されたCookie:</strong><br>
+            SID=mock_sid_12345<br>
+            HSID=mock_hsid_12345<br>
+            SSID=mock_ssid_12345<br>
+            APISID=mock_apisid_12345<br>
+            SAPISID=mock_sapisid_12345
+        </div>
+    </div>
+    <script>
+        // 認証情報検出用: CookieをページのtitleにLISCOV_AUTH:プレフィックス付きで設定
+        // これによりTauriのauth_windowがCookieを検出できる
+        const cookies = document.cookie;
+        if (cookies && cookies.includes('SAPISID=')) {
+            document.title = 'LISCOV_AUTH:' + cookies;
+        }
+    </script>
+</body>
+</html>"#.to_string()
 }
 
 fn build_resp(acts: Vec<Value>) -> Value {

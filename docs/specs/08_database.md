@@ -10,6 +10,8 @@
 |---------|------|
 | liscov.db | `%APPDATA%/liscov/liscov.db` |
 
+> **Note**: ディレクトリ名 `liscov` は環境変数 `LISCOV_APP_NAME` で変更可能（E2Eテスト用）。詳細は[認証機能仕様のE2Eテストセクション](01_auth.md#e2eテスト)を参照。
+
 ## バックエンドコマンド
 
 | コマンド | 入力 | 出力 | 説明 |

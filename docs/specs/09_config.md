@@ -14,6 +14,8 @@
 | macOS | `~/Library/Application Support/liscov/config.toml` |
 | Linux | `~/.config/liscov/config.toml` |
 
+> **Note**: ディレクトリ名 `liscov` は環境変数 `LISCOV_APP_NAME` で変更可能（E2Eテスト用）。詳細は[認証機能仕様のE2Eテストセクション](01_auth.md#e2eテスト)を参照。
+
 ### ファイル形式
 
 TOML形式で保存。

@@ -29,6 +29,10 @@ export async function authDeleteCredentials(): Promise<void> {
   await invoke('auth_delete_credentials');
 }
 
+export async function authClearWebviewCookies(): Promise<void> {
+  await invoke('auth_clear_webview_cookies');
+}
+
 export async function authValidateCredentials(): Promise<boolean> {
   return invoke('auth_validate_credentials');
 }

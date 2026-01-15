@@ -4,14 +4,19 @@
 //! ログイン完了後にCookieを取得する機能を提供します。
 
 use crate::core::models::YouTubeCookies;
-use std::fs;
 use std::sync::Arc;
-use tauri::{AppHandle, Listener, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 use thiserror::Error;
 use tokio::sync::Mutex;
 
-/// YouTube認証用URL
-pub const YOUTUBE_AUTH_URL: &str = "https://www.youtube.com/";
+/// YouTube認証用URL (デフォルト)
+pub const DEFAULT_YOUTUBE_AUTH_URL: &str = "https://www.youtube.com/";
+
+/// 認証URLを取得する（テスト用に環境変数で上書き可能）
+/// LISCOV_AUTH_URL 環境変数が設定されている場合はそれを使用
+pub fn get_auth_url() -> String {
+    std::env::var("LISCOV_AUTH_URL").unwrap_or_else(|_| DEFAULT_YOUTUBE_AUTH_URL.to_string())
+}
 
 /// 認証ウィンドウのエラー型
 #[derive(Error, Debug)]
@@ -47,7 +52,8 @@ struct AuthState {
 
 /// 認証ウィンドウを開いてYouTubeログインを行う
 pub async fn open_auth_window(app: AppHandle) -> AuthResult {
-    tracing::info!("🔐 Opening YouTube authentication window...");
+    let auth_url = get_auth_url();
+    tracing::info!("🔐 Opening YouTube authentication window: {}", auth_url);
 
     // 認証状態
     let state = Arc::new(Mutex::new(AuthState {
@@ -59,7 +65,7 @@ pub async fn open_auth_window(app: AppHandle) -> AuthResult {
     let auth_window = WebviewWindowBuilder::new(
         &app,
         "youtube-auth",
-        WebviewUrl::External(YOUTUBE_AUTH_URL.parse().unwrap()),
+        WebviewUrl::External(auth_url.parse().unwrap()),
     )
     .title("YouTube ログイン - liscov")
     .inner_size(900.0, 700.0)
@@ -86,30 +92,6 @@ pub async fn open_auth_window(app: AppHandle) -> AuthResult {
         }
     });
 
-    // Cookieチェック用のJavaScript
-    let check_cookies_js = r#"
-        (function() {
-            const cookies = document.cookie.split(';').reduce((acc, c) => {
-                const [key, val] = c.trim().split('=');
-                acc[key] = val;
-                return acc;
-            }, {});
-
-            // Check if SAPISID exists (login indicator)
-            if (cookies['SAPISID']) {
-                return JSON.stringify({
-                    logged_in: true,
-                    sid: cookies['SID'] || '',
-                    hsid: cookies['HSID'] || '',
-                    ssid: cookies['SSID'] || '',
-                    apisid: cookies['APISID'] || '',
-                    sapisid: cookies['SAPISID'] || ''
-                });
-            }
-            return JSON.stringify({ logged_in: false });
-        })()
-    "#;
-
     // ポーリングループ
     let start_time = std::time::Instant::now();
 
@@ -121,7 +103,7 @@ pub async fn open_auth_window(app: AppHandle) -> AuthResult {
             return Err(AuthWindowError::Timeout);
         }
 
-        // 状態チェック
+        // 状態チェック（ウィンドウが閉じられた場合）
         {
             let s = state.lock().await;
             if s.completed {
@@ -131,8 +113,12 @@ pub async fn open_auth_window(app: AppHandle) -> AuthResult {
                         Err(e) => Err(match e {
                             AuthWindowError::Cancelled => AuthWindowError::Cancelled,
                             AuthWindowError::Timeout => AuthWindowError::Timeout,
-                            AuthWindowError::WindowCreation(s) => AuthWindowError::WindowCreation(s.clone()),
-                            AuthWindowError::CookieExtraction(s) => AuthWindowError::CookieExtraction(s.clone()),
+                            AuthWindowError::WindowCreation(s) => {
+                                AuthWindowError::WindowCreation(s.clone())
+                            }
+                            AuthWindowError::CookieExtraction(s) => {
+                                AuthWindowError::CookieExtraction(s.clone())
+                            }
                         }),
                     };
                 }
@@ -145,75 +131,74 @@ pub async fn open_auth_window(app: AppHandle) -> AuthResult {
             return Err(AuthWindowError::Cancelled);
         }
 
-        // JavaScriptでCookieをチェック
-        match auth_window.eval(check_cookies_js) {
-            Ok(_) => {
-                // evalの結果を取得するためにevaluate_scriptを使用
-            }
-            Err(e) => {
-                tracing::debug!("Failed to execute cookie check: {}", e);
-            }
-        }
-
-        // URL変化を監視してログイン判定
-        // YouTube Studioなどにリダイレクトされたらログイン完了と判断
+        // Googleログインページ以外でCookieをチェック
+        // (モックサーバー使用時も動作するよう、youtube.com判定を削除)
         if let Ok(url) = auth_window.url() {
             let url_str = url.to_string();
-            // ログイン後のCookie取得のため、JavaScriptを注入
-            if url_str.contains("youtube.com") && !url_str.contains("accounts.google.com") {
-                // ログインページから離れたら、再度Cookieチェック
-                let js_get_cookies = format!(
-                    r#"
-                    (function() {{
-                        const cookies = document.cookie;
-                        if (cookies.includes('SAPISID')) {{
-                            window.__TAURI__.event.emit('auth-cookies', cookies);
-                        }}
-                    }})()
-                "#
-                );
-                let _ = auth_window.eval(&js_get_cookies);
+            tracing::info!("📍 Current URL: {}", url_str);
+
+            // about:blank, Googleのログインページの場合はスキップ
+            if url_str == "about:blank" || url_str.contains("accounts.google.com") {
+                tokio::time::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS)).await;
+                continue;
+            }
+
+            // Cookieをチェック
+            {
+                // 方法1: Tauri cookies() APIで直接Cookieを取得
+                match auth_window.cookies() {
+                    Ok(cookie_list) => {
+                        tracing::info!("🍪 Found {} cookies", cookie_list.len());
+
+                        // Cookieをログ出力（デバッグ用）
+                        for cookie in &cookie_list {
+                            tracing::debug!("  Cookie: {}={}", cookie.name(), cookie.value());
+                        }
+
+                        // SAPISIDがあるかチェック
+                        if cookie_list.iter().any(|c| c.name() == "SAPISID") {
+                            tracing::info!("🔓 SAPISID detected in cookies");
+
+                            // CookieをHashMapに変換
+                            let mut cookies_map = std::collections::HashMap::new();
+                            for cookie in cookie_list {
+                                cookies_map.insert(cookie.name().to_string(), cookie.value().to_string());
+                            }
+
+                            if let Some(yt_cookies) = extract_youtube_cookies_from_map(&cookies_map) {
+                                tracing::info!("✅ Successfully extracted YouTube cookies");
+
+                                let _ = auth_window.close();
+                                return Ok(yt_cookies);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to get cookies: {}", e);
+                    }
+                }
+
+                // 方法2: URLフラグメントからCookieを取得（mock server用フォールバック）
+                if let Some(fragment) = url.fragment() {
+                    tracing::info!("📎 URL fragment: {}", fragment);
+                    if let Some(cookie_str) = fragment.strip_prefix("LISCOV_AUTH:") {
+                        tracing::info!("🔓 SAPISID detected in URL fragment");
+
+                        let cookies = parse_cookie_string(cookie_str);
+
+                        if let Some(yt_cookies) = extract_youtube_cookies_from_map(&cookies) {
+                            tracing::info!("✅ Successfully extracted YouTube cookies from URL");
+
+                            let _ = auth_window.close();
+                            return Ok(yt_cookies);
+                        }
+                    }
+                }
             }
         }
 
         // 短い間隔で待機
         tokio::time::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS)).await;
-
-        // Cookieイベントをリッスン
-        let app_clone = app.clone();
-        let state_for_listener = state.clone();
-        let window_to_close = auth_window.clone();
-
-        // 一度だけリスナーを設定
-        static LISTENER_SET: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-        if !LISTENER_SET.swap(true, std::sync::atomic::Ordering::SeqCst) {
-            app_clone.listen_any("auth-cookies", move |event| {
-                // event.payload() returns a String
-                let payload = event.payload();
-                tracing::info!("Received cookies from WebView");
-
-                // Cookieをパース
-                let cookies = parse_cookie_string(&payload);
-
-                if let Some(yt_cookies) = extract_youtube_cookies_from_map(&cookies) {
-                    // 保存
-                    if let Err(e) = save_cookies(&yt_cookies) {
-                        tracing::error!("Failed to save cookies: {}", e);
-                    }
-
-                    // 状態更新
-                    let state = state_for_listener.clone();
-                    let window = window_to_close.clone();
-                    tauri::async_runtime::spawn(async move {
-                        let mut s = state.lock().await;
-                        s.completed = true;
-                        s.result = Some(Ok(yt_cookies));
-                        let _ = window.close();
-                    });
-                }
-            });
-        }
     }
 }
 
@@ -250,69 +235,134 @@ fn extract_youtube_cookies_from_map(
     })
 }
 
-/// Cookieをファイルに保存
-fn save_cookies(cookies: &YouTubeCookies) -> Result<(), AuthWindowError> {
-    use serde::{Deserialize, Serialize};
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    #[derive(Debug, Serialize, Deserialize)]
-    struct CredentialsConfig {
-        youtube: YouTubeCookiesConfig,
+    #[test]
+    fn test_parse_cookie_string_basic() {
+        let cookie_str = "SID=abc123; HSID=def456; SSID=ghi789";
+        let cookies = parse_cookie_string(cookie_str);
+
+        assert_eq!(cookies.get("SID"), Some(&"abc123".to_string()));
+        assert_eq!(cookies.get("HSID"), Some(&"def456".to_string()));
+        assert_eq!(cookies.get("SSID"), Some(&"ghi789".to_string()));
     }
 
-    #[derive(Debug, Serialize, Deserialize)]
-    struct YouTubeCookiesConfig {
-        sid: String,
-        hsid: String,
-        ssid: String,
-        apisid: String,
-        sapisid: String,
+    #[test]
+    fn test_parse_cookie_string_with_spaces() {
+        let cookie_str = "  SID=abc123 ;  HSID=def456  ; SSID=ghi789  ";
+        let cookies = parse_cookie_string(cookie_str);
+
+        assert_eq!(cookies.get("SID"), Some(&"abc123".to_string()));
+        assert_eq!(cookies.get("HSID"), Some(&"def456".to_string()));
+        assert_eq!(cookies.get("SSID"), Some(&"ghi789".to_string()));
     }
 
-    let config_dir = dirs::config_dir()
-        .ok_or_else(|| AuthWindowError::CookieExtraction("Failed to determine config directory".to_string()))?;
-    let path = config_dir.join("liscov").join("credentials.toml");
+    #[test]
+    fn test_parse_cookie_string_with_equals_in_value() {
+        let cookie_str = "SID=abc=123; HSID=def=456==";
+        let cookies = parse_cookie_string(cookie_str);
 
-    // Create parent directory if needed
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| AuthWindowError::CookieExtraction(format!("Failed to create config directory: {}", e)))?;
+        assert_eq!(cookies.get("SID"), Some(&"abc=123".to_string()));
+        assert_eq!(cookies.get("HSID"), Some(&"def=456==".to_string()));
     }
 
-    let config = CredentialsConfig {
-        youtube: YouTubeCookiesConfig {
-            sid: cookies.sid.clone(),
-            hsid: cookies.hsid.clone(),
-            ssid: cookies.ssid.clone(),
-            apisid: cookies.apisid.clone(),
-            sapisid: cookies.sapisid.clone(),
-        },
-    };
+    #[test]
+    fn test_parse_cookie_string_empty() {
+        let cookie_str = "";
+        let cookies = parse_cookie_string(cookie_str);
 
-    let toml_string = toml::to_string_pretty(&config)
-        .map_err(|e| AuthWindowError::CookieExtraction(format!("Failed to serialize credentials: {}", e)))?;
-
-    fs::write(&path, toml_string)
-        .map_err(|e| AuthWindowError::CookieExtraction(format!("Failed to write credentials file: {}", e)))?;
-
-    tracing::info!("💾 Credentials saved to file");
-    Ok(())
-}
-
-/// WebViewのブラウジングデータ（Cookie含む）をクリアする
-/// 注: Tauri v2ではWebViewのCookieクリアは直接サポートされていないため、
-/// 資格情報ファイルのみを削除します
-pub async fn clear_webview_cookies() -> Result<(), AuthWindowError> {
-    tracing::info!("🧹 Clearing credentials...");
-
-    let config_dir = dirs::config_dir()
-        .ok_or_else(|| AuthWindowError::CookieExtraction("Failed to determine config directory".to_string()))?;
-    let path = config_dir.join("liscov").join("credentials.toml");
-
-    if path.exists() {
-        fs::remove_file(&path)
-            .map_err(|e| AuthWindowError::CookieExtraction(format!("Failed to remove credentials file: {}", e)))?;
-        tracing::info!("✅ Credentials file removed");
+        assert!(cookies.is_empty());
     }
 
-    Ok(())
+    #[test]
+    fn test_extract_youtube_cookies_success() {
+        let mut cookies = std::collections::HashMap::new();
+        cookies.insert("SID".to_string(), "sid_value".to_string());
+        cookies.insert("HSID".to_string(), "hsid_value".to_string());
+        cookies.insert("SSID".to_string(), "ssid_value".to_string());
+        cookies.insert("APISID".to_string(), "apisid_value".to_string());
+        cookies.insert("SAPISID".to_string(), "sapisid_value".to_string());
+
+        let result = extract_youtube_cookies_from_map(&cookies);
+
+        assert!(result.is_some());
+        let yt_cookies = result.unwrap();
+        assert_eq!(yt_cookies.sid, "sid_value");
+        assert_eq!(yt_cookies.hsid, "hsid_value");
+        assert_eq!(yt_cookies.ssid, "ssid_value");
+        assert_eq!(yt_cookies.apisid, "apisid_value");
+        assert_eq!(yt_cookies.sapisid, "sapisid_value");
+    }
+
+    #[test]
+    fn test_extract_youtube_cookies_missing_sapisid() {
+        let mut cookies = std::collections::HashMap::new();
+        cookies.insert("SID".to_string(), "sid_value".to_string());
+        cookies.insert("HSID".to_string(), "hsid_value".to_string());
+        cookies.insert("SSID".to_string(), "ssid_value".to_string());
+        cookies.insert("APISID".to_string(), "apisid_value".to_string());
+        // SAPISID is missing
+
+        let result = extract_youtube_cookies_from_map(&cookies);
+
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_extract_youtube_cookies_with_extra_cookies() {
+        let mut cookies = std::collections::HashMap::new();
+        cookies.insert("SID".to_string(), "sid_value".to_string());
+        cookies.insert("HSID".to_string(), "hsid_value".to_string());
+        cookies.insert("SSID".to_string(), "ssid_value".to_string());
+        cookies.insert("APISID".to_string(), "apisid_value".to_string());
+        cookies.insert("SAPISID".to_string(), "sapisid_value".to_string());
+        cookies.insert("OTHER_COOKIE".to_string(), "other_value".to_string());
+
+        let result = extract_youtube_cookies_from_map(&cookies);
+
+        assert!(result.is_some());
+        let yt_cookies = result.unwrap();
+        assert_eq!(yt_cookies.sapisid, "sapisid_value");
+    }
+
+    #[test]
+    fn test_full_cookie_flow() {
+        // Simulate the full flow from cookie string to YouTubeCookies
+        let cookie_str =
+            "SID=sid123; HSID=hsid456; SSID=ssid789; APISID=apisid012; SAPISID=sapisid345";
+        let cookies = parse_cookie_string(cookie_str);
+        let result = extract_youtube_cookies_from_map(&cookies);
+
+        assert!(result.is_some());
+        let yt_cookies = result.unwrap();
+        assert_eq!(yt_cookies.sid, "sid123");
+        assert_eq!(yt_cookies.hsid, "hsid456");
+        assert_eq!(yt_cookies.ssid, "ssid789");
+        assert_eq!(yt_cookies.apisid, "apisid012");
+        assert_eq!(yt_cookies.sapisid, "sapisid345");
+    }
+
+    #[test]
+    fn test_get_auth_url_default() {
+        // Clear any existing env var
+        // SAFETY: This test runs with --test-threads=1 to avoid race conditions
+        unsafe { std::env::remove_var("LISCOV_AUTH_URL") };
+
+        let url = get_auth_url();
+        assert_eq!(url, DEFAULT_YOUTUBE_AUTH_URL);
+    }
+
+    #[test]
+    fn test_get_auth_url_with_env_var() {
+        // SAFETY: This test runs with --test-threads=1 to avoid race conditions
+        unsafe { std::env::set_var("LISCOV_AUTH_URL", "http://localhost:3456/") };
+
+        let url = get_auth_url();
+        assert_eq!(url, "http://localhost:3456/");
+
+        // Clean up
+        unsafe { std::env::remove_var("LISCOV_AUTH_URL") };
+    }
 }

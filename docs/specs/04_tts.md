@@ -32,6 +32,8 @@ pub struct TtsStatus {
 |---------|------|------|
 | tts_config.toml | `%APPDATA%/liscov/tts_config.toml` | TOML |
 
+> **Note**: ディレクトリ名 `liscov` は環境変数 `LISCOV_APP_NAME` で変更可能（E2Eテスト用）。詳細は[認証機能仕様のE2Eテストセクション](01_auth.md#e2eテスト)を参照。
+
 ## 設定ファイル形式
 
 ```toml

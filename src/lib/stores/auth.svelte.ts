@@ -145,7 +145,10 @@ function createAuthStore() {
       isLoading = true;
       error = null;
       try {
+        // Delete saved credentials from secure storage
         await authApi.authDeleteCredentials();
+        // Clear WebView cookies to logout from YouTube
+        await authApi.authClearWebviewCookies();
         sessionValidity = null;
         await this.refreshStatus();
       } catch (e) {

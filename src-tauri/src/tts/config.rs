@@ -99,11 +99,16 @@ impl Default for TtsConfig {
 }
 
 impl TtsConfig {
+    /// Get the app name for directory paths (can be overridden via LISCOV_APP_NAME env var for testing)
+    fn get_app_name() -> String {
+        std::env::var("LISCOV_APP_NAME").unwrap_or_else(|_| "liscov".to_string())
+    }
+
     /// Get the config file path
     fn config_path() -> Result<PathBuf, String> {
         let config_dir = dirs::config_dir()
             .ok_or_else(|| "Failed to determine config directory".to_string())?;
-        Ok(config_dir.join("liscov").join("tts_config.toml"))
+        Ok(config_dir.join(Self::get_app_name()).join("tts_config.toml"))
     }
 
     /// Load config from file, or return default if file doesn't exist
