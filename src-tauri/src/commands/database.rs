@@ -207,3 +207,118 @@ pub async fn get_viewers_for_broadcaster(
         .map(GuiViewerWithCustomInfo::from)
         .collect())
 }
+
+/// GUI-friendly broadcaster channel
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GuiBroadcasterChannel {
+    pub channel_id: String,
+    pub channel_name: Option<String>,
+    pub handle: Option<String>,
+    pub viewer_count: usize,
+}
+
+/// Get broadcaster list
+#[tauri::command]
+pub async fn broadcaster_get_list(
+    state: State<'_, AppState>,
+) -> Result<Vec<GuiBroadcasterChannel>, String> {
+    let db_guard = state.database.read().await;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| "Database not initialized".to_string())?;
+
+    let conn = db.connection().await;
+    let broadcasters = database::get_distinct_broadcaster_channels(&conn)
+        .map_err(|e| format!("Failed to get broadcasters: {}", e))?;
+
+    // Get viewer count for each broadcaster
+    let mut result = Vec::new();
+    for b in broadcasters {
+        let viewer_count = database::get_viewer_count_for_broadcaster(&conn, &b.channel_id)
+            .unwrap_or(0) as usize;
+        result.push(GuiBroadcasterChannel {
+            channel_id: b.channel_id,
+            channel_name: b.channel_name,
+            handle: b.handle,
+            viewer_count,
+        });
+    }
+
+    Ok(result)
+}
+
+/// Delete viewer custom info (keeps viewer_profiles)
+#[tauri::command]
+pub async fn viewer_delete(
+    state: State<'_, AppState>,
+    broadcaster_id: String,
+    viewer_id: String,
+) -> Result<bool, String> {
+    let db_guard = state.database.read().await;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| "Database not initialized".to_string())?;
+
+    let conn = db.connection().await;
+    let deleted = database::delete_viewer_custom_info(&conn, &broadcaster_id, &viewer_id)
+        .map_err(|e| format!("Failed to delete viewer custom info: {}", e))?;
+
+    Ok(deleted)
+}
+
+/// Delete broadcaster and all associated viewer custom info
+/// Returns (broadcaster_deleted, viewers_deleted_count)
+#[tauri::command]
+pub async fn broadcaster_delete(
+    state: State<'_, AppState>,
+    broadcaster_id: String,
+) -> Result<(bool, u32), String> {
+    let db_guard = state.database.read().await;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| "Database not initialized".to_string())?;
+
+    let conn = db.connection().await;
+    let result = database::delete_broadcaster(&conn, &broadcaster_id)
+        .map_err(|e| format!("Failed to delete broadcaster: {}", e))?;
+
+    Ok(result)
+}
+
+/// Update viewer info (custom info + tags)
+#[tauri::command]
+pub async fn viewer_update_info(
+    state: State<'_, AppState>,
+    broadcaster_id: String,
+    viewer_id: String,
+    reading: Option<String>,
+    notes: Option<String>,
+    tags: Option<Vec<String>>,
+) -> Result<bool, String> {
+    let db_guard = state.database.read().await;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| "Database not initialized".to_string())?;
+
+    let conn = db.connection().await;
+
+    // Update custom info (reading, notes)
+    let custom_info = ViewerCustomInfo {
+        id: None,
+        broadcaster_channel_id: broadcaster_id,
+        viewer_channel_id: viewer_id.clone(),
+        reading,
+        notes,
+        custom_data: None,
+        created_at: None,
+        updated_at: None,
+    };
+    database::upsert_viewer_custom_info(&conn, &custom_info)
+        .map_err(|e| format!("Failed to update custom info: {}", e))?;
+
+    // Update tags in viewer_profiles
+    database::update_viewer_tags(&conn, &viewer_id, tags)
+        .map_err(|e| format!("Failed to update tags: {}", e))?;
+
+    Ok(true)
+}

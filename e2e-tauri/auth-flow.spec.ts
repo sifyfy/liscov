@@ -1,5 +1,5 @@
 import { test, expect, chromium, BrowserContext, Page, Browser } from '@playwright/test';
-import { exec, execSync } from 'child_process';
+import { exec, execSync, spawn, ChildProcess } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -17,15 +17,12 @@ const execAsync = promisify(exec);
  * - Credential persistence across app restart
  * - Logout button click -> Credentials deleted -> Login button reappears
  *
- * Prerequisites:
- * 1. Mock server running on port 3456:
- *    cargo run --manifest-path src-tauri/Cargo.toml --bin mock_server
- *
- * 2. Run tests (app will be started automatically with test namespace):
- *    pnpm exec playwright test --config e2e-tauri/playwright.config.ts
+ * Run tests (mock server and app will be started automatically):
+ *    pnpm exec playwright test --config e2e-tauri/playwright.config.ts auth-flow.spec.ts
  */
 
 const CDP_URL = 'http://127.0.0.1:9222';
+const MOCK_SERVER_URL = 'http://localhost:3456';
 const PROJECT_DIR = process.cwd().replace(/[\\/]e2e-tauri$/, '');
 
 // Test isolation: use separate namespace for credentials and data
@@ -77,8 +74,8 @@ async function cleanupTestCredentials(): Promise<void> {
   if (process.platform === 'win32') {
     try {
       // Delete credentials from Windows Credential Manager
-      // The credential target format is: service:user
-      execSync(`cmdkey /delete:${TEST_KEYRING_SERVICE}:youtube_credentials 2>nul`, { stdio: 'ignore' });
+      // The keyring crate stores credentials with target format: <user>.<service>
+      execSync(`cmdkey /delete:youtube_credentials.${TEST_KEYRING_SERVICE} 2>nul`, { stdio: 'ignore' });
       console.log('Cleaned up test credentials from Windows Credential Manager');
     } catch {
       // Credential may not exist, which is fine
@@ -148,8 +145,8 @@ async function startTauriApp(): Promise<void> {
     LISCOV_APP_NAME: TEST_APP_NAME,
     LISCOV_KEYRING_SERVICE: TEST_KEYRING_SERVICE,
     // Mock server URLs
-    LISCOV_AUTH_URL: 'http://localhost:3456/?auto_login=true',
-    LISCOV_SESSION_CHECK_URL: 'http://localhost:3456/youtubei/v1/account/account_menu',
+    LISCOV_AUTH_URL: `${MOCK_SERVER_URL}/?auto_login=true`,
+    LISCOV_SESSION_CHECK_URL: `${MOCK_SERVER_URL}/youtubei/v1/account/account_menu`,
     // Enable CDP for Playwright
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=9222',
   };
@@ -163,13 +160,89 @@ async function startTauriApp(): Promise<void> {
   await waitForCDP();
 }
 
+// Mock server process reference
+let mockServerProcess: ChildProcess | null = null;
+
+// Helper to kill mock server process
+async function killMockServer(): Promise<void> {
+  if (mockServerProcess) {
+    console.log('Stopping mock server...');
+    mockServerProcess.kill();
+    mockServerProcess = null;
+  }
+  // Also kill any orphaned mock_server processes
+  try {
+    if (process.platform === 'win32') {
+      execSync('taskkill /F /IM mock_server.exe 2>nul', { stdio: 'ignore' });
+    } else {
+      execSync('pkill -f mock_server', { stdio: 'ignore' });
+    }
+  } catch {
+    // Process may not exist
+  }
+  await new Promise(resolve => setTimeout(resolve, 500));
+}
+
+// Helper to start mock server
+async function startMockServer(): Promise<void> {
+  console.log('Starting mock server...');
+
+  // Kill any existing mock server first
+  await killMockServer();
+
+  // Start mock server as a child process
+  const cargoPath = path.join(PROJECT_DIR, 'src-tauri', 'Cargo.toml');
+  mockServerProcess = spawn('cargo', ['run', '--manifest-path', cargoPath, '--bin', 'mock_server'], {
+    cwd: PROJECT_DIR,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    shell: true,
+  });
+
+  // Log mock server output for debugging
+  mockServerProcess.stdout?.on('data', (data) => {
+    const msg = data.toString().trim();
+    if (msg) console.log(`[mock_server] ${msg}`);
+  });
+  mockServerProcess.stderr?.on('data', (data) => {
+    const msg = data.toString().trim();
+    // Filter out cargo build warnings/info
+    if (msg && !msg.includes('Compiling') && !msg.includes('Finished') && !msg.includes('warning:')) {
+      console.log(`[mock_server] ${msg}`);
+    }
+  });
+
+  // Wait for mock server to be ready
+  const timeout = 60000;
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    try {
+      const response = await fetch(`${MOCK_SERVER_URL}/status`);
+      if (response.ok) {
+        console.log(`Mock server ready after ${Date.now() - start}ms`);
+        return;
+      }
+    } catch {
+      // Server not ready yet
+    }
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  throw new Error(`Mock server not ready after ${timeout}ms`);
+}
+
+// Helper to reset mock server state
+async function resetMockServer(): Promise<void> {
+  await fetch(`${MOCK_SERVER_URL}/reset`, { method: 'POST' });
+}
+
 test.describe('Authentication Feature (01_auth.md)', () => {
   let browser: Browser;
   let context: BrowserContext;
   let mainPage: Page;
 
   test.beforeAll(async () => {
-    // Step 1: Kill any existing Tauri app
+    test.setTimeout(240000); // 4 minutes for setup (includes mock server build time)
+
+    // Step 1: Kill any existing processes
     console.log('Killing any existing Tauri app...');
     await killTauriApp();
 
@@ -178,11 +251,24 @@ test.describe('Authentication Feature (01_auth.md)', () => {
     await cleanupTestData();
     await cleanupTestCredentials();
 
-    // Step 3: Start Tauri app with test namespace
+    // Step 3: Start mock server
+    await startMockServer();
+
+    // Step 4: Reset mock server state and set to unauthenticated
+    console.log('Resetting mock server state...');
+    await resetMockServer();
+    // Set auth state to unauthenticated so app starts in logged out state
+    await fetch(`${MOCK_SERVER_URL}/set_auth_state`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_valid: false }),
+    });
+
+    // Step 5: Start Tauri app with test namespace
     console.log('Starting Tauri app with test namespace...');
     await startTauriApp();
 
-    // Step 4: Connect to the running Tauri app
+    // Step 6: Connect to the running Tauri app
     const connection = await connectToApp();
     browser = connection.browser;
     context = connection.context;
@@ -197,10 +283,11 @@ test.describe('Authentication Feature (01_auth.md)', () => {
       await browser.close();
     }
     await killTauriApp();
-
-    // Optionally clean up test data (comment out to preserve for debugging)
-    // await cleanupTestData();
-    // await cleanupTestCredentials();
+    // Stop mock server
+    await killMockServer();
+    // Clean up test data
+    await cleanupTestData();
+    await cleanupTestCredentials();
   });
 
   test.beforeEach(async () => {

@@ -101,7 +101,7 @@ impl Default for TtsConfig {
 impl TtsConfig {
     /// Get the app name for directory paths (can be overridden via LISCOV_APP_NAME env var for testing)
     fn get_app_name() -> String {
-        std::env::var("LISCOV_APP_NAME").unwrap_or_else(|_| "liscov".to_string())
+        std::env::var("LISCOV_APP_NAME").unwrap_or_else(|_| "liscov-tauri".to_string())
     }
 
     /// Get the config file path

@@ -27,6 +27,19 @@ pub fn create_session(
         params![id, start_time, stream_url, stream_title, broadcaster_channel_id, broadcaster_name],
     )?;
 
+    // Also save broadcaster profile if we have broadcaster info
+    if let Some(channel_id) = broadcaster_channel_id {
+        let profile = BroadcasterProfile {
+            channel_id: channel_id.to_string(),
+            channel_name: broadcaster_name.map(|s| s.to_string()),
+            handle: None,
+            thumbnail_url: None,
+            created_at: None,
+            updated_at: None,
+        };
+        upsert_broadcaster_profile(conn, &profile)?;
+    }
+
     Ok(id)
 }
 
@@ -402,6 +415,42 @@ pub fn delete_viewer_custom_info(
     )?;
 
     Ok(deleted > 0)
+}
+
+/// Update viewer profile tags
+pub fn update_viewer_tags(
+    conn: &Connection,
+    channel_id: &str,
+    tags: Option<Vec<String>>,
+) -> Result<bool> {
+    let tags_str = tags.map(|t| t.join(","));
+    let updated = conn.execute(
+        "UPDATE viewer_profiles SET tags = ?1, updated_at = CURRENT_TIMESTAMP WHERE channel_id = ?2",
+        params![tags_str, channel_id],
+    )?;
+
+    Ok(updated > 0)
+}
+
+/// Delete broadcaster and all associated viewer custom info
+/// Returns (broadcaster_deleted, viewers_deleted_count)
+pub fn delete_broadcaster(
+    conn: &Connection,
+    broadcaster_channel_id: &str,
+) -> Result<(bool, u32)> {
+    // Delete all viewer custom info for this broadcaster
+    let viewers_deleted = conn.execute(
+        "DELETE FROM viewer_custom_info WHERE broadcaster_channel_id = ?1",
+        params![broadcaster_channel_id],
+    )? as u32;
+
+    // Delete the broadcaster profile
+    let broadcaster_deleted = conn.execute(
+        "DELETE FROM broadcaster_profiles WHERE channel_id = ?1",
+        params![broadcaster_channel_id],
+    )? > 0;
+
+    Ok((broadcaster_deleted, viewers_deleted))
 }
 
 // ============================================================================

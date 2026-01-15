@@ -48,7 +48,9 @@ pub enum MessageRun {
 /// Badge information
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BadgeInfo {
-    pub tooltip: String,
+    pub badge_type: String,
+    pub label: String,
+    pub tooltip: Option<String>,
     pub image_url: Option<String>,
 }
 
@@ -65,6 +67,8 @@ pub struct SuperChatColors {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GuiMessageMetadata {
     pub amount: Option<String>,
+    pub milestone_months: Option<u32>,
+    pub gift_count: Option<u32>,
     pub badges: Vec<String>,
     pub badge_info: Vec<BadgeInfo>,
     pub is_moderator: bool,
@@ -92,19 +96,21 @@ pub struct GuiChatMessage {
 
 impl From<ChatMessage> for GuiChatMessage {
     fn from(msg: ChatMessage) -> Self {
-        let (message_type, amount) = match &msg.message_type {
-            crate::core::models::MessageType::Text => ("text".to_string(), None),
+        let (message_type, amount, milestone_months, gift_count) = match &msg.message_type {
+            crate::core::models::MessageType::Text => ("text".to_string(), None, None, None),
             crate::core::models::MessageType::SuperChat { amount } => {
-                ("superchat".to_string(), Some(amount.clone()))
+                ("superchat".to_string(), Some(amount.clone()), None, None)
             }
             crate::core::models::MessageType::SuperSticker { amount } => {
-                ("supersticker".to_string(), Some(amount.clone()))
+                ("supersticker".to_string(), Some(amount.clone()), None, None)
             }
-            crate::core::models::MessageType::Membership { .. } => ("membership".to_string(), None),
-            crate::core::models::MessageType::MembershipGift { .. } => {
-                ("membership_gift".to_string(), None)
+            crate::core::models::MessageType::Membership { milestone_months } => {
+                ("membership".to_string(), None, *milestone_months, None)
             }
-            crate::core::models::MessageType::System => ("system".to_string(), None),
+            crate::core::models::MessageType::MembershipGift { gift_count } => {
+                ("membership_gift".to_string(), None, None, Some(*gift_count))
+            }
+            crate::core::models::MessageType::System => ("system".to_string(), None, None, None),
         };
 
         // Convert runs from core models to GUI models
@@ -121,10 +127,14 @@ impl From<ChatMessage> for GuiChatMessage {
         let metadata = msg.metadata.map(|m| {
             GuiMessageMetadata {
                 amount: m.amount,
+                milestone_months,
+                gift_count,
                 badges: m.badges,
                 badge_info: m.badge_info.into_iter().map(|b| {
                     BadgeInfo {
-                        tooltip: b.label,
+                        badge_type: b.badge_type,
+                        label: b.label.clone(),
+                        tooltip: b.tooltip.or(Some(b.label)),
                         image_url: b.icon_url,
                     }
                 }).collect(),

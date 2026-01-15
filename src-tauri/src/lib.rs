@@ -24,6 +24,7 @@ use commands::{
     websocket_start, websocket_stop, websocket_get_status,
     // Database (spec: 08_database.md)
     get_sessions, get_session_messages, upsert_viewer_custom_info, get_viewers_for_broadcaster,
+    broadcaster_get_list, broadcaster_delete, viewer_delete, viewer_update_info,
     // Analytics (spec: 07_revenue.md)
     get_revenue_analytics, get_session_analytics, export_session_data, export_current_messages,
     // TTS (spec: 04_tts.md)
@@ -92,6 +93,10 @@ pub fn run() {
             get_session_messages,
             upsert_viewer_custom_info,
             get_viewers_for_broadcaster,
+            broadcaster_get_list,
+            broadcaster_delete,
+            viewer_delete,
+            viewer_update_info,
             // Analytics (spec: 07_revenue.md)
             get_revenue_analytics,
             get_session_analytics,

@@ -100,28 +100,29 @@ pub async fn get_viewer_with_custom_info(
 
     let conn = db.connection().await;
 
-    // Get viewer profile
+    // Get viewer profile (optional - may not exist yet)
     let profile = database::get_viewer_profile(&conn, &viewer_id)
         .map_err(|e| format!("Failed to get viewer profile: {}", e))?;
-
-    let profile = match profile {
-        Some(p) => p,
-        None => return Ok(None),
-    };
 
     // Get custom info
     let custom_info = database::get_viewer_custom_info(&conn, &broadcaster_id, &viewer_id)
         .map_err(|e| format!("Failed to get custom info: {}", e))?;
 
+    // Return None only if both profile and custom info don't exist
+    if profile.is_none() && custom_info.is_none() {
+        return Ok(None);
+    }
+
+    // Build response, using defaults if profile doesn't exist
     Ok(Some(GuiViewerWithInfo {
-        channel_id: profile.channel_id,
-        display_name: profile.display_name,
-        first_seen: profile.first_seen,
-        last_seen: profile.last_seen,
-        message_count: profile.message_count,
-        total_contribution: profile.total_contribution,
-        membership_level: profile.membership_level,
-        tags: profile.tags,
+        channel_id: profile.as_ref().map(|p| p.channel_id.clone()).unwrap_or_else(|| viewer_id.clone()),
+        display_name: profile.as_ref().map(|p| p.display_name.clone()).unwrap_or_default(),
+        first_seen: profile.as_ref().map(|p| p.first_seen.clone()).unwrap_or_default(),
+        last_seen: profile.as_ref().map(|p| p.last_seen.clone()).unwrap_or_default(),
+        message_count: profile.as_ref().map(|p| p.message_count).unwrap_or(0),
+        total_contribution: profile.as_ref().map(|p| p.total_contribution).unwrap_or(0.0),
+        membership_level: profile.as_ref().and_then(|p| p.membership_level.clone()),
+        tags: profile.as_ref().map(|p| p.tags.clone()).unwrap_or_default(),
         reading: custom_info.as_ref().and_then(|c| c.reading.clone()),
         notes: custom_info.as_ref().and_then(|c| c.notes.clone()),
     }))

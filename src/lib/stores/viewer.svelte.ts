@@ -1,10 +1,11 @@
 // Viewer state management using Svelte 5 runes
-import type { ViewerWithCustomInfo, Session } from '$lib/types';
+import type { ViewerWithCustomInfo, Session, BroadcasterChannel } from '$lib/types';
 import * as viewerApi from '$lib/tauri/viewer';
 
 // Reactive state
 let viewers = $state<ViewerWithCustomInfo[]>([]);
 let sessions = $state<Session[]>([]);
+let broadcasters = $state<BroadcasterChannel[]>([]);
 let selectedViewer = $state<ViewerWithCustomInfo | null>(null);
 let selectedBroadcasterId = $state<string | null>(null);
 let searchQuery = $state('');
@@ -92,6 +93,31 @@ async function updateViewerCustomInfo(
   }
 }
 
+async function updateViewerInfo(
+  broadcasterId: string,
+  viewerId: string,
+  reading: string | null,
+  notes: string | null,
+  tags: string[] | null
+): Promise<void> {
+  try {
+    await viewerApi.updateViewerInfo(broadcasterId, viewerId, reading, notes, tags);
+
+    // Update local state
+    if (selectedViewer && selectedViewer.channel_id === viewerId) {
+      selectedViewer = { ...selectedViewer, reading, notes, tags: tags || [] };
+    }
+
+    // Refresh viewers list
+    if (selectedBroadcasterId) {
+      await loadViewers(selectedBroadcasterId, currentPage);
+    }
+  } catch (e) {
+    error = e instanceof Error ? e.message : String(e);
+    throw e;
+  }
+}
+
 function nextPage(): void {
   if (selectedBroadcasterId) {
     loadViewers(selectedBroadcasterId, currentPage + 1);
@@ -104,6 +130,65 @@ function prevPage(): void {
   }
 }
 
+async function loadBroadcasters(): Promise<void> {
+  isLoading = true;
+  error = null;
+
+  try {
+    broadcasters = await viewerApi.getBroadcasterList();
+  } catch (e) {
+    error = e instanceof Error ? e.message : String(e);
+    broadcasters = [];
+  } finally {
+    isLoading = false;
+  }
+}
+
+async function deleteViewerCustomInfo(
+  broadcasterId: string,
+  viewerId: string
+): Promise<boolean> {
+  try {
+    const result = await viewerApi.deleteViewerCustomInfo(broadcasterId, viewerId);
+
+    // Clear selection if deleted viewer was selected
+    if (selectedViewer && selectedViewer.channel_id === viewerId) {
+      selectedViewer = null;
+    }
+
+    // Refresh viewers list
+    if (selectedBroadcasterId) {
+      await loadViewers(selectedBroadcasterId, currentPage);
+    }
+
+    return result;
+  } catch (e) {
+    error = e instanceof Error ? e.message : String(e);
+    throw e;
+  }
+}
+
+async function deleteBroadcaster(broadcasterId: string): Promise<[boolean, number]> {
+  try {
+    const result = await viewerApi.deleteBroadcaster(broadcasterId);
+
+    // Clear selection if deleted broadcaster was selected
+    if (selectedBroadcasterId === broadcasterId) {
+      selectedBroadcasterId = null;
+      viewers = [];
+      selectedViewer = null;
+    }
+
+    // Refresh broadcasters list
+    await loadBroadcasters();
+
+    return result;
+  } catch (e) {
+    error = e instanceof Error ? e.message : String(e);
+    throw e;
+  }
+}
+
 // Export store interface
 export const viewerStore = {
   // Getters (reactive)
@@ -112,6 +197,9 @@ export const viewerStore = {
   },
   get sessions() {
     return sessions;
+  },
+  get broadcasters() {
+    return broadcasters;
   },
   get selectedViewer() {
     return selectedViewer;
@@ -138,10 +226,14 @@ export const viewerStore = {
   // Actions
   loadSessions,
   loadViewers,
+  loadBroadcasters,
   searchViewers: searchViewersAction,
   selectViewer,
   clearSelection,
   updateViewerCustomInfo,
+  updateViewerInfo,
+  deleteViewerCustomInfo,
+  deleteBroadcaster,
   nextPage,
   prevPage
 };

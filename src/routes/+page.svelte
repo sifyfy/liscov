@@ -94,13 +94,9 @@
       </button>
       <button
         onclick={() => (activeTab = 'viewers')}
-        class="px-4 py-2 rounded-t-lg text-sm font-medium transition-colors {activeTab === 'viewers' ? 'bg-white/20 text-white' : 'text-white/70 hover:text-white hover:bg-white/10'} {!broadcasterId ? 'opacity-50 cursor-not-allowed' : ''}"
-        disabled={!broadcasterId}
+        class="px-4 py-2 rounded-t-lg text-sm font-medium transition-colors {activeTab === 'viewers' ? 'bg-white/20 text-white' : 'text-white/70 hover:text-white hover:bg-white/10'}"
       >
         Viewers
-        {#if !broadcasterId}
-          <span class="text-xs">(connect first)</span>
-        {/if}
       </button>
       <button
         onclick={() => (activeTab = 'analytics')}
@@ -121,7 +117,7 @@
   <main class="flex-1 flex overflow-hidden bg-[var(--bg-white)]">
     {#if activeTab === 'chat'}
       <!-- Chat panel -->
-      <div class="flex-1 flex flex-col relative bg-[var(--bg-light)]">
+      <div class="flex-1 flex flex-col relative bg-[var(--bg-light)] min-w-0 overflow-hidden">
         <InputSection />
         <FilterPanel />
         <div class="flex-1 overflow-hidden">
@@ -169,10 +165,10 @@
           </div>
         </div>
       </aside>
-    {:else if activeTab === 'viewers' && broadcasterId}
+    {:else if activeTab === 'viewers'}
       <!-- Viewers panel -->
       <div class="flex-1 p-4 bg-[var(--bg-light)]">
-        <ViewerManagement {broadcasterId} />
+        <ViewerManagement broadcasterId={broadcasterId || undefined} />
       </div>
     {:else if activeTab === 'analytics'}
       <!-- Analytics panel -->

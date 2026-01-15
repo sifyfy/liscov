@@ -7,8 +7,10 @@ export type MessageRun =
 
 /** Badge information */
 export interface BadgeInfo {
-  tooltip: string;
-  image_url: string | null;
+  badge_type: string;           // "member", "moderator", "verified", etc.
+  label: string;                // Display label
+  tooltip: string | null;       // Tooltip text
+  image_url: string | null;     // Badge image URL
 }
 
 /** SuperChat color scheme from YouTube */
@@ -22,6 +24,8 @@ export interface SuperChatColors {
 /** Message metadata */
 export interface MessageMetadata {
   amount: string | null;
+  milestone_months: number | null;    // Membership milestone months
+  gift_count: number | null;          // Membership gift count
   badges: string[];
   badge_info: BadgeInfo[];
   is_moderator: boolean;

@@ -33,6 +33,7 @@ pub enum MessageRun {
 pub struct BadgeInfo {
     pub badge_type: String,
     pub label: String,
+    pub tooltip: Option<String>,
     pub icon_url: Option<String>,
 }
 

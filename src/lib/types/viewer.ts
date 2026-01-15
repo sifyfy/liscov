@@ -49,3 +49,10 @@ export interface ContributorStats {
   message_count: number;
   total_contribution: number;
 }
+
+export interface BroadcasterChannel {
+  channel_id: string;
+  channel_name: string | null;
+  handle: string | null;
+  viewer_count: number;
+}

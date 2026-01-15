@@ -22,23 +22,39 @@
   let isSaving = $state(false);
   let saveMessage = $state('');
 
-  // Load existing custom info
+  // Load existing custom info when viewer changes
   $effect(() => {
-    loadCustomInfo();
+    // Explicitly reference reactive dependencies for effect tracking
+    const bc = broadcasterChannelId;
+    const vc = viewer.channelId;
+
+    // Reset state before loading (important when viewer changes)
+    reading = '';
+    notes = '';
+    saveMessage = '';
+
+    // Load custom info for this viewer
+    loadCustomInfo(bc, vc);
   });
 
-  async function loadCustomInfo() {
+  async function loadCustomInfo(bc: string, vc: string) {
     try {
       const info = await invoke<{
         reading: string | null;
         notes: string | null;
       } | null>('get_viewer_with_custom_info', {
-        broadcasterChannelId,
-        viewerChannelId: viewer.channelId
+        broadcasterId: bc,
+        viewerId: vc
       });
       if (info) {
-        reading = info.reading || '';
-        notes = info.notes || '';
+        // Only update if we got actual values from the API
+        // Don't overwrite with empty string if user has already typed something
+        if (info.reading !== null) {
+          reading = info.reading;
+        }
+        if (info.notes !== null) {
+          notes = info.notes;
+        }
       }
     } catch (error) {
       console.error('Failed to load viewer info:', error);

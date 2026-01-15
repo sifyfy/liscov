@@ -13,11 +13,11 @@
   }
 </script>
 
-<div class="p-4 bg-[var(--bg-white)] border-b border-[var(--border-light)]">
+<div class="p-4 bg-[var(--bg-white)] border-b border-[var(--border-light)] overflow-hidden">
   {#if chatStore.isConnected}
     <!-- Connected state -->
-    <div class="flex items-center justify-between">
-      <div class="flex-1 min-w-0">
+    <div class="flex items-center justify-between gap-4">
+      <div class="flex-1 min-w-0 overflow-hidden">
         <p class="text-[var(--text-primary)] font-semibold truncate">
           {chatStore.streamTitle || 'Connected'}
         </p>
@@ -32,7 +32,7 @@
       </div>
       <button
         onclick={handleDisconnect}
-        class="px-4 py-2 bg-red-500 text-white font-semibold rounded-lg hover:bg-red-600 transition-colors"
+        class="flex-shrink-0 px-4 py-2 bg-red-500 text-white font-semibold rounded-lg hover:bg-red-600 transition-colors"
       >
         Disconnect
       </button>

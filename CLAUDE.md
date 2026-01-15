@@ -45,12 +45,11 @@ pnpm tauri build  # リリースビルド
 認証機能のE2Eテストは `e2e-tauri/` ディレクトリにあります。
 
 ```bash
-# 1. モックサーバーを起動（別ターミナル）
-cargo run --manifest-path src-tauri/Cargo.toml --bin mock_server
-
-# 2. E2Eテストを実行（アプリは自動起動・終了）
+# E2Eテストを実行（モックサーバー・アプリは自動起動・終了）
 pnpm exec playwright test --config e2e-tauri/playwright.config.ts
 ```
+
+> **Note**: モックサーバーはテスト実行時に自動的に起動・停止されます。手動起動は不要です。
 
 **テスト分離**: E2Eテストは本番データと分離された専用の名前空間を使用します。
 

@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::sync::RwLock;
 use tauri::State;
 
-const KEYRING_SERVICE_DEFAULT: &str = "liscov";
+const KEYRING_SERVICE_DEFAULT: &str = "liscov-tauri";
 const KEYRING_USER: &str = "youtube_credentials";
 
 /// Get keyring service name (can be overridden via LISCOV_KEYRING_SERVICE env var for testing)
@@ -135,7 +135,7 @@ impl From<&YouTubeCookies> for YouTubeCookiesConfig {
 
 /// Get the app name for directory paths (can be overridden via LISCOV_APP_NAME env var for testing)
 fn get_app_name() -> String {
-    std::env::var("LISCOV_APP_NAME").unwrap_or_else(|_| "liscov".to_string())
+    std::env::var("LISCOV_APP_NAME").unwrap_or_else(|_| "liscov-tauri".to_string())
 }
 
 /// Get credentials file path (for fallback mode)

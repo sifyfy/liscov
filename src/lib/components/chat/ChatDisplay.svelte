@@ -7,6 +7,9 @@
   let chatContainer: HTMLDivElement;
   let autoScroll = $state(true);
 
+  // Flag to temporarily suppress auto-scroll during programmatic scrolling
+  let suppressAutoScroll = $state(false);
+
   // Selected viewer for ViewerInfoPanel
   let selectedViewer = $state<{
     channelId: string;
@@ -15,14 +18,21 @@
     message: ChatMessage;
   } | null>(null);
 
+  // Highlighted message ID (for scroll-to feature)
+  let highlightedMessageId = $state<string | null>(null);
+
   // Auto-scroll when new messages arrive
   $effect(() => {
     const messages = chatStore.filteredMessages;
-    if (autoScroll && chatContainer && messages.length > 0) {
-      requestAnimationFrame(() => {
-        chatContainer.scrollTop = chatContainer.scrollHeight;
-      });
+    // Skip auto-scroll if suppressed or manually disabled
+    if (suppressAutoScroll || !autoScroll || !chatContainer || messages.length === 0) {
+      return;
     }
+    requestAnimationFrame(() => {
+      if (!suppressAutoScroll && autoScroll && chatContainer) {
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+      }
+    });
   });
 
   function handleScroll() {
@@ -53,6 +63,32 @@
         message: message
       };
     }
+
+    // Disable auto-scroll and suppress it during programmatic scroll
+    autoScroll = false;
+    suppressAutoScroll = true;
+
+    // Highlight the message first (so it's visible when scrolled to)
+    highlightedMessageId = message.id;
+
+    // Use requestAnimationFrame to ensure DOM is updated before scrolling
+    requestAnimationFrame(() => {
+      // Scroll to the message in main chat
+      const targetElement = chatContainer?.querySelector(`[data-message-id="${message.id}"]`);
+      if (targetElement) {
+        targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+
+      // Re-enable auto-scroll suppression check after scroll animation completes
+      setTimeout(() => {
+        suppressAutoScroll = false;
+      }, 500);
+
+      // Clear highlight after 3 seconds
+      setTimeout(() => {
+        highlightedMessageId = null;
+      }, 3000);
+    });
   }
 </script>
 
@@ -122,7 +158,11 @@
       </div>
     {:else}
       {#each chatStore.filteredMessages as message (message.id)}
-        <ChatMessageComponent {message} onClick={() => handleMessageClick(message)} />
+        <ChatMessageComponent
+          {message}
+          highlighted={highlightedMessageId === message.id}
+          onClick={() => handleMessageClick(message)}
+        />
       {/each}
     {/if}
   </div>

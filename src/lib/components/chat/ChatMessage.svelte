@@ -4,10 +4,11 @@
 
   interface Props {
     message: ChatMessage;
+    highlighted?: boolean;
     onClick?: () => void;
   }
 
-  let { message, onClick }: Props = $props();
+  let { message, highlighted = false, onClick }: Props = $props();
   let fontSize = $derived(chatStore.messageFontSize);
   let showTimestamps = $derived(chatStore.showTimestamps);
 
@@ -131,7 +132,8 @@
 
 <div
   class="px-3 py-2 cursor-pointer hover:ring-2 hover:ring-[var(--primary-start)]/30 transition-all {containerStyle()}"
-  style={dynamicStyle()}
+  style="{dynamicStyle()}{highlighted ? 'border: 2px solid #5865f2; box-shadow: 0 0 8px rgba(88, 101, 242, 0.4);' : ''}"
+  data-message-id={message.id}
   onclick={onClick}
   role="button"
   tabindex="0"
@@ -170,8 +172,11 @@
       </div>
     {/if}
 
-    <!-- Author name -->
-    <span class="font-medium text-[var(--text-primary)] truncate max-w-[200px]">
+    <!-- Author name (member=green, non-member=blue) -->
+    <span
+      class="font-medium truncate max-w-[200px]"
+      style="color: {message.is_member ? '#059669' : '#2563eb'};"
+    >
       {message.author}
     </span>
 

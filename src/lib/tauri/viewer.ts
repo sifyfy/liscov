@@ -5,7 +5,8 @@ import type {
   ViewerWithCustomInfo,
   ViewerCustomInfo,
   Session,
-  ContributorStats
+  ContributorStats,
+  BroadcasterChannel
 } from '$lib/types';
 
 /**
@@ -81,4 +82,50 @@ export async function upsertViewerCustomInfo(info: {
   custom_data?: string | null;
 }): Promise<number> {
   return invoke('upsert_viewer_custom_info', { info });
+}
+
+/**
+ * Get broadcaster list
+ */
+export async function getBroadcasterList(): Promise<BroadcasterChannel[]> {
+  return invoke('broadcaster_get_list');
+}
+
+/**
+ * Delete viewer custom info (keeps viewer_profiles)
+ */
+export async function deleteViewerCustomInfo(
+  broadcasterId: string,
+  viewerId: string
+): Promise<boolean> {
+  return invoke('viewer_delete', { broadcasterId, viewerId });
+}
+
+/**
+ * Delete broadcaster and all associated viewer custom info
+ * Returns [broadcaster_deleted, viewers_deleted_count]
+ */
+export async function deleteBroadcaster(
+  broadcasterId: string
+): Promise<[boolean, number]> {
+  return invoke('broadcaster_delete', { broadcasterId });
+}
+
+/**
+ * Update viewer info (custom info + tags)
+ */
+export async function updateViewerInfo(
+  broadcasterId: string,
+  viewerId: string,
+  reading: string | null,
+  notes: string | null,
+  tags: string[] | null
+): Promise<boolean> {
+  return invoke('viewer_update_info', {
+    broadcasterId,
+    viewerId,
+    reading,
+    notes,
+    tags
+  });
 }

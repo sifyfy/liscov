@@ -101,7 +101,7 @@ impl Default for ConnectionStatus {
 pub fn extract_video_id(url: &str) -> Option<String> {
     // Handle various YouTube URL formats
     let url = url.trim();
-    
+
     // youtu.be/VIDEO_ID
     if url.contains("youtu.be/") {
         return url.split("youtu.be/")
@@ -109,9 +109,9 @@ pub fn extract_video_id(url: &str) -> Option<String> {
             .and_then(|s| s.split(&['?', '&', '#'][..]).next())
             .map(|s| s.to_string());
     }
-    
-    // youtube.com/watch?v=VIDEO_ID
-    if url.contains("youtube.com") {
+
+    // Any URL with watch?v=VIDEO_ID (supports youtube.com and localhost for testing)
+    if url.contains("/watch") {
         if let Some(query) = url.split('?').nth(1) {
             for param in query.split('&') {
                 if let Some(value) = param.strip_prefix("v=") {
@@ -119,20 +119,21 @@ pub fn extract_video_id(url: &str) -> Option<String> {
                 }
             }
         }
-        // youtube.com/live/VIDEO_ID
-        if url.contains("/live/") {
-            return url.split("/live/")
-                .nth(1)
-                .and_then(|s| s.split(&['?', '&', '#', '/'][..]).next())
-                .map(|s| s.to_string());
-        }
     }
-    
+
+    // youtube.com/live/VIDEO_ID or any URL with /live/VIDEO_ID
+    if url.contains("/live/") {
+        return url.split("/live/")
+            .nth(1)
+            .and_then(|s| s.split(&['?', '&', '#', '/'][..]).next())
+            .map(|s| s.to_string());
+    }
+
     // Plain video ID (11 characters)
     if url.len() == 11 && url.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
         return Some(url.to_string());
     }
-    
+
     None
 }
 
@@ -157,6 +158,11 @@ mod tests {
         assert_eq!(
             extract_video_id("dQw4w9WgXcQ"),
             Some("dQw4w9WgXcQ".to_string())
+        );
+        // Test localhost URL for testing
+        assert_eq!(
+            extract_video_id("http://localhost:3456/watch?v=test_video_123"),
+            Some("test_video_123".to_string())
         );
     }
 }

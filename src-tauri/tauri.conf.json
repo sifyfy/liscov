@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "liscov",
+  "productName": "liscov-tauri",
   "version": "0.1.0",
-  "identifier": "com.liscov.app",
+  "identifier": "com.liscov-tauri.app",
   "build": {
     "frontendDist": "../build",
     "devUrl": "http://localhost:5173",
