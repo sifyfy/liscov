@@ -142,10 +142,10 @@ impl From<ChatMessage> for GuiChatMessage {
                 is_verified: m.is_verified,
                 superchat_colors: m.superchat_colors.map(|c| {
                     SuperChatColors {
-                        header_background: c.header_color,
-                        header_text: c.author_name_color,
-                        body_background: c.background_color,
-                        body_text: c.message_color,
+                        header_background: c.header_background,
+                        header_text: c.header_text,
+                        body_background: c.body_background,
+                        body_text: c.body_text,
                     }
                 }),
             }

@@ -242,7 +242,7 @@ pub async fn get_revenue_analytics(
                 // Determine tier from color if available, otherwise from amount
                 let tier = if let Some(ref metadata) = message.metadata {
                     if let Some(ref colors) = metadata.superchat_colors {
-                        determine_tier_from_color(&colors.header_color)
+                        determine_tier_from_color(&colors.header_background)
                     } else {
                         determine_tier_from_amount(amount)
                     }
@@ -531,7 +531,7 @@ pub async fn export_current_messages(
                 MessageType::SuperChat { amount } => {
                     let t = if let Some(ref metadata) = msg.metadata {
                         if let Some(ref colors) = metadata.superchat_colors {
-                            determine_tier_from_color(&colors.header_color)
+                            determine_tier_from_color(&colors.header_background)
                         } else {
                             determine_tier_from_amount(amount)
                         }

@@ -492,6 +492,107 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       // Disconnect
       await mainPage.locator('button:has-text("Disconnect")').click();
     });
+
+    test('should display SuperChat with YouTube-specified tier colors', async () => {
+      // This test verifies that SuperChat messages use the color scheme from YouTube API
+      // Per 02_chat.md spec:
+      // - superchat_colors contains: header_background, header_text, body_background, body_text
+      // - These should be applied via inline styles for border-left-color and background gradient
+
+      // Connect to stream
+      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await mainPage.locator('button:has-text("Connect")').click();
+      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+
+      // Add SuperChat with 'blue' tier (0x1565C0 = rgb(21, 101, 192))
+      await addMockMessage({
+        message_type: 'superchat',
+        author: 'BlueTierDonator',
+        content: 'Blue tier superchat!',
+        amount: '¥5,000',
+        tier: 'blue',
+      });
+
+      await mainPage.waitForTimeout(3000);
+
+      // Find the SuperChat message element
+      const superchatMessage = mainPage.locator('[data-message-id]').filter({
+        has: mainPage.locator('text=BlueTierDonator')
+      }).first();
+
+      await expect(superchatMessage).toBeVisible();
+
+      // Get the inline style attribute - should contain YouTube's blue tier color
+      // Blue tier: 0x1565C0 = #1565C0 = rgb(21, 101, 192)
+      const styleAttr = await superchatMessage.getAttribute('style');
+
+      // The spec requires:
+      // border-left-color: {header_background}
+      // background: linear-gradient(135deg, {body_background}22 0%, {header_background}22 100%)
+      //
+      // If superchat_colors is properly parsed from YouTube API, it should contain:
+      // - The tier color (blue = #1565C0) in border-left-color
+      // - A gradient background using the tier color
+
+      console.log(`SuperChat style attribute: "${styleAttr}"`);
+
+      // CRITICAL ASSERTION: Style must contain the YouTube-specified blue tier color
+      // Either as hex (#1565c0) or rgb (rgb(21, 101, 192))
+      // If this fails, it means superchat_colors is not being parsed from the API
+      expect(styleAttr).toBeTruthy();
+      const hasYouTubeColor = styleAttr?.includes('1565c0') ||
+                              styleAttr?.includes('1565C0') ||
+                              styleAttr?.match(/rgb\(21,\s*101,\s*192\)/);
+
+      expect(hasYouTubeColor).toBeTruthy();
+
+      // Additionally, should have a gradient background
+      expect(styleAttr).toContain('linear-gradient');
+
+      // Disconnect
+      await mainPage.locator('button:has-text("Disconnect")').click();
+    });
+
+    test('should display different SuperChat tiers with their respective colors', async () => {
+      // Test multiple SuperChat tiers to verify color differentiation
+
+      // Connect to stream
+      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await mainPage.locator('button:has-text("Connect")').click();
+      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+
+      // Add red tier SuperChat (0xD00000 = rgb(208, 0, 0))
+      await addMockMessage({
+        message_type: 'superchat',
+        author: 'RedTierDonator',
+        content: 'Red tier superchat!',
+        amount: '¥50,000',
+        tier: 'red',
+      });
+
+      await mainPage.waitForTimeout(3000);
+
+      // Find the red tier SuperChat
+      const redSuperchat = mainPage.locator('[data-message-id]').filter({
+        has: mainPage.locator('text=RedTierDonator')
+      }).first();
+
+      await expect(redSuperchat).toBeVisible();
+
+      const redStyle = await redSuperchat.getAttribute('style');
+      console.log(`Red tier SuperChat style: "${redStyle}"`);
+
+      // Red tier should have red color (0xD00000 = #D00000 = rgb(208, 0, 0))
+      expect(redStyle).toBeTruthy();
+      const hasRedColor = redStyle?.toLowerCase().includes('d00000') ||
+                          redStyle?.match(/rgb\(208,\s*0,\s*0\)/);
+      expect(hasRedColor).toBeTruthy();
+
+      // Disconnect
+      await mainPage.locator('button:has-text("Disconnect")').click();
+    });
   });
 
   test.describe('ViewerInfoPanel and Scroll', () => {

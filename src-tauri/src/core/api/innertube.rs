@@ -306,6 +306,29 @@ fn parse_text_message(renderer: &Value) -> Option<ChatMessage> {
     })
 }
 
+/// Convert YouTube color integer (ARGB format) to hex string (#RRGGBB)
+fn color_int_to_hex(color: i64) -> String {
+    // YouTube returns colors as signed i64, but we only need the RGB portion
+    // The format is typically 0xAARRGGBB or just 0xRRGGBB
+    let rgb = (color & 0xFFFFFF) as u32;
+    format!("#{:06X}", rgb)
+}
+
+/// Parse SuperChat colors from YouTube API response
+fn parse_superchat_colors(renderer: &Value) -> Option<SuperChatColors> {
+    let header_bg = renderer.get("headerBackgroundColor")?.as_i64()?;
+    let header_text = renderer.get("headerTextColor").and_then(|v| v.as_i64()).unwrap_or(0xFFFFFF);
+    let body_bg = renderer.get("bodyBackgroundColor").and_then(|v| v.as_i64()).unwrap_or(header_bg);
+    let body_text = renderer.get("bodyTextColor").and_then(|v| v.as_i64()).unwrap_or(0xFFFFFF);
+
+    Some(SuperChatColors {
+        header_background: color_int_to_hex(header_bg),
+        header_text: color_int_to_hex(header_text),
+        body_background: color_int_to_hex(body_bg),
+        body_text: color_int_to_hex(body_text),
+    })
+}
+
 fn parse_superchat_message(renderer: &Value) -> Option<ChatMessage> {
     let id = renderer.get("id")?.as_str()?.to_string();
     let timestamp_usec = renderer.get("timestampUsec")?.as_str()?.to_string();
@@ -333,6 +356,9 @@ fn parse_superchat_message(renderer: &Value) -> Option<ChatMessage> {
         .map(|m| parse_message_content(m))
         .unwrap_or_default();
 
+    // Parse SuperChat colors from YouTube API
+    let superchat_colors = parse_superchat_colors(renderer);
+
     Some(ChatMessage {
         id,
         timestamp: format_timestamp(&timestamp_usec),
@@ -350,10 +376,30 @@ fn parse_superchat_message(renderer: &Value) -> Option<ChatMessage> {
             color: None,
             is_moderator: false,
             is_verified: false,
-            superchat_colors: None,
+            superchat_colors,
         }),
         is_member: false,
         comment_count: None,
+    })
+}
+
+/// Parse SuperSticker colors from YouTube API response
+/// SuperStickers use moneyChipBackgroundColor/moneyChipTextColor fields
+fn parse_supersticker_colors(renderer: &Value) -> Option<SuperChatColors> {
+    // YouTube API uses moneyChipBackgroundColor for stickers
+    let bg_color = renderer.get("moneyChipBackgroundColor")?.as_i64()?;
+    let text_color = renderer.get("moneyChipTextColor")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0xFFFFFF);
+
+    let bg_hex = color_int_to_hex(bg_color);
+    let text_hex = color_int_to_hex(text_color);
+
+    Some(SuperChatColors {
+        header_background: bg_hex.clone(),
+        header_text: text_hex.clone(),
+        body_background: bg_hex,
+        body_text: text_hex,
     })
 }
 
@@ -376,6 +422,9 @@ fn parse_supersticker_message(renderer: &Value) -> Option<ChatMessage> {
         .unwrap_or("")
         .to_string();
 
+    // Parse SuperSticker colors from YouTube API
+    let superchat_colors = parse_supersticker_colors(renderer);
+
     Some(ChatMessage {
         id,
         timestamp: format_timestamp(&timestamp_usec),
@@ -393,7 +442,7 @@ fn parse_supersticker_message(renderer: &Value) -> Option<ChatMessage> {
             color: None,
             is_moderator: false,
             is_verified: false,
-            superchat_colors: None,
+            superchat_colors,
         }),
         is_member: false,
         comment_count: None,
@@ -962,5 +1011,103 @@ mod tests {
             }
             _ => panic!("Expected Membership message type"),
         }
+    }
+
+    #[test]
+    fn test_color_int_to_hex() {
+        // Test YouTube color integer to hex string conversion
+        assert_eq!(color_int_to_hex(0x1565C0), "#1565C0"); // Blue tier
+        assert_eq!(color_int_to_hex(0xD00000), "#D00000"); // Red tier
+        assert_eq!(color_int_to_hex(0x00BFA5), "#00BFA5"); // Green tier
+        assert_eq!(color_int_to_hex(0xFFFFFF), "#FFFFFF"); // White
+        assert_eq!(color_int_to_hex(0x000000), "#000000"); // Black
+    }
+
+    #[test]
+    fn test_parse_superchat_with_colors() {
+        // Test parsing SuperChat message with YouTube-specified colors
+        let action = serde_json::json!({
+            "addChatItemAction": {
+                "item": {
+                    "liveChatPaidMessageRenderer": {
+                        "id": "sc_color_test",
+                        "timestampUsec": "1234567890000000",
+                        "authorName": {"simpleText": "ColorDonator"},
+                        "authorExternalChannelId": "UC_color_test",
+                        "purchaseAmountText": {"simpleText": "¥5,000"},
+                        "message": {"runs": [{"text": "Test with colors"}]},
+                        "headerBackgroundColor": 0x1565C0,
+                        "headerTextColor": 0xFFFFFF,
+                        "bodyBackgroundColor": 0x1565C0,
+                        "bodyTextColor": 0xFFFFFF
+                    }
+                }
+            }
+        });
+
+        let msg = parse_chat_action(&action);
+        assert!(msg.is_some(), "SuperChat with colors should be parsed");
+        let msg = msg.unwrap();
+
+        // Verify message type
+        match &msg.message_type {
+            MessageType::SuperChat { amount } => {
+                assert_eq!(amount, "¥5,000");
+            }
+            _ => panic!("Expected SuperChat message type"),
+        }
+
+        // Verify superchat_colors is present and correct
+        let metadata = msg.metadata.expect("Metadata should be present");
+        let colors = metadata.superchat_colors.expect("superchat_colors should be present");
+
+        assert_eq!(colors.header_background, "#1565C0", "header_background should be blue");
+        assert_eq!(colors.header_text, "#FFFFFF", "header_text should be white");
+        assert_eq!(colors.body_background, "#1565C0", "body_background should be blue");
+        assert_eq!(colors.body_text, "#FFFFFF", "body_text should be white");
+    }
+
+    #[test]
+    fn test_parse_supersticker_with_money_chip_color() {
+        // Test parsing SuperSticker message with moneyChipBackgroundColor (actual YouTube API field)
+        // YouTube returns ARGB colors as large integers that may overflow i32
+        // Using i64 values directly: 4280191205_i64 for blue, 4294967295_i64 for white
+        let action = serde_json::json!({
+            "addChatItemAction": {
+                "item": {
+                    "liveChatPaidStickerRenderer": {
+                        "id": "sticker_color_test",
+                        "timestampUsec": "1234567890000000",
+                        "authorName": {"simpleText": "StickerUser"},
+                        "authorExternalChannelId": "UC_sticker",
+                        "purchaseAmountText": {"simpleText": "¥1,500"},
+                        "moneyChipBackgroundColor": 4280191205_i64,  // 0xFF1E88E5 (blue)
+                        "moneyChipTextColor": 4294967295_i64,        // 0xFFFFFFFF (white)
+                        "sticker": {"thumbnails": [{"url": "https://example.com/sticker.png"}]}
+                    }
+                }
+            }
+        });
+
+        let msg = parse_chat_action(&action);
+        assert!(msg.is_some(), "SuperSticker with color should be parsed");
+        let msg = msg.unwrap();
+
+        // Verify message type
+        match &msg.message_type {
+            MessageType::SuperSticker { amount } => {
+                assert_eq!(amount, "¥1,500");
+            }
+            _ => panic!("Expected SuperSticker message type"),
+        }
+
+        // Verify superchat_colors is present and uses moneyChipBackgroundColor
+        let metadata = msg.metadata.expect("Metadata should be present");
+        let colors = metadata.superchat_colors.expect("superchat_colors should be present");
+
+        assert_eq!(colors.header_background, "#1E88E5", "header_background should be blue");
+        assert_eq!(colors.body_background, "#1E88E5", "body_background should be blue");
+        assert_eq!(colors.header_text, "#FFFFFF", "header_text should be white");
+        assert_eq!(colors.body_text, "#FFFFFF", "body_text should be white");
     }
 }

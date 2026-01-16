@@ -37,13 +37,13 @@ pub struct BadgeInfo {
     pub icon_url: Option<String>,
 }
 
-/// SuperChat color scheme
+/// SuperChat color scheme (per 02_chat.md spec)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SuperChatColors {
-    pub background_color: String,
-    pub header_color: String,
-    pub author_name_color: String,
-    pub message_color: String,
+    pub header_background: String,  // "#RRGGBB"
+    pub header_text: String,
+    pub body_background: String,
+    pub body_text: String,
 }
 
 /// Message metadata
