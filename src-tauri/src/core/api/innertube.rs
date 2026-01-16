@@ -623,7 +623,8 @@ fn format_timestamp(timestamp_usec: &str) -> String {
     if let Ok(usec) = timestamp_usec.parse::<i64>() {
         let secs = usec / 1_000_000;
         let datetime = chrono::DateTime::from_timestamp(secs, 0).unwrap_or_default();
-        datetime.format("%H:%M:%S").to_string()
+        // Return RFC3339 format so frontend can convert to local timezone
+        datetime.to_rfc3339()
     } else {
         String::new()
     }

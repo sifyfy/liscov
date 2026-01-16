@@ -105,6 +105,24 @@
     }
     return null;
   }
+
+  // Format timestamp to local timezone HH:MM:SS
+  function formatTimestamp(timestamp: string): string {
+    if (!timestamp) return '';
+    try {
+      const date = new Date(timestamp);
+      if (isNaN(date.getTime())) {
+        return timestamp;
+      }
+      return date.toLocaleTimeString('ja-JP', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      });
+    } catch {
+      return timestamp;
+    }
+  }
 </script>
 
 <!-- Slide-in panel -->
@@ -214,7 +232,7 @@
             class="w-full text-left p-3 bg-[var(--bg-light)] rounded-lg cursor-pointer transition-colors hover:bg-[var(--bg-light)]/80 {isClicked ? 'ring-2 ring-[var(--primary-start)]' : 'border border-[var(--border-light)]'}"
             onclick={() => onMessageClick?.(message)}
           >
-            <p class="text-xs text-[var(--text-muted)] mb-1">{message.timestamp}</p>
+            <p class="text-xs text-[var(--text-muted)] mb-1">{formatTimestamp(message.timestamp)}</p>
             <p class="text-sm text-[var(--text-primary)] break-words leading-relaxed">{message.content}</p>
             {#if badge}
               <span class="inline-block mt-2 px-2 py-0.5 text-xs rounded {badge.style}">

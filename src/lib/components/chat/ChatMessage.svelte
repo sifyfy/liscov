@@ -56,17 +56,19 @@
     return '';
   });
 
-  // Format timestamp to HH:MM:SS
+  // Format timestamp to HH:MM:SS in local timezone
   let formattedTime = $derived(() => {
-    // timestamp is already in HH:MM:SS format from backend
-    if (message.timestamp && message.timestamp.includes(':')) {
-      return message.timestamp;
+    if (!message.timestamp) {
+      return '';
     }
     try {
+      // Parse timestamp (RFC3339/ISO8601 format from backend)
       const date = new Date(message.timestamp);
       if (isNaN(date.getTime())) {
+        // Fallback: return as-is if not parseable
         return message.timestamp;
       }
+      // Convert to local timezone and format as HH:MM:SS
       return date.toLocaleTimeString('ja-JP', {
         hour: '2-digit',
         minute: '2-digit',
