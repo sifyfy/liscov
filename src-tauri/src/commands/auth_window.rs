@@ -12,6 +12,15 @@ use tokio::sync::Mutex;
 /// YouTube認証用URL (デフォルト)
 pub const DEFAULT_YOUTUBE_AUTH_URL: &str = "https://www.youtube.com/";
 
+/// Cookie取得対象のURL一覧
+/// YouTubeとGoogleのCookieは異なるドメインで設定される可能性があるため、複数のドメインをチェックする
+const COOKIE_URLS: &[&str] = &[
+    "https://www.youtube.com/",
+    "https://youtube.com/",
+    "https://accounts.google.com/",
+    "https://www.google.com/",
+];
+
 /// 認証URLを取得する（テスト用に環境変数で上書き可能）
 /// LISCOV_AUTH_URL 環境変数が設定されている場合はそれを使用
 pub fn get_auth_url() -> String {
@@ -145,36 +154,54 @@ pub async fn open_auth_window(app: AppHandle) -> AuthResult {
 
             // Cookieをチェック
             {
-                // 方法1: Tauri cookies() APIで直接Cookieを取得
-                match auth_window.cookies() {
-                    Ok(cookie_list) => {
-                        tracing::info!("🍪 Found {} cookies", cookie_list.len());
+                // 複数のドメインからCookieを取得して統合
+                // YouTubeとGoogleのCookieは異なるドメインで設定される可能性がある
+                let mut all_cookies = Vec::new();
 
-                        // Cookieをログ出力（デバッグ用）
-                        for cookie in &cookie_list {
-                            tracing::debug!("  Cookie: {}={}", cookie.name(), cookie.value());
+                for url in COOKIE_URLS {
+                    match auth_window.cookies_for_url(url.parse().unwrap()) {
+                        Ok(cookies) => {
+                            if !cookies.is_empty() {
+                                tracing::debug!(
+                                    "🍪 Retrieved {} cookies from {}",
+                                    cookies.len(),
+                                    url
+                                );
+                                all_cookies.extend(cookies);
+                            }
                         }
-
-                        // SAPISIDがあるかチェック
-                        if cookie_list.iter().any(|c| c.name() == "SAPISID") {
-                            tracing::info!("🔓 SAPISID detected in cookies");
-
-                            // CookieをHashMapに変換
-                            let mut cookies_map = std::collections::HashMap::new();
-                            for cookie in cookie_list {
-                                cookies_map.insert(cookie.name().to_string(), cookie.value().to_string());
-                            }
-
-                            if let Some(yt_cookies) = extract_youtube_cookies_from_map(&cookies_map) {
-                                tracing::info!("✅ Successfully extracted YouTube cookies");
-
-                                let _ = auth_window.close();
-                                return Ok(yt_cookies);
-                            }
+                        Err(e) => {
+                            tracing::debug!("🍪 Failed to get cookies from {}: {}", url, e);
                         }
                     }
-                    Err(e) => {
-                        tracing::warn!("Failed to get cookies: {}", e);
+                }
+
+                tracing::debug!(
+                    "🍪 Total retrieved {} cookies from all domains",
+                    all_cookies.len()
+                );
+
+                if !all_cookies.is_empty() {
+                    // Cookieをログ出力（デバッグ用）
+                    let cookie_names: Vec<&str> = all_cookies.iter().map(|c| c.name()).collect();
+                    tracing::debug!("🍪 Cookie names: {:?}", cookie_names);
+
+                    // SAPISIDがあるかチェック
+                    if all_cookies.iter().any(|c| c.name() == "SAPISID") {
+                        tracing::info!("🔓 SAPISID detected in cookies");
+
+                        // CookieをHashMapに変換
+                        let mut cookies_map = std::collections::HashMap::new();
+                        for cookie in all_cookies {
+                            cookies_map.insert(cookie.name().to_string(), cookie.value().to_string());
+                        }
+
+                        if let Some(yt_cookies) = extract_youtube_cookies_from_map(&cookies_map) {
+                            tracing::info!("✅ Successfully extracted YouTube cookies");
+
+                            let _ = auth_window.close();
+                            return Ok(yt_cookies);
+                        }
                     }
                 }
 
