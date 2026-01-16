@@ -1,16 +1,16 @@
 //! WebSocket API commands for external app integration
 
-use crate::core::api::WebSocketServer;
+use crate::core::api::{ClientEvent, WebSocketServer};
 use crate::AppState;
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
 /// WebSocket server status
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSocketStatus {
     pub is_running: bool,
     pub actual_port: Option<u16>,
-    pub connected_clients: usize,
+    pub connected_clients: u32,
 }
 
 /// Result of starting WebSocket server
@@ -19,9 +19,16 @@ pub struct WebSocketStartResult {
     pub actual_port: u16,
 }
 
+/// Tauri event payload for client connection events
+#[derive(Debug, Clone, Serialize)]
+struct ClientEventPayload {
+    client_id: u64,
+}
+
 /// Start the WebSocket server for external app integration
 #[tauri::command]
 pub async fn websocket_start(
+    app: AppHandle,
     state: State<'_, AppState>,
     port: Option<u16>,
 ) -> Result<WebSocketStartResult, String> {
@@ -41,10 +48,29 @@ pub async fn websocket_start(
 
     // Create and start new server
     let server = WebSocketServer::new(preferred_port);
+
+    // Subscribe to client events before starting
+    let mut event_rx = server.subscribe_events();
+
     let actual_port = server
         .start()
         .await
         .map_err(|e| format!("Failed to start WebSocket server: {}", e))?;
+
+    // Spawn task to emit Tauri events for client connections
+    let app_handle = app.clone();
+    tokio::spawn(async move {
+        while let Ok(event) = event_rx.recv().await {
+            match event {
+                ClientEvent::Connected { client_id } => {
+                    let _ = app_handle.emit("websocket-client-connected", ClientEventPayload { client_id });
+                }
+                ClientEvent::Disconnected { client_id } => {
+                    let _ = app_handle.emit("websocket-client-disconnected", ClientEventPayload { client_id });
+                }
+            }
+        }
+    });
 
     // Store server in state
     {

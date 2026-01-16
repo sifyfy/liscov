@@ -1,6 +1,7 @@
 // WebSocket state management using Svelte 5 runes
 import type { WebSocketStatus } from '$lib/types';
 import * as wsApi from '$lib/tauri/websocket';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 // Reactive state
 let isRunning = $state(false);
@@ -8,6 +9,36 @@ let actualPort = $state<number | null>(null);
 let connectedClients = $state(0);
 let isStarting = $state(false);
 let error = $state<string | null>(null);
+
+// Event listeners
+let unlistenConnect: UnlistenFn | null = null;
+let unlistenDisconnect: UnlistenFn | null = null;
+
+async function setupEventListeners(): Promise<void> {
+  // Clean up existing listeners
+  await cleanupEventListeners();
+
+  // Listen for client connections
+  unlistenConnect = await listen<{ client_id: number }>('websocket-client-connected', () => {
+    connectedClients++;
+  });
+
+  // Listen for client disconnections
+  unlistenDisconnect = await listen<{ client_id: number }>('websocket-client-disconnected', () => {
+    connectedClients = Math.max(0, connectedClients - 1);
+  });
+}
+
+async function cleanupEventListeners(): Promise<void> {
+  if (unlistenConnect) {
+    unlistenConnect();
+    unlistenConnect = null;
+  }
+  if (unlistenDisconnect) {
+    unlistenDisconnect();
+    unlistenDisconnect = null;
+  }
+}
 
 // Actions
 async function start(port?: number): Promise<void> {
@@ -18,6 +49,9 @@ async function start(port?: number): Promise<void> {
     const result = await wsApi.websocketStart(port);
     isRunning = true;
     actualPort = result.actual_port;
+    connectedClients = 0;
+    // Setup event listeners for client connect/disconnect
+    await setupEventListeners();
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
     isRunning = false;
@@ -31,6 +65,8 @@ async function stop(): Promise<void> {
   try {
     await wsApi.websocketStop();
   } finally {
+    // Cleanup event listeners
+    await cleanupEventListeners();
     isRunning = false;
     actualPort = null;
     connectedClients = 0;

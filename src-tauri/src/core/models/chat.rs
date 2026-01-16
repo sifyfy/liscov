@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 
 /// Chat message type
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type")]
 pub enum MessageType {
     Text,
     SuperChat { amount: String },
@@ -22,7 +21,6 @@ impl Default for MessageType {
 
 /// Message run (text or emoji)
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
 pub enum MessageRun {
     Text { content: String },
     Emoji { emoji_id: String, image_url: String, alt_text: String },

@@ -45,6 +45,9 @@ importers:
       '@types/node':
         specifier: ^25.0.7
         version: 25.0.7
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
       jsdom:
         specifier: ^27.4.0
         version: 27.4.0
@@ -66,6 +69,9 @@ importers:
       vitest:
         specifier: ^4.0.17
         version: 4.0.17(@types/node@25.0.7)(jiti@2.6.1)(jsdom@27.4.0)(lightningcss@1.30.2)
+      ws:
+        specifier: ^8.19.0
+        version: 8.19.0
 
 packages:
 
@@ -698,6 +704,9 @@ packages:
 
   '@types/node@25.0.7':
     resolution: {integrity: sha512-C/er7DlIZgRJO7WtTdYovjIFzGsz0I95UlMyR9anTb4aCpBSRWe5Jc1/RvLKUfzmOxHPGjSE5+63HgLtndxU4w==}
+
+  '@types/ws@8.18.1':
+    resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
 
   '@vitest/expect@4.0.17':
     resolution: {integrity: sha512-mEoqP3RqhKlbmUmntNDDCJeTDavDR+fVYkSOw8qRwJFaW/0/5zA9zFeTrHqNtcmwh6j26yMmwx2PqUDPzt5ZAQ==}
@@ -1735,6 +1744,10 @@ snapshots:
   '@types/node@25.0.7':
     dependencies:
       undici-types: 7.16.0
+
+  '@types/ws@8.18.1':
+    dependencies:
+      '@types/node': 25.0.7
 
   '@vitest/expect@4.0.17':
     dependencies:

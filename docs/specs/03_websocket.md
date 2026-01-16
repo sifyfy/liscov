@@ -93,18 +93,31 @@ pub struct WebSocketStatus {
     "channel_id": "UCxxxxxxxxxxxx",
     "content": "こんにちは！",
     "runs": [
-      { "type": "text", "text": "こんにちは！" }
+      { "Text": { "content": "こんにちは！" } }
     ],
     "metadata": {
       "amount": null,
       "badges": ["Member (6 months)"],
+      "badge_info": [{ "badge_type": "member", "label": "Member", "tooltip": "Member (6 months)", "icon_url": "https://..." }],
+      "color": null,
       "is_moderator": false,
-      "is_verified": false
+      "is_verified": false,
+      "superchat_colors": null
     },
     "is_member": true,
     "comment_count": 5
   }
 }
+```
+
+**runs フォーマット（InnerTube API準拠）**
+
+```json
+// テキスト
+{ "Text": { "content": "テキスト内容" } }
+
+// 絵文字
+{ "Emoji": { "emoji_id": "🎉", "image_url": "https://...", "alt_text": ":party:" } }
 ```
 
 #### ServerInfo

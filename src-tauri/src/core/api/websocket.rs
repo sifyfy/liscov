@@ -13,13 +13,20 @@ use tokio_tungstenite::tungstenite::Message;
 
 type ClientId = u64;
 
+/// Client connection event for external notification
+#[derive(Debug, Clone)]
+pub enum ClientEvent {
+    Connected { client_id: u64 },
+    Disconnected { client_id: u64 },
+}
+
 /// Server to client message
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 pub enum ServerMessage {
     ChatMessage(ChatMessage),
     Connected { client_id: ClientId },
-    ServerInfo { version: String, connected_clients: usize },
+    ServerInfo { version: String, connected_clients: u32 },
     Error { message: String },
 }
 
@@ -47,6 +54,7 @@ pub struct WebSocketServer {
     state: Arc<RwLock<ServerState>>,
     clients: Arc<RwLock<HashMap<ClientId, tokio::sync::mpsc::UnboundedSender<Message>>>>,
     message_tx: broadcast::Sender<ServerMessage>,
+    client_event_tx: broadcast::Sender<ClientEvent>,
     next_client_id: Arc<AtomicU64>,
     shutdown: Arc<AtomicBool>,
 }
@@ -54,15 +62,22 @@ pub struct WebSocketServer {
 impl WebSocketServer {
     pub fn new(port: u16) -> Self {
         let (message_tx, _) = broadcast::channel(1024);
+        let (client_event_tx, _) = broadcast::channel(64);
         Self {
             preferred_port: port,
             actual_port: Arc::new(RwLock::new(None)),
             state: Arc::new(RwLock::new(ServerState::Stopped)),
             clients: Arc::new(RwLock::new(HashMap::new())),
             message_tx,
+            client_event_tx,
             next_client_id: Arc::new(AtomicU64::new(1)),
             shutdown: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Subscribe to client events (connect/disconnect)
+    pub fn subscribe_events(&self) -> broadcast::Receiver<ClientEvent> {
+        self.client_event_tx.subscribe()
     }
 
     pub async fn start(&self) -> anyhow::Result<u16> {
@@ -76,8 +91,8 @@ impl WebSocketServer {
 
         self.shutdown.store(false, Ordering::SeqCst);
 
-        // Try to bind to ports
-        let port_range_end = self.preferred_port.saturating_add(10);
+        // Try to bind to ports (spec: 8765-8774, 10 ports)
+        let port_range_end = self.preferred_port.saturating_add(9);
         let (listener, bound_port) = self.try_bind_ports(self.preferred_port, port_range_end).await?;
 
         {
@@ -94,6 +109,7 @@ impl WebSocketServer {
 
         let clients = Arc::clone(&self.clients);
         let message_tx = self.message_tx.clone();
+        let client_event_tx = self.client_event_tx.clone();
         let next_client_id = Arc::clone(&self.next_client_id);
         let shutdown = Arc::clone(&self.shutdown);
         let state = Arc::clone(&self.state);
@@ -107,9 +123,10 @@ impl WebSocketServer {
                                 let client_id = next_client_id.fetch_add(1, Ordering::SeqCst);
                                 let clients = Arc::clone(&clients);
                                 let mut message_rx = message_tx.subscribe();
+                                let event_tx = client_event_tx.clone();
 
                                 tokio::spawn(async move {
-                                    if let Err(e) = handle_connection(stream, addr, client_id, clients, &mut message_rx).await {
+                                    if let Err(e) = handle_connection(stream, addr, client_id, clients, &mut message_rx, event_tx).await {
                                         tracing::warn!("WebSocket error for client {}: {}", client_id, e);
                                     }
                                 });
@@ -177,8 +194,8 @@ impl WebSocketServer {
         }
     }
 
-    pub async fn connected_clients(&self) -> usize {
-        self.clients.read().await.len()
+    pub async fn connected_clients(&self) -> u32 {
+        self.clients.read().await.len() as u32
     }
 
     pub async fn get_state(&self) -> ServerState {
@@ -200,6 +217,7 @@ async fn handle_connection(
     client_id: ClientId,
     clients: Arc<RwLock<HashMap<ClientId, tokio::sync::mpsc::UnboundedSender<Message>>>>,
     message_rx: &mut broadcast::Receiver<ServerMessage>,
+    event_tx: broadcast::Sender<ClientEvent>,
 ) -> anyhow::Result<()> {
     let ws_stream = tokio_tungstenite::accept_async(stream).await?;
     let (mut write, mut read) = ws_stream.split();
@@ -210,6 +228,9 @@ async fn handle_connection(
         let mut clients_guard = clients.write().await;
         clients_guard.insert(client_id, tx);
     }
+
+    // Emit client connected event
+    let _ = event_tx.send(ClientEvent::Connected { client_id });
 
     let connected_msg = ServerMessage::Connected { client_id };
     let json = serde_json::to_string(&connected_msg)?;
@@ -231,7 +252,7 @@ async fn handle_connection(
                                     let clients_guard = clients.read().await;
                                     let info = ServerMessage::ServerInfo {
                                         version: env!("CARGO_PKG_VERSION").to_string(),
-                                        connected_clients: clients_guard.len(),
+                                        connected_clients: clients_guard.len() as u32,
                                     };
                                     let json = serde_json::to_string(&info)?;
                                     write.send(Message::Text(json)).await?;
@@ -272,6 +293,10 @@ async fn handle_connection(
         let mut clients_guard = clients.write().await;
         clients_guard.remove(&client_id);
     }
+
+    // Emit client disconnected event
+    let _ = event_tx.send(ClientEvent::Disconnected { client_id });
+    tracing::info!("Client {} disconnected", client_id);
 
     Ok(())
 }
