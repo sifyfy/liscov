@@ -196,6 +196,15 @@ pub async fn connect_to_stream(
         .await
         .map_err(|e| format!("Failed to connect: {}", e))?;
 
+    // Debug: Log connection status details
+    tracing::info!(
+        "Connection status: is_connected={}, stream_title={:?}, broadcaster_channel_id={:?}, broadcaster_name={:?}",
+        status.is_connected,
+        status.stream_title,
+        status.broadcaster_channel_id,
+        status.broadcaster_name
+    );
+
     let mut result = ConnectionResult::from(status.clone());
 
     if result.success {
@@ -253,6 +262,7 @@ pub async fn connect_to_stream(
         let websocket_server = Arc::clone(&state.websocket_server);
         let database = Arc::clone(&state.database);
         let current_session_id = Arc::clone(&state.current_session_id);
+        let current_broadcaster_id = Arc::clone(&state.current_broadcaster_id);
         let app_handle = app.clone();
 
         // Get save config for raw response saving
@@ -273,6 +283,7 @@ pub async fn connect_to_stream(
                 websocket_server,
                 database,
                 current_session_id,
+                current_broadcaster_id,
                 is_monitoring,
                 save_config,
             )
@@ -294,6 +305,7 @@ async fn chat_monitoring_task(
     websocket_server: Arc<RwLock<Option<crate::core::api::WebSocketServer>>>,
     database: Arc<RwLock<Option<Database>>>,
     current_session_id: Arc<RwLock<Option<String>>>,
+    current_broadcaster_id: Arc<RwLock<Option<String>>>,
     is_monitoring: Arc<RwLock<bool>>,
     save_config: SaveConfig,
 ) {
@@ -332,10 +344,11 @@ async fn chat_monitoring_task(
             }
         }
 
-        // Get current session ID
-        let session_id = {
+        // Get current session ID and broadcaster ID
+        let (session_id, broadcaster_id) = {
             let session = current_session_id.read().await;
-            session.clone()
+            let broadcaster = current_broadcaster_id.read().await;
+            (session.clone(), broadcaster.clone())
         };
 
         // Process new messages
@@ -354,7 +367,12 @@ async fn chat_monitoring_task(
                 let db_guard = database.read().await;
                 if let Some(db) = db_guard.as_ref() {
                     let conn = db.connection().await;
-                    if let Err(e) = database::save_message(&conn, session_id, &msg) {
+                    if let Err(e) = database::save_message(
+                        &conn,
+                        session_id,
+                        broadcaster_id.as_deref(),
+                        &msg,
+                    ) {
                         tracing::warn!("Failed to save message: {}", e);
                     }
                 }

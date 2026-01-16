@@ -44,9 +44,10 @@ CREATE TABLE sessions (
     end_time TEXT,
     stream_url TEXT,
     stream_title TEXT,
+    broadcaster_channel_id TEXT,
+    broadcaster_name TEXT,
     total_messages INTEGER DEFAULT 0,
-    super_chat_count INTEGER DEFAULT 0,
-    membership_count INTEGER DEFAULT 0,
+    total_revenue REAL DEFAULT 0.0,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
@@ -65,9 +66,10 @@ END;
 | `end_time` | TEXT | 終了時刻（NULL=進行中） |
 | `stream_url` | TEXT | YouTube Live URL |
 | `stream_title` | TEXT | 配信タイトル |
+| `broadcaster_channel_id` | TEXT | 配信者チャンネルID |
+| `broadcaster_name` | TEXT | 配信者名 |
 | `total_messages` | INTEGER | 合計メッセージ数 |
-| `super_chat_count` | INTEGER | SuperChat件数 |
-| `membership_count` | INTEGER | メンバーシップ獲得数 |
+| `total_revenue` | REAL | 合計収益（SuperChat等） |
 
 ### messages テーブル
 
@@ -75,12 +77,16 @@ END;
 CREATE TABLE messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id TEXT NOT NULL,
+    message_id TEXT NOT NULL,
     timestamp TEXT NOT NULL,
+    timestamp_usec TEXT NOT NULL,
     author TEXT NOT NULL,
-    channel_id TEXT,
-    content TEXT,
+    author_icon_url TEXT,
+    channel_id TEXT NOT NULL,
+    content TEXT NOT NULL,
     message_type TEXT NOT NULL,
-    amount REAL,
+    amount TEXT,
+    is_member INTEGER DEFAULT 0,
     metadata TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
@@ -89,62 +95,90 @@ CREATE TABLE messages (
 CREATE INDEX idx_messages_session_timestamp ON messages(session_id, timestamp);
 CREATE INDEX idx_messages_channel_id ON messages(channel_id);
 CREATE INDEX idx_messages_type ON messages(message_type);
+CREATE UNIQUE INDEX idx_messages_unique ON messages(session_id, message_id);
 ```
 
 | カラム | 型 | 説明 |
 |-------|-----|------|
-| `id` | INTEGER | メッセージID（自動増分） |
+| `id` | INTEGER | 内部ID（自動増分） |
 | `session_id` | TEXT | セッションID（外部キー） |
-| `timestamp` | TEXT | メッセージタイムスタンプ |
+| `message_id` | TEXT | YouTube内部メッセージID |
+| `timestamp` | TEXT | メッセージタイムスタンプ（ISO8601） |
+| `timestamp_usec` | TEXT | マイクロ秒タイムスタンプ |
 | `author` | TEXT | 投稿者名 |
+| `author_icon_url` | TEXT | 投稿者アイコンURL |
 | `channel_id` | TEXT | 投稿者チャンネルID |
 | `content` | TEXT | メッセージ本文 |
-| `message_type` | TEXT | メッセージタイプ |
-| `amount` | REAL | SuperChat金額（通常はNULL） |
+| `message_type` | TEXT | メッセージタイプ（text/superchat/supersticker/membership等） |
+| `amount` | TEXT | SuperChat金額（通貨記号含む、例: "¥500"） |
+| `is_member` | INTEGER | メンバーシップ加入者フラグ（0/1） |
 | `metadata` | TEXT | JSON形式のメタデータ |
 
 ### viewer_profiles テーブル
 
 詳細は[視聴者管理機能](06_viewer.md)を参照。
 
+視聴者プロフィールは配信者ごとにスコープされる。同じ視聴者でも配信者ごとに異なる統計情報（メッセージ数、貢献額等）を持つ。
+
 ```sql
 CREATE TABLE viewer_profiles (
-    channel_id TEXT PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    broadcaster_channel_id TEXT NOT NULL,
+    channel_id TEXT NOT NULL,
     display_name TEXT NOT NULL,
-    first_seen TEXT,
-    last_seen TEXT,
+    first_seen TEXT NOT NULL,
+    last_seen TEXT NOT NULL,
     message_count INTEGER DEFAULT 0,
     total_contribution REAL DEFAULT 0.0,
     membership_level TEXT,
     tags TEXT,
-    behavior_stats TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(broadcaster_channel_id, channel_id)
 );
+
+CREATE INDEX idx_viewer_profiles_broadcaster ON viewer_profiles(broadcaster_channel_id);
+CREATE INDEX idx_viewer_profiles_message_count ON viewer_profiles(broadcaster_channel_id, message_count DESC);
+CREATE INDEX idx_viewer_profiles_contribution ON viewer_profiles(broadcaster_channel_id, total_contribution DESC);
 ```
+
+| カラム | 型 | 説明 |
+|-------|-----|------|
+| `id` | INTEGER | サロゲートキー（自動増分） |
+| `broadcaster_channel_id` | TEXT | 配信者チャンネルID |
+| `channel_id` | TEXT | 視聴者チャンネルID |
+| `display_name` | TEXT | 表示名 |
+| `first_seen` | TEXT | 初見日時（RFC3339） |
+| `last_seen` | TEXT | 最終確認日時（RFC3339） |
+| `message_count` | INTEGER | メッセージ数 |
+| `total_contribution` | REAL | 総貢献額（SuperChat等） |
+| `membership_level` | TEXT | メンバーシップレベル |
+| `tags` | TEXT | タグ（カンマ区切り） |
 
 ### viewer_custom_info テーブル
 
 詳細は[視聴者管理機能](06_viewer.md)を参照。
 
+`viewer_profiles`の拡張情報として、読み仮名やメモを保存する。`viewer_profile_id`で1:1対応。
+
 ```sql
 CREATE TABLE viewer_custom_info (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    broadcaster_channel_id TEXT NOT NULL,
-    viewer_channel_id TEXT NOT NULL,
+    viewer_profile_id INTEGER PRIMARY KEY,
     reading TEXT,
     notes TEXT,
     custom_data TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(broadcaster_channel_id, viewer_channel_id)
+    FOREIGN KEY (viewer_profile_id) REFERENCES viewer_profiles(id) ON DELETE CASCADE
 );
-
-CREATE INDEX idx_viewer_custom_info_lookup
-    ON viewer_custom_info(broadcaster_channel_id, viewer_channel_id);
-CREATE INDEX idx_viewer_custom_info_broadcaster
-    ON viewer_custom_info(broadcaster_channel_id);
 ```
+
+| カラム | 型 | 説明 |
+|-------|-----|------|
+| `viewer_profile_id` | INTEGER | viewer_profiles.id（主キー・外部キー） |
+| `reading` | TEXT | 読み仮名（TTS用） |
+| `notes` | TEXT | メモ |
+| `custom_data` | TEXT | 拡張データ（JSON形式） |
 
 ### broadcaster_profiles テーブル
 
@@ -264,9 +298,10 @@ pub struct Session {
     pub end_time: Option<String>,
     pub stream_url: Option<String>,
     pub stream_title: Option<String>,
+    pub broadcaster_channel_id: Option<String>,
+    pub broadcaster_name: Option<String>,
     pub total_messages: i64,
-    pub super_chat_count: i64,
-    pub membership_count: i64,
+    pub total_revenue: f64,
 }
 ```
 
@@ -276,13 +311,45 @@ pub struct Session {
 pub struct StoredMessage {
     pub id: i64,
     pub session_id: String,
+    pub message_id: String,
     pub timestamp: String,
+    pub timestamp_usec: String,
     pub author: String,
-    pub channel_id: Option<String>,
-    pub content: Option<String>,
+    pub author_icon_url: Option<String>,
+    pub channel_id: String,
+    pub content: String,
     pub message_type: String,
-    pub amount: Option<f64>,
+    pub amount: Option<String>,
+    pub is_member: bool,
     pub metadata: Option<String>,
+}
+```
+
+### ViewerProfile
+
+```rust
+pub struct ViewerProfile {
+    pub id: i64,
+    pub broadcaster_channel_id: String,
+    pub channel_id: String,
+    pub display_name: String,
+    pub first_seen: String,
+    pub last_seen: String,
+    pub message_count: i64,
+    pub total_contribution: f64,
+    pub membership_level: Option<String>,
+    pub tags: Vec<String>,
+}
+```
+
+### ViewerCustomInfo
+
+```rust
+pub struct ViewerCustomInfo {
+    pub viewer_profile_id: i64,
+    pub reading: Option<String>,
+    pub notes: Option<String>,
+    pub custom_data: Option<String>,
 }
 ```
 
@@ -295,21 +362,46 @@ interface Session {
     end_time: string | null;
     stream_url: string | null;
     stream_title: string | null;
+    broadcaster_channel_id: string | null;
+    broadcaster_name: string | null;
     total_messages: number;
-    super_chat_count: number;
-    membership_count: number;
+    total_revenue: number;
 }
 
 interface StoredMessage {
     id: number;
     session_id: string;
+    message_id: string;
     timestamp: string;
+    timestamp_usec: string;
     author: string;
-    channel_id: string | null;
-    content: string | null;
+    author_icon_url: string | null;
+    channel_id: string;
+    content: string;
     message_type: string;
-    amount: number | null;
+    amount: string | null;
+    is_member: boolean;
     metadata: string | null;
+}
+
+interface ViewerProfile {
+    id: number;
+    broadcaster_channel_id: string;
+    channel_id: string;
+    display_name: string;
+    first_seen: string;
+    last_seen: string;
+    message_count: number;
+    total_contribution: number;
+    membership_level: string | null;
+    tags: string[];
+}
+
+interface ViewerCustomInfo {
+    viewer_profile_id: number;
+    reading: string | null;
+    notes: string | null;
+    custom_data: string | null;
 }
 ```
 
@@ -320,10 +412,12 @@ interface StoredMessage {
 | `idx_messages_session_timestamp` | messages(session_id, timestamp) | セッション別メッセージ検索 |
 | `idx_messages_channel_id` | messages(channel_id) | 投稿者別メッセージ検索 |
 | `idx_messages_type` | messages(message_type) | タイプ別メッセージ検索 |
+| `idx_messages_unique` | messages(session_id, message_id) | 重複防止 |
+| `idx_viewer_profiles_broadcaster` | viewer_profiles(broadcaster_channel_id) | 配信者別視聴者検索 |
+| `idx_viewer_profiles_message_count` | viewer_profiles(broadcaster_channel_id, message_count DESC) | アクティブ順ソート |
+| `idx_viewer_profiles_contribution` | viewer_profiles(broadcaster_channel_id, total_contribution DESC) | 貢献額順ソート |
 | `idx_hourly_stats_session` | hourly_stats(session_id) | セッション別統計検索 |
 | `idx_contributor_stats_session` | contributor_stats(session_id) | セッション別貢献者検索 |
-| `idx_viewer_custom_info_lookup` | viewer_custom_info(...) | 視聴者情報検索 |
-| `idx_viewer_custom_info_broadcaster` | viewer_custom_info(...) | 配信者別視聴者検索 |
 
 ## トリガー一覧
 
@@ -331,7 +425,6 @@ interface StoredMessage {
 |---------|------|------|
 | `update_sessions_timestamp` | sessions | UPDATE時にupdated_atを更新 |
 | `update_viewer_profiles_timestamp` | viewer_profiles | UPDATE時にupdated_atを更新 |
-| `update_contributor_stats_timestamp` | contributor_stats | UPDATE時にupdated_atを更新 |
 | `update_viewer_custom_info_timestamp` | viewer_custom_info | UPDATE時にupdated_atを更新 |
 | `update_broadcaster_profiles_timestamp` | broadcaster_profiles | UPDATE時にupdated_atを更新 |
 
@@ -378,5 +471,7 @@ interface StoredMessage {
 | sessions | messages | CASCADE |
 | sessions | hourly_stats | CASCADE |
 | sessions | contributor_stats | CASCADE |
+| viewer_profiles | viewer_custom_info | CASCADE |
 
 セッション削除時、関連する全データが自動削除される。
+視聴者プロフィール削除時、関連するカスタム情報も自動削除される。

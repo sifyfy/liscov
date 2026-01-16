@@ -1,6 +1,8 @@
 // Viewer-related type definitions
 
 export interface ViewerProfile {
+  id: number;
+  broadcaster_channel_id: string;
   channel_id: string;
   display_name: string;
   first_seen: string;
@@ -12,14 +14,15 @@ export interface ViewerProfile {
 }
 
 export interface ViewerCustomInfo {
-  broadcaster_channel_id: string;
-  viewer_channel_id: string;
+  viewer_profile_id: number;
   reading: string | null;
   notes: string | null;
   custom_data: string | null;
 }
 
 export interface ViewerWithCustomInfo {
+  id: number;
+  broadcaster_channel_id: string;
   channel_id: string;
   display_name: string;
   first_seen: string;
@@ -30,6 +33,7 @@ export interface ViewerWithCustomInfo {
   tags: string[];
   reading: string | null;
   notes: string | null;
+  custom_data: string | null;
 }
 
 export interface Session {

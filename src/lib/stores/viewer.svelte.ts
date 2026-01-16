@@ -37,7 +37,7 @@ async function loadViewers(broadcasterId: string, page = 0): Promise<void> {
 
   try {
     const query = searchQuery.trim() || undefined;
-    viewers = await viewerApi.getViewersForBroadcaster(
+    viewers = await viewerApi.viewerGetList(
       broadcasterId,
       query,
       pageSize,
@@ -64,23 +64,21 @@ function clearSelection(): void {
   selectedViewer = null;
 }
 
+/**
+ * Update viewer custom info using viewer_profile_id
+ */
 async function updateViewerCustomInfo(
-  broadcasterId: string,
-  viewerId: string,
+  viewerProfileId: number,
   reading: string | null,
-  notes: string | null
+  notes: string | null,
+  customData?: string | null
 ): Promise<void> {
   try {
-    await viewerApi.upsertViewerCustomInfo({
-      broadcaster_channel_id: broadcasterId,
-      viewer_channel_id: viewerId,
-      reading,
-      notes
-    });
+    await viewerApi.viewerUpsertCustomInfo(viewerProfileId, reading, notes, customData);
 
     // Update local state
-    if (selectedViewer && selectedViewer.channel_id === viewerId) {
-      selectedViewer = { ...selectedViewer, reading, notes };
+    if (selectedViewer && selectedViewer.id === viewerProfileId) {
+      selectedViewer = { ...selectedViewer, reading, notes, custom_data: customData ?? selectedViewer.custom_data };
     }
 
     // Refresh viewers list
@@ -93,19 +91,28 @@ async function updateViewerCustomInfo(
   }
 }
 
+/**
+ * Update viewer info (custom info + tags) using viewer_profile_id
+ */
 async function updateViewerInfo(
-  broadcasterId: string,
-  viewerId: string,
+  viewerProfileId: number,
   reading: string | null,
   notes: string | null,
+  customData: string | null,
   tags: string[] | null
 ): Promise<void> {
   try {
-    await viewerApi.updateViewerInfo(broadcasterId, viewerId, reading, notes, tags);
+    await viewerApi.viewerUpdateInfo(viewerProfileId, reading, notes, customData, tags);
 
     // Update local state
-    if (selectedViewer && selectedViewer.channel_id === viewerId) {
-      selectedViewer = { ...selectedViewer, reading, notes, tags: tags || [] };
+    if (selectedViewer && selectedViewer.id === viewerProfileId) {
+      selectedViewer = {
+        ...selectedViewer,
+        reading,
+        notes,
+        custom_data: customData,
+        tags: tags || []
+      };
     }
 
     // Refresh viewers list
@@ -131,28 +138,33 @@ function prevPage(): void {
 }
 
 async function loadBroadcasters(): Promise<void> {
+  console.log('[viewerStore] loadBroadcasters called');
   isLoading = true;
   error = null;
 
   try {
-    broadcasters = await viewerApi.getBroadcasterList();
+    const result = await viewerApi.broadcasterGetList();
+    console.log('[viewerStore] broadcasterGetList result:', JSON.stringify(result));
+    broadcasters = result;
   } catch (e) {
+    console.error('[viewerStore] loadBroadcasters error:', e);
     error = e instanceof Error ? e.message : String(e);
     broadcasters = [];
   } finally {
     isLoading = false;
+    console.log('[viewerStore] loadBroadcasters finished, count:', broadcasters.length);
   }
 }
 
-async function deleteViewerCustomInfo(
-  broadcasterId: string,
-  viewerId: string
-): Promise<boolean> {
+/**
+ * Delete viewer profile by viewer_profile_id
+ */
+async function deleteViewer(viewerProfileId: number): Promise<boolean> {
   try {
-    const result = await viewerApi.deleteViewerCustomInfo(broadcasterId, viewerId);
+    const result = await viewerApi.viewerDelete(viewerProfileId);
 
     // Clear selection if deleted viewer was selected
-    if (selectedViewer && selectedViewer.channel_id === viewerId) {
+    if (selectedViewer && selectedViewer.id === viewerProfileId) {
       selectedViewer = null;
     }
 
@@ -170,7 +182,7 @@ async function deleteViewerCustomInfo(
 
 async function deleteBroadcaster(broadcasterId: string): Promise<[boolean, number]> {
   try {
-    const result = await viewerApi.deleteBroadcaster(broadcasterId);
+    const result = await viewerApi.broadcasterDelete(broadcasterId);
 
     // Clear selection if deleted broadcaster was selected
     if (selectedBroadcasterId === broadcasterId) {
@@ -232,7 +244,7 @@ export const viewerStore = {
   clearSelection,
   updateViewerCustomInfo,
   updateViewerInfo,
-  deleteViewerCustomInfo,
+  deleteViewer,
   deleteBroadcaster,
   nextPage,
   prevPage

@@ -2,17 +2,17 @@
 
 ## 概要
 
-チャット参加者の情報を管理し、カスタム情報（読み仮名、メモ）を保存する。視聴者情報は配信者ごとにスコープされ、同じ視聴者でも配信者ごとに異なるカスタム情報を持てる。
+チャット参加者の情報を管理し、カスタム情報（読み仮名、メモ）を保存する。視聴者プロフィールは配信者ごとにスコープされ、同じ視聴者でも配信者ごとに異なるプロフィール（メッセージ数、貢献額等）とカスタム情報を持つ。
 
 ## バックエンドコマンド
 
 | コマンド | 入力 | 出力 | 説明 |
 |---------|------|------|------|
 | `viewer_get_list` | `broadcaster_id, search_query?, limit?, offset?` | `Vec<ViewerWithCustomInfo>` | 視聴者リスト取得 |
-| `viewer_upsert_custom_info` | `info: ViewerCustomInfo` | `i64` | カスタム情報保存 |
-| `viewer_get_profile` | `channel_id: String` | `Option<ViewerProfile>` | プロフィール取得 |
+| `viewer_upsert_custom_info` | `viewer_profile_id, reading?, notes?, custom_data?` | `()` | カスタム情報保存 |
+| `viewer_get_profile` | `broadcaster_id, channel_id` | `Option<ViewerProfile>` | プロフィール取得 |
 | `viewer_search` | `broadcaster_id, query, limit?` | `Vec<ViewerWithCustomInfo>` | 検索 |
-| `viewer_delete` | `broadcaster_id, viewer_id` | `bool` | 視聴者データ削除 |
+| `viewer_delete` | `viewer_profile_id` | `bool` | 視聴者データ削除 |
 | `broadcaster_get_list` | なし | `Vec<BroadcasterChannel>` | 配信者リスト取得 |
 | `broadcaster_delete` | `broadcaster_id` | `(bool, u32)` | 配信者データ削除 |
 
@@ -20,8 +20,8 @@
 
 | テーブル | 用途 |
 |---------|------|
-| `viewer_profiles` | 視聴者の基本情報・統計（配信者間で共有） |
-| `viewer_custom_info` | 配信者ごとのカスタム情報 |
+| `viewer_profiles` | 配信者ごとの視聴者プロフィール・統計 |
+| `viewer_custom_info` | 視聴者のカスタム情報（読み仮名、メモ等） |
 | `broadcaster_profiles` | 配信者情報 |
 
 すべて `%APPDATA%/liscov/liscov.db` (SQLite) に保存。
@@ -30,63 +30,62 @@
 
 ### viewer_profiles テーブル
 
-視聴者の基本情報と統計を管理。複数配信者間で共有。
+配信者ごとの視聴者プロフィール。同じ視聴者でも配信者ごとに異なる統計（メッセージ数、貢献額等）を持つ。
 
 ```sql
 CREATE TABLE viewer_profiles (
-    channel_id TEXT PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    broadcaster_channel_id TEXT NOT NULL,
+    channel_id TEXT NOT NULL,
     display_name TEXT NOT NULL,
-    first_seen TEXT,
-    last_seen TEXT,
+    first_seen TEXT NOT NULL,
+    last_seen TEXT NOT NULL,
     message_count INTEGER DEFAULT 0,
     total_contribution REAL DEFAULT 0.0,
     membership_level TEXT,
     tags TEXT,
-    behavior_stats TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(broadcaster_channel_id, channel_id)
 );
+
+CREATE INDEX idx_viewer_profiles_broadcaster ON viewer_profiles(broadcaster_channel_id);
+CREATE INDEX idx_viewer_profiles_message_count ON viewer_profiles(broadcaster_channel_id, message_count DESC);
+CREATE INDEX idx_viewer_profiles_contribution ON viewer_profiles(broadcaster_channel_id, total_contribution DESC);
 ```
 
 | カラム | 型 | 説明 |
 |-------|-----|------|
-| `channel_id` | TEXT | YouTubeチャンネルID（主キー） |
+| `id` | INTEGER | サロゲートキー（自動増分） |
+| `broadcaster_channel_id` | TEXT | 配信者チャンネルID |
+| `channel_id` | TEXT | 視聴者YouTubeチャンネルID |
 | `display_name` | TEXT | 表示名 |
-| `first_seen` | TEXT | 初見日時 |
-| `last_seen` | TEXT | 最終確認日時 |
+| `first_seen` | TEXT | 初見日時（RFC3339） |
+| `last_seen` | TEXT | 最終確認日時（RFC3339） |
 | `message_count` | INTEGER | メッセージ数 |
 | `total_contribution` | REAL | 総貢献額（スーパーチャット等） |
 | `membership_level` | TEXT | メンバーシップレベル |
 | `tags` | TEXT | タグ（カンマ区切り） |
-| `behavior_stats` | TEXT | 行動統計（JSON形式） |
 
 ### viewer_custom_info テーブル
 
-配信者ごとのカスタム情報。同じ視聴者でも配信者ごとに異なる情報を持てる。
+`viewer_profiles`の拡張情報として、読み仮名やメモを保存。`viewer_profile_id`で1:1対応。
 
 ```sql
 CREATE TABLE viewer_custom_info (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    broadcaster_channel_id TEXT NOT NULL,
-    viewer_channel_id TEXT NOT NULL,
+    viewer_profile_id INTEGER PRIMARY KEY,
     reading TEXT,
     notes TEXT,
     custom_data TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(broadcaster_channel_id, viewer_channel_id)
+    FOREIGN KEY (viewer_profile_id) REFERENCES viewer_profiles(id) ON DELETE CASCADE
 );
-
-CREATE INDEX idx_viewer_custom_info_lookup
-    ON viewer_custom_info(broadcaster_channel_id, viewer_channel_id);
-CREATE INDEX idx_viewer_custom_info_broadcaster
-    ON viewer_custom_info(broadcaster_channel_id);
 ```
 
 | カラム | 型 | 説明 |
 |-------|-----|------|
-| `broadcaster_channel_id` | TEXT | 配信者のチャンネルID |
-| `viewer_channel_id` | TEXT | 視聴者のチャンネルID |
+| `viewer_profile_id` | INTEGER | viewer_profiles.id（主キー・外部キー） |
 | `reading` | TEXT | 読み仮名（TTS用） |
 | `notes` | TEXT | メモ |
 | `custom_data` | TEXT | 拡張データ（JSON形式） |
@@ -108,15 +107,18 @@ CREATE TABLE broadcaster_profiles (
 
 ```rust
 pub struct ViewerProfile {
+    pub id: i64,
+    pub broadcaster_channel_id: String,
     pub channel_id: String,
     pub display_name: String,
-    pub first_seen: Option<String>,
-    pub last_seen: Option<String>,
+    pub first_seen: String,
+    pub last_seen: String,
     pub message_count: i64,
     pub total_contribution: f64,
     pub membership_level: Option<String>,
     pub tags: Vec<String>,
-    pub behavior_stats: Option<String>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
 }
 ```
 
@@ -124,9 +126,7 @@ pub struct ViewerProfile {
 
 ```rust
 pub struct ViewerCustomInfo {
-    pub id: Option<i64>,
-    pub broadcaster_channel_id: String,
-    pub viewer_channel_id: String,
+    pub viewer_profile_id: i64,
     pub reading: Option<String>,
     pub notes: Option<String>,
     pub custom_data: Option<String>,
@@ -140,10 +140,12 @@ pub struct ViewerCustomInfo {
 ```rust
 pub struct ViewerWithCustomInfo {
     // viewer_profiles
+    pub id: i64,
+    pub broadcaster_channel_id: String,
     pub channel_id: String,
     pub display_name: String,
-    pub first_seen: Option<String>,
-    pub last_seen: Option<String>,
+    pub first_seen: String,
+    pub last_seen: String,
     pub message_count: i64,
     pub total_contribution: f64,
     pub membership_level: Option<String>,
@@ -171,26 +173,35 @@ pub struct BroadcasterChannel {
 
 ### 概要
 
-同じ視聴者が異なる配信者では異なるカスタム情報を持てる。
+同じ視聴者でも配信者ごとに異なるプロフィール（統計情報）とカスタム情報を持つ。
 
 ### 例
 
 ```
 視聴者: UCxxx_common_viewer
 
-配信者A (UCaaa) のカスタム情報:
-- reading: "たなかさん"
-- notes: "常連さん"
+配信者A (UCaaa) での情報:
+- viewer_profiles:
+  - message_count: 150
+  - total_contribution: 5000.0
+- viewer_custom_info:
+  - reading: "たなかさん"
+  - notes: "常連さん"
 
-配信者B (UCbbb) のカスタム情報:
-- reading: "タナカ"
-- notes: "初見"
+配信者B (UCbbb) での情報:
+- viewer_profiles:
+  - message_count: 10
+  - total_contribution: 0.0
+- viewer_custom_info:
+  - reading: "タナカ"
+  - notes: "初見"
 ```
 
 ### 実装
 
-- `viewer_custom_info` テーブルは `(broadcaster_channel_id, viewer_channel_id)` の複合キーで一意性を保証
-- `viewer_profiles` は配信者間で共有（基本情報・統計）
+- `viewer_profiles` は `(broadcaster_channel_id, channel_id)` の複合キーで一意性を保証
+- `viewer_custom_info` は `viewer_profile_id` で `viewer_profiles` と1:1対応
+- 配信者削除時は関連する全ての `viewer_profiles` が削除され、CASCADE削除で `viewer_custom_info` も削除される
 
 ## カスタム情報フィールド
 
@@ -257,28 +268,29 @@ pub struct BroadcasterChannel {
 ### SQL
 
 ```sql
-SELECT vp.*, vci.reading, vci.notes, vci.custom_data
+SELECT vp.id, vp.broadcaster_channel_id, vp.channel_id, vp.display_name,
+       vp.first_seen, vp.last_seen, vp.message_count, vp.total_contribution,
+       vp.membership_level, vp.tags,
+       vci.reading, vci.notes, vci.custom_data
 FROM viewer_profiles vp
-LEFT JOIN viewer_custom_info vci
-    ON vp.channel_id = vci.viewer_channel_id
-    AND vci.broadcaster_channel_id = ?1
-WHERE (vp.display_name LIKE ?2
-       OR vci.reading LIKE ?2
-       OR vci.notes LIKE ?2)
-ORDER BY vp.last_seen DESC
+LEFT JOIN viewer_custom_info vci ON vp.id = vci.viewer_profile_id
+WHERE vp.broadcaster_channel_id = ?1
+  AND (vp.display_name LIKE ?2 OR vci.reading LIKE ?2 OR vci.notes LIKE ?2)
+ORDER BY vp.message_count DESC
 LIMIT ?3 OFFSET ?4
 ```
 
 ## 削除機能
 
-### 視聴者カスタム情報削除
+### 視聴者データ削除
 
-- `viewer_custom_info` のみ削除
-- `viewer_profiles` は残存（他の配信者で使用される可能性）
+- `viewer_profiles` レコードを削除
+- `viewer_custom_info` は FK CASCADE により自動削除
 
 ### 配信者データ削除
 
-- その配信者に関連するすべての `viewer_custom_info` を削除
+- その配信者に関連するすべての `viewer_profiles` を削除
+- `viewer_custom_info` は FK CASCADE により自動削除
 - `broadcaster_profiles` も削除
 - 戻り値: `(broadcaster_deleted: bool, viewers_deleted: u32)`
 
@@ -352,10 +364,12 @@ ViewerManagement.svelte
 
 ```typescript
 interface ViewerProfile {
+    id: number;
+    broadcaster_channel_id: string;
     channel_id: string;
     display_name: string;
-    first_seen: string | null;
-    last_seen: string | null;
+    first_seen: string;
+    last_seen: string;
     message_count: number;
     total_contribution: number;
     membership_level: string | null;
@@ -363,8 +377,7 @@ interface ViewerProfile {
 }
 
 interface ViewerCustomInfo {
-    broadcaster_channel_id: string;
-    viewer_channel_id: string;
+    viewer_profile_id: number;
     reading: string | null;
     notes: string | null;
     custom_data: string | null;

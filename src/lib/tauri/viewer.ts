@@ -3,38 +3,88 @@ import { invoke } from '@tauri-apps/api/core';
 import type {
   ViewerProfile,
   ViewerWithCustomInfo,
-  ViewerCustomInfo,
   Session,
   ContributorStats,
   BroadcasterChannel
 } from '$lib/types';
 
 /**
- * Get viewer profile by channel ID
+ * Get viewer profile by broadcaster ID and channel ID
  */
-export async function getViewerProfile(channelId: string): Promise<ViewerProfile | null> {
-  return invoke('get_viewer_profile', { channelId });
+export async function viewerGetProfile(
+  broadcasterId: string,
+  channelId: string
+): Promise<ViewerProfile | null> {
+  return invoke('viewer_get_profile', { broadcasterId, channelId });
 }
 
 /**
- * Get viewer with custom info
+ * Get viewer list for a broadcaster with optional search and pagination
  */
-export async function getViewerWithCustomInfo(
+export async function viewerGetList(
   broadcasterId: string,
-  viewerId: string
-): Promise<ViewerWithCustomInfo | null> {
-  return invoke('get_viewer_with_custom_info', { broadcasterId, viewerId });
+  searchQuery?: string,
+  limit?: number,
+  offset?: number
+): Promise<ViewerWithCustomInfo[]> {
+  return invoke('viewer_get_list', {
+    broadcasterId,
+    searchQuery,
+    limit,
+    offset
+  });
 }
 
 /**
  * Search viewers
  */
-export async function searchViewers(
+export async function viewerSearch(
   broadcasterId: string,
   query: string,
   limit?: number
 ): Promise<ViewerWithCustomInfo[]> {
-  return invoke('search_viewers', { broadcasterId, query, limit });
+  return invoke('viewer_search', { broadcasterId, query, limit });
+}
+
+/**
+ * Upsert viewer custom info by viewer_profile_id
+ */
+export async function viewerUpsertCustomInfo(
+  viewerProfileId: number,
+  reading?: string | null,
+  notes?: string | null,
+  customData?: string | null
+): Promise<void> {
+  return invoke('viewer_upsert_custom_info', {
+    viewerProfileId,
+    reading,
+    notes,
+    customData
+  });
+}
+
+/**
+ * Delete viewer profile by viewer_profile_id
+ */
+export async function viewerDelete(viewerProfileId: number): Promise<boolean> {
+  return invoke('viewer_delete', { viewerProfileId });
+}
+
+/**
+ * Get broadcaster list with viewer counts
+ */
+export async function broadcasterGetList(): Promise<BroadcasterChannel[]> {
+  return invoke('broadcaster_get_list');
+}
+
+/**
+ * Delete broadcaster and all associated viewer profiles
+ * Returns [broadcaster_deleted, viewers_deleted_count]
+ */
+export async function broadcasterDelete(
+  broadcasterId: string
+): Promise<[boolean, number]> {
+  return invoke('broadcaster_delete', { broadcasterId });
 }
 
 /**
@@ -48,14 +98,51 @@ export async function getTopContributors(
 }
 
 /**
- * Get sessions list
+ * Update viewer info (custom info + tags) by viewer_profile_id
  */
-export async function getSessions(limit?: number): Promise<Session[]> {
-  return invoke('get_sessions', { limit });
+export async function viewerUpdateInfo(
+  viewerProfileId: number,
+  reading: string | null,
+  notes: string | null,
+  customData: string | null,
+  tags: string[] | null
+): Promise<boolean> {
+  return invoke('viewer_update_info', {
+    viewerProfileId,
+    reading,
+    notes,
+    customData,
+    tags
+  });
+}
+
+// ============================================================================
+// Backward compatibility aliases (deprecated)
+// ============================================================================
+
+/**
+ * @deprecated Use viewerGetProfile instead
+ */
+export async function getViewerProfile(
+  broadcasterId: string,
+  channelId: string
+): Promise<ViewerProfile | null> {
+  return viewerGetProfile(broadcasterId, channelId);
 }
 
 /**
- * Get viewers for a broadcaster
+ * @deprecated Use viewerSearch instead
+ */
+export async function searchViewers(
+  broadcasterId: string,
+  query: string,
+  limit?: number
+): Promise<ViewerWithCustomInfo[]> {
+  return viewerSearch(broadcasterId, query, limit);
+}
+
+/**
+ * @deprecated Use viewerGetList instead
  */
 export async function getViewersForBroadcaster(
   broadcasterId: string,
@@ -63,69 +150,32 @@ export async function getViewersForBroadcaster(
   limit?: number,
   offset?: number
 ): Promise<ViewerWithCustomInfo[]> {
-  return invoke('get_viewers_for_broadcaster', {
-    broadcasterId,
-    searchQuery,
-    limit,
-    offset
-  });
+  return viewerGetList(broadcasterId, searchQuery, limit, offset);
 }
 
 /**
- * Upsert viewer custom info
- */
-export async function upsertViewerCustomInfo(info: {
-  broadcaster_channel_id: string;
-  viewer_channel_id: string;
-  reading?: string | null;
-  notes?: string | null;
-  custom_data?: string | null;
-}): Promise<number> {
-  return invoke('upsert_viewer_custom_info', { info });
-}
-
-/**
- * Get broadcaster list
+ * @deprecated Use broadcasterGetList instead
  */
 export async function getBroadcasterList(): Promise<BroadcasterChannel[]> {
-  return invoke('broadcaster_get_list');
+  return broadcasterGetList();
 }
 
 /**
- * Delete viewer custom info (keeps viewer_profiles)
- */
-export async function deleteViewerCustomInfo(
-  broadcasterId: string,
-  viewerId: string
-): Promise<boolean> {
-  return invoke('viewer_delete', { broadcasterId, viewerId });
-}
-
-/**
- * Delete broadcaster and all associated viewer custom info
- * Returns [broadcaster_deleted, viewers_deleted_count]
+ * @deprecated Use broadcasterDelete instead
  */
 export async function deleteBroadcaster(
   broadcasterId: string
 ): Promise<[boolean, number]> {
-  return invoke('broadcaster_delete', { broadcasterId });
+  return broadcasterDelete(broadcasterId);
 }
 
+// ============================================================================
+// Session helpers (unchanged)
+// ============================================================================
+
 /**
- * Update viewer info (custom info + tags)
+ * Get sessions list
  */
-export async function updateViewerInfo(
-  broadcasterId: string,
-  viewerId: string,
-  reading: string | null,
-  notes: string | null,
-  tags: string[] | null
-): Promise<boolean> {
-  return invoke('viewer_update_info', {
-    broadcasterId,
-    viewerId,
-    reading,
-    notes,
-    tags
-  });
+export async function getSessions(limit?: number): Promise<Session[]> {
+  return invoke('get_sessions', { limit });
 }

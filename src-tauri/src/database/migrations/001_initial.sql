@@ -1,4 +1,5 @@
--- Liscov Database Schema
+-- Migration 001: Initial Schema
+-- Creates all tables with the current schema design
 
 -- Sessions table - track streaming sessions
 CREATE TABLE IF NOT EXISTS sessions (
@@ -39,9 +40,11 @@ CREATE INDEX IF NOT EXISTS idx_messages_channel_id ON messages(channel_id);
 CREATE INDEX IF NOT EXISTS idx_messages_type ON messages(message_type);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_unique ON messages(session_id, message_id);
 
--- Viewer profiles table - global viewer information
+-- Viewer profiles table - broadcaster-scoped viewer information
 CREATE TABLE IF NOT EXISTS viewer_profiles (
-    channel_id TEXT PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    broadcaster_channel_id TEXT NOT NULL,
+    channel_id TEXT NOT NULL,
     display_name TEXT NOT NULL,
     first_seen TEXT NOT NULL,
     last_seen TEXT NOT NULL,
@@ -50,27 +53,24 @@ CREATE TABLE IF NOT EXISTS viewer_profiles (
     membership_level TEXT,
     tags TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(broadcaster_channel_id, channel_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_viewer_profiles_message_count ON viewer_profiles(message_count DESC);
-CREATE INDEX IF NOT EXISTS idx_viewer_profiles_contribution ON viewer_profiles(total_contribution DESC);
+CREATE INDEX IF NOT EXISTS idx_viewer_profiles_broadcaster ON viewer_profiles(broadcaster_channel_id);
+CREATE INDEX IF NOT EXISTS idx_viewer_profiles_message_count ON viewer_profiles(broadcaster_channel_id, message_count DESC);
+CREATE INDEX IF NOT EXISTS idx_viewer_profiles_contribution ON viewer_profiles(broadcaster_channel_id, total_contribution DESC);
 
--- Viewer custom info table - broadcaster-specific viewer information
+-- Viewer custom info table - extension of viewer_profiles
 CREATE TABLE IF NOT EXISTS viewer_custom_info (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    broadcaster_channel_id TEXT NOT NULL,
-    viewer_channel_id TEXT NOT NULL,
+    viewer_profile_id INTEGER PRIMARY KEY,
     reading TEXT,
     notes TEXT,
     custom_data TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(broadcaster_channel_id, viewer_channel_id)
+    FOREIGN KEY (viewer_profile_id) REFERENCES viewer_profiles(id) ON DELETE CASCADE
 );
-
-CREATE INDEX IF NOT EXISTS idx_viewer_custom_info_broadcaster ON viewer_custom_info(broadcaster_channel_id);
-CREATE INDEX IF NOT EXISTS idx_viewer_custom_info_lookup ON viewer_custom_info(broadcaster_channel_id, viewer_channel_id);
 
 -- Broadcaster profiles table
 CREATE TABLE IF NOT EXISTS broadcaster_profiles (
@@ -92,13 +92,13 @@ CREATE TRIGGER IF NOT EXISTS update_sessions_timestamp
 CREATE TRIGGER IF NOT EXISTS update_viewer_profiles_timestamp
     AFTER UPDATE ON viewer_profiles
     BEGIN
-        UPDATE viewer_profiles SET updated_at = CURRENT_TIMESTAMP WHERE channel_id = NEW.channel_id;
+        UPDATE viewer_profiles SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
     END;
 
 CREATE TRIGGER IF NOT EXISTS update_viewer_custom_info_timestamp
     AFTER UPDATE ON viewer_custom_info
     BEGIN
-        UPDATE viewer_custom_info SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+        UPDATE viewer_custom_info SET updated_at = CURRENT_TIMESTAMP WHERE viewer_profile_id = NEW.viewer_profile_id;
     END;
 
 CREATE TRIGGER IF NOT EXISTS update_broadcaster_profiles_timestamp

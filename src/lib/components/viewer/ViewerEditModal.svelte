@@ -33,10 +33,10 @@
     try {
       const tags = parseTags(tagsInput);
       await viewerStore.updateViewerInfo(
-        broadcasterId,
-        viewer.channel_id,
+        viewer.id,
         reading || null,
         notes || null,
+        viewer.custom_data ?? null,
         tags.length > 0 ? tags : null
       );
       onClose();
@@ -52,7 +52,7 @@
     error = null;
 
     try {
-      await viewerStore.deleteViewerCustomInfo(broadcasterId, viewer.channel_id);
+      await viewerStore.deleteViewer(viewer.id);
       showDeleteConfirm = false;
       onClose();
     } catch (e) {

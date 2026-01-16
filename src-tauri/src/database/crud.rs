@@ -18,6 +18,12 @@ pub fn create_session(
     broadcaster_channel_id: Option<&str>,
     broadcaster_name: Option<&str>,
 ) -> Result<String> {
+    // Debug: Log session creation details
+    tracing::info!(
+        "Creating session: stream_url={:?}, stream_title={:?}, broadcaster_channel_id={:?}, broadcaster_name={:?}",
+        stream_url, stream_title, broadcaster_channel_id, broadcaster_name
+    );
+
     let id = uuid::Uuid::new_v4().to_string();
     let start_time = chrono::Utc::now().to_rfc3339();
 
@@ -138,7 +144,12 @@ pub fn get_session(conn: &Connection, session_id: &str) -> Result<Option<Session
 // ============================================================================
 
 /// Save a chat message
-pub fn save_message(conn: &Connection, session_id: &str, message: &ChatMessage) -> Result<i64> {
+pub fn save_message(
+    conn: &Connection,
+    session_id: &str,
+    broadcaster_channel_id: Option<&str>,
+    message: &ChatMessage,
+) -> Result<i64> {
     let message_type = match &message.message_type {
         crate::core::models::MessageType::Text => "text",
         crate::core::models::MessageType::SuperChat { .. } => "superchat",
@@ -175,8 +186,16 @@ pub fn save_message(conn: &Connection, session_id: &str, message: &ChatMessage) 
         ],
     )?;
 
-    // Update viewer profile
-    upsert_viewer_profile(conn, &message.channel_id, &message.author, amount.as_deref())?;
+    // Update viewer profile (if broadcaster_channel_id is available)
+    if let Some(broadcaster_id) = broadcaster_channel_id {
+        upsert_viewer_profile(
+            conn,
+            broadcaster_id,
+            &message.channel_id,
+            &message.author,
+            amount.as_deref(),
+        )?;
+    }
 
     Ok(conn.last_insert_rowid())
 }
@@ -224,55 +243,104 @@ pub fn get_session_messages(
 // Viewer Profile Operations
 // ============================================================================
 
-/// Upsert viewer profile
+/// Upsert viewer profile (returns the profile id)
 pub fn upsert_viewer_profile(
     conn: &Connection,
+    broadcaster_channel_id: &str,
     channel_id: &str,
     display_name: &str,
     amount: Option<&str>,
-) -> Result<()> {
+) -> Result<i64> {
     let now = chrono::Utc::now().to_rfc3339();
     let contribution = parse_amount(amount).unwrap_or(0.0);
 
     conn.execute(
-        "INSERT INTO viewer_profiles (channel_id, display_name, first_seen, last_seen, message_count, total_contribution)
-         VALUES (?1, ?2, ?3, ?3, 1, ?4)
-         ON CONFLICT(channel_id) DO UPDATE SET
+        "INSERT INTO viewer_profiles (broadcaster_channel_id, channel_id, display_name, first_seen, last_seen, message_count, total_contribution)
+         VALUES (?1, ?2, ?3, ?4, ?4, 1, ?5)
+         ON CONFLICT(broadcaster_channel_id, channel_id) DO UPDATE SET
             display_name = excluded.display_name,
             last_seen = excluded.last_seen,
             message_count = message_count + 1,
             total_contribution = total_contribution + excluded.total_contribution",
-        params![channel_id, display_name, now, contribution],
+        params![broadcaster_channel_id, channel_id, display_name, now, contribution],
     )?;
 
-    Ok(())
+    // Get the id of the upserted row
+    let id: i64 = conn.query_row(
+        "SELECT id FROM viewer_profiles WHERE broadcaster_channel_id = ?1 AND channel_id = ?2",
+        params![broadcaster_channel_id, channel_id],
+        |row| row.get(0),
+    )?;
+
+    Ok(id)
 }
 
 /// Get viewer profile
-pub fn get_viewer_profile(conn: &Connection, channel_id: &str) -> Result<Option<ViewerProfile>> {
+pub fn get_viewer_profile(
+    conn: &Connection,
+    broadcaster_channel_id: &str,
+    channel_id: &str,
+) -> Result<Option<ViewerProfile>> {
     let profile = conn
         .query_row(
-            "SELECT channel_id, display_name, first_seen, last_seen, message_count,
-                    total_contribution, membership_level, tags, created_at, updated_at
-             FROM viewer_profiles WHERE channel_id = ?1",
-            params![channel_id],
+            "SELECT id, broadcaster_channel_id, channel_id, display_name, first_seen, last_seen,
+                    message_count, total_contribution, membership_level, tags, created_at, updated_at
+             FROM viewer_profiles WHERE broadcaster_channel_id = ?1 AND channel_id = ?2",
+            params![broadcaster_channel_id, channel_id],
             |row| {
-                let tags_str: Option<String> = row.get(7)?;
+                let tags_str: Option<String> = row.get(9)?;
                 let tags = tags_str
                     .map(|s| s.split(',').map(|t| t.trim().to_string()).collect())
                     .unwrap_or_default();
 
                 Ok(ViewerProfile {
-                    channel_id: row.get(0)?,
-                    display_name: row.get(1)?,
-                    first_seen: row.get(2)?,
-                    last_seen: row.get(3)?,
-                    message_count: row.get(4)?,
-                    total_contribution: row.get(5)?,
-                    membership_level: row.get(6)?,
+                    id: row.get(0)?,
+                    broadcaster_channel_id: row.get(1)?,
+                    channel_id: row.get(2)?,
+                    display_name: row.get(3)?,
+                    first_seen: row.get(4)?,
+                    last_seen: row.get(5)?,
+                    message_count: row.get(6)?,
+                    total_contribution: row.get(7)?,
+                    membership_level: row.get(8)?,
                     tags,
-                    created_at: row.get(8)?,
-                    updated_at: row.get(9)?,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
+                })
+            },
+        )
+        .optional()?;
+
+    Ok(profile)
+}
+
+/// Get viewer profile by id
+pub fn get_viewer_profile_by_id(conn: &Connection, id: i64) -> Result<Option<ViewerProfile>> {
+    let profile = conn
+        .query_row(
+            "SELECT id, broadcaster_channel_id, channel_id, display_name, first_seen, last_seen,
+                    message_count, total_contribution, membership_level, tags, created_at, updated_at
+             FROM viewer_profiles WHERE id = ?1",
+            params![id],
+            |row| {
+                let tags_str: Option<String> = row.get(9)?;
+                let tags = tags_str
+                    .map(|s| s.split(',').map(|t| t.trim().to_string()).collect())
+                    .unwrap_or_default();
+
+                Ok(ViewerProfile {
+                    id: row.get(0)?,
+                    broadcaster_channel_id: row.get(1)?,
+                    channel_id: row.get(2)?,
+                    display_name: row.get(3)?,
+                    first_seen: row.get(4)?,
+                    last_seen: row.get(5)?,
+                    message_count: row.get(6)?,
+                    total_contribution: row.get(7)?,
+                    membership_level: row.get(8)?,
+                    tags,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
                 })
             },
         )
@@ -317,29 +385,25 @@ pub fn get_top_contributors(
 // Viewer Custom Info Operations
 // ============================================================================
 
-/// Get viewer custom info
+/// Get viewer custom info by viewer_profile_id
 pub fn get_viewer_custom_info(
     conn: &Connection,
-    broadcaster_channel_id: &str,
-    viewer_channel_id: &str,
+    viewer_profile_id: i64,
 ) -> Result<Option<ViewerCustomInfo>> {
     let info = conn
         .query_row(
-            "SELECT id, broadcaster_channel_id, viewer_channel_id, reading, notes,
-                    custom_data, created_at, updated_at
+            "SELECT viewer_profile_id, reading, notes, custom_data, created_at, updated_at
              FROM viewer_custom_info
-             WHERE broadcaster_channel_id = ?1 AND viewer_channel_id = ?2",
-            params![broadcaster_channel_id, viewer_channel_id],
+             WHERE viewer_profile_id = ?1",
+            params![viewer_profile_id],
             |row| {
                 Ok(ViewerCustomInfo {
-                    id: row.get(0)?,
-                    broadcaster_channel_id: row.get(1)?,
-                    viewer_channel_id: row.get(2)?,
-                    reading: row.get(3)?,
-                    notes: row.get(4)?,
-                    custom_data: row.get(5)?,
-                    created_at: row.get(6)?,
-                    updated_at: row.get(7)?,
+                    viewer_profile_id: row.get(0)?,
+                    reading: row.get(1)?,
+                    notes: row.get(2)?,
+                    custom_data: row.get(3)?,
+                    created_at: row.get(4)?,
+                    updated_at: row.get(5)?,
                 })
             },
         )
@@ -349,98 +413,60 @@ pub fn get_viewer_custom_info(
 }
 
 /// Upsert viewer custom info
-pub fn upsert_viewer_custom_info(conn: &Connection, info: &ViewerCustomInfo) -> Result<i64> {
+pub fn upsert_viewer_custom_info(conn: &Connection, info: &ViewerCustomInfo) -> Result<()> {
     conn.execute(
-        "INSERT INTO viewer_custom_info (broadcaster_channel_id, viewer_channel_id, reading, notes, custom_data)
-         VALUES (?1, ?2, ?3, ?4, ?5)
-         ON CONFLICT(broadcaster_channel_id, viewer_channel_id) DO UPDATE SET
+        "INSERT INTO viewer_custom_info (viewer_profile_id, reading, notes, custom_data)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(viewer_profile_id) DO UPDATE SET
             reading = excluded.reading,
             notes = excluded.notes,
             custom_data = excluded.custom_data",
         params![
-            info.broadcaster_channel_id,
-            info.viewer_channel_id,
+            info.viewer_profile_id,
             info.reading,
             info.notes,
             info.custom_data,
         ],
     )?;
 
-    Ok(conn.last_insert_rowid())
+    Ok(())
 }
 
-/// Get all viewer custom info for a broadcaster
-pub fn get_all_viewer_custom_info_for_broadcaster(
-    conn: &Connection,
-    broadcaster_channel_id: &str,
-) -> Result<HashMap<String, ViewerCustomInfo>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, broadcaster_channel_id, viewer_channel_id, reading, notes,
-                custom_data, created_at, updated_at
-         FROM viewer_custom_info
-         WHERE broadcaster_channel_id = ?1",
-    )?;
-
-    let mut map = HashMap::new();
-    let rows = stmt.query_map(params![broadcaster_channel_id], |row| {
-        Ok(ViewerCustomInfo {
-            id: row.get(0)?,
-            broadcaster_channel_id: row.get(1)?,
-            viewer_channel_id: row.get(2)?,
-            reading: row.get(3)?,
-            notes: row.get(4)?,
-            custom_data: row.get(5)?,
-            created_at: row.get(6)?,
-            updated_at: row.get(7)?,
-        })
-    })?;
-
-    for info in rows {
-        let info = info?;
-        map.insert(info.viewer_channel_id.clone(), info);
-    }
-
-    Ok(map)
-}
-
-/// Delete viewer custom info
-pub fn delete_viewer_custom_info(
-    conn: &Connection,
-    broadcaster_channel_id: &str,
-    viewer_channel_id: &str,
-) -> Result<bool> {
+/// Delete viewer custom info by viewer_profile_id
+pub fn delete_viewer_custom_info(conn: &Connection, viewer_profile_id: i64) -> Result<bool> {
     let deleted = conn.execute(
-        "DELETE FROM viewer_custom_info WHERE broadcaster_channel_id = ?1 AND viewer_channel_id = ?2",
-        params![broadcaster_channel_id, viewer_channel_id],
+        "DELETE FROM viewer_custom_info WHERE viewer_profile_id = ?1",
+        params![viewer_profile_id],
     )?;
 
     Ok(deleted > 0)
 }
 
-/// Update viewer profile tags
+/// Update viewer profile tags by id
 pub fn update_viewer_tags(
     conn: &Connection,
-    channel_id: &str,
+    viewer_profile_id: i64,
     tags: Option<Vec<String>>,
 ) -> Result<bool> {
     let tags_str = tags.map(|t| t.join(","));
     let updated = conn.execute(
-        "UPDATE viewer_profiles SET tags = ?1, updated_at = CURRENT_TIMESTAMP WHERE channel_id = ?2",
-        params![tags_str, channel_id],
+        "UPDATE viewer_profiles SET tags = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
+        params![tags_str, viewer_profile_id],
     )?;
 
     Ok(updated > 0)
 }
 
-/// Delete broadcaster and all associated viewer custom info
+/// Delete broadcaster and all associated viewer profiles (cascade deletes viewer_custom_info)
 /// Returns (broadcaster_deleted, viewers_deleted_count)
 pub fn delete_broadcaster(
     conn: &Connection,
     broadcaster_channel_id: &str,
 ) -> Result<(bool, u32)> {
-    // Delete all viewer custom info for this broadcaster
+    // Delete all viewer profiles for this broadcaster
+    // (viewer_custom_info is cascade deleted via FK)
     let viewers_deleted = conn.execute(
-        "DELETE FROM viewer_custom_info WHERE broadcaster_channel_id = ?1",
+        "DELETE FROM viewer_profiles WHERE broadcaster_channel_id = ?1",
         params![broadcaster_channel_id],
     )? as u32;
 
@@ -451,6 +477,16 @@ pub fn delete_broadcaster(
     )? > 0;
 
     Ok((broadcaster_deleted, viewers_deleted))
+}
+
+/// Delete viewer profile by id (cascade deletes viewer_custom_info)
+pub fn delete_viewer_profile(conn: &Connection, viewer_profile_id: i64) -> Result<bool> {
+    let deleted = conn.execute(
+        "DELETE FROM viewer_profiles WHERE id = ?1",
+        params![viewer_profile_id],
+    )?;
+
+    Ok(deleted > 0)
 }
 
 // ============================================================================
@@ -466,22 +502,24 @@ pub fn get_viewers_for_broadcaster(
     offset: usize,
 ) -> Result<Vec<ViewerWithCustomInfo>> {
     let query = if search_query.is_some() {
-        "SELECT vp.channel_id, vp.display_name, vp.first_seen, vp.last_seen,
-                vp.message_count, vp.total_contribution, vp.membership_level, vp.tags,
+        "SELECT vp.id, vp.broadcaster_channel_id, vp.channel_id, vp.display_name,
+                vp.first_seen, vp.last_seen, vp.message_count, vp.total_contribution,
+                vp.membership_level, vp.tags,
                 vci.reading, vci.notes, vci.custom_data
          FROM viewer_profiles vp
-         LEFT JOIN viewer_custom_info vci ON vp.channel_id = vci.viewer_channel_id
-            AND vci.broadcaster_channel_id = ?1
-         WHERE vp.display_name LIKE ?2 OR vci.reading LIKE ?2 OR vci.notes LIKE ?2
+         LEFT JOIN viewer_custom_info vci ON vp.id = vci.viewer_profile_id
+         WHERE vp.broadcaster_channel_id = ?1
+           AND (vp.display_name LIKE ?2 OR vci.reading LIKE ?2 OR vci.notes LIKE ?2)
          ORDER BY vp.message_count DESC
          LIMIT ?3 OFFSET ?4"
     } else {
-        "SELECT vp.channel_id, vp.display_name, vp.first_seen, vp.last_seen,
-                vp.message_count, vp.total_contribution, vp.membership_level, vp.tags,
+        "SELECT vp.id, vp.broadcaster_channel_id, vp.channel_id, vp.display_name,
+                vp.first_seen, vp.last_seen, vp.message_count, vp.total_contribution,
+                vp.membership_level, vp.tags,
                 vci.reading, vci.notes, vci.custom_data
          FROM viewer_profiles vp
-         LEFT JOIN viewer_custom_info vci ON vp.channel_id = vci.viewer_channel_id
-            AND vci.broadcaster_channel_id = ?1
+         LEFT JOIN viewer_custom_info vci ON vp.id = vci.viewer_profile_id
+         WHERE vp.broadcaster_channel_id = ?1
          ORDER BY vp.message_count DESC
          LIMIT ?3 OFFSET ?4"
     };
@@ -500,33 +538,32 @@ pub fn get_viewers_for_broadcaster(
 }
 
 fn row_to_viewer(row: &rusqlite::Row) -> rusqlite::Result<ViewerWithCustomInfo> {
-    let tags_str: Option<String> = row.get(7)?;
+    let tags_str: Option<String> = row.get(9)?;
     let tags = tags_str
         .map(|s| s.split(',').map(|t| t.trim().to_string()).collect())
         .unwrap_or_default();
 
     Ok(ViewerWithCustomInfo {
-        channel_id: row.get(0)?,
-        display_name: row.get(1)?,
-        first_seen: row.get(2)?,
-        last_seen: row.get(3)?,
-        message_count: row.get(4)?,
-        total_contribution: row.get(5)?,
-        membership_level: row.get(6)?,
+        id: row.get(0)?,
+        broadcaster_channel_id: row.get(1)?,
+        channel_id: row.get(2)?,
+        display_name: row.get(3)?,
+        first_seen: row.get(4)?,
+        last_seen: row.get(5)?,
+        message_count: row.get(6)?,
+        total_contribution: row.get(7)?,
+        membership_level: row.get(8)?,
         tags,
-        reading: row.get(8)?,
-        notes: row.get(9)?,
-        custom_data: row.get(10)?,
+        reading: row.get(10)?,
+        notes: row.get(11)?,
+        custom_data: row.get(12)?,
     })
 }
 
 /// Get viewer count for a broadcaster
 pub fn get_viewer_count_for_broadcaster(conn: &Connection, broadcaster_channel_id: &str) -> Result<i64> {
     let count: i64 = conn.query_row(
-        "SELECT COUNT(DISTINCT vp.channel_id)
-         FROM viewer_profiles vp
-         LEFT JOIN viewer_custom_info vci ON vp.channel_id = vci.viewer_channel_id
-            AND vci.broadcaster_channel_id = ?1",
+        "SELECT COUNT(*) FROM viewer_profiles WHERE broadcaster_channel_id = ?1",
         params![broadcaster_channel_id],
         |row| row.get(0),
     )?;

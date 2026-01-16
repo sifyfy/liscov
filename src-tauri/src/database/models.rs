@@ -37,9 +37,11 @@ pub struct StoredMessage {
     pub created_at: Option<String>,
 }
 
-/// Viewer profile record
+/// Viewer profile record (broadcaster-scoped)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ViewerProfile {
+    pub id: i64,
+    pub broadcaster_channel_id: String,
     pub channel_id: String,
     pub display_name: String,
     pub first_seen: String,
@@ -52,12 +54,10 @@ pub struct ViewerProfile {
     pub updated_at: Option<String>,
 }
 
-/// Viewer custom info record (broadcaster-specific)
+/// Viewer custom info record (extension of viewer_profiles)
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ViewerCustomInfo {
-    pub id: Option<i64>,
-    pub broadcaster_channel_id: String,
-    pub viewer_channel_id: String,
+    pub viewer_profile_id: i64,
     pub reading: Option<String>,
     pub notes: Option<String>,
     pub custom_data: Option<String>,
@@ -66,11 +66,9 @@ pub struct ViewerCustomInfo {
 }
 
 impl ViewerCustomInfo {
-    pub fn new(broadcaster_channel_id: impl Into<String>, viewer_channel_id: impl Into<String>) -> Self {
+    pub fn new(viewer_profile_id: i64) -> Self {
         Self {
-            id: None,
-            broadcaster_channel_id: broadcaster_channel_id.into(),
-            viewer_channel_id: viewer_channel_id.into(),
+            viewer_profile_id,
             reading: None,
             notes: None,
             custom_data: None,
@@ -104,6 +102,8 @@ pub struct BroadcasterProfile {
 /// Combined viewer with custom info
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ViewerWithCustomInfo {
+    pub id: i64,
+    pub broadcaster_channel_id: String,
     pub channel_id: String,
     pub display_name: String,
     pub first_seen: String,

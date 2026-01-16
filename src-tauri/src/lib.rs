@@ -23,15 +23,16 @@ use commands::{
     // WebSocket (spec: 03_websocket.md)
     websocket_start, websocket_stop, websocket_get_status,
     // Database (spec: 08_database.md)
-    get_sessions, get_session_messages, upsert_viewer_custom_info, get_viewers_for_broadcaster,
-    broadcaster_get_list, broadcaster_delete, viewer_delete, viewer_update_info,
+    get_sessions, get_session_messages, viewer_update_info,
     // Analytics (spec: 07_revenue.md)
     get_revenue_analytics, get_session_analytics, export_session_data, export_current_messages,
     // TTS (spec: 04_tts.md)
     tts_speak, tts_speak_direct, tts_update_config, tts_get_config, tts_test_connection,
     tts_start, tts_stop, tts_clear_queue, tts_get_status,
     // Viewer (spec: 06_viewer.md)
-    get_viewer_profile, get_viewer_with_custom_info, search_viewers, get_top_contributors,
+    viewer_get_profile, viewer_get_list, viewer_search, viewer_upsert_custom_info,
+    viewer_delete, broadcaster_get_list, broadcaster_delete, get_top_contributors,
+    get_viewer_profile, search_viewers, // Backward compatibility aliases
     // Raw Response (spec: 05_raw_response.md)
     raw_response_get_config, raw_response_update_config, raw_response_resolve_path, SaveConfigState,
 };
@@ -91,11 +92,6 @@ pub fn run() {
             // Database (spec: 08_database.md)
             get_sessions,
             get_session_messages,
-            upsert_viewer_custom_info,
-            get_viewers_for_broadcaster,
-            broadcaster_get_list,
-            broadcaster_delete,
-            viewer_delete,
             viewer_update_info,
             // Analytics (spec: 07_revenue.md)
             get_revenue_analytics,
@@ -113,10 +109,16 @@ pub fn run() {
             tts_clear_queue,
             tts_get_status,
             // Viewer (spec: 06_viewer.md)
-            get_viewer_profile,
-            get_viewer_with_custom_info,
-            search_viewers,
+            viewer_get_profile,
+            viewer_get_list,
+            viewer_search,
+            viewer_upsert_custom_info,
+            viewer_delete,
+            broadcaster_get_list,
+            broadcaster_delete,
             get_top_contributors,
+            get_viewer_profile,   // Backward compatibility
+            search_viewers,       // Backward compatibility
             // Raw Response (spec: 05_raw_response.md)
             raw_response_get_config,
             raw_response_update_config,

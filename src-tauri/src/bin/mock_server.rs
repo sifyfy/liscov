@@ -56,6 +56,8 @@ struct StreamState {
     member_only: bool,           // Member-only stream
     require_auth: bool,          // Require authentication for chat
     title_override: Option<String>, // Override stream title for testing
+    channel_id_override: Option<String>, // Override broadcaster channel ID for testing
+    channel_name_override: Option<String>, // Override broadcaster channel name for testing
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,6 +87,8 @@ impl Default for StreamState {
             member_only: false,
             require_auth: false,
             title_override: None,
+            channel_id_override: None,
+            channel_name_override: None,
         }
     }
 }
@@ -200,7 +204,9 @@ fn build_routes(state: Arc<ServerState>) -> impl Filter<Extract = impl warp::Rep
         let vid = q.v.as_deref().unwrap_or(&sw.config.video_id);
         let stream_state = sw.stream_state.lock().unwrap();
         let title = stream_state.title_override.as_ref().unwrap_or(&sw.config.stream_title);
-        warp::reply::html(gen_html(vid, &sw.config.channel_id, &sw.config.channel_name, title))
+        let channel_id = stream_state.channel_id_override.as_ref().unwrap_or(&sw.config.channel_id);
+        let channel_name = stream_state.channel_name_override.as_ref().unwrap_or(&sw.config.channel_name);
+        warp::reply::html(gen_html(vid, channel_id, channel_name, title))
     });
     let sa = Arc::clone(&state);
     let chat = warp::path!("youtubei" / "v1" / "live_chat" / "get_live_chat").and(warp::post()).and(warp::body::json())
@@ -244,7 +250,7 @@ fn build_routes(state: Arc<ServerState>) -> impl Filter<Extract = impl warp::Rep
     let sad = Arc::clone(&state);
     let add = warp::path("add_message").and(warp::post()).and(warp::body::json())
         .map(move |b: AMR| { sad.message_queue.lock().unwrap().push_back(gen_msg(&sad, &b)); warp::reply::json(&json!({"status":"ok"})) });
-    // Set stream state (member_only, require_auth)
+    // Set stream state (member_only, require_auth, channel_id, channel_name)
     let sss = Arc::clone(&state);
     let setstream = warp::path("set_stream_state").and(warp::post()).and(warp::body::json())
         .map(move |b: SSR| {
@@ -252,6 +258,8 @@ fn build_routes(state: Arc<ServerState>) -> impl Filter<Extract = impl warp::Rep
             if let Some(v) = b.member_only { ss.member_only = v; }
             if let Some(v) = b.require_auth { ss.require_auth = v; }
             if let Some(t) = b.title { ss.title_override = if t.is_empty() { None } else { Some(t) }; }
+            if let Some(c) = b.channel_id { ss.channel_id_override = if c.is_empty() { None } else { Some(c) }; }
+            if let Some(n) = b.channel_name { ss.channel_name_override = if n.is_empty() { None } else { Some(n) }; }
             warp::reply::json(&json!({"status":"ok","stream":&*ss}))
         });
     let srs = Arc::clone(&state);
@@ -268,7 +276,7 @@ fn build_routes(state: Arc<ServerState>) -> impl Filter<Extract = impl warp::Rep
 #[derive(Debug, Deserialize)] struct WQ { v: Option<String> }
 #[derive(Debug, Deserialize)] struct AMR { message_type: String, author: String, #[serde(default = "dcid")] channel_id: String, #[serde(default)] content: String, amount: Option<String>, tier: Option<String>, #[serde(default)] is_member: bool, milestone_months: Option<u32>, gift_count: Option<u32> }
 #[derive(Debug, Deserialize)] struct SAR { session_valid: Option<bool>, expected_sapisid: Option<String>, simulate_error: Option<bool>, auth_channel_name: Option<String>, auth_channel_id: Option<String> }
-#[derive(Debug, Deserialize)] struct SSR { member_only: Option<bool>, require_auth: Option<bool>, title: Option<String> }
+#[derive(Debug, Deserialize)] struct SSR { member_only: Option<bool>, require_auth: Option<bool>, title: Option<String>, channel_id: Option<String>, channel_name: Option<String> }
 fn dcid() -> String { format!("UC_user_{}", rand::random::<u32>() % 1000) }
 
 fn get_actions(s: &ServerState) -> Vec<Value> {

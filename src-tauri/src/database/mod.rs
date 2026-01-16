@@ -2,6 +2,7 @@
 
 pub mod models;
 mod crud;
+mod migrations;
 
 pub use models::*;
 pub use crud::*;
@@ -32,8 +33,8 @@ impl Database {
         // Enable foreign keys
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
 
-        // Initialize schema
-        conn.execute_batch(include_str!("schema.sql"))?;
+        // Run migrations
+        migrations::run_migrations(&conn)?;
 
         tracing::info!("Database initialized at {:?}", path);
 
@@ -47,7 +48,7 @@ impl Database {
     pub fn new_in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
-        conn.execute_batch(include_str!("schema.sql"))?;
+        migrations::run_migrations(&conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
