@@ -1146,12 +1146,16 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
   });
 
   test.describe('Auto-Scroll Behavior', () => {
-    test('should auto-scroll to new messages when enabled', async () => {
+    test('should auto-scroll to new messages when checkbox is enabled', async () => {
       // Connect to stream
       const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("Connect")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+
+      // Verify auto-scroll checkbox is ON by default
+      const autoScrollCheckbox = mainPage.locator('label').filter({ hasText: '自動スクロール' }).locator('input[type="checkbox"]');
+      await expect(autoScrollCheckbox).toBeChecked();
 
       // Add many messages to create scroll
       for (let i = 1; i <= 20; i++) {
@@ -1167,41 +1171,196 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await mainPage.locator('button:has-text("Disconnect")').click();
     });
 
-    test('should have auto-scroll toggle', async () => {
-      // Check for auto-scroll checkbox - try different label texts
-      let autoScrollCheckbox = mainPage.locator('label').filter({ hasText: '自動スクロール' }).locator('input[type="checkbox"]');
-      let isVisible = await autoScrollCheckbox.isVisible().catch(() => false);
+    test('should scroll exactly to bottom (not partial scroll)', async () => {
+      // This test verifies that auto-scroll reaches the exact bottom of the chat container
+      // Bug: Sometimes scroll stops short of the actual bottom
 
-      if (!isVisible) {
-        // Try English label
-        autoScrollCheckbox = mainPage.locator('label').filter({ hasText: /auto.?scroll/i }).locator('input[type="checkbox"]');
-        isVisible = await autoScrollCheckbox.isVisible().catch(() => false);
+      // Connect to stream
+      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await mainPage.locator('button:has-text("Connect")').click();
+      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+
+      // Add many messages to create scrollable content
+      for (let i = 1; i <= 30; i++) {
+        await addMockMessage({ message_type: 'text', author: `ScrollUser${i}`, content: `Bottom scroll test message ${i}` });
       }
 
-      if (!isVisible) {
-        // Try looking for any checkbox with scroll-related attribute
-        autoScrollCheckbox = mainPage.locator('input[type="checkbox"]').first();
-        isVisible = await autoScrollCheckbox.isVisible().catch(() => false);
+      // Wait for messages to be received and auto-scroll to complete
+      await mainPage.waitForTimeout(5000);
+
+      // Find the chat container
+      const chatContainer = mainPage.locator('.overflow-y-auto').filter({
+        has: mainPage.locator('[data-message-id]'),
+      }).first();
+
+      // Check scroll position - should be at the exact bottom
+      const scrollInfo = await chatContainer.evaluate(el => ({
+        scrollTop: el.scrollTop,
+        scrollHeight: el.scrollHeight,
+        clientHeight: el.clientHeight,
+        distanceFromBottom: el.scrollHeight - el.scrollTop - el.clientHeight,
+      }));
+
+      console.log(`Scroll to bottom test: scrollTop=${scrollInfo.scrollTop}, scrollHeight=${scrollInfo.scrollHeight}, clientHeight=${scrollInfo.clientHeight}, distanceFromBottom=${scrollInfo.distanceFromBottom}`);
+
+      // The distance from bottom should be very small (within threshold of 30px)
+      // Perfect scroll would have distanceFromBottom === 0
+      expect(scrollInfo.distanceFromBottom).toBeLessThanOrEqual(30);
+
+      // Disconnect
+      await mainPage.locator('button:has-text("Disconnect")').click();
+    });
+
+    test('should maintain auto-scroll when many messages arrive at once (checkbox stays ON)', async () => {
+      // This test verifies that auto-scroll checkbox remains ON when messages arrive rapidly
+      // Bug: Previously, adding many messages would cause auto-scroll to be incorrectly disabled
+
+      // Connect to stream
+      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await mainPage.locator('button:has-text("Connect")').click();
+      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+
+      // Verify auto-scroll checkbox is ON
+      const autoScrollCheckbox = mainPage.locator('label').filter({ hasText: '自動スクロール' }).locator('input[type="checkbox"]');
+      await expect(autoScrollCheckbox).toBeChecked();
+
+      // Add initial messages
+      for (let i = 1; i <= 10; i++) {
+        await addMockMessage({ message_type: 'text', author: `InitUser${i}`, content: `Initial message ${i}` });
       }
 
-      if (isVisible) {
-        // Should be checkable
-        const initialState = await autoScrollCheckbox.isChecked();
+      await mainPage.waitForTimeout(3000);
 
-        // Toggle
-        if (initialState) {
-          await autoScrollCheckbox.uncheck();
-          expect(await autoScrollCheckbox.isChecked()).toBe(false);
-          await autoScrollCheckbox.check();
-        } else {
-          await autoScrollCheckbox.check();
-          expect(await autoScrollCheckbox.isChecked()).toBe(true);
-          await autoScrollCheckbox.uncheck();
-        }
-      } else {
-        // Auto-scroll toggle may not be visible in current UI state
-        console.log('Auto-scroll toggle not found in current UI state');
+      // Checkbox should still be ON
+      await expect(autoScrollCheckbox).toBeChecked();
+
+      // "最新に戻る" button should NOT be visible (auto-scroll is ON)
+      const scrollButton = mainPage.locator('button:has-text("最新に戻る")');
+      await expect(scrollButton).not.toBeVisible();
+
+      // Now add many messages rapidly (simulating burst of chat messages)
+      for (let i = 1; i <= 20; i++) {
+        await addMockMessage({ message_type: 'text', author: `BurstUser${i}`, content: `Burst message ${i}` });
       }
+
+      // Wait for all messages to arrive and be processed
+      await mainPage.waitForTimeout(5000);
+
+      // The latest message should be visible (auto-scroll maintained)
+      await expect(mainPage.locator('text=Burst message 20')).toBeVisible();
+
+      // CRITICAL: Checkbox should still be ON (not automatically unchecked)
+      await expect(autoScrollCheckbox).toBeChecked();
+
+      // CRITICAL: "最新に戻る" button should still NOT be visible
+      await expect(scrollButton).not.toBeVisible();
+
+      // Find the chat container and verify we're at the bottom
+      const chatContainer = mainPage.locator('.overflow-y-auto').filter({
+        has: mainPage.locator('[data-message-id]'),
+      }).first();
+
+      const scrollInfo = await chatContainer.evaluate(el => ({
+        distanceFromBottom: el.scrollHeight - el.scrollTop - el.clientHeight,
+      }));
+      expect(scrollInfo.distanceFromBottom).toBeLessThanOrEqual(30);
+
+      // Disconnect
+      await mainPage.locator('button:has-text("Disconnect")').click();
+    });
+
+    test('should show 最新に戻る button only when auto-scroll checkbox is OFF', async () => {
+      // This test verifies that the button appears ONLY when checkbox is unchecked
+
+      // Connect to stream
+      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await mainPage.locator('button:has-text("Connect")').click();
+      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+
+      // Add messages
+      for (let i = 1; i <= 20; i++) {
+        await addMockMessage({ message_type: 'text', author: `User${i}`, content: `Message ${i}` });
+      }
+
+      await mainPage.waitForTimeout(4000);
+
+      // Button should not be visible initially (checkbox is ON)
+      const scrollButton = mainPage.locator('button:has-text("最新に戻る")');
+      await expect(scrollButton).not.toBeVisible();
+
+      // Uncheck the auto-scroll checkbox
+      const autoScrollCheckbox = mainPage.locator('label').filter({ hasText: '自動スクロール' }).locator('input[type="checkbox"]');
+      await autoScrollCheckbox.uncheck();
+      await mainPage.waitForTimeout(200);
+
+      // Now the button SHOULD be visible
+      await expect(scrollButton).toBeVisible();
+
+      // Click the button to re-enable auto-scroll
+      await scrollButton.click();
+      await mainPage.waitForTimeout(500);
+
+      // Button should disappear (checkbox is now ON again)
+      await expect(scrollButton).not.toBeVisible();
+
+      // Checkbox should be checked again
+      await expect(autoScrollCheckbox).toBeChecked();
+
+      // Disconnect
+      await mainPage.locator('button:has-text("Disconnect")').click();
+    });
+
+    test('should have auto-scroll checkbox that controls scrolling', async () => {
+      // Connect to stream
+      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await mainPage.locator('button:has-text("Connect")').click();
+      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+
+      // Find auto-scroll checkbox
+      const autoScrollCheckbox = mainPage.locator('label').filter({ hasText: '自動スクロール' }).locator('input[type="checkbox"]');
+      await expect(autoScrollCheckbox).toBeVisible();
+
+      // Should be checked by default
+      await expect(autoScrollCheckbox).toBeChecked();
+
+      // Toggle OFF
+      await autoScrollCheckbox.uncheck();
+      await expect(autoScrollCheckbox).not.toBeChecked();
+
+      // Add messages - should NOT auto-scroll when checkbox is OFF
+      for (let i = 1; i <= 10; i++) {
+        await addMockMessage({ message_type: 'text', author: `NoScrollUser${i}`, content: `No scroll message ${i}` });
+      }
+
+      await mainPage.waitForTimeout(3000);
+
+      // Find the chat container
+      const chatContainer = mainPage.locator('.overflow-y-auto').filter({
+        has: mainPage.locator('[data-message-id]'),
+      }).first();
+
+      // Scroll to top manually
+      await chatContainer.evaluate(el => { el.scrollTop = 0; });
+      await mainPage.waitForTimeout(200);
+
+      // Add more messages
+      await addMockMessage({ message_type: 'text', author: 'FinalUser', content: 'Final message' });
+      await mainPage.waitForTimeout(2000);
+
+      // Should still be at top (no auto-scroll because checkbox is OFF)
+      const scrollPos = await chatContainer.evaluate(el => el.scrollTop);
+      expect(scrollPos).toBeLessThan(100); // Should be near top
+
+      // Toggle back ON
+      await autoScrollCheckbox.check();
+      await expect(autoScrollCheckbox).toBeChecked();
+
+      // Disconnect
+      await mainPage.locator('button:has-text("Disconnect")').click();
     });
   });
 

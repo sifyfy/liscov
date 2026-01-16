@@ -5,7 +5,10 @@
   import type { ChatMessage } from '$lib/types';
 
   let chatContainer: HTMLDivElement;
-  let autoScroll = $state(true);
+
+  // Auto-scroll setting (checkbox controlled, same as original liscov)
+  // This is the ONLY control for auto-scroll behavior
+  let autoScrollEnabled = $state(true);
 
   // Flag to temporarily suppress auto-scroll during programmatic scrolling
   let suppressAutoScroll = $state(false);
@@ -21,26 +24,37 @@
   // Highlighted message ID (for scroll-to feature)
   let highlightedMessageId = $state<string | null>(null);
 
-  // Auto-scroll when new messages arrive
-  $effect(() => {
-    const messages = chatStore.filteredMessages;
-    // Skip auto-scroll if suppressed or manually disabled
-    if (suppressAutoScroll || !autoScroll || !chatContainer || messages.length === 0) {
-      return;
-    }
-    requestAnimationFrame(() => {
-      if (!suppressAutoScroll && autoScroll && chatContainer) {
+  // Reliable scroll to bottom with retry
+  function scrollToBottom() {
+    if (!chatContainer) return;
+
+    // Use multiple attempts to ensure scroll completes after DOM update
+    const doScroll = () => {
+      if (chatContainer) {
         chatContainer.scrollTop = chatContainer.scrollHeight;
       }
-    });
-  });
+    };
 
-  function handleScroll() {
-    if (!chatContainer) return;
-    const { scrollTop, scrollHeight, clientHeight } = chatContainer;
-    // Enable auto-scroll if user scrolls near the bottom
-    autoScroll = scrollHeight - scrollTop - clientHeight < 100;
+    // First attempt: immediate
+    doScroll();
+
+    // Second attempt: after next frame (DOM update)
+    requestAnimationFrame(() => {
+      doScroll();
+      // Third attempt: after a short delay for images/dynamic content
+      setTimeout(doScroll, 50);
+    });
   }
+
+  // Auto-scroll when new messages arrive (controlled by checkbox only)
+  $effect(() => {
+    const messages = chatStore.filteredMessages;
+    // Skip auto-scroll if suppressed or disabled by checkbox
+    if (suppressAutoScroll || !autoScrollEnabled || !chatContainer || messages.length === 0) {
+      return;
+    }
+    scrollToBottom();
+  });
 
   function handleMessageClick(message: ChatMessage) {
     selectedViewer = {
@@ -64,8 +78,8 @@
       };
     }
 
-    // Disable auto-scroll and suppress it during programmatic scroll
-    autoScroll = false;
+    // Disable auto-scroll (same as original liscov)
+    autoScrollEnabled = false;
     suppressAutoScroll = true;
 
     // Highlight the message first (so it's visible when scrolled to)
@@ -120,6 +134,16 @@
           A+
         </button>
       </div>
+      <!-- Auto-scroll toggle (same as original liscov) -->
+      <label class="flex items-center gap-1 text-xs text-[var(--text-muted)] cursor-pointer">
+        <input
+          type="checkbox"
+          checked={autoScrollEnabled}
+          onchange={(e) => autoScrollEnabled = (e.target as HTMLInputElement).checked}
+          class="w-3 h-3"
+        />
+        自動スクロール
+      </label>
       <!-- Timestamp toggle -->
       <label class="flex items-center gap-1 text-xs text-[var(--text-muted)] cursor-pointer">
         <input
@@ -143,7 +167,6 @@
   <!-- Messages -->
   <div
     bind:this={chatContainer}
-    onscroll={handleScroll}
     class="flex-1 overflow-y-auto p-3 space-y-2"
   >
     {#if chatStore.filteredMessages.length === 0}
@@ -177,19 +200,17 @@
     />
   {/if}
 
-  <!-- Auto-scroll indicator -->
-  {#if !autoScroll && chatStore.filteredMessages.length > 0}
+  <!-- Scroll to bottom button (shown when auto-scroll is disabled) -->
+  {#if !autoScrollEnabled && chatStore.filteredMessages.length > 0}
     <button
       onclick={() => {
-        autoScroll = true;
-        if (chatContainer) {
-          chatContainer.scrollTop = chatContainer.scrollHeight;
-        }
+        autoScrollEnabled = true;
+        scrollToBottom();
       }}
       class="absolute bottom-4 right-4 px-4 py-2 text-white rounded-full shadow-lg transition-colors"
       style="background: linear-gradient(135deg, var(--primary-start) 0%, var(--primary-end) 100%);"
     >
-      Scroll to bottom
+      最新に戻る
     </button>
   {/if}
 </div>
