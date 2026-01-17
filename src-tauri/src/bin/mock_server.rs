@@ -301,13 +301,19 @@ fn build_routes(state: Arc<ServerState>) -> impl Filter<Extract = impl warp::Rep
         ];
 
         // Cookieを文字列に変換してURLフラグメントに含める
+        // URLフラグメントでスペースやセミコロンを含む場合はエンコードが必要
         let cookie_str = cookies.iter()
             .map(|(k, v)| format!("{}={}", k, v))
             .collect::<Vec<_>>()
             .join("; ");
 
+        // URLエンコード: スペースを%20に、セミコロンを%3Bに変換
+        let encoded_cookie_str = cookie_str
+            .replace(' ', "%20")
+            .replace(';', "%3B");
+
         // リダイレクトでCookieをフラグメントに含める
-        let redirect_url = format!("/logged_in#LISCOV_AUTH:{}", cookie_str);
+        let redirect_url = format!("/logged_in#LISCOV_AUTH:{}", encoded_cookie_str);
 
         let mut resp = warp::reply::Response::new(warp::hyper::Body::empty());
         *resp.status_mut() = warp::http::StatusCode::SEE_OTHER;

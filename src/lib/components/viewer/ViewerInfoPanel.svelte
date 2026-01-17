@@ -21,6 +21,7 @@
   let notes = $state('');
   let isSaving = $state(false);
   let saveMessage = $state('');
+  let viewerProfileId = $state<number | null>(null);
 
   // Load existing custom info when viewer changes
   $effect(() => {
@@ -32,6 +33,7 @@
     reading = '';
     notes = '';
     saveMessage = '';
+    viewerProfileId = null;
 
     // Load custom info for this viewer
     loadCustomInfo(bc, vc);
@@ -39,21 +41,37 @@
 
   async function loadCustomInfo(bc: string, vc: string) {
     try {
-      const info = await invoke<{
-        reading: string | null;
-        notes: string | null;
-      } | null>('get_viewer_with_custom_info', {
+      // Use viewer_get_profile to get viewer profile including id
+      const profile = await invoke<{
+        id: number;
+        reading?: string | null;
+        notes?: string | null;
+      } | null>('viewer_get_profile', {
         broadcasterId: bc,
-        viewerId: vc
+        channelId: vc
       });
-      if (info) {
-        // Only update if we got actual values from the API
-        // Don't overwrite with empty string if user has already typed something
-        if (info.reading !== null) {
-          reading = info.reading;
-        }
-        if (info.notes !== null) {
-          notes = info.notes;
+      if (profile) {
+        viewerProfileId = profile.id;
+        // viewer_get_profile doesn't include reading/notes, need to get from viewer_get_list
+        // For now, try to load from the full list
+        const viewers = await invoke<Array<{
+          id: number;
+          reading: string | null;
+          notes: string | null;
+        }>>('viewer_get_list', {
+          broadcasterId: bc,
+          searchQuery: null,
+          limit: 1000,
+          offset: 0
+        });
+        const viewerInfo = viewers.find(v => v.id === profile.id);
+        if (viewerInfo) {
+          if (viewerInfo.reading !== null) {
+            reading = viewerInfo.reading;
+          }
+          if (viewerInfo.notes !== null) {
+            notes = viewerInfo.notes;
+          }
         }
       }
     } catch (error) {
@@ -62,17 +80,19 @@
   }
 
   async function handleSave() {
+    if (viewerProfileId === null) {
+      saveMessage = '視聴者プロファイルが見つかりません';
+      return;
+    }
+
     isSaving = true;
     saveMessage = '';
     try {
-      await invoke('upsert_viewer_custom_info', {
-        info: {
-          broadcaster_channel_id: broadcasterChannelId,
-          viewer_channel_id: viewer.channelId,
-          reading: reading || null,
-          notes: notes || null,
-          custom_data: null
-        }
+      await invoke('viewer_upsert_custom_info', {
+        viewerProfileId: viewerProfileId,
+        reading: reading || null,
+        notes: notes || null,
+        customData: null
       });
       saveMessage = '保存しました';
       setTimeout(() => saveMessage = '', 3000);

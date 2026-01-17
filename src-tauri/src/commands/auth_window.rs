@@ -211,7 +211,12 @@ pub async fn open_auth_window(app: AppHandle) -> AuthResult {
                     if let Some(cookie_str) = fragment.strip_prefix("LISCOV_AUTH:") {
                         tracing::info!("🔓 SAPISID detected in URL fragment");
 
-                        let cookies = parse_cookie_string(cookie_str);
+                        // URLデコード（%3B -> ;、%20 -> スペース など）
+                        let decoded_cookie_str = urlencoding::decode(cookie_str)
+                            .unwrap_or_else(|_| cookie_str.into());
+                        tracing::info!("🍪 Decoded cookie string: {}", decoded_cookie_str);
+
+                        let cookies = parse_cookie_string(&decoded_cookie_str);
 
                         if let Some(yt_cookies) = extract_youtube_cookies_from_map(&cookies) {
                             tracing::info!("✅ Successfully extracted YouTube cookies from URL");
