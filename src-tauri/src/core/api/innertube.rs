@@ -55,9 +55,53 @@ impl InnerTubeClient {
         self.auth_cookies = Some(cookies);
     }
 
-    /// Set chat mode
-    pub fn set_chat_mode(&mut self, mode: ChatMode) {
-        self.chat_mode = mode;
+    /// Set chat mode and modify continuation token
+    ///
+    /// This method modifies the continuation token's binary data to switch
+    /// between TopChat and AllChat modes.
+    ///
+    /// # Returns
+    /// * `true` - Mode change successful
+    /// * `false` - Mode change failed (no continuation token or modification failed)
+    pub fn set_chat_mode(&mut self, mode: ChatMode) -> bool {
+        // Already in this mode
+        if self.chat_mode == mode {
+            tracing::debug!("Chat mode already set to {:?}", mode);
+            return true;
+        }
+
+        // No continuation token
+        let Some(ref continuation) = self.continuation else {
+            tracing::warn!("Cannot change chat mode: no continuation token");
+            return false;
+        };
+
+        // Modify continuation token binary
+        if let Some(new_token) = super::continuation_builder::modify_continuation_mode(continuation, mode) {
+            tracing::info!(
+                "Chat mode changed: {:?} -> {:?} (token length: {})",
+                self.chat_mode,
+                mode,
+                new_token.len()
+            );
+            self.continuation = Some(new_token);
+            self.chat_mode = mode;
+            true
+        } else {
+            tracing::warn!("Failed to modify continuation token for mode {:?}", mode);
+            false
+        }
+    }
+
+    /// Get current chat mode
+    pub fn get_chat_mode(&self) -> ChatMode {
+        self.chat_mode
+    }
+
+    /// Detect chat mode from current continuation token
+    pub fn detect_chat_mode(&self) -> Option<ChatMode> {
+        self.continuation.as_ref()
+            .and_then(|token| super::continuation_builder::detect_chat_mode(token))
     }
 
     /// Initialize connection and get initial data
@@ -1109,5 +1153,97 @@ mod tests {
         assert_eq!(colors.body_background, "#1E88E5", "body_background should be blue");
         assert_eq!(colors.header_text, "#FFFFFF", "header_text should be white");
         assert_eq!(colors.body_text, "#FFFFFF", "body_text should be white");
+    }
+
+    #[test]
+    fn test_set_chat_mode_without_continuation() {
+        // set_chat_mode should return false when no continuation token
+        let mut client = InnerTubeClient::new("test_video");
+        assert_eq!(client.get_chat_mode(), ChatMode::TopChat);
+
+        // No continuation token, should fail
+        let result = client.set_chat_mode(ChatMode::AllChat);
+        assert!(!result, "Should fail without continuation token");
+        assert_eq!(client.get_chat_mode(), ChatMode::TopChat);
+    }
+
+    #[test]
+    fn test_set_chat_mode_same_mode() {
+        // set_chat_mode should return true when already in same mode
+        let mut client = InnerTubeClient::new("test_video");
+        assert_eq!(client.get_chat_mode(), ChatMode::TopChat);
+
+        // Same mode should succeed
+        let result = client.set_chat_mode(ChatMode::TopChat);
+        assert!(result, "Should succeed when already in same mode");
+        assert_eq!(client.get_chat_mode(), ChatMode::TopChat);
+    }
+
+    #[test]
+    fn test_set_chat_mode_with_valid_token() {
+        use base64::{engine::general_purpose, Engine as _};
+
+        // Create a token with valid chattype field structure
+        // Field 16 (0x82 0x01) + length(2) + Field 1 (0x08) + value(4=TopChat)
+        let inner = vec![
+            0xd2, 0x87, 0xcc, 0xc8, 0x03, // YouTube header
+            0x10, 0x00, // some field
+            0x82, 0x01, 0x02, 0x08, 0x04, // Field 16 with chattype=4 (TopChat)
+            0x20, 0x00, // trailing field
+        ];
+        let token = general_purpose::URL_SAFE_NO_PAD.encode(&inner);
+
+        let mut client = InnerTubeClient::new("test_video");
+        client.continuation = Some(token);
+
+        // Change to AllChat
+        let result = client.set_chat_mode(ChatMode::AllChat);
+        assert!(result, "Should succeed with valid token");
+        assert_eq!(client.get_chat_mode(), ChatMode::AllChat);
+
+        // Verify token was modified
+        let new_token = client.continuation.as_ref().unwrap();
+        let decoded = general_purpose::URL_SAFE_NO_PAD.decode(new_token).unwrap();
+        assert_eq!(decoded[11], 0x01, "chattype should be 1 (AllChat)");
+
+        // Change back to TopChat
+        let result = client.set_chat_mode(ChatMode::TopChat);
+        assert!(result, "Should succeed switching back");
+        assert_eq!(client.get_chat_mode(), ChatMode::TopChat);
+
+        let new_token = client.continuation.as_ref().unwrap();
+        let decoded = general_purpose::URL_SAFE_NO_PAD.decode(new_token).unwrap();
+        assert_eq!(decoded[11], 0x04, "chattype should be 4 (TopChat)");
+    }
+
+    #[test]
+    fn test_detect_chat_mode() {
+        use base64::{engine::general_purpose, Engine as _};
+
+        // TopChat token
+        let inner_top = vec![
+            0xd2, 0x87, 0xcc, 0xc8, 0x03,
+            0x10, 0x00,
+            0x82, 0x01, 0x02, 0x08, 0x04, // chattype=4 (TopChat)
+            0x20, 0x00,
+        ];
+        let top_token = general_purpose::URL_SAFE_NO_PAD.encode(&inner_top);
+
+        let mut client = InnerTubeClient::new("test_video");
+        client.continuation = Some(top_token);
+
+        assert_eq!(client.detect_chat_mode(), Some(ChatMode::TopChat));
+
+        // AllChat token
+        let inner_all = vec![
+            0xd2, 0x87, 0xcc, 0xc8, 0x03,
+            0x10, 0x00,
+            0x82, 0x01, 0x02, 0x08, 0x01, // chattype=1 (AllChat)
+            0x20, 0x00,
+        ];
+        let all_token = general_purpose::URL_SAFE_NO_PAD.encode(&inner_all);
+        client.continuation = Some(all_token);
+
+        assert_eq!(client.detect_chat_mode(), Some(ChatMode::AllChat));
     }
 }

@@ -189,12 +189,18 @@ pub async fn connect_to_stream(
 
     // Create and initialize InnerTube client
     let mut client = InnerTubeClient::new(&video_id);
-    client.set_chat_mode(mode);
 
     let status = client
         .initialize()
         .await
         .map_err(|e| format!("Failed to connect: {}", e))?;
+
+    // Set chat mode after initialization (requires continuation token)
+    if status.is_connected {
+        if !client.set_chat_mode(mode) {
+            tracing::warn!("Failed to set chat mode to {:?}, using default", mode);
+        }
+    }
 
     // Debug: Log connection status details
     tracing::info!(

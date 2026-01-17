@@ -259,6 +259,30 @@ async function setStreamState(state: { member_only?: boolean; require_auth?: boo
   });
 }
 
+// Helper to get current chat mode from mock server
+async function getChatModeStatus(): Promise<string | null> {
+  const response = await fetch(`${MOCK_SERVER_URL}/chat_mode_status`);
+  const data = await response.json();
+  return data.chat_mode;
+}
+
+// Token validation result from mock server
+interface TokenValidation {
+  received: boolean;
+  decode_success: boolean;
+  chat_mode_found: boolean;
+  detected_mode: string | null;
+  raw_token_preview: string;
+  decoded_length: number;
+  validation_count: number;
+}
+
+// Helper to get detailed token validation from mock server
+async function getTokenValidation(): Promise<TokenValidation> {
+  const response = await fetch(`${MOCK_SERVER_URL}/token_validation`);
+  return response.json();
+}
+
 test.describe('Chat Display Feature (02_chat.md)', () => {
   let browser: Browser;
   let context: BrowserContext;
@@ -809,11 +833,281 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       // Expand filter panel
       const filtersButton = mainPage.locator('button:has-text("Filters")');
       await filtersButton.click();
+      await mainPage.waitForTimeout(300);
 
       // Chat mode options should be visible
       await expect(mainPage.locator('text=Chat mode:')).toBeVisible();
       await expect(mainPage.locator('span:has-text("Top Chat")')).toBeVisible();
       await expect(mainPage.locator('span:has-text("All Chat")')).toBeVisible();
+
+      // Close filter panel for next test
+      await filtersButton.click();
+    });
+
+    test('should switch from TopChat to AllChat while connected', async () => {
+      // Connect to stream (default is TopChat)
+      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await mainPage.locator('button:has-text("Connect")').click();
+      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+
+      // Wait for initial messages
+      await mainPage.waitForTimeout(2000);
+
+      // Open filter panel
+      const filtersButton = mainPage.locator('button:has-text("Filters")');
+      await filtersButton.click();
+
+      // Wait for filter panel content to be visible
+      await expect(mainPage.locator('text=Chat mode:')).toBeVisible({ timeout: 5000 });
+
+      // Find radio buttons by their associated label text
+      const topChatLabel = mainPage.locator('label').filter({ hasText: 'Top Chat' });
+      const allChatLabel = mainPage.locator('label').filter({ hasText: 'All Chat' });
+      const topChatRadio = topChatLabel.locator('input[type="radio"]');
+      const allChatRadio = allChatLabel.locator('input[type="radio"]');
+
+      // TopChat should be checked initially
+      await expect(topChatRadio).toBeChecked({ timeout: 5000 });
+      await expect(allChatRadio).not.toBeChecked();
+
+      // Click AllChat to switch mode
+      await allChatLabel.click();
+      await mainPage.waitForTimeout(1000);
+
+      // Verify AllChat is now selected
+      await expect(allChatRadio).toBeChecked();
+      await expect(topChatRadio).not.toBeChecked();
+
+      // Close filter panel
+      await filtersButton.click();
+
+      // Disconnect
+      await mainPage.locator('button:has-text("Disconnect")').click();
+    });
+
+    test('should switch from AllChat to TopChat while connected', async () => {
+      // Connect to stream with AllChat mode
+      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+
+      // Open filter panel and select AllChat before connecting
+      const filtersButton = mainPage.locator('button:has-text("Filters")');
+      await filtersButton.click();
+      await mainPage.waitForTimeout(500);
+
+      const topChatLabel = mainPage.locator('label').filter({ hasText: 'Top Chat' });
+      const allChatLabel = mainPage.locator('label').filter({ hasText: 'All Chat' });
+      const topChatRadio = topChatLabel.locator('input[type="radio"]');
+      const allChatRadio = allChatLabel.locator('input[type="radio"]');
+
+      await allChatLabel.click();
+      await mainPage.waitForTimeout(500);
+
+      // Close filter panel and connect
+      await filtersButton.click();
+      await mainPage.locator('button:has-text("Connect")').click();
+      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+
+      // Wait for messages
+      await mainPage.waitForTimeout(2000);
+
+      // Open filter panel
+      await filtersButton.click();
+      await mainPage.waitForTimeout(500);
+
+      // Verify AllChat is selected
+      await expect(allChatRadio).toBeChecked();
+
+      // Switch to TopChat
+      await topChatLabel.click();
+      await mainPage.waitForTimeout(1000);
+
+      // Verify TopChat is now selected
+      await expect(topChatRadio).toBeChecked();
+      await expect(allChatRadio).not.toBeChecked();
+
+      // Close filter panel
+      await filtersButton.click();
+
+      // Disconnect
+      await mainPage.locator('button:has-text("Disconnect")').click();
+    });
+
+    test('should receive messages after switching chat mode', async () => {
+      // Connect to stream
+      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await mainPage.locator('button:has-text("Connect")').click();
+      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+
+      // Add messages for TopChat mode
+      await addMockMessage({
+        message_type: 'text',
+        author: 'TopChatUser',
+        content: 'Message in TopChat mode',
+      });
+
+      await mainPage.waitForTimeout(2000);
+
+      // Verify message received in TopChat mode
+      await expect(mainPage.locator('text=TopChatUser')).toBeVisible();
+      await expect(mainPage.locator('text=Message in TopChat mode')).toBeVisible();
+
+      // Switch to AllChat mode
+      const filtersButton = mainPage.locator('button:has-text("Filters")');
+      await filtersButton.click();
+      await mainPage.waitForTimeout(500);
+
+      const allChatLabel = mainPage.locator('label').filter({ hasText: 'All Chat' });
+      await allChatLabel.click();
+      await mainPage.waitForTimeout(1000);
+
+      // Close filter panel
+      await filtersButton.click();
+
+      // Add messages for AllChat mode
+      await addMockMessage({
+        message_type: 'text',
+        author: 'AllChatUser',
+        content: 'Message in AllChat mode',
+      });
+
+      await mainPage.waitForTimeout(2000);
+
+      // Verify new message received in AllChat mode
+      await expect(mainPage.locator('text=AllChatUser')).toBeVisible();
+      await expect(mainPage.locator('text=Message in AllChat mode')).toBeVisible();
+
+      // Disconnect
+      await mainPage.locator('button:has-text("Disconnect")').click();
+    });
+
+    test('should modify continuation token when switching chat mode (backend verification)', async () => {
+      // This test verifies that the backend actually modifies the continuation token
+      // when switching between TopChat and AllChat modes.
+      // It explicitly checks both UI state and backend state to detect any mismatch.
+      // It also validates that the token is properly formatted and parseable.
+
+      // Reset mock server state and ensure TopChat is selected in the app
+      await fetch(`${MOCK_SERVER_URL}/reset`, { method: 'POST' });
+
+      // Ensure TopChat is selected before connecting
+      const filtersButton = mainPage.locator('button:has-text("Filters")');
+      await filtersButton.click();
+      await mainPage.waitForTimeout(300);
+      const topChatLabel = mainPage.locator('label').filter({ hasText: 'Top Chat' });
+      const allChatLabel = mainPage.locator('label').filter({ hasText: 'All Chat' });
+      const topChatRadio = topChatLabel.locator('input[type="radio"]');
+      const allChatRadio = allChatLabel.locator('input[type="radio"]');
+
+      await topChatLabel.click();
+      await filtersButton.click();
+      await mainPage.waitForTimeout(300);
+
+      // Connect to stream (default is TopChat)
+      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await mainPage.locator('button:has-text("Connect")').click();
+      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+
+      // Wait for initial polling to establish chat mode
+      await mainPage.waitForTimeout(3000);
+
+      // Verify initial state: UI shows TopChat AND backend uses TopChat token
+      await filtersButton.click();
+      await mainPage.waitForTimeout(300);
+      await expect(topChatRadio).toBeChecked();
+
+      // Check detailed token validation for TopChat
+      const topChatValidation = await getTokenValidation();
+      expect(topChatValidation.received, 'Token should be received by backend').toBe(true);
+      expect(topChatValidation.decode_success, 'Token should be valid base64').toBe(true);
+      expect(topChatValidation.chat_mode_found, 'Chat mode field should be found in token').toBe(true);
+      expect(topChatValidation.detected_mode, 'Backend should detect TopChat mode from token').toBe('TopChat');
+      expect(topChatValidation.decoded_length, 'Token should have reasonable length').toBeGreaterThan(0);
+
+      const initialBackendMode = await getChatModeStatus();
+      expect(initialBackendMode, 'Backend should use TopChat token when UI shows TopChat').toBe('TopChat');
+
+      // Switch to AllChat mode in UI
+      await allChatLabel.click();
+      await mainPage.waitForTimeout(3000);
+
+      // Verify AllChat state: UI shows AllChat AND backend uses AllChat token
+      await expect(allChatRadio).toBeChecked();
+
+      // Check detailed token validation for AllChat
+      const allChatValidation = await getTokenValidation();
+      expect(allChatValidation.received, 'Token should be received by backend').toBe(true);
+      expect(allChatValidation.decode_success, 'Token should be valid base64').toBe(true);
+      expect(allChatValidation.chat_mode_found, 'Chat mode field should be found in token').toBe(true);
+      expect(allChatValidation.detected_mode, 'Backend should detect AllChat mode from token').toBe('AllChat');
+
+      const allChatBackendMode = await getChatModeStatus();
+      expect(allChatBackendMode, 'Backend should use AllChat token when UI shows AllChat').toBe('AllChat');
+
+      // Switch back to TopChat in UI
+      await topChatLabel.click();
+      await mainPage.waitForTimeout(3000);
+
+      // Verify TopChat state again: UI shows TopChat AND backend uses TopChat token
+      await expect(topChatRadio).toBeChecked();
+
+      // Final token validation
+      const finalValidation = await getTokenValidation();
+      expect(finalValidation.detected_mode, 'Backend should detect TopChat mode after switching back').toBe('TopChat');
+      expect(finalValidation.validation_count, 'Multiple tokens should have been validated').toBeGreaterThan(3);
+
+      const topChatBackendMode = await getChatModeStatus();
+      expect(topChatBackendMode, 'Backend should use TopChat token when UI shows TopChat').toBe('TopChat');
+
+      // Close filter panel and disconnect
+      await filtersButton.click();
+      await mainPage.locator('button:has-text("Disconnect")').click();
+    });
+
+    test('should persist chat mode selection across reconnection', async () => {
+      // Open filter panel and select AllChat
+      const filtersButton = mainPage.locator('button:has-text("Filters")');
+      await filtersButton.click();
+      await mainPage.waitForTimeout(500);
+
+      const allChatLabel = mainPage.locator('label').filter({ hasText: 'All Chat' });
+      const allChatRadio = allChatLabel.locator('input[type="radio"]');
+      await allChatLabel.click();
+      await mainPage.waitForTimeout(500);
+      await filtersButton.click();
+
+      // Connect to stream
+      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await mainPage.locator('button:has-text("Connect")').click();
+      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+
+      // Disconnect
+      await mainPage.locator('button:has-text("Disconnect")').click();
+      await mainPage.waitForTimeout(1000);
+
+      // Open filter panel and verify AllChat is still selected
+      await filtersButton.click();
+      await mainPage.waitForTimeout(500);
+      await expect(allChatRadio).toBeChecked();
+
+      // Reconnect
+      await filtersButton.click();
+      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_456`);
+      await mainPage.locator('button:has-text("Connect")').click();
+      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+
+      // Open filter panel and verify AllChat is still selected after reconnection
+      await filtersButton.click();
+      await mainPage.waitForTimeout(500);
+      await expect(allChatRadio).toBeChecked();
+
+      // Disconnect
+      await filtersButton.click();
+      await mainPage.locator('button:has-text("Disconnect")').click();
     });
   });
 

@@ -19,7 +19,10 @@
 		"test:e2e": "playwright test",
 		"test:e2e:ui": "playwright test --ui",
 		"test:e2e:headed": "playwright test --headed",
-		"test:e2e:tauri": "playwright test --config e2e-tauri/playwright.config.ts"
+		"test:e2e:tauri": "playwright test --config e2e-tauri/playwright.config.ts",
+		"test:e2e:tauri:chat": "playwright test --config e2e-tauri/playwright.config.ts e2e-tauri/chat-display.spec.ts",
+		"test:e2e:tauri:auth": "playwright test --config e2e-tauri/playwright.config.ts e2e-tauri/auth-flow.spec.ts",
+		"test:e2e:tauri:ws": "playwright test --config e2e-tauri/playwright.config.ts e2e-tauri/websocket.spec.ts"
 	},
 	"devDependencies": {
 		"@playwright/test": "^1.57.0",

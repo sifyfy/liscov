@@ -5,6 +5,7 @@
 //!   POST /set_auth_state                    - Control auth behavior
 //!   GET  /auth_status                       - Get current auth state
 
+use base64::{engine::general_purpose, Engine as _};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -15,7 +16,116 @@ use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::time::Instant;
-use warp::{Filter, Reply};
+use warp::Filter;
+
+/// Detect chat mode from continuation token by parsing Protocol Buffer binary data
+fn detect_chat_mode_from_token(token: &str) -> Option<String> {
+    let decoded = general_purpose::URL_SAFE_NO_PAD
+        .decode(token)
+        .or_else(|_| general_purpose::STANDARD.decode(token))
+        .ok()?;
+
+    // Pattern 1: Field 16 (0x82 0x01) + 1-byte length + 0x08 + chattype
+    for i in 0..decoded.len().saturating_sub(4) {
+        if decoded[i] == 0x82 && decoded[i + 1] == 0x01 {
+            let len = decoded[i + 2] as usize;
+            if decoded[i + 2] & 0x80 == 0 && i + 3 + len <= decoded.len() && decoded[i + 3] == 0x08 {
+                let chattype = decoded[i + 4];
+                return match chattype {
+                    4 => Some("TopChat".to_string()),
+                    1 => Some("AllChat".to_string()),
+                    _ => None,
+                };
+            }
+            // Pattern 2: 2-byte varint length
+            if decoded[i + 2] & 0x80 != 0 && i + 5 < decoded.len() && decoded[i + 4] == 0x08 {
+                let chattype = decoded[i + 5];
+                return match chattype {
+                    4 => Some("TopChat".to_string()),
+                    1 => Some("AllChat".to_string()),
+                    _ => None,
+                };
+            }
+        }
+    }
+
+    // Pattern 3: 0x08 + chattype + 0x10
+    for i in 0..decoded.len().saturating_sub(2) {
+        if decoded[i] == 0x08 && decoded[i + 2] == 0x10 {
+            let chattype = decoded[i + 1];
+            if chattype == 0x01 || chattype == 0x04 {
+                return match chattype {
+                    4 => Some("TopChat".to_string()),
+                    1 => Some("AllChat".to_string()),
+                    _ => None,
+                };
+            }
+        }
+    }
+
+    // Pattern 4: length-delimited field with 0x08 + chattype
+    for i in 0..decoded.len().saturating_sub(2) {
+        if decoded[i] == 0x08 {
+            let chattype = decoded[i + 1];
+            if (chattype == 0x01 || chattype == 0x04) && i >= 3 {
+                let prev = decoded[i - 1];
+                if prev == 0x02 || prev == 0x03 || prev == 0x04 {
+                    return match chattype {
+                        4 => Some("TopChat".to_string()),
+                        1 => Some("AllChat".to_string()),
+                        _ => None,
+                    };
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Validate continuation token and return detailed validation result
+fn validate_continuation_token(token: &str) -> TokenValidation {
+    let preview = if token.len() > 50 {
+        format!("{}...", &token[..50])
+    } else {
+        token.to_string()
+    };
+
+    // Try to decode
+    let decoded = match general_purpose::URL_SAFE_NO_PAD
+        .decode(token)
+        .or_else(|_| general_purpose::STANDARD.decode(token))
+    {
+        Ok(d) => d,
+        Err(_) => {
+            return TokenValidation {
+                received: true,
+                decode_success: false,
+                chat_mode_found: false,
+                detected_mode: None,
+                raw_token_preview: preview,
+                decoded_length: 0,
+                validation_count: 1,
+            };
+        }
+    };
+
+    let decoded_length = decoded.len();
+
+    // Try to detect chat mode
+    let detected_mode = detect_chat_mode_from_token(token);
+    let chat_mode_found = detected_mode.is_some();
+
+    TokenValidation {
+        received: true,
+        decode_success: true,
+        chat_mode_found,
+        detected_mode,
+        raw_token_preview: preview,
+        decoded_length,
+        validation_count: 1,
+    }
+}
 
 #[derive(Parser, Debug)]
 #[command(name = "mock_server")]
@@ -40,6 +150,25 @@ struct Args {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ResponseEntry { timestamp: u64, response: Value }
 
+/// Token validation result for testing
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct TokenValidation {
+    /// Whether a continuation token was received in the request
+    received: bool,
+    /// Whether the token was successfully parsed (base64 decode succeeded)
+    decode_success: bool,
+    /// Whether the chat mode field was found in the token
+    chat_mode_found: bool,
+    /// The detected chat mode (TopChat or AllChat)
+    detected_mode: Option<String>,
+    /// Raw token for debugging (truncated to 50 chars)
+    raw_token_preview: String,
+    /// Token length in bytes after base64 decode
+    decoded_length: usize,
+    /// Number of tokens validated
+    validation_count: u64,
+}
+
 struct ServerState {
     config: ServerConfig,
     message_queue: Mutex<VecDeque<Value>>,
@@ -49,6 +178,8 @@ struct ServerState {
     login_page_visits: AtomicU64,  // Track login page visits for cookie clearing verification
     auth_state: Mutex<AuthState>,
     stream_state: Mutex<StreamState>,
+    last_chat_mode: Mutex<Option<String>>,  // Track chat mode from continuation token
+    token_validation: Mutex<TokenValidation>,  // Detailed token validation results
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -136,6 +267,8 @@ async fn main() {
         login_page_visits: AtomicU64::new(0),
         auth_state: Mutex::new(AuthState::default()),
         stream_state: Mutex::new(StreamState::default()),
+        last_chat_mode: Mutex::new(None),
+        token_validation: Mutex::new(TokenValidation::default()),
     });
     let routes = build_routes(state);
     let addr: SocketAddr = ([127, 0, 0, 1], args.port).into();
@@ -210,7 +343,43 @@ fn build_routes(state: Arc<ServerState>) -> impl Filter<Extract = impl warp::Rep
     });
     let sa = Arc::clone(&state);
     let chat = warp::path!("youtubei" / "v1" / "live_chat" / "get_live_chat").and(warp::post()).and(warp::body::json())
-        .map(move |_: Value| { sa.request_count.fetch_add(1, Ordering::SeqCst); warp::reply::json(&build_resp(get_actions(&sa))) });
+        .map(move |body: Value| {
+            sa.request_count.fetch_add(1, Ordering::SeqCst);
+            // Extract and parse continuation token to detect chat mode
+            // Default to TopChat (4), but preserve from incoming token if available
+            let mut chattype: u8 = 4;
+            if let Some(cont) = body.get("continuation").and_then(|c| c.as_str()) {
+                // Validate and record token details
+                let validation = validate_continuation_token(cont);
+                {
+                    let mut tv = sa.token_validation.lock().unwrap();
+                    tv.received = validation.received;
+                    tv.decode_success = validation.decode_success;
+                    tv.chat_mode_found = validation.chat_mode_found;
+                    tv.detected_mode = validation.detected_mode.clone();
+                    tv.raw_token_preview = validation.raw_token_preview;
+                    tv.decoded_length = validation.decoded_length;
+                    tv.validation_count += 1;
+                }
+
+                if let Some(ref mode) = validation.detected_mode {
+                    let mut cm = sa.last_chat_mode.lock().unwrap();
+                    *cm = Some(mode.clone());
+                    chattype = if mode == "AllChat" { 1 } else { 4 };
+                }
+            } else {
+                // No continuation token received
+                let mut tv = sa.token_validation.lock().unwrap();
+                tv.received = false;
+                tv.decode_success = false;
+                tv.chat_mode_found = false;
+                tv.detected_mode = None;
+                tv.raw_token_preview = String::new();
+                tv.decoded_length = 0;
+                tv.validation_count += 1;
+            }
+            warp::reply::json(&build_resp(get_actions(&sa), chattype))
+        });
     let sac = Arc::clone(&state);
     let acct = warp::path!("youtubei" / "v1" / "account" / "account_menu").and(warp::post())
         .and(warp::header::optional::<String>("authorization")).and(warp::header::optional::<String>("cookie")).and(warp::body::json())
@@ -262,15 +431,27 @@ fn build_routes(state: Arc<ServerState>) -> impl Filter<Extract = impl warp::Rep
             if let Some(n) = b.channel_name { ss.channel_name_override = if n.is_empty() { None } else { Some(n) }; }
             warp::reply::json(&json!({"status":"ok","stream":&*ss}))
         });
+    let scm = Arc::clone(&state);
+    let chat_mode_status = warp::path("chat_mode_status").and(warp::get()).map(move || {
+        let cm = scm.last_chat_mode.lock().unwrap();
+        warp::reply::json(&json!({"chat_mode": *cm}))
+    });
+    let stv = Arc::clone(&state);
+    let token_validation = warp::path("token_validation").and(warp::get()).map(move || {
+        let tv = stv.token_validation.lock().unwrap();
+        warp::reply::json(&*tv)
+    });
     let srs = Arc::clone(&state);
     let reset = warp::path("reset").and(warp::post()).map(move || {
         let mut r = srs.replay_state.lock().unwrap(); r.current_index = 0; r.start_time = None; r.base_timestamp = None;
         srs.message_queue.lock().unwrap().clear(); *srs.auth_state.lock().unwrap() = AuthState::default();
         *srs.stream_state.lock().unwrap() = StreamState::default();
+        *srs.last_chat_mode.lock().unwrap() = None;
+        *srs.token_validation.lock().unwrap() = TokenValidation::default();
         srs.login_page_visits.store(0, Ordering::SeqCst);
         warp::reply::json(&json!({"status":"ok"}))
     });
-    login_page.or(do_login).or(logged_in).or(watch).or(chat).or(acct).or(setauth).or(authst).or(status).or(add).or(setstream).or(reset)
+    login_page.or(do_login).or(logged_in).or(watch).or(chat).or(acct).or(setauth).or(authst).or(status).or(add).or(setstream).or(chat_mode_status).or(token_validation).or(reset)
 }
 
 #[derive(Debug, Deserialize)] struct WQ { v: Option<String> }
@@ -338,7 +519,8 @@ fn split_title_into_runs(title: &str) -> Vec<serde_json::Value> {
 }
 
 fn gen_html(_vid: &str, cid: &str, cn: &str, t: &str) -> String {
-    let ct = format!("mock_cont_{}", rand::random::<u32>());
+    // Generate a proper continuation token with TopChat mode (chattype=4)
+    let ct = generate_mock_continuation_token(4);
     let title_runs = split_title_into_runs(t);
     let d = json!({"contents":{"twoColumnWatchNextResults":{"results":{"results":{"contents":[{"videoPrimaryInfoRenderer":{"title":{"runs":title_runs}}},{"videoSecondaryInfoRenderer":{"owner":{"videoOwnerRenderer":{"title":{"runs":[{"text":cn}]},"navigationEndpoint":{"browseEndpoint":{"browseId":cid}}}}}}]}},"conversationBar":{"liveChatRenderer":{"continuations":[{"reloadContinuationData":{"continuation":ct}}],"isReplay":false}}}}});
     format!("<!DOCTYPE html><html><head><title>{}</title></head><body><script>var ytInitialData = {};</script></body></html>", t, serde_json::to_string(&d).unwrap())
@@ -417,8 +599,26 @@ fn gen_logged_in_html() -> String {
 </html>"#.to_string()
 }
 
-fn build_resp(acts: Vec<Value>) -> Value {
-    json!({"continuationContents":{"liveChatContinuation":{"continuations":[{"invalidationContinuationData":{"continuation":format!("mock_cont_{}",rand::random::<u32>()),"timeoutMs":5000}}],"actions":acts}}})
+/// Generate a mock continuation token with proper Protocol Buffer structure
+/// that includes the chattype field (4=TopChat, 1=AllChat)
+fn generate_mock_continuation_token(chattype: u8) -> String {
+    // Build a minimal Protocol Buffer structure:
+    // Field 16 (0x82 0x01) + length(2) + Field 1 (0x08) + chattype
+    // Plus some random data to make each token unique
+    let random_data: u32 = rand::random();
+    let bytes: Vec<u8> = vec![
+        0xd2, 0x87, 0xcc, 0xc8, 0x03,           // Some header bytes
+        0x10, (random_data & 0xFF) as u8,       // Field 2 with random value
+        0x82, 0x01, 0x02, 0x08, chattype,       // Field 16 with chattype
+        0x20, ((random_data >> 8) & 0xFF) as u8, // Trailing field
+    ];
+    general_purpose::URL_SAFE_NO_PAD.encode(&bytes)
+}
+
+fn build_resp(acts: Vec<Value>, chattype: u8) -> Value {
+    // Preserve the chat mode from the incoming request
+    let token = generate_mock_continuation_token(chattype);
+    json!({"continuationContents":{"liveChatContinuation":{"continuations":[{"invalidationContinuationData":{"continuation":token,"timeoutMs":5000}}],"actions":acts}}})
 }
 
 fn gen_msg(s: &ServerState, r: &AMR) -> Value {

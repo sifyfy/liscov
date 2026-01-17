@@ -53,12 +53,12 @@ pnpm exec playwright test --config e2e-tauri/playwright.config.ts
 
 **テスト分離**: E2Eテストは本番データと分離された専用の名前空間を使用します。
 
-| 環境変数 | デフォルト | テスト時 | 用途 |
-|---------|-----------|---------|------|
-| `LISCOV_APP_NAME` | `liscov` | `liscov-test` | 設定・DB・ログのディレクトリ名 |
-| `LISCOV_KEYRING_SERVICE` | `liscov` | `liscov-test` | Windows資格情報マネージャーのサービス名 |
-| `LISCOV_AUTH_URL` | YouTube URL | mock server | 認証ウィンドウのURL |
-| `LISCOV_SESSION_CHECK_URL` | YouTube API | mock server | セッション検証エンドポイント |
+| 環境変数                   | デフォルト  | テスト時      | 用途                                    |
+| -------------------------- | ----------- | ------------- | --------------------------------------- |
+| `LISCOV_APP_NAME`          | `liscov`    | `liscov-test` | 設定・DB・ログのディレクトリ名          |
+| `LISCOV_KEYRING_SERVICE`   | `liscov`    | `liscov-test` | Windows資格情報マネージャーのサービス名 |
+| `LISCOV_AUTH_URL`          | YouTube URL | mock server   | 認証ウィンドウのURL                     |
+| `LISCOV_SESSION_CHECK_URL` | YouTube API | mock server   | セッション検証エンドポイント            |
 
 テスト実行時、`beforeAll`フックで以下が自動実行されます：
 1. 既存のTauriアプリを終了
@@ -120,6 +120,14 @@ liscov-tauri/
 └── package.json
 ```
 
+## 開発ガイドライン
+
+### 基本ルール（重要）
+- 新規ファイル作成より既存ファイル編集を優先
+- 公開機能に対するテストコード原則作成
+- 機能変更時のドキュメント更新必須
+- クリーンコード維持
+
 ## ドキュメント
 
 - **機能仕様**: `docs/specs/` - 認証、チャット、WebSocket、TTS、収益分析等
@@ -127,12 +135,12 @@ liscov-tauri/
 
 ## 元liscovとの対応
 
-| 元liscov | liscov-tauri |
-|----------|--------------|
-| `src/gui/components/` | `src/lib/components/` |
-| `src/gui/models.rs` | `src-tauri/src/commands/chat.rs` + `src/lib/types/` |
-| `src/database/` | `src-tauri/src/database/` |
-| `src/api/` | `src-tauri/src/core/` |
+| 元liscov              | liscov-tauri                                        |
+| --------------------- | --------------------------------------------------- |
+| `src/gui/components/` | `src/lib/components/`                               |
+| `src/gui/models.rs`   | `src-tauri/src/commands/chat.rs` + `src/lib/types/` |
+| `src/database/`       | `src-tauri/src/database/`                           |
+| `src/api/`            | `src-tauri/src/core/`                               |
 
 ## 重要な注意事項
 
