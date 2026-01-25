@@ -196,8 +196,8 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
 
   test('Step 1: Before connecting - Viewer Management should be empty', async () => {
     // Navigate to Viewers tab WITHOUT connecting to a stream first
-    await mainPage.getByRole('button', { name: 'Viewers' }).click();
-    await expect(mainPage.getByRole('heading', { name: 'Viewer Management' })).toBeVisible();
+    await mainPage.locator('button:has-text("Viewer")').click();
+    await expect(mainPage.getByRole('heading', { name: 'Viewer Management' }).first()).toBeVisible();
 
     // Wait for the broadcaster list to load (async operation)
     await new Promise(resolve => setTimeout(resolve, 2000));
@@ -212,12 +212,12 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
     // CRITICAL: Without connecting to a stream, there should be NO broadcasters
     expect(options.length).toBe(1); // Only placeholder
 
-    // Should show "Select a broadcaster" message
+    // Should show "Select a broadcaster" message (Japanese UI)
     await expect(mainPage.getByText('Select a broadcaster to view viewers')).toBeVisible();
   });
 
   test('Step 2: Authenticate', async () => {
-    await mainPage.getByRole('button', { name: 'Settings' }).click();
+    await mainPage.locator('button:has-text("Settings")').click();
     await expect(mainPage.getByRole('heading', { name: 'YouTube認証' })).toBeVisible();
 
     const loginButton = mainPage.getByRole('button', { name: 'YouTubeにログイン' });
@@ -286,11 +286,11 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
     });
 
     // Navigate to Chat and connect
-    await mainPage.getByRole('button', { name: 'Chat' }).click();
-    const urlInput = mainPage.getByPlaceholder(/Enter YouTube URL or Video ID/i);
+    await mainPage.locator('button:has-text("Chat")').click();
+    const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
     await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=real_test_123`);
 
-    const connectButton = mainPage.getByRole('button', { name: 'Connect' });
+    const connectButton = mainPage.locator('button:has-text("開始")');
     await connectButton.click();
 
     // Wait for connection and stream title
@@ -354,8 +354,8 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
     });
 
     // Navigate to Viewers tab
-    await mainPage.getByRole('button', { name: 'Viewers' }).click();
-    await expect(mainPage.getByRole('heading', { name: 'Viewer Management' })).toBeVisible();
+    await mainPage.locator('button:has-text("Viewer")').click();
+    await expect(mainPage.getByRole('heading', { name: 'Viewer Management' }).first()).toBeVisible();
 
     // Wait for the store to load and log
     await new Promise(resolve => setTimeout(resolve, 3000));
@@ -441,8 +441,8 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
     console.log('App restarted');
 
     // Navigate directly to Viewers tab (without connecting to stream)
-    await mainPage.getByRole('button', { name: 'Viewers' }).click();
-    await expect(mainPage.getByRole('heading', { name: 'Viewer Management' })).toBeVisible();
+    await mainPage.locator('button:has-text("Viewer")').click();
+    await expect(mainPage.getByRole('heading', { name: 'Viewer Management' }).first()).toBeVisible();
 
     // Wait for the broadcaster list to load (async operation)
     await new Promise(resolve => setTimeout(resolve, 3000));

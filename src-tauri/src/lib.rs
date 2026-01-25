@@ -10,6 +10,8 @@ pub mod tts;
 pub use database::Database;
 pub use state::AppState;
 
+use tauri::Manager;
+
 // Re-export command functions for registration
 use commands::{
     // Auth (spec: 01_auth.md)
@@ -20,8 +22,9 @@ use commands::{
     connect_to_stream, disconnect_stream, get_chat_messages, set_chat_mode,
     // Config (spec: 09_config.md)
     config_load, config_save, config_get_value, config_set_value, ConfigState,
-    // WebSocket (spec: 03_websocket.md)
-    websocket_start, websocket_stop, websocket_get_status,
+    // WebSocket (spec: 03_websocket.md) - auto-start, no manual start/stop
+    websocket_get_status,
+    websocket::start_websocket_server_auto,
     // Database (spec: 08_database.md)
     get_sessions, get_session_messages, viewer_update_info,
     // Analytics (spec: 07_revenue.md)
@@ -55,10 +58,19 @@ pub fn run() {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
+                        .level(log::LevelFilter::Debug)
                         .build(),
                 )?;
             }
+
+            // Auto-start WebSocket server
+            let app_handle = app.handle().clone();
+            let state = app.state::<AppState>();
+            let ws_server = state.websocket_server.clone();
+            tauri::async_runtime::spawn(async move {
+                start_websocket_server_auto(app_handle, ws_server).await;
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -85,9 +97,7 @@ pub fn run() {
             config_save,
             config_get_value,
             config_set_value,
-            // WebSocket (spec: 03_websocket.md)
-            websocket_start,
-            websocket_stop,
+            // WebSocket (spec: 03_websocket.md) - auto-start only
             websocket_get_status,
             // Database (spec: 08_database.md)
             get_sessions,

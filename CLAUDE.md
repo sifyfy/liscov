@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 liscov-tauri プロジェクトの開発ガイド
 
 ## プロジェクト概要
@@ -45,8 +47,16 @@ pnpm tauri build  # リリースビルド
 認証機能のE2Eテストは `e2e-tauri/` ディレクトリにあります。
 
 ```bash
-# E2Eテストを実行（モックサーバー・アプリは自動起動・終了）
-pnpm exec playwright test --config e2e-tauri/playwright.config.ts
+# 全E2Eテストを実行（モックサーバー・アプリは自動起動・終了）
+pnpm test:e2e:tauri
+
+# 特定のテストファイルを実行
+pnpm test:e2e:tauri:chat   # チャット表示
+pnpm test:e2e:tauri:auth   # 認証フロー
+pnpm test:e2e:tauri:ws     # WebSocket
+
+# 個別テスト（ファイル指定）
+pnpm exec playwright test --config e2e-tauri/playwright.config.ts e2e-tauri/viewer-management.spec.ts
 ```
 
 > **Note**: モックサーバーはテスト実行時に自動的に起動・停止されます。手動起動は不要です。
@@ -119,6 +129,38 @@ liscov-tauri/
 │   └── decisions/                # アーキテクチャ決定記録 (ADR)
 └── package.json
 ```
+
+## アーキテクチャ
+
+### Frontend-Backend 連携パターン
+
+```
+Frontend (Svelte)           Backend (Rust/Tauri)
+─────────────────           ────────────────────
+src/lib/tauri/*.ts    ──→   src-tauri/src/commands/*.rs
+    ↓ invoke()                     ↓
+src/lib/stores/*.svelte.ts   AppState (state.rs)
+    ↓                              ↓
+src/lib/components/         core/api/ (InnerTubeClient, WebSocket)
+```
+
+**Tauri Commands**: フロントエンドは `invoke()` でRust関数を呼び出す。各コマンドは `docs/specs/` の仕様書に対応。
+
+**Tauri Events**: バックエンドからフロントエンドへのリアルタイム通知。
+- `chat:message` - 新規チャットメッセージ
+- `chat:connection` - 接続状態の変更
+
+**AppState** (`state.rs`): シングルトン状態管理。`Arc<RwLock<T>>` で並行アクセス。
+
+### 新機能追加の流れ
+
+1. `docs/specs/` に仕様書を作成
+2. `src-tauri/src/commands/` にTauriコマンドを実装
+3. `src-tauri/src/lib.rs` にコマンドを登録
+4. `src/lib/tauri/` にTypeScriptラッパーを作成
+5. `src/lib/stores/` にストアを作成 (Svelte 5 runes)
+6. `src/lib/components/` にUIコンポーネントを作成
+7. `e2e-tauri/` にE2Eテストを追加
 
 ## 開発ガイドライン
 

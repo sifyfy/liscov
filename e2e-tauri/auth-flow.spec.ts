@@ -273,7 +273,10 @@ test.describe('Authentication Feature (01_auth.md)', () => {
     browser = connection.browser;
     context = connection.context;
     mainPage = connection.page;
-    console.log('Connected to Tauri app:', await mainPage.title());
+    // Wait for page to be fully loaded and stable before accessing
+    await mainPage.waitForLoadState('load');
+    await mainPage.waitForTimeout(1000);
+    console.log('Connected to Tauri app');
   });
 
   test.afterAll(async () => {

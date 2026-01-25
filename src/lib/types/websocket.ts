@@ -5,7 +5,3 @@ export interface WebSocketStatus {
   actual_port: number | null;
   connected_clients: number;
 }
-
-export interface WebSocketStartResult {
-  actual_port: number;
-}

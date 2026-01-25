@@ -145,23 +145,28 @@
   }
 </script>
 
-<!-- Slide-in panel -->
+<!-- Slide-in panel (original liscov dark theme style) -->
 <div
-  class="fixed right-0 top-0 h-full w-80 bg-[var(--bg-white)] shadow-[-4px_0_12px_rgba(0,0,0,0.15)] z-50 overflow-y-auto animate-slide-in"
+  class="fixed right-0 top-0 h-full w-80 shadow-[-4px_0_12px_rgba(0,0,0,0.3)] z-50 overflow-y-auto animate-slide-in"
+  style="background: #2d2d3d;"
 >
-  <!-- Header -->
-  <div class="flex items-center justify-between px-5 py-4 border-b border-[var(--border-light)]" style="background: linear-gradient(135deg, var(--primary-start) 0%, var(--primary-end) 100%);">
+  <!-- Header (dark theme) -->
+  <div
+    class="flex items-center justify-between px-5 py-4"
+    style="background: #363648; border-bottom: 1px solid #555;"
+  >
     <h2 class="text-lg font-semibold text-white">視聴者情報</h2>
     <button
       onclick={onClose}
-      class="px-3 py-1 bg-white/20 hover:bg-white/30 rounded text-white transition-colors"
+      class="px-3 py-1 rounded text-white transition-colors"
+      style="background: #555; hover:background: #666;"
       title="閉じる"
     >
       ✕
     </button>
   </div>
 
-  <!-- Content -->
+  <!-- Content (dark theme) -->
   <div class="p-5">
     <!-- Viewer info -->
     <div class="flex items-center gap-4 mb-4">
@@ -172,28 +177,28 @@
           class="w-14 h-14 rounded-full"
         />
       {:else}
-        <div class="w-14 h-14 rounded-full bg-[var(--bg-light)] flex items-center justify-center text-2xl">
+        <div class="w-14 h-14 rounded-full flex items-center justify-center text-2xl" style="background: #3d3d4d;">
           👤
         </div>
       {/if}
       <div>
-        <p class="text-lg font-semibold text-[var(--text-primary)]">{viewer.displayName}</p>
+        <p class="text-lg font-semibold text-white">{viewer.displayName}</p>
         {#if reading}
-          <p class="text-sm text-[var(--primary-start)]">({reading})</p>
+          <p class="text-sm" style="color: #a78bfa;">({reading})</p>
         {/if}
       </div>
     </div>
 
     <!-- Channel ID -->
-    <p class="text-xs text-[var(--text-muted)] break-all mb-5">
+    <p class="text-xs break-all mb-5" style="color: #9ca3af;">
       Channel ID: {viewer.channelId}
     </p>
 
-    <hr class="border-[var(--border-light)] my-5" />
+    <hr class="my-5" style="border-color: #555;" />
 
     <!-- Reading input -->
     <div class="mb-5">
-      <label for="viewer-reading" class="block text-sm font-semibold text-[var(--text-primary)] mb-2">
+      <label for="viewer-reading" class="block text-sm font-semibold text-white mb-2">
         読み仮名（ふりがな）
       </label>
       <input
@@ -201,16 +206,17 @@
         type="text"
         placeholder="例: やまだ たろう"
         bind:value={reading}
-        class="w-full px-3 py-2 border border-[var(--border-light)] rounded-lg text-[var(--text-primary)] bg-[var(--bg-white)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-start)]/50"
+        class="w-full px-3 py-2 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-400/50"
+        style="background: #3d3d4d; border: 1px solid #555;"
       />
-      <p class="text-xs text-[var(--text-muted)] mt-1">
+      <p class="text-xs mt-1" style="color: #9ca3af;">
         視聴者名の横に括弧書きで表示されます
       </p>
     </div>
 
     <!-- Notes input -->
     <div class="mb-5">
-      <label for="viewer-notes" class="block text-sm font-semibold text-[var(--text-primary)] mb-2">
+      <label for="viewer-notes" class="block text-sm font-semibold text-white mb-2">
         メモ
       </label>
       <textarea
@@ -218,7 +224,8 @@
         placeholder="この視聴者についてのメモ..."
         bind:value={notes}
         rows="3"
-        class="w-full px-3 py-2 border border-[var(--border-light)] rounded-lg text-[var(--text-primary)] bg-[var(--bg-white)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-start)]/50 resize-none"
+        class="w-full px-3 py-2 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-400/50 resize-none"
+        style="background: #3d3d4d; border: 1px solid #555;"
       ></textarea>
     </div>
 
@@ -233,15 +240,15 @@
         {isSaving ? '保存中...' : '保存'}
       </button>
       {#if saveMessage}
-        <span class="text-sm text-green-600">{saveMessage}</span>
+        <span class="text-sm" style="color: #4ade80;">{saveMessage}</span>
       {/if}
     </div>
 
-    <hr class="border-[var(--border-light)] my-5" />
+    <hr class="my-5" style="border-color: #555;" />
 
     <!-- Viewer's messages -->
     <div>
-      <h3 class="text-sm font-semibold text-[var(--text-primary)] mb-3">
+      <h3 class="text-sm font-semibold text-white mb-3">
         投稿されたコメント ({viewerMessages.length}件)
       </h3>
       <div class="max-h-72 overflow-y-auto space-y-2">
@@ -249,11 +256,12 @@
           {@const isClicked = message.id === viewer.message.id}
           {@const badge = formatMessageType(message)}
           <button
-            class="w-full text-left p-3 bg-[var(--bg-light)] rounded-lg cursor-pointer transition-colors hover:bg-[var(--bg-light)]/80 {isClicked ? 'ring-2 ring-[var(--primary-start)]' : 'border border-[var(--border-light)]'}"
+            class="w-full text-left p-3 rounded-lg cursor-pointer transition-colors"
+            style="background: #3d3d4d; border: 1px solid {isClicked ? '#a78bfa' : '#555'}; {isClicked ? 'box-shadow: 0 0 8px rgba(167, 139, 250, 0.4);' : ''}"
             onclick={() => onMessageClick?.(message)}
           >
-            <p class="text-xs text-[var(--text-muted)] mb-1">{formatTimestamp(message.timestamp)}</p>
-            <p class="text-sm text-[var(--text-primary)] break-words leading-relaxed">{message.content}</p>
+            <p class="text-xs mb-1" style="color: #9ca3af;">{formatTimestamp(message.timestamp)}</p>
+            <p class="text-sm text-white break-words leading-relaxed">{message.content}</p>
             {#if badge}
               <span class="inline-block mt-2 px-2 py-0.5 text-xs rounded {badge.style}">
                 {badge.text}

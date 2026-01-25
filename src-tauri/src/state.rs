@@ -5,6 +5,7 @@ use crate::core::models::ChatMessage;
 use crate::database::Database;
 use crate::tts::TtsManager;
 use std::collections::VecDeque;
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -21,6 +22,8 @@ pub struct AppState {
     pub messages: Arc<RwLock<VecDeque<ChatMessage>>>,
     /// Whether chat monitoring is active
     pub is_monitoring: Arc<RwLock<bool>>,
+    /// Connection ID to detect stale monitoring tasks
+    pub connection_id: Arc<AtomicU64>,
     /// Database connection
     pub database: Arc<RwLock<Option<Database>>>,
     /// Current session ID
@@ -50,6 +53,7 @@ impl AppState {
             websocket_server: Arc::new(RwLock::new(None)),
             messages: Arc::new(RwLock::new(VecDeque::with_capacity(MAX_MESSAGES))),
             is_monitoring: Arc::new(RwLock::new(false)),
+            connection_id: Arc::new(AtomicU64::new(0)),
             database: Arc::new(RwLock::new(database)),
             current_session_id: Arc::new(RwLock::new(None)),
             current_broadcaster_id: Arc::new(RwLock::new(None)),

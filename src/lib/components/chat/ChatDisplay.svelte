@@ -6,9 +6,8 @@
 
   let chatContainer: HTMLDivElement;
 
-  // Auto-scroll setting (checkbox controlled, same as original liscov)
-  // This is the ONLY control for auto-scroll behavior
-  let autoScrollEnabled = $state(true);
+  // Auto-scroll is now controlled by chatStore (synced with FilterPanel)
+  let autoScrollEnabled = $derived(chatStore.autoScroll);
 
   // Flag to temporarily suppress auto-scroll during programmatic scrolling
   let suppressAutoScroll = $state(false);
@@ -56,6 +55,14 @@
     scrollToBottom();
   });
 
+  // Respond to scrollToLatest trigger from FilterPanel
+  $effect(() => {
+    const trigger = chatStore.scrollToLatestTrigger;
+    if (trigger > 0) {
+      scrollToBottom();
+    }
+  });
+
   function handleMessageClick(message: ChatMessage) {
     selectedViewer = {
       channelId: message.channel_id,
@@ -79,7 +86,7 @@
     }
 
     // Disable auto-scroll (same as original liscov)
-    autoScrollEnabled = false;
+    chatStore.setAutoScroll(false);
     suppressAutoScroll = true;
 
     // Highlight the message first (so it's visible when scrolled to)
@@ -106,68 +113,12 @@
   }
 </script>
 
-<div class="flex flex-col h-full bg-[var(--bg-light)]">
-  <!-- Header -->
-  <div class="flex items-center justify-between px-4 py-2 bg-[var(--bg-white)] border-b border-[var(--border-light)]">
-    <div class="flex items-center gap-2">
-      <span class="font-semibold text-[var(--text-primary)]">Chat</span>
-      <span class="text-[var(--text-muted)] text-sm">
-        ({chatStore.filteredMessages.length} messages)
-      </span>
-    </div>
-    <div class="flex items-center gap-3">
-      <!-- Font size controls -->
-      <div class="flex items-center gap-1 text-xs text-[var(--text-muted)]">
-        <button
-          onclick={() => chatStore.decreaseFontSize()}
-          class="w-6 h-6 flex items-center justify-center hover:bg-[var(--bg-light)] rounded transition-colors"
-          title="文字サイズを小さく"
-        >
-          A-
-        </button>
-        <span class="w-8 text-center">{chatStore.messageFontSize}px</span>
-        <button
-          onclick={() => chatStore.increaseFontSize()}
-          class="w-6 h-6 flex items-center justify-center hover:bg-[var(--bg-light)] rounded transition-colors"
-          title="文字サイズを大きく"
-        >
-          A+
-        </button>
-      </div>
-      <!-- Auto-scroll toggle (same as original liscov) -->
-      <label class="flex items-center gap-1 text-xs text-[var(--text-muted)] cursor-pointer">
-        <input
-          type="checkbox"
-          checked={autoScrollEnabled}
-          onchange={(e) => autoScrollEnabled = (e.target as HTMLInputElement).checked}
-          class="w-3 h-3"
-        />
-        自動スクロール
-      </label>
-      <!-- Timestamp toggle -->
-      <label class="flex items-center gap-1 text-xs text-[var(--text-muted)] cursor-pointer">
-        <input
-          type="checkbox"
-          checked={chatStore.showTimestamps}
-          onchange={(e) => chatStore.setShowTimestamps((e.target as HTMLInputElement).checked)}
-          class="w-3 h-3"
-        />
-        時刻
-      </label>
-      <!-- Clear button -->
-      <button
-        onclick={() => chatStore.clearMessages()}
-        class="px-3 py-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-light)] rounded transition-colors border border-transparent hover:border-[var(--border-light)]"
-      >
-        Clear
-      </button>
-    </div>
-  </div>
-
-  <!-- Messages -->
+<div class="flex flex-col h-full bg-[var(--bg-white)] relative">
+  <!-- Messages (no header - controls are in FilterPanel) -->
   <div
     bind:this={chatContainer}
     class="flex-1 overflow-y-auto p-3 space-y-2"
+    style="font-size: {chatStore.messageFontSize}px;"
   >
     {#if chatStore.filteredMessages.length === 0}
       <div class="flex items-center justify-center h-full">
@@ -198,19 +149,5 @@
       onClose={closeViewerPanel}
       onMessageClick={handleViewerMessageClick}
     />
-  {/if}
-
-  <!-- Scroll to bottom button (shown when auto-scroll is disabled) -->
-  {#if !autoScrollEnabled && chatStore.filteredMessages.length > 0}
-    <button
-      onclick={() => {
-        autoScrollEnabled = true;
-        scrollToBottom();
-      }}
-      class="absolute bottom-4 right-4 px-4 py-2 text-white rounded-full shadow-lg transition-colors"
-      style="background: linear-gradient(135deg, var(--primary-start) 0%, var(--primary-end) 100%);"
-    >
-      最新に戻る
-    </button>
   {/if}
 </div>

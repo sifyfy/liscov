@@ -243,10 +243,9 @@ Origin: https://www.youtube.com
 
 | コンポーネント | 役割 |
 |--------------|------|
-| `InputSection.svelte` | URL入力、接続/切断ボタン |
+| `InputSection.svelte` | URL入力、接続/停止ボタン、統計情報表示 |
 | `ChatDisplay.svelte` | メッセージ一覧表示 |
-| `FilterPanel.svelte` | メッセージフィルタリング |
-| `StatisticsPanel.svelte` | 統計情報表示 |
+| `FilterPanel.svelte` | メッセージフィルタリング、表示制御 |
 
 ### Store状態（chat.svelte.ts）
 
@@ -255,10 +254,11 @@ Origin: https://www.youtube.com
 | 状態 | 型 | 説明 |
 |-----|-----|------|
 | `messages` | `ChatMessage[]` | メッセージ配列 |
-| `archivedMessages` | `ChatMessage[]` | アーカイブ済みメッセージ |
 | `filteredMessages` | `ChatMessage[]` | フィルタ済みメッセージ（derived） |
-| `isConnected` | `boolean` | 接続状態 |
-| `isConnecting` | `boolean` | 接続処理中 |
+| `connectionState` | `ConnectionState` | 接続状態（idle/connecting/connected/paused/error） |
+| `isConnected` | `boolean` | 接続状態（derived: connectionState === 'connected'） |
+| `isConnecting` | `boolean` | 接続処理中（derived: connectionState === 'connecting'） |
+| `isPaused` | `boolean` | 一時停止中（derived: connectionState === 'paused'） |
 | `streamTitle` | `string \| null` | 配信タイトル |
 | `broadcasterName` | `string \| null` | 配信者名 |
 | `broadcasterChannelId` | `string \| null` | 配信者チャンネルID |
@@ -272,7 +272,9 @@ Origin: https://www.youtube.com
 |-----|-----|------|
 | `messageFontSize` | `number` | フォントサイズ（10〜24px、デフォルト13px） |
 | `showTimestamps` | `boolean` | タイムスタンプ表示 |
-| `autoScrollEnabled` | `boolean` | 自動スクロール有効 |
+| `autoScroll` | `boolean` | 自動スクロール有効 |
+| `displayLimit` | `number \| null` | 表示件数制限（null=無制限） |
+| `scrollToLatestTrigger` | `number` | スクロールトリガー（インクリメントで発火） |
 
 #### 視聴者情報パネル関連
 
@@ -297,11 +299,40 @@ interface ChatFilter {
 
 | 操作 | 動作 |
 |-----|------|
-| URL入力 + 「Connect」クリック | `connect_to_stream`呼び出し |
-| 「Disconnect」クリック | `disconnect_stream`呼び出し |
+| URL入力 + 「開始」クリック | `connect_to_stream`呼び出し |
+| 「停止」クリック | `disconnect_stream`呼び出し、一時停止状態へ |
+| 「再開」クリック | 一時停止状態から再接続 |
+| 「初期化」クリック | 接続状態をクリア、アイドル状態へ |
 | チャットモード切り替え | `set_chat_mode`呼び出し |
 | フィルタ選択 | ローカルでフィルタリング |
 | フォントサイズ変更 | ローカル設定を更新 |
+
+### 接続状態遷移
+
+```
+                開始
+Idle ─────────────→ Connecting ─────→ Connected
+  ↑                                      │
+  │              初期化                   │ 停止
+  │         ←───────────────           ↓
+  └───────────── Paused ←──────────────┘
+                   │ 再開
+                   └──────→ Connecting → Connected
+```
+
+| 状態 | 説明 | UI表示 |
+|-----|------|-------|
+| `idle` | 未接続、初期状態 | URL入力欄 + 「開始」ボタン |
+| `connecting` | 接続処理中 | 「接続中...」表示 |
+| `connected` | 接続済み、メッセージ受信中 | 配信タイトル + 「停止」ボタン |
+| `paused` | 一時停止中、メッセージ保持 | 「再開」「初期化」ボタン |
+| `error` | エラー発生 | エラーメッセージ表示 |
+
+**一時停止状態の特徴:**
+- メッセージは保持される（クリアされない）
+- 配信情報は保持される
+- 「再開」で同じ配信に再接続可能
+- 「初期化」でアイドル状態に戻る
 
 ## メッセージ表示仕様
 

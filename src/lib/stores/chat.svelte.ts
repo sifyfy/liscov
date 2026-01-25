@@ -5,16 +5,24 @@ import * as chatApi from '$lib/tauri/chat';
 
 const MAX_MESSAGES = 500;
 
+// Connection states: 'idle' | 'connecting' | 'connected' | 'paused' | 'error'
+type ConnectionState = 'idle' | 'connecting' | 'connected' | 'paused' | 'error';
+
 // Reactive state
 let messages = $state<ChatMessage[]>([]);
-let isConnected = $state(false);
+let connectionState = $state<ConnectionState>('idle');
 let streamTitle = $state<string | null>(null);
 let broadcasterName = $state<string | null>(null);
 let broadcasterChannelId = $state<string | null>(null);
+let streamUrl = $state<string | null>(null);
 let isReplay = $state(false);
 let chatMode = $state<ChatMode>('top');
-let isConnecting = $state(false);
 let error = $state<string | null>(null);
+
+// Derived states for backward compatibility
+let isConnected = $derived(connectionState === 'connected');
+let isConnecting = $derived(connectionState === 'connecting');
+let isPaused = $derived(connectionState === 'paused');
 let filter = $state<ChatFilter>({
   showText: true,
   showSuperchat: true,
@@ -28,6 +36,9 @@ const MAX_FONT_SIZE = 24;
 const DEFAULT_FONT_SIZE = 13;
 let messageFontSize = $state(DEFAULT_FONT_SIZE);
 let showTimestamps = $state(true);
+let autoScroll = $state(true);
+let displayLimit = $state<number | null>(null);
+let scrollToLatestTrigger = $state(0); // Increment to trigger scroll
 
 // Derived state: filtered messages
 let filteredMessages = $derived.by(() => {
@@ -59,25 +70,28 @@ let filteredMessages = $derived.by(() => {
 
 // Actions
 async function connect(url: string, mode?: ChatMode): Promise<ConnectionResult> {
-  isConnecting = true;
+  connectionState = 'connecting';
   error = null;
 
   try {
     const result = await chatApi.connectToStream(url, mode);
 
     if (result.success) {
-      isConnected = true;
+      connectionState = 'connected';
       streamTitle = result.stream_title;
       broadcasterName = result.broadcaster_name;
       broadcasterChannelId = result.broadcaster_channel_id;
+      streamUrl = url;
       isReplay = result.is_replay;
       messages = [];
     } else {
+      connectionState = 'error';
       error = result.error;
     }
 
     return result;
   } catch (e) {
+    connectionState = 'error';
     error = e instanceof Error ? e.message : String(e);
     return {
       success: false,
@@ -87,21 +101,86 @@ async function connect(url: string, mode?: ChatMode): Promise<ConnectionResult> 
       is_replay: false,
       error: error
     };
-  } finally {
-    isConnecting = false;
   }
 }
 
-async function disconnect(): Promise<void> {
+// Pause monitoring (preserves messages and stream info)
+async function pause(): Promise<void> {
   try {
     await chatApi.disconnectStream();
   } finally {
-    isConnected = false;
+    connectionState = 'paused';
+    // Keep streamTitle, broadcasterName, messages, etc.
+  }
+}
+
+// Resume monitoring (reconnect to the same stream)
+async function resume(): Promise<ConnectionResult> {
+  if (!streamUrl) {
+    return {
+      success: false,
+      stream_title: null,
+      broadcaster_channel_id: null,
+      broadcaster_name: null,
+      is_replay: false,
+      error: 'No stream URL to resume'
+    };
+  }
+
+  connectionState = 'connecting';
+  error = null;
+
+  try {
+    const result = await chatApi.connectToStream(streamUrl, chatMode);
+
+    if (result.success) {
+      connectionState = 'connected';
+      streamTitle = result.stream_title;
+      broadcasterName = result.broadcaster_name;
+      broadcasterChannelId = result.broadcaster_channel_id;
+      isReplay = result.is_replay;
+      // Don't clear messages on resume
+    } else {
+      connectionState = 'error';
+      error = result.error;
+    }
+
+    return result;
+  } catch (e) {
+    connectionState = 'error';
+    error = e instanceof Error ? e.message : String(e);
+    return {
+      success: false,
+      stream_title: null,
+      broadcaster_channel_id: null,
+      broadcaster_name: null,
+      is_replay: false,
+      error: error
+    };
+  }
+}
+
+// Initialize (clear everything and go back to idle)
+async function initialize(): Promise<void> {
+  try {
+    await chatApi.disconnectStream();
+  } catch {
+    // Ignore errors during cleanup
+  } finally {
+    connectionState = 'idle';
     streamTitle = null;
     broadcasterName = null;
     broadcasterChannelId = null;
+    streamUrl = null;
     isReplay = false;
+    messages = [];
+    error = null;
   }
+}
+
+// Legacy disconnect (alias for pause for backward compatibility)
+async function disconnect(): Promise<void> {
+  await pause();
 }
 
 async function setChatModeAction(mode: ChatMode): Promise<void> {
@@ -137,6 +216,18 @@ function setShowTimestamps(show: boolean): void {
   showTimestamps = show;
 }
 
+function setAutoScroll(enabled: boolean): void {
+  autoScroll = enabled;
+}
+
+function scrollToLatest(): void {
+  scrollToLatestTrigger++;
+}
+
+function setDisplayLimit(limit: number | null): void {
+  displayLimit = limit;
+}
+
 // Event listener setup
 let unlisten: (() => void) | null = null;
 
@@ -149,13 +240,19 @@ async function setupEventListeners(): Promise<void> {
   // Listen for connection status changes
   const unlistenConnection = await listen<ConnectionResult>('chat:connection', (event) => {
     const result = event.payload;
-    isConnected = result.success;
-    streamTitle = result.stream_title;
-    broadcasterName = result.broadcaster_name;
-    broadcasterChannelId = result.broadcaster_channel_id;
-    isReplay = result.is_replay;
+    // Don't update state if paused (preserve stream info during pause)
+    if (connectionState === 'paused') {
+      return;
+    }
 
-    if (!result.success) {
+    if (result.success) {
+      connectionState = 'connected';
+      streamTitle = result.stream_title;
+      broadcasterName = result.broadcaster_name;
+      broadcasterChannelId = result.broadcaster_channel_id;
+      isReplay = result.is_replay;
+    } else {
+      connectionState = 'error';
       error = result.error;
     }
   });
@@ -215,10 +312,28 @@ export const chatStore = {
   get showTimestamps() {
     return showTimestamps;
   },
+  get isPaused() {
+    return isPaused;
+  },
+  get connectionState() {
+    return connectionState;
+  },
+  get autoScroll() {
+    return autoScroll;
+  },
+  get displayLimit() {
+    return displayLimit;
+  },
+  get scrollToLatestTrigger() {
+    return scrollToLatestTrigger;
+  },
 
   // Actions
   connect,
   disconnect,
+  pause,
+  resume,
+  initialize,
   setChatMode: setChatModeAction,
   setFilter,
   clearMessages,
@@ -226,6 +341,9 @@ export const chatStore = {
   increaseFontSize,
   decreaseFontSize,
   setShowTimestamps,
+  setAutoScroll,
+  scrollToLatest,
+  setDisplayLimit,
   setupEventListeners,
   cleanup
 };

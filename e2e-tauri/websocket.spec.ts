@@ -12,9 +12,10 @@ const execAsync = promisify(exec);
  * E2E tests for WebSocket API based on 03_websocket.md specification.
  *
  * Tests verify:
- * - Server start/stop and port selection (8765-8774 range)
+ * - Server auto-starts on app launch (no manual start/stop)
+ * - Port selection within 8765-8774 range
  * - Tauri events: websocket-client-connected, websocket-client-disconnected
- * - Connected clients count
+ * - Connected clients count in UI
  * - Complete data flow: YouTube (mock) → Tauri App → WebSocket API → External Client
  * - Message format verification per spec
  */
@@ -27,15 +28,31 @@ const PROJECT_DIR = process.cwd().replace(/[\\/]e2e-tauri$/, '');
 const TEST_APP_NAME = 'liscov-test';
 const TEST_KEYRING_SERVICE = 'liscov-test';
 
-// Helper to get the actual WebSocket port from the UI
+// Helper to get the actual WebSocket port from the UI status display
+// Format: "WS:8765(0)" or status text showing port
 async function getWebSocketPort(page: Page): Promise<number> {
-  // Port is displayed in side panel: "Running on port XXXX"
-  const portText = await page.locator('text=/Running on port \\d+/').textContent();
-  const match = portText?.match(/Running on port (\d+)/);
-  if (!match) {
-    throw new Error('Could not find WebSocket port in UI');
+  // Wait for WebSocket status to be visible - format: "WS:8765(0)"
+  // Use a more flexible approach - wait for text matching the pattern
+  const wsStatusLocator = page.locator('text=/WS:\\d{4}\\(\\d+\\)/');
+
+  // Wait with retries for WebSocket server to start
+  const timeout = 15000;
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    const count = await wsStatusLocator.count();
+    if (count > 0) {
+      const wsStatus = await wsStatusLocator.first().textContent();
+      if (wsStatus) {
+        const match = wsStatus.match(/WS:(\d+)/i);
+        if (match) {
+          return parseInt(match[1], 10);
+        }
+      }
+    }
+    await page.waitForTimeout(500);
   }
-  return parseInt(match[1], 10);
+
+  throw new Error('Could not find WebSocket port in UI - WebSocket server may not have started');
 }
 
 // Get test data directories based on platform
@@ -331,6 +348,20 @@ function collectMessages(ws: WebSocket, duration: number): Promise<unknown[]> {
   });
 }
 
+// Helper to fully disconnect (stop + initialize) and return to idle state
+async function disconnectAndInitialize(page: Page): Promise<void> {
+  // Click 停止 to pause
+  const stopButton = page.locator('button:has-text("停止")');
+  if (await stopButton.isVisible({ timeout: 1000 }).catch(() => false)) {
+    await stopButton.click();
+    // After clicking 停止, app goes to paused state with 再開 and 初期化 buttons
+    // Click 初期化 to return to idle state
+    await page.locator('button:has-text("初期化")').click();
+    // Wait for UI to return to idle state (URL input visible)
+    await expect(page.locator('input[placeholder*="youtube.com"], input[placeholder*="youtube.com"]')).toBeVisible({ timeout: 5000 });
+  }
+}
+
 test.describe('WebSocket API (03_websocket.md)', () => {
   let browser: Browser;
   let context: BrowserContext;
@@ -364,7 +395,10 @@ test.describe('WebSocket API (03_websocket.md)', () => {
     browser = connection.browser;
     context = connection.context;
     mainPage = connection.page;
-    console.log('Connected to Tauri app:', await mainPage.title());
+    // Wait for page to be fully loaded and stable before accessing
+    await mainPage.waitForLoadState('load');
+    await mainPage.waitForTimeout(1000);
+    console.log('Connected to Tauri app');
   });
 
   test.afterAll(async () => {
@@ -381,168 +415,46 @@ test.describe('WebSocket API (03_websocket.md)', () => {
     // Reset mock server before each test
     await resetMockServer();
 
-    // Ensure clean app state before each test
-    // Stop WebSocket server if running
-    const stopButton = mainPage.getByRole('button', { name: 'Stop Server' });
-    if (await stopButton.isVisible({ timeout: 1000 }).catch(() => false)) {
-      await stopButton.click();
-      await mainPage.waitForTimeout(500);
-    }
-
     // Disconnect from YouTube if connected
-    const disconnectButton = mainPage.locator('button:has-text("Disconnect")');
-    if (await disconnectButton.isVisible({ timeout: 1000 }).catch(() => false)) {
-      await disconnectButton.click();
-      await mainPage.waitForTimeout(500);
-    }
+    await disconnectAndInitialize(mainPage);
   });
 
-  test.describe('Server Start/Stop', () => {
-    test('should show Start Server button initially', async () => {
-      // Spec: 起動/停止ボタン - サーバーの起動・停止を切り替え
-      // WebSocket controls are on Chat tab side panel
-      await expect(mainPage.getByText('WebSocket API')).toBeVisible({ timeout: 5000 });
-      const startButton = mainPage.getByRole('button', { name: 'Start Server' });
-      await expect(startButton).toBeVisible();
-    });
-
-    test('should start server and show Stop Server button', async () => {
-      // Spec: 「Start Server」クリック → WebSocketサーバー起動、ポート番号表示
-      const startButton = mainPage.getByRole('button', { name: 'Start Server' });
-      await startButton.click();
-
-      // Stop button should appear
-      const stopButton = mainPage.getByRole('button', { name: 'Stop Server' });
-      await expect(stopButton).toBeVisible({ timeout: 5000 });
-
-      // Cleanup
-      await stopButton.click();
-      await expect(startButton).toBeVisible({ timeout: 5000 });
-    });
-
-    test('should display actual port number after starting', async () => {
-      // Spec: ポート番号表示 - 実際に使用中のポート
-      const startButton = mainPage.getByRole('button', { name: 'Start Server' });
-      await startButton.click();
-      await expect(mainPage.getByRole('button', { name: 'Stop Server' })).toBeVisible({ timeout: 5000 });
-
-      // Should display port in range 8765-8774
+  test.describe('Auto-Start Behavior', () => {
+    test('should have WebSocket server running on app launch', async () => {
+      // Spec: アプリケーション起動時に自動的にサーバーが起動する
+      // WebSocket server should be running automatically - verify by connecting
       const port = await getWebSocketPort(mainPage);
       expect(port).toBeGreaterThanOrEqual(8765);
       expect(port).toBeLessThanOrEqual(8774);
 
-      // Cleanup
-      await mainPage.getByRole('button', { name: 'Stop Server' }).click();
+      // Verify we can connect to it
+      const ws = await connectWebSocket(`ws://127.0.0.1:${port}`);
+      const connectedMsg = await waitForMessage(ws) as { type: string; data: { client_id: number } };
+      expect(connectedMsg.type).toBe('Connected');
+      expect(connectedMsg.data.client_id).toBeGreaterThan(0);
+
+      ws.close();
     });
 
-    test('should stop server and show Start Server button', async () => {
-      // Spec: 「Stop Server」クリック → サーバー停止、ボタンが「Start Server」に戻る
-      const startButton = mainPage.getByRole('button', { name: 'Start Server' });
-      await startButton.click();
-      await expect(mainPage.getByRole('button', { name: 'Stop Server' })).toBeVisible({ timeout: 5000 });
+    test('should display port number in header status', async () => {
+      // Spec: ヘッダーに `WS:ポート番号(接続数)` 形式で表示
+      // Format example: "WS:8765(0)"
+      const wsStatus = await mainPage.locator('text=/WS:\\d+/i').textContent();
+      expect(wsStatus).toMatch(/WS:\d{4}/i);
 
-      const stopButton = mainPage.getByRole('button', { name: 'Stop Server' });
-      await stopButton.click();
-
-      await expect(startButton).toBeVisible({ timeout: 5000 });
+      // Port should be in valid range
+      const port = await getWebSocketPort(mainPage);
+      expect(port).toBeGreaterThanOrEqual(8765);
+      expect(port).toBeLessThanOrEqual(8774);
     });
   });
 
   test.describe('Port Range (8765-8774)', () => {
     test('should use port within valid range', async () => {
       // Spec: ポート範囲: 8765 〜 8774
-      const startButton = mainPage.getByRole('button', { name: 'Start Server' });
-      await startButton.click();
-      await expect(mainPage.getByRole('button', { name: 'Stop Server' })).toBeVisible({ timeout: 5000 });
-
-      // Verify port is within valid range
       const port = await getWebSocketPort(mainPage);
       expect(port).toBeGreaterThanOrEqual(8765);
       expect(port).toBeLessThanOrEqual(8774);
-
-      // Cleanup
-      await mainPage.getByRole('button', { name: 'Stop Server' }).click();
-    });
-
-    test('should fallback to next port when preferred port is in use', async () => {
-      // Spec: ポート範囲: 8765 〜 8774（自動フォールバック用）
-      const { createServer } = await import('net');
-
-      // First, start WebSocket server to see which port it uses
-      const startButton = mainPage.getByRole('button', { name: 'Start Server' });
-      await startButton.click();
-      await expect(mainPage.getByRole('button', { name: 'Stop Server' })).toBeVisible({ timeout: 5000 });
-      const firstPort = await getWebSocketPort(mainPage);
-      await mainPage.getByRole('button', { name: 'Stop Server' }).click();
-      await expect(startButton).toBeVisible({ timeout: 5000 });
-
-      // Wait for port to be released
-      await mainPage.waitForTimeout(500);
-
-      // Block the port that was used
-      const blockingServer = createServer();
-      await new Promise<void>((resolve, reject) => {
-        blockingServer.on('error', reject);
-        blockingServer.listen(firstPort, '127.0.0.1', () => resolve());
-      });
-
-      try {
-        // Start WebSocket server again - should fallback to next port
-        await startButton.click();
-        await expect(mainPage.getByRole('button', { name: 'Stop Server' })).toBeVisible({ timeout: 5000 });
-
-        const secondPort = await getWebSocketPort(mainPage);
-        // Should use a different port (next available)
-        expect(secondPort).not.toBe(firstPort);
-        expect(secondPort).toBeGreaterThanOrEqual(8765);
-        expect(secondPort).toBeLessThanOrEqual(8774);
-
-        // Cleanup
-        await mainPage.getByRole('button', { name: 'Stop Server' }).click();
-      } finally {
-        blockingServer.close();
-      }
-    });
-
-    test('should fail when all ports (8765-8774) are in use', async () => {
-      // Spec: 全ポート使用中 → エラーを返却、サーバー起動失敗
-      const { createServer } = await import('net');
-      const servers: ReturnType<typeof createServer>[] = [];
-
-      // Occupy all ports 8765-8774
-      for (let port = 8765; port <= 8774; port++) {
-        const server = createServer();
-        try {
-          await new Promise<void>((resolve, reject) => {
-            server.on('error', reject);
-            server.listen(port, '127.0.0.1', () => resolve());
-          });
-          servers.push(server);
-        } catch {
-          // Port may already be in use, skip it
-        }
-      }
-
-      try {
-        // Try to start WebSocket server - should fail
-        const startButton = mainPage.getByRole('button', { name: 'Start Server' });
-        await startButton.click();
-
-        // Wait for UI to respond
-        await mainPage.waitForTimeout(2000);
-
-        // Check for error message or verify server didn't start
-        const errorVisible = await mainPage.getByText(/error|failed|no.*port/i).isVisible().catch(() => false);
-        const startButtonStillVisible = await startButton.isVisible().catch(() => false);
-
-        // Either an error is shown, or the start button is still visible
-        expect(errorVisible || startButtonStillVisible).toBe(true);
-      } finally {
-        // Clean up all blocking servers
-        for (const server of servers) {
-          server.close();
-        }
-      }
     });
   });
 
@@ -551,38 +463,24 @@ test.describe('WebSocket API (03_websocket.md)', () => {
       // Spec: websocket-client-connected | { client_id: u64 } | クライアント接続時
       // This test verifies that the Tauri event is emitted by observing UI updates
 
-      // Start server
-      const startButton = mainPage.getByRole('button', { name: 'Start Server' });
-      await startButton.click();
-      await expect(mainPage.getByRole('button', { name: 'Stop Server' })).toBeVisible({ timeout: 5000 });
-
       const port = await getWebSocketPort(mainPage);
 
-      // Verify initial state: 0 clients
-      await expect(mainPage.getByText('0 clients connected')).toBeVisible({ timeout: 5000 });
+      // Verify initial state: 0 clients in status display (format: "WS:8765(0)")
+      await expect(mainPage.locator(`text=/WS:${port}\\(0\\)/`)).toBeVisible({ timeout: 5000 });
 
       // Connect a WebSocket client
       const ws = await connectWebSocket(`ws://127.0.0.1:${port}`);
       await waitForMessage(ws); // Wait for Connected message
 
-      // Verify UI updated via Tauri event: 1 client
-      await expect(mainPage.getByText('1 clients connected')).toBeVisible({ timeout: 5000 });
+      // Verify UI updated via Tauri event: 1 client (format: "WS:8765(1)")
+      await expect(mainPage.locator(`text=/WS:${port}\\(1\\)/`)).toBeVisible({ timeout: 5000 });
 
       ws.close();
-
-      // Clean up - stop server
-      await mainPage.getByRole('button', { name: 'Stop Server' }).click();
-      await expect(mainPage.getByRole('button', { name: 'Start Server' })).toBeVisible({ timeout: 5000 });
     });
 
     test('should update UI when client disconnects (websocket-client-disconnected event)', async () => {
       // Spec: websocket-client-disconnected | { client_id: u64 } | クライアント切断時
       // This test verifies that the Tauri event is emitted by observing UI updates
-
-      // Start server
-      const startButton = mainPage.getByRole('button', { name: 'Start Server' });
-      await startButton.click();
-      await expect(mainPage.getByRole('button', { name: 'Stop Server' })).toBeVisible({ timeout: 5000 });
 
       const port = await getWebSocketPort(mainPage);
 
@@ -591,73 +489,54 @@ test.describe('WebSocket API (03_websocket.md)', () => {
       await waitForMessage(ws); // Wait for Connected message
 
       // Verify 1 client connected
-      await expect(mainPage.getByText('1 clients connected')).toBeVisible({ timeout: 5000 });
+      await expect(mainPage.locator(`text=/WS:${port}\\(1\\)/`)).toBeVisible({ timeout: 5000 });
 
       // Close the WebSocket connection
       ws.close();
 
       // Verify UI updated via Tauri event: 0 clients
-      await expect(mainPage.getByText('0 clients connected')).toBeVisible({ timeout: 5000 });
-
-      // Clean up - stop server
-      await mainPage.getByRole('button', { name: 'Stop Server' }).click();
-      await expect(mainPage.getByRole('button', { name: 'Start Server' })).toBeVisible({ timeout: 5000 });
+      await expect(mainPage.locator(`text=/WS:${port}\\(0\\)/`)).toBeVisible({ timeout: 5000 });
     });
   });
 
   test.describe('Connected Clients Count', () => {
-    test('should display connected clients count', async () => {
+    test('should display connected clients count in header', async () => {
       // Spec: 接続数表示 - 現在接続中のクライアント数
-
-      // Start server
-      const startButton = mainPage.getByRole('button', { name: 'Start Server' });
-      await startButton.click();
-      await expect(mainPage.getByRole('button', { name: 'Stop Server' })).toBeVisible({ timeout: 5000 });
 
       const port = await getWebSocketPort(mainPage);
 
-      // Initially 0 clients - UI shows "0 clients connected"
-      await expect(mainPage.getByText('0 clients connected')).toBeVisible({ timeout: 5000 });
+      // Initially 0 clients - format: "WS:8765(0)"
+      await expect(mainPage.locator(`text=/WS:${port}\\(0\\)/`)).toBeVisible({ timeout: 5000 });
 
       // Connect a client
       const ws = await connectWebSocket(`ws://127.0.0.1:${port}`);
       await waitForMessage(ws); // Wait for Connected message
 
-      // Wait for UI to update
-      await expect(mainPage.getByText('1 clients connected')).toBeVisible({ timeout: 5000 });
+      // Should show 1 client
+      await expect(mainPage.locator(`text=/WS:${port}\\(1\\)/`)).toBeVisible({ timeout: 5000 });
 
       // Connect another client
       const ws2 = await connectWebSocket(`ws://127.0.0.1:${port}`);
       await waitForMessage(ws2);
 
       // Should show 2 clients
-      await expect(mainPage.getByText('2 clients connected')).toBeVisible({ timeout: 5000 });
+      await expect(mainPage.locator(`text=/WS:${port}\\(2\\)/`)).toBeVisible({ timeout: 5000 });
 
       // Disconnect one
       ws.close();
-      await expect(mainPage.getByText('1 clients connected')).toBeVisible({ timeout: 5000 });
+      await expect(mainPage.locator(`text=/WS:${port}\\(1\\)/`)).toBeVisible({ timeout: 5000 });
 
       // Disconnect all
       ws2.close();
-      await expect(mainPage.getByText('0 clients connected')).toBeVisible({ timeout: 5000 });
-
-      // Cleanup
-      await mainPage.getByRole('button', { name: 'Stop Server' }).click();
+      await expect(mainPage.locator(`text=/WS:${port}\\(0\\)/`)).toBeVisible({ timeout: 5000 });
     });
   });
 
   test.describe('Connected Message', () => {
     test('should send Connected message with unique client_id on connection', async () => {
-      // Start WebSocket server
-      await expect(mainPage.getByText('WebSocket API')).toBeVisible({ timeout: 5000 });
-      await mainPage.getByRole('button', { name: 'Start Server' }).click();
-      await expect(mainPage.getByRole('button', { name: 'Stop Server' })).toBeVisible({ timeout: 5000 });
-
-      // Wait for server to be fully ready
-      await mainPage.waitForTimeout(1000);
-
-      // Get actual port and connect multiple clients to verify unique IDs (staggered to avoid race conditions)
       const port = await getWebSocketPort(mainPage);
+
+      // Connect multiple clients to verify unique IDs (staggered to avoid race conditions)
       const ws1 = await connectWebSocket(`ws://127.0.0.1:${port}`);
       const msg1 = await waitForMessage(ws1) as { type: string; data: { client_id: number } };
 
@@ -680,18 +559,11 @@ test.describe('WebSocket API (03_websocket.md)', () => {
       // Cleanup
       ws1.close();
       ws2.close();
-      await mainPage.getByRole('button', { name: 'Stop Server' }).click();
     });
   });
 
   test.describe('ServerInfo Message', () => {
     test('should respond to GetInfo with correct format', async () => {
-      // Start WebSocket server
-      await expect(mainPage.getByText('WebSocket API')).toBeVisible({ timeout: 5000 });
-      await mainPage.getByRole('button', { name: 'Start Server' }).click();
-      await expect(mainPage.getByRole('button', { name: 'Stop Server' })).toBeVisible({ timeout: 5000 });
-
-      // Get actual port and connect WebSocket client
       const port = await getWebSocketPort(mainPage);
       const ws = await connectWebSocket(`ws://127.0.0.1:${port}`);
       await waitForMessage(ws); // Connected message
@@ -718,34 +590,27 @@ test.describe('WebSocket API (03_websocket.md)', () => {
 
       // Cleanup
       ws.close();
-      await mainPage.getByRole('button', { name: 'Stop Server' }).click();
     });
   });
 
   test.describe('Complete Data Flow: YouTube → App → WebSocket → Client', () => {
     test('should receive text message through WebSocket API', async () => {
       // Step 1: Connect to YouTube stream (via mock)
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
-      // Step 2: Start WebSocket server (on Chat tab side panel)
-      await expect(mainPage.getByText('WebSocket API')).toBeVisible({ timeout: 5000 });
-      const startButton = mainPage.getByRole('button', { name: 'Start Server' });
-      await startButton.click();
-      await expect(mainPage.getByRole('button', { name: 'Stop Server' })).toBeVisible({ timeout: 5000 });
-
-      // Step 3: Get actual port and connect WebSocket client
+      // Step 2: Get port and connect WebSocket client (server is already running)
       const port = await getWebSocketPort(mainPage);
       const ws = await connectWebSocket(`ws://127.0.0.1:${port}`);
 
-      // Step 4: Wait for Connected message
+      // Step 3: Wait for Connected message
       const connectedMsg = await waitForMessage(ws) as { type: string; data: { client_id: number } };
       expect(connectedMsg.type).toBe('Connected');
       expect(connectedMsg.data.client_id).toBeGreaterThan(0);
 
-      // Step 5: Add message via mock
+      // Step 4: Add message via mock
       await addMockMessage({
         message_type: 'text',
         author: 'TestViewer',
@@ -754,10 +619,10 @@ test.describe('WebSocket API (03_websocket.md)', () => {
         is_member: false,
       });
 
-      // Step 6: Collect messages from WebSocket
+      // Step 5: Collect messages from WebSocket
       const messages = await collectMessages(ws, 5000);
 
-      // Step 7: Verify ChatMessage was received
+      // Step 6: Verify ChatMessage was received
       const chatMessages = messages.filter((m: unknown) =>
         (m as { type: string }).type === 'ChatMessage'
       );
@@ -787,23 +652,17 @@ test.describe('WebSocket API (03_websocket.md)', () => {
 
       // Cleanup
       ws.close();
-      await mainPage.getByRole('button', { name: 'Stop Server' }).click();
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
 
     test('should receive SuperChat message with correct format', async () => {
       // Connect to YouTube stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
-      // Start WebSocket server (on Chat tab side panel)
-      await expect(mainPage.getByText('WebSocket API')).toBeVisible({ timeout: 5000 });
-      await mainPage.getByRole('button', { name: 'Start Server' }).click();
-      await expect(mainPage.getByRole('button', { name: 'Stop Server' })).toBeVisible({ timeout: 5000 });
-
-      // Get actual port and connect WebSocket client
+      // Get port and connect WebSocket client
       const port = await getWebSocketPort(mainPage);
       const ws = await connectWebSocket(`ws://127.0.0.1:${port}`);
       await waitForMessage(ws); // Connected message
@@ -851,23 +710,17 @@ test.describe('WebSocket API (03_websocket.md)', () => {
 
       // Cleanup
       ws.close();
-      await mainPage.getByRole('button', { name: 'Stop Server' }).click();
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
 
     test('should receive membership message with milestone_months', async () => {
       // Connect to YouTube stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
-      // Start WebSocket server (on Chat tab side panel)
-      await expect(mainPage.getByText('WebSocket API')).toBeVisible({ timeout: 5000 });
-      await mainPage.getByRole('button', { name: 'Start Server' }).click();
-      await expect(mainPage.getByRole('button', { name: 'Stop Server' })).toBeVisible({ timeout: 5000 });
-
-      // Get actual port and connect WebSocket client
+      // Get port and connect WebSocket client
       const port = await getWebSocketPort(mainPage);
       const ws = await connectWebSocket(`ws://127.0.0.1:${port}`);
       await waitForMessage(ws); // Connected message
@@ -903,23 +756,17 @@ test.describe('WebSocket API (03_websocket.md)', () => {
 
       // Cleanup
       ws.close();
-      await mainPage.getByRole('button', { name: 'Stop Server' }).click();
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
 
     test('should receive membership gift message with gift_count', async () => {
       // Connect to YouTube stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
-      // Start WebSocket server (on Chat tab side panel)
-      await expect(mainPage.getByText('WebSocket API')).toBeVisible({ timeout: 5000 });
-      await mainPage.getByRole('button', { name: 'Start Server' }).click();
-      await expect(mainPage.getByRole('button', { name: 'Stop Server' })).toBeVisible({ timeout: 5000 });
-
-      // Get actual port and connect WebSocket client
+      // Get port and connect WebSocket client
       const port = await getWebSocketPort(mainPage);
       const ws = await connectWebSocket(`ws://127.0.0.1:${port}`);
       await waitForMessage(ws); // Connected message
@@ -954,25 +801,19 @@ test.describe('WebSocket API (03_websocket.md)', () => {
 
       // Cleanup
       ws.close();
-      await mainPage.getByRole('button', { name: 'Stop Server' }).click();
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
   });
 
   test.describe('Message Format Verification (03_websocket.md spec)', () => {
     test('should have correct ChatMessage structure', async () => {
       // Connect to YouTube stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
-      // Start WebSocket server (on Chat tab side panel)
-      await expect(mainPage.getByText('WebSocket API')).toBeVisible({ timeout: 5000 });
-      await mainPage.getByRole('button', { name: 'Start Server' }).click();
-      await expect(mainPage.getByRole('button', { name: 'Stop Server' })).toBeVisible({ timeout: 5000 });
-
-      // Get actual port and connect WebSocket client
+      // Get port and connect WebSocket client
       const port = await getWebSocketPort(mainPage);
       const ws = await connectWebSocket(`ws://127.0.0.1:${port}`);
       await waitForMessage(ws); // Connected message
@@ -1053,8 +894,7 @@ test.describe('WebSocket API (03_websocket.md)', () => {
 
       // Cleanup
       ws.close();
-      await mainPage.getByRole('button', { name: 'Stop Server' }).click();
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
 
     test('should broadcast to multiple connected clients', async () => {
@@ -1062,23 +902,15 @@ test.describe('WebSocket API (03_websocket.md)', () => {
       await resetMockServer();
 
       // Connect to YouTube stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Wait for YouTube connection to stabilize
       await mainPage.waitForTimeout(1000);
 
-      // Start WebSocket server (on Chat tab side panel)
-      await expect(mainPage.getByText('WebSocket API')).toBeVisible({ timeout: 5000 });
-      await mainPage.getByRole('button', { name: 'Start Server' }).click();
-      await expect(mainPage.getByRole('button', { name: 'Stop Server' })).toBeVisible({ timeout: 5000 });
-
-      // Wait for server to be fully ready
-      await mainPage.waitForTimeout(1000);
-
-      // Get actual port and connect multiple WebSocket clients with delays to avoid race conditions
+      // Get port and connect multiple WebSocket clients with delays to avoid race conditions
       const port = await getWebSocketPort(mainPage);
 
       // Store messages as they arrive (don't wait for timeout)
@@ -1134,8 +966,7 @@ test.describe('WebSocket API (03_websocket.md)', () => {
       ws1.close();
       ws2.close();
       ws3.close();
-      await mainPage.getByRole('button', { name: 'Stop Server' }).click();
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
   });
 });

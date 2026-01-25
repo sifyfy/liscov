@@ -1,4 +1,5 @@
 // WebSocket state management using Svelte 5 runes
+// WebSocket server auto-starts on app launch - no manual start/stop needed
 import type { WebSocketStatus } from '$lib/types';
 import * as wsApi from '$lib/tauri/websocket';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
@@ -7,8 +8,8 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 let isRunning = $state(false);
 let actualPort = $state<number | null>(null);
 let connectedClients = $state(0);
-let isStarting = $state(false);
 let error = $state<string | null>(null);
+let initialized = $state(false);
 
 // Event listeners
 let unlistenConnect: UnlistenFn | null = null;
@@ -40,45 +41,43 @@ async function cleanupEventListeners(): Promise<void> {
   }
 }
 
-// Actions
-async function start(port?: number): Promise<void> {
-  isStarting = true;
-  error = null;
+// Initialize store - called once on first use
+// Polls for WebSocket server to be ready (auto-starts on app launch)
+async function init(): Promise<void> {
+  if (initialized) return;
 
   try {
-    const result = await wsApi.websocketStart(port);
-    isRunning = true;
-    actualPort = result.actual_port;
-    connectedClients = 0;
-    // Setup event listeners for client connect/disconnect
+    // Set up event listeners for client connect/disconnect
     await setupEventListeners();
+
+    // Poll for WebSocket server to be ready (it auto-starts on app launch)
+    // Give it up to 10 seconds to start
+    const maxWait = 10000;
+    const pollInterval = 500;
+    const start = Date.now();
+
+    while (Date.now() - start < maxWait) {
+      await refreshStatus();
+      if (isRunning) {
+        break;
+      }
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+    }
+
+    initialized = true;
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
-    isRunning = false;
-    actualPort = null;
-  } finally {
-    isStarting = false;
   }
 }
 
-async function stop(): Promise<void> {
-  try {
-    await wsApi.websocketStop();
-  } finally {
-    // Cleanup event listeners
-    await cleanupEventListeners();
-    isRunning = false;
-    actualPort = null;
-    connectedClients = 0;
-  }
-}
-
+// Refresh status from backend
 async function refreshStatus(): Promise<void> {
   try {
     const status = await wsApi.websocketGetStatus();
     isRunning = status.is_running;
     actualPort = status.actual_port;
     connectedClients = status.connected_clients;
+    error = null;
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
   }
@@ -96,15 +95,14 @@ export const websocketStore = {
   get connectedClients() {
     return connectedClients;
   },
-  get isStarting() {
-    return isStarting;
-  },
   get error() {
     return error;
   },
+  get initialized() {
+    return initialized;
+  },
 
   // Actions
-  start,
-  stop,
+  init,
   refreshStatus
 };

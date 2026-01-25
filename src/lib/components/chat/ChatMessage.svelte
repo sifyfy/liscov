@@ -20,40 +20,68 @@
     return null;
   });
 
-  // Determine container styles based on message type and actual YouTube colors
+  // Determine container styles based on message type (original liscov style: left border frame)
   let containerStyle = $derived(() => {
-    const baseStyle = 'bg-[var(--bg-card)] border border-[var(--border-light)] rounded-lg shadow-sm';
+    // Base style: white background with left border frame (original liscov style)
+    const baseStyle = 'bg-white rounded shadow-sm';
+
+    switch (message.message_type) {
+      case 'superchat':
+        // SuperChat: gradient background with YouTube colors
+        return `${baseStyle} border-l-4`;
+      case 'supersticker':
+        // SuperSticker: similar to SuperChat
+        return `${baseStyle} border-l-4`;
+      case 'membership':
+        // Membership: green gradient (new member or milestone)
+        return `${baseStyle} border-l-4`;
+      case 'membership_gift':
+        // Membership gift: blue gradient
+        return `${baseStyle} border-l-4`;
+      case 'system':
+        // System message: blue left border
+        return `${baseStyle} border-l-4`;
+      default:
+        // Normal text: primary color left border, member gets green background
+        if (message.is_member) {
+          return `${baseStyle} border-l-4`;
+        }
+        return `${baseStyle} border-l-4`;
+    }
+  });
+
+  // Dynamic inline style for message type (original liscov style with left frame)
+  let dynamicStyle = $derived(() => {
     const colors = superchatColors();
 
     switch (message.message_type) {
       case 'superchat':
         if (colors) {
-          return `${baseStyle} border-l-4`;
+          return `border-left-color: ${colors.header_background}; background: linear-gradient(135deg, ${colors.body_background} 0%, ${colors.header_background}33 100%);`;
         }
-        return `${baseStyle} border-l-4 border-l-yellow-500 bg-yellow-50`;
+        return 'border-left-color: #f6ad55; background: linear-gradient(135deg, #fff7ed 0%, #fed7aa 100%);';
       case 'supersticker':
         if (colors) {
-          return `${baseStyle} border-l-4`;
+          return `border-left-color: ${colors.header_background}; background: ${colors.body_background};`;
         }
-        return `${baseStyle} border-l-4 border-l-orange-500 bg-orange-50`;
+        return 'border-left-color: #fc8181; background: #fef2f2;';
       case 'membership':
-        return `${baseStyle} border-l-4 border-l-[var(--member-border)] bg-[var(--member-bg)]`;
+        // Check if milestone
+        if (message.metadata?.milestone_months) {
+          return 'border-left-color: #9f7aea; background: linear-gradient(135deg, #faf5ff 0%, #e9d5ff 100%);';
+        }
+        return 'border-left-color: #48bb78; background: linear-gradient(135deg, #f0fff4 0%, #c6f6d5 100%);';
       case 'membership_gift':
-        return `${baseStyle} border-l-4 border-l-emerald-500 bg-emerald-50`;
+        return 'border-left-color: #4299e1; background: linear-gradient(135deg, #eff6ff 0%, #bfdbfe 100%);';
       case 'system':
-        return `${baseStyle} border-l-4 border-l-blue-500 bg-blue-50`;
+        return 'border-left-color: #4299e1; background: #eff6ff;';
       default:
-        return baseStyle;
+        // Normal text or member
+        if (message.is_member) {
+          return 'border-left-color: #16a34a; background: #f0f9f0;';
+        }
+        return 'border-left-color: #667eea; background: white;';
     }
-  });
-
-  // Dynamic inline style for SuperChat actual colors
-  let dynamicStyle = $derived(() => {
-    const colors = superchatColors();
-    if (colors && (message.message_type === 'superchat' || message.message_type === 'supersticker')) {
-      return `border-left-color: ${colors.header_background}; background: linear-gradient(135deg, ${colors.body_background}22 0%, ${colors.header_background}22 100%);`;
-    }
-    return '';
   });
 
   // Format timestamp to HH:MM:SS in local timezone

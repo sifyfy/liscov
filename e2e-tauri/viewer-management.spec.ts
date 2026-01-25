@@ -235,6 +235,20 @@ async function startTauriApp(): Promise<void> {
   await waitForCDP();
 }
 
+// Helper to fully disconnect (stop + initialize) and return to idle state
+async function disconnectAndInitialize(page: Page): Promise<void> {
+  // Click 停止 to pause
+  const stopButton = page.locator('button:has-text("停止")');
+  if (await stopButton.isVisible({ timeout: 1000 }).catch(() => false)) {
+    await stopButton.click();
+    // After clicking 停止, app goes to paused state with 再開 and 初期化 buttons
+    // Click 初期化 to return to idle state
+    await page.locator('button:has-text("初期化")').click();
+    // Wait for UI to return to idle state (URL input visible)
+    await expect(page.locator('input[placeholder*="YouTube URL"], input[placeholder*="youtube.com"], input[placeholder*="Enter YouTube URL"]')).toBeVisible({ timeout: 5000 });
+  }
+}
+
 // Use test.describe.serial to ensure tests run in order and share state
 test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
   let browser: Browser;
@@ -267,10 +281,13 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
     browser = connection.browser;
     context = connection.context;
     mainPage = connection.page;
-    console.log('Connected to Tauri app:', await mainPage.title());
+    // Wait for page to be fully loaded and stable before accessing
+    await mainPage.waitForLoadState('load');
+    await mainPage.waitForTimeout(1000);
+    console.log('Connected to Tauri app');
 
     // Step 6: Authenticate first (required for chat connection)
-    await mainPage.getByRole('button', { name: 'Settings' }).click();
+    await mainPage.locator('button:has-text("Settings")').click();
     await expect(mainPage.getByRole('heading', { name: 'YouTube認証' })).toBeVisible();
 
     const loginButton = mainPage.getByRole('button', { name: 'YouTubeにログイン' });
@@ -317,14 +334,14 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
     // Step 8: Navigate to Chat tab and connect to mock chat to generate viewer data
     // THIS IS THE CRITICAL SCENARIO: connecting to a stream creates broadcaster + viewer data
     console.log('Connecting to mock chat to generate viewer data...');
-    await mainPage.getByRole('button', { name: 'Chat' }).click();
+    await mainPage.locator('button:has-text("Chat")').click();
 
     // Enter mock stream URL (full URL format to pass validation)
     // Note: The URL validation accepts localhost URLs with /watch?v= format
-    const urlInput = mainPage.getByPlaceholder(/Enter YouTube URL or Video ID/i);
+    const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
     await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test123`);
 
-    const connectButton = mainPage.getByRole('button', { name: 'Connect' });
+    const connectButton = mainPage.getByRole('button', { name: '開始' });
     await connectButton.click();
 
     // Wait for connection success - look for stream title or connected state
@@ -354,8 +371,8 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
   test.describe('Viewer Management Page', () => {
     test.beforeEach(async () => {
       // Navigate to Viewers tab
-      await mainPage.getByRole('button', { name: 'Viewers' }).click();
-      await expect(mainPage.getByRole('heading', { name: 'Viewer Management' })).toBeVisible();
+      await mainPage.locator('button:has-text("Viewer")').click();
+      await expect(mainPage.getByRole('heading', { name: 'Viewer Management' }).first()).toBeVisible();
     });
 
     test('should use consistent color scheme with CSS variables (not hard-coded colors)', async () => {
@@ -366,7 +383,8 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
       // - Bug: text-purple-300 (light purple, high luminance ~210)
       // - Fixed: text-[var(--text-primary)] (dark text, low luminance ~60)
 
-      const heading = mainPage.getByRole('heading', { name: 'Viewer Management' });
+      // Select the h2 heading (not h1 in header) as it uses CSS variables
+      const heading = mainPage.locator('h2').filter({ hasText: 'Viewer Management' });
       await expect(heading).toBeVisible();
 
       // Get heading color and convert to RGB
@@ -579,8 +597,8 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
   test.describe('Viewer Edit Modal', () => {
     test.beforeEach(async () => {
       // Navigate to Viewers tab and select a broadcaster
-      await mainPage.getByRole('button', { name: 'Viewers' }).click();
-      await expect(mainPage.getByRole('heading', { name: 'Viewer Management' })).toBeVisible();
+      await mainPage.locator('button:has-text("Viewer")').click();
+      await expect(mainPage.getByRole('heading', { name: 'Viewer Management' }).first()).toBeVisible();
 
       const broadcasterSelect = mainPage.locator('#broadcaster-select');
       const options = await broadcasterSelect.locator('option').all();
@@ -804,8 +822,8 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
     test('should show viewers from connected stream after selecting broadcaster', async () => {
       // After connecting to a stream and receiving messages,
       // viewers should be visible in the Viewer Management
-      await mainPage.getByRole('button', { name: 'Viewers' }).click();
-      await expect(mainPage.getByRole('heading', { name: 'Viewer Management' })).toBeVisible();
+      await mainPage.locator('button:has-text("Viewer")').click();
+      await expect(mainPage.getByRole('heading', { name: 'Viewer Management' }).first()).toBeVisible();
 
       const broadcasterSelect = mainPage.locator('#broadcaster-select');
       const options = await broadcasterSelect.locator('option').all();
@@ -828,8 +846,8 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
 
     test('should be able to edit viewer info for viewers from connected stream', async () => {
       // Verify that we can edit viewer info for viewers we received via the stream
-      await mainPage.getByRole('button', { name: 'Viewers' }).click();
-      await expect(mainPage.getByRole('heading', { name: 'Viewer Management' })).toBeVisible();
+      await mainPage.locator('button:has-text("Viewer")').click();
+      await expect(mainPage.getByRole('heading', { name: 'Viewer Management' }).first()).toBeVisible();
 
       const broadcasterSelect = mainPage.locator('#broadcaster-select');
       const options = await broadcasterSelect.locator('option').all();
@@ -862,8 +880,8 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
 
     test('should persist viewer data across page navigation', async () => {
       // Verify data persists when navigating away and back
-      await mainPage.getByRole('button', { name: 'Viewers' }).click();
-      await expect(mainPage.getByRole('heading', { name: 'Viewer Management' })).toBeVisible();
+      await mainPage.locator('button:has-text("Viewer")').click();
+      await expect(mainPage.getByRole('heading', { name: 'Viewer Management' }).first()).toBeVisible();
 
       const broadcasterSelect = mainPage.locator('#broadcaster-select');
       const options = await broadcasterSelect.locator('option').all();
@@ -873,12 +891,12 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
         await expect(mainPage.locator('table')).toBeVisible({ timeout: 5000 });
 
         // Navigate to Chat tab
-        await mainPage.getByRole('button', { name: 'Chat' }).click();
+        await mainPage.locator('button:has-text("Chat")').click();
         await new Promise(resolve => setTimeout(resolve, 500));
 
         // Navigate back to Viewers tab
-        await mainPage.getByRole('button', { name: 'Viewers' }).click();
-        await expect(mainPage.getByRole('heading', { name: 'Viewer Management' })).toBeVisible();
+        await mainPage.locator('button:has-text("Viewer")').click();
+        await expect(mainPage.getByRole('heading', { name: 'Viewer Management' }).first()).toBeVisible();
 
         // Re-select the broadcaster
         await broadcasterSelect.selectOption({ index: 1 });
@@ -906,8 +924,8 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
 
       // Step 1: We're already connected to Broadcaster A (UC_mock) from beforeAll
       // Navigate to Viewers tab and set up reading for a viewer on Broadcaster A
-      await mainPage.getByRole('button', { name: 'Viewers' }).click();
-      await expect(mainPage.getByRole('heading', { name: 'Viewer Management' })).toBeVisible();
+      await mainPage.locator('button:has-text("Viewer")').click();
+      await expect(mainPage.getByRole('heading', { name: 'Viewer Management' }).first()).toBeVisible();
 
       const broadcasterSelect = mainPage.locator('#broadcaster-select');
       let options = await broadcasterSelect.locator('option').all();
@@ -947,12 +965,8 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
       console.log('Reading saved for Broadcaster A');
 
       // Step 2: Disconnect from current stream
-      await mainPage.getByRole('button', { name: 'Chat' }).click();
-      const disconnectButton = mainPage.getByRole('button', { name: 'Disconnect' });
-      if (await disconnectButton.isVisible()) {
-        await disconnectButton.click();
-        await expect(mainPage.getByRole('button', { name: 'Connect' })).toBeVisible({ timeout: 5000 });
-      }
+      await mainPage.locator('button:has-text("Chat")').click();
+      await disconnectAndInitialize(mainPage);
 
       // Step 3: Configure mock server to use Broadcaster B
       console.log('Switching to Broadcaster B...');
@@ -979,9 +993,9 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
       });
 
       // Step 4: Connect to Broadcaster B
-      const urlInput = mainPage.getByPlaceholder(/Enter YouTube URL or Video ID/i);
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_b_123`);
-      await mainPage.getByRole('button', { name: 'Connect' }).click();
+      await mainPage.getByRole('button', { name: '開始' }).click();
 
       // Wait for connection
       await expect(mainPage.getByText('Mock Live Stream B').first()).toBeVisible({ timeout: 15000 });
@@ -991,8 +1005,8 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
       await new Promise(resolve => setTimeout(resolve, 3000));
 
       // Step 5: Navigate to Viewer Management and check Broadcaster B
-      await mainPage.getByRole('button', { name: 'Viewers' }).click();
-      await expect(mainPage.getByRole('heading', { name: 'Viewer Management' })).toBeVisible();
+      await mainPage.locator('button:has-text("Viewer")').click();
+      await expect(mainPage.getByRole('heading', { name: 'Viewer Management' }).first()).toBeVisible();
 
       // Refresh broadcaster list and find Broadcaster B
       options = await broadcasterSelect.locator('option').all();
@@ -1077,8 +1091,8 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
      */
     test('should increment message_count when new messages are received', async () => {
       // Navigate to Viewers tab
-      await mainPage.getByRole('button', { name: 'Viewers' }).click();
-      await expect(mainPage.getByRole('heading', { name: 'Viewer Management' })).toBeVisible();
+      await mainPage.locator('button:has-text("Viewer")').click();
+      await expect(mainPage.getByRole('heading', { name: 'Viewer Management' }).first()).toBeVisible();
 
       const broadcasterSelect = mainPage.locator('#broadcaster-select');
       const options = await broadcasterSelect.locator('option').all();
@@ -1103,8 +1117,8 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
 
     test('should update total_contribution when superchat is received', async () => {
       // Navigate to Viewers tab
-      await mainPage.getByRole('button', { name: 'Viewers' }).click();
-      await expect(mainPage.getByRole('heading', { name: 'Viewer Management' })).toBeVisible();
+      await mainPage.locator('button:has-text("Viewer")').click();
+      await expect(mainPage.getByRole('heading', { name: 'Viewer Management' }).first()).toBeVisible();
 
       const broadcasterSelect = mainPage.locator('#broadcaster-select');
       const options = await broadcasterSelect.locator('option').all();
@@ -1140,8 +1154,8 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
      * 検索方式: 部分一致 LIKE "%{検索文字}%"
      */
     test.beforeEach(async () => {
-      await mainPage.getByRole('button', { name: 'Viewers' }).click();
-      await expect(mainPage.getByRole('heading', { name: 'Viewer Management' })).toBeVisible();
+      await mainPage.locator('button:has-text("Viewer")').click();
+      await expect(mainPage.getByRole('heading', { name: 'Viewer Management' }).first()).toBeVisible();
 
       const broadcasterSelect = mainPage.locator('#broadcaster-select');
       const options = await broadcasterSelect.locator('option').all();
@@ -1244,8 +1258,8 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
   // the delete test removes data that other tests depend on
   test.describe('Broadcaster Management (Destructive - Run Last)', () => {
     test.beforeEach(async () => {
-      await mainPage.getByRole('button', { name: 'Viewers' }).click();
-      await expect(mainPage.getByRole('heading', { name: 'Viewer Management' })).toBeVisible();
+      await mainPage.locator('button:has-text("Viewer")').click();
+      await expect(mainPage.getByRole('heading', { name: 'Viewer Management' }).first()).toBeVisible();
     });
 
     test('should show delete broadcaster button when broadcaster is selected', async () => {

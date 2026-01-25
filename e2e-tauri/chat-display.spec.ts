@@ -283,6 +283,20 @@ async function getTokenValidation(): Promise<TokenValidation> {
   return response.json();
 }
 
+// Helper to fully disconnect (stop + initialize) and return to idle state
+async function disconnectAndInitialize(page: Page): Promise<void> {
+  // Click 停止 to pause
+  const stopButton = page.locator('button:has-text("停止")');
+  if (await stopButton.isVisible({ timeout: 1000 }).catch(() => false)) {
+    await stopButton.click();
+    // After clicking 停止, app goes to paused state with 再開 and 初期化 buttons
+    // Click 初期化 to return to idle state
+    await page.locator('button:has-text("初期化")').click();
+    // Wait for UI to return to idle state (URL input visible)
+    await expect(page.locator('input[placeholder*="youtube.com"], input[placeholder*="youtube.com"]')).toBeVisible({ timeout: 5000 });
+  }
+}
+
 test.describe('Chat Display Feature (02_chat.md)', () => {
   let browser: Browser;
   let context: BrowserContext;
@@ -316,7 +330,10 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
     browser = connection.browser;
     context = connection.context;
     mainPage = connection.page;
-    console.log('Connected to Tauri app:', await mainPage.title());
+    // Wait for page to be fully loaded and stable before accessing
+    await mainPage.waitForLoadState('load');
+    await mainPage.waitForTimeout(1000);
+    console.log('Connected to Tauri app');
   });
 
   test.afterAll(async () => {
@@ -337,30 +354,27 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
   test.describe('Stream Connection', () => {
     test('should connect to a stream and show stream info', async () => {
       // Enter mock video URL
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await expect(urlInput).toBeVisible();
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
 
       // Click Connect button
-      const connectButton = mainPage.locator('button:has-text("Connect")');
+      const connectButton = mainPage.locator('button:has-text("開始")');
       await connectButton.click();
 
       // Wait for connection - should show stream title (use first() to avoid strict mode violation)
+      // UI prioritizes streamTitle over broadcasterName, so only streamTitle is displayed
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
-      // Should show broadcaster name
-      await expect(mainPage.getByText('Mock Broadcaster').first()).toBeVisible();
-
       // Disconnect after test
-      const disconnectButton = mainPage.locator('button:has-text("Disconnect")');
-      await disconnectButton.click();
+      await disconnectAndInitialize(mainPage);
     });
 
     test('should receive and display chat messages', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Add mock messages
@@ -388,16 +402,16 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await expect(mainPage.locator('text=Member message here')).toBeVisible();
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
   });
 
   test.describe('Author Name Color Coding', () => {
     test('should display member names in green (#059669) and non-member names in blue (#2563eb)', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Use unique identifiers to avoid text matching issues
@@ -458,16 +472,16 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       expect(memberColor).toMatch(/rgb\(5,\s*150,\s*105\)/);
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
   });
 
   test.describe('SuperChat and Special Messages', () => {
     test('should display SuperChat with amount', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Add SuperChat message
@@ -489,14 +503,14 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await expect(mainPage.locator('text=Super Chat')).toBeVisible();
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
 
     test('should display membership message', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Add membership message
@@ -514,7 +528,7 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await expect(mainPage.getByText('New Member').first()).toBeVisible();
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
 
     test('should display SuperChat with YouTube-specified tier colors', async () => {
@@ -524,9 +538,9 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       // - These should be applied via inline styles for border-left-color and background gradient
 
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Add SuperChat with 'blue' tier (0x1565C0 = rgb(21, 101, 192))
@@ -575,16 +589,16 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       expect(styleAttr).toContain('linear-gradient');
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
 
     test('should display different SuperChat tiers with their respective colors', async () => {
       // Test multiple SuperChat tiers to verify color differentiation
 
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Add red tier SuperChat (0xD00000 = rgb(208, 0, 0))
@@ -615,16 +629,16 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       expect(hasRedColor).toBeTruthy();
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
   });
 
   test.describe('ViewerInfoPanel and Scroll', () => {
     test('should open ViewerInfoPanel when clicking a message', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Add message
@@ -652,14 +666,14 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await closeButton.click();
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
 
     test('should scroll to message when clicking past comment in panel', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Add multiple messages from the same user
@@ -723,14 +737,14 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await viewerPanel.locator('button:has-text("✕")').click();
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
 
     test('should have data-message-id attribute on messages', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Add message
@@ -750,7 +764,7 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       expect(messageId).toMatch(/^mock_msg_\d+$/);
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
   });
 
@@ -762,7 +776,7 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       const initialNum = parseInt(initialSize?.replace('px', '') || '13');
 
       // Click increase button
-      const increaseButton = mainPage.locator('button[title="文字サイズを大きく"]');
+      const increaseButton = mainPage.locator('button[title="文字を大きく"]');
       await increaseButton.click();
       await mainPage.waitForTimeout(100);
 
@@ -779,7 +793,7 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       const initialNum = parseInt(initialSize?.replace('px', '') || '13');
 
       // Click decrease button
-      const decreaseButton = mainPage.locator('button[title="文字サイズを小さく"]');
+      const decreaseButton = mainPage.locator('button[title="文字を小さく"]');
       await decreaseButton.click();
       await mainPage.waitForTimeout(100);
 
@@ -791,9 +805,9 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
 
     test('should toggle timestamp display', async () => {
       // Connect to stream and add message
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       await addMockMessage({
@@ -805,7 +819,7 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await mainPage.waitForTimeout(3000);
 
       // Get timestamp toggle
-      const timestampToggle = mainPage.locator('label:has-text("時刻") input[type="checkbox"]');
+      const timestampToggle = mainPage.locator('label:has-text("タイムスタンプ") input[type="checkbox"]');
 
       // If checked, timestamps should be visible
       const isChecked = await timestampToggle.isChecked();
@@ -824,121 +838,93 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       }
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
   });
 
   test.describe('Chat Mode Selection', () => {
-    test('should have chat mode options in filter panel', async () => {
-      // Expand filter panel
-      const filtersButton = mainPage.locator('button:has-text("Filters")');
-      await filtersButton.click();
-      await mainPage.waitForTimeout(300);
+    test('should have chat mode toggle button in connection area', async () => {
+      // Chat mode toggle button should be visible in the connection area
+      // Default mode is 'top' which shows as "🔝 トップ"
+      const chatModeButton = mainPage.locator('button[title="チャットモード切り替え"]');
+      await expect(chatModeButton).toBeVisible();
 
-      // Chat mode options should be visible
-      await expect(mainPage.locator('text=Chat mode:')).toBeVisible();
-      await expect(mainPage.locator('span:has-text("Top Chat")')).toBeVisible();
-      await expect(mainPage.locator('span:has-text("All Chat")')).toBeVisible();
-
-      // Close filter panel for next test
-      await filtersButton.click();
+      // Should show either "トップ" or "全て"
+      const buttonText = await chatModeButton.textContent();
+      expect(buttonText).toMatch(/トップ|全て/);
     });
 
     test('should switch from TopChat to AllChat while connected', async () => {
       // Connect to stream (default is TopChat)
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Wait for initial messages
       await mainPage.waitForTimeout(2000);
 
-      // Open filter panel
-      const filtersButton = mainPage.locator('button:has-text("Filters")');
-      await filtersButton.click();
+      // Chat mode toggle button should be visible
+      const chatModeButton = mainPage.locator('button[title="チャットモード切り替え"]');
+      await expect(chatModeButton).toBeVisible();
 
-      // Wait for filter panel content to be visible
-      await expect(mainPage.locator('text=Chat mode:')).toBeVisible({ timeout: 5000 });
+      // Default mode should be TopChat (shows "🔝 トップ")
+      await expect(chatModeButton).toHaveText(/トップ/);
 
-      // Find radio buttons by their associated label text
-      const topChatLabel = mainPage.locator('label').filter({ hasText: 'Top Chat' });
-      const allChatLabel = mainPage.locator('label').filter({ hasText: 'All Chat' });
-      const topChatRadio = topChatLabel.locator('input[type="radio"]');
-      const allChatRadio = allChatLabel.locator('input[type="radio"]');
+      // Click to switch to AllChat
+      await chatModeButton.click();
+      await mainPage.waitForTimeout(500);
 
-      // TopChat should be checked initially
-      await expect(topChatRadio).toBeChecked({ timeout: 5000 });
-      await expect(allChatRadio).not.toBeChecked();
-
-      // Click AllChat to switch mode
-      await allChatLabel.click();
-      await mainPage.waitForTimeout(1000);
-
-      // Verify AllChat is now selected
-      await expect(allChatRadio).toBeChecked();
-      await expect(topChatRadio).not.toBeChecked();
-
-      // Close filter panel
-      await filtersButton.click();
+      // Verify switched to AllChat (shows "💬 全て")
+      await expect(chatModeButton).toHaveText(/全て/);
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
 
     test('should switch from AllChat to TopChat while connected', async () => {
-      // Connect to stream with AllChat mode
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      // Connect to stream
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
 
-      // Open filter panel and select AllChat before connecting
-      const filtersButton = mainPage.locator('button:has-text("Filters")');
-      await filtersButton.click();
-      await mainPage.waitForTimeout(500);
+      // Chat mode toggle button should be visible (before connecting too)
+      const chatModeButton = mainPage.locator('button[title="チャットモード切り替え"]');
 
-      const topChatLabel = mainPage.locator('label').filter({ hasText: 'Top Chat' });
-      const allChatLabel = mainPage.locator('label').filter({ hasText: 'All Chat' });
-      const topChatRadio = topChatLabel.locator('input[type="radio"]');
-      const allChatRadio = allChatLabel.locator('input[type="radio"]');
+      // Ensure we're in AllChat mode before connecting
+      // (previous test may have left it in a different state)
+      const buttonText = await chatModeButton.textContent();
+      if (buttonText?.includes('トップ')) {
+        await chatModeButton.click();
+        await mainPage.waitForTimeout(300);
+      }
+      await expect(chatModeButton).toHaveText(/全て/);
 
-      await allChatLabel.click();
-      await mainPage.waitForTimeout(500);
-
-      // Close filter panel and connect
-      await filtersButton.click();
-      await mainPage.locator('button:has-text("Connect")').click();
+      // Connect
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Wait for messages
       await mainPage.waitForTimeout(2000);
 
-      // Open filter panel
-      await filtersButton.click();
+      // Verify still in AllChat mode
+      await expect(chatModeButton).toHaveText(/全て/);
+
+      // Switch back to TopChat
+      await chatModeButton.click();
       await mainPage.waitForTimeout(500);
 
-      // Verify AllChat is selected
-      await expect(allChatRadio).toBeChecked();
-
-      // Switch to TopChat
-      await topChatLabel.click();
-      await mainPage.waitForTimeout(1000);
-
-      // Verify TopChat is now selected
-      await expect(topChatRadio).toBeChecked();
-      await expect(allChatRadio).not.toBeChecked();
-
-      // Close filter panel
-      await filtersButton.click();
+      // Verify switched to TopChat
+      await expect(chatModeButton).toHaveText(/トップ/);
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
 
     test('should receive messages after switching chat mode', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Add messages for TopChat mode
@@ -954,17 +940,10 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await expect(mainPage.locator('text=TopChatUser')).toBeVisible();
       await expect(mainPage.locator('text=Message in TopChat mode')).toBeVisible();
 
-      // Switch to AllChat mode
-      const filtersButton = mainPage.locator('button:has-text("Filters")');
-      await filtersButton.click();
-      await mainPage.waitForTimeout(500);
-
-      const allChatLabel = mainPage.locator('label').filter({ hasText: 'All Chat' });
-      await allChatLabel.click();
+      // Switch to AllChat mode using toggle button
+      const chatModeButton = mainPage.locator('button[title="チャットモード切り替え"]');
+      await chatModeButton.click();
       await mainPage.waitForTimeout(1000);
-
-      // Close filter panel
-      await filtersButton.click();
 
       // Add messages for AllChat mode
       await addMockMessage({
@@ -980,7 +959,7 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await expect(mainPage.locator('text=Message in AllChat mode')).toBeVisible();
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
 
     test('should modify continuation token when switching chat mode (backend verification)', async () => {
@@ -992,32 +971,29 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       // Reset mock server state and ensure TopChat is selected in the app
       await fetch(`${MOCK_SERVER_URL}/reset`, { method: 'POST' });
 
-      // Ensure TopChat is selected before connecting
-      const filtersButton = mainPage.locator('button:has-text("Filters")');
-      await filtersButton.click();
-      await mainPage.waitForTimeout(300);
-      const topChatLabel = mainPage.locator('label').filter({ hasText: 'Top Chat' });
-      const allChatLabel = mainPage.locator('label').filter({ hasText: 'All Chat' });
-      const topChatRadio = topChatLabel.locator('input[type="radio"]');
-      const allChatRadio = allChatLabel.locator('input[type="radio"]');
+      // Chat mode toggle button
+      const chatModeButton = mainPage.locator('button[title="チャットモード切り替え"]');
 
-      await topChatLabel.click();
-      await filtersButton.click();
-      await mainPage.waitForTimeout(300);
+      // Ensure TopChat is selected before connecting
+      // (previous test may have left it in a different state)
+      const buttonText = await chatModeButton.textContent();
+      if (buttonText?.includes('全て')) {
+        await chatModeButton.click();
+        await mainPage.waitForTimeout(300);
+      }
+      await expect(chatModeButton).toHaveText(/トップ/);
 
       // Connect to stream (default is TopChat)
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Wait for initial polling to establish chat mode
       await mainPage.waitForTimeout(3000);
 
       // Verify initial state: UI shows TopChat AND backend uses TopChat token
-      await filtersButton.click();
-      await mainPage.waitForTimeout(300);
-      await expect(topChatRadio).toBeChecked();
+      await expect(chatModeButton).toHaveText(/トップ/);
 
       // Check detailed token validation for TopChat
       const topChatValidation = await getTokenValidation();
@@ -1031,11 +1007,11 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       expect(initialBackendMode, 'Backend should use TopChat token when UI shows TopChat').toBe('TopChat');
 
       // Switch to AllChat mode in UI
-      await allChatLabel.click();
+      await chatModeButton.click();
       await mainPage.waitForTimeout(3000);
 
       // Verify AllChat state: UI shows AllChat AND backend uses AllChat token
-      await expect(allChatRadio).toBeChecked();
+      await expect(chatModeButton).toHaveText(/全て/);
 
       // Check detailed token validation for AllChat
       const allChatValidation = await getTokenValidation();
@@ -1048,11 +1024,11 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       expect(allChatBackendMode, 'Backend should use AllChat token when UI shows AllChat').toBe('AllChat');
 
       // Switch back to TopChat in UI
-      await topChatLabel.click();
+      await chatModeButton.click();
       await mainPage.waitForTimeout(3000);
 
       // Verify TopChat state again: UI shows TopChat AND backend uses TopChat token
-      await expect(topChatRadio).toBeChecked();
+      await expect(chatModeButton).toHaveText(/トップ/);
 
       // Final token validation
       const finalValidation = await getTokenValidation();
@@ -1062,61 +1038,51 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       const topChatBackendMode = await getChatModeStatus();
       expect(topChatBackendMode, 'Backend should use TopChat token when UI shows TopChat').toBe('TopChat');
 
-      // Close filter panel and disconnect
-      await filtersButton.click();
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      // Disconnect
+      await disconnectAndInitialize(mainPage);
     });
 
     test('should persist chat mode selection across reconnection', async () => {
-      // Open filter panel and select AllChat
-      const filtersButton = mainPage.locator('button:has-text("Filters")');
-      await filtersButton.click();
-      await mainPage.waitForTimeout(500);
+      // Chat mode toggle button
+      const chatModeButton = mainPage.locator('button[title="チャットモード切り替え"]');
 
-      const allChatLabel = mainPage.locator('label').filter({ hasText: 'All Chat' });
-      const allChatRadio = allChatLabel.locator('input[type="radio"]');
-      await allChatLabel.click();
-      await mainPage.waitForTimeout(500);
-      await filtersButton.click();
+      // Switch to AllChat before connecting
+      await chatModeButton.click();
+      await mainPage.waitForTimeout(300);
+      await expect(chatModeButton).toHaveText(/全て/);
 
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
       await mainPage.waitForTimeout(1000);
 
-      // Open filter panel and verify AllChat is still selected
-      await filtersButton.click();
-      await mainPage.waitForTimeout(500);
-      await expect(allChatRadio).toBeChecked();
+      // Verify AllChat is still selected after disconnect
+      await expect(chatModeButton).toHaveText(/全て/);
 
       // Reconnect
-      await filtersButton.click();
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_456`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
-      // Open filter panel and verify AllChat is still selected after reconnection
-      await filtersButton.click();
-      await mainPage.waitForTimeout(500);
-      await expect(allChatRadio).toBeChecked();
+      // Verify AllChat is still selected after reconnection
+      await expect(chatModeButton).toHaveText(/全て/);
 
       // Disconnect
-      await filtersButton.click();
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
   });
 
   test.describe('Clear Messages', () => {
     test('should clear all messages when clicking Clear button', async () => {
       // Connect and add messages
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       await addMockMessage({
@@ -1128,14 +1094,18 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await mainPage.waitForTimeout(3000);
       await expect(mainPage.locator('text=ClearTestUser')).toBeVisible();
 
-      // Click Clear button
-      await mainPage.locator('button:has-text("Clear")').click();
+      // Click Clear button (in control bar)
+      await mainPage.locator('button:has-text("クリア")').first().click();
+
+      // Confirmation dialog appears - click the confirm button in the dialog
+      await expect(mainPage.getByRole('heading', { name: 'メッセージをクリア' })).toBeVisible();
+      await mainPage.locator('div.fixed button:has-text("クリア")').click();
 
       // Message should be gone
       await expect(mainPage.locator('text=ClearTestUser')).not.toBeVisible();
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
   });
 
@@ -1158,9 +1128,9 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await setStreamState({ member_only: true, require_auth: true });
 
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=member_only_video`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
 
       // Should connect successfully with auth
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
@@ -1177,7 +1147,7 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await expect(mainPage.locator('text=MemberOnlyUser')).toBeVisible();
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
 
       // Reset stream state
       await setStreamState({ member_only: false, require_auth: false });
@@ -1191,15 +1161,15 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await setStreamState({ title: fullTitle });
 
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=hashtag_title_test`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
 
       // Wait for connection
       await expect(mainPage.getByText('【雑談配信】').first()).toBeVisible({ timeout: 10000 });
 
-      // Find the title element specifically (in InputSection - the font-semibold truncate p tag)
-      const titleElement = mainPage.locator('p.font-semibold.truncate').first();
+      // Find the title element specifically (in InputSection - the div with truncate class)
+      const titleElement = mainPage.locator('div.truncate.bg-white').first();
       await expect(titleElement).toBeVisible();
 
       // Get the full text content of the title element (even if visually truncated)
@@ -1210,10 +1180,10 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       expect(titleTextContent).toContain('#vtuber');
       expect(titleTextContent).toContain('#ゲーム実況');
       expect(titleTextContent).toContain('#参加型');
-      expect(titleTextContent).toBe(fullTitle);
+      expect(titleTextContent?.trim()).toBe(fullTitle);
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
 
       // Reset stream state
       await setStreamState({ title: '' });
@@ -1225,15 +1195,16 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await setStreamState({ title: fullTitle });
 
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=special_title_test`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
 
       // Wait for connection
       await expect(mainPage.getByText('🎮 Gaming Stream').first()).toBeVisible({ timeout: 10000 });
 
-      // Find the title element specifically
-      const titleElement = mainPage.locator('p.font-semibold.truncate').first();
+      // Find the title element specifically (in InputSection - the div with truncate class)
+      const titleElement = mainPage.locator('div.truncate.bg-white').first();
+      await expect(titleElement).toBeVisible();
       const titleTextContent = await titleElement.textContent();
       console.log(`Title text content: "${titleTextContent}"`);
 
@@ -1243,10 +1214,10 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       expect(titleTextContent).toContain('#live');
       expect(titleTextContent).toContain('#fun');
       expect(titleTextContent).toContain('@everyone!');
-      expect(titleTextContent).toBe(fullTitle);
+      expect(titleTextContent?.trim()).toBe(fullTitle);
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
 
       // Reset stream state
       await setStreamState({ title: '' });
@@ -1254,9 +1225,9 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
 
     test('should display messages with hashtags correctly', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Add message with hashtag
@@ -1274,14 +1245,14 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await expect(mainPage.getByText('#ゲーム実況')).toBeVisible();
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
 
     test('should display messages with various special characters', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Add message with special characters
@@ -1298,14 +1269,14 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await expect(mainPage.getByText('💖')).toBeVisible();
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
 
     test('should display messages with URLs', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Add message with URL
@@ -1321,14 +1292,14 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await expect(mainPage.getByText('https://example.com/path?param=value&foo=bar')).toBeVisible();
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
 
     test('should display long messages without breaking layout', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Add long message
@@ -1352,16 +1323,16 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       expect(hasBreakWords).toBeGreaterThan(0);
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
   });
 
   test.describe('Additional Message Types', () => {
     test('should display SuperSticker with amount', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Add SuperSticker message
@@ -1380,16 +1351,16 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await expect(mainPage.locator('text=Super Sticker')).toBeVisible();
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
 
     test('should display membership milestone message', async () => {
       // Milestone months are extracted from badge tooltip (e.g., "Member (12 months)")
 
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Add membership milestone message
@@ -1408,16 +1379,16 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await expect(mainPage.locator('text=Welcome to Channel')).toBeVisible();
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
 
     test('should display membership gift message', async () => {
       // Gift messages use liveChatSponsorshipsGiftPurchaseAnnouncementRenderer
 
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Add membership gift message
@@ -1432,19 +1403,20 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
 
       // Verify gift message is displayed
       await expect(mainPage.locator('text=GenerousGifter')).toBeVisible();
-      await expect(mainPage.getByText('10').first()).toBeVisible();
+      // Check for gift count in the message content (e.g., "Sent 10 Channel gift memberships")
+      await expect(mainPage.locator('text=/\\b10\\b.*gift/i').first()).toBeVisible();
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
   });
 
   test.describe('Filter Functionality', () => {
     test('should filter messages by type - SuperChat only', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Add mixed messages
@@ -1460,16 +1432,17 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await expect(mainPage.locator('text=MemberUser')).toBeVisible();
 
       // Open filter panel
-      await mainPage.locator('button:has-text("Filters")').click();
+      await mainPage.locator('button:has-text("フィルター")').click();
+      await mainPage.waitForTimeout(300);
 
-      // Uncheck text messages
-      const textFilter = mainPage.locator('label').filter({ hasText: 'Text' }).locator('input[type="checkbox"]');
+      // Uncheck text messages (labeled as "通常" in Japanese UI)
+      const textFilter = mainPage.locator('label').filter({ hasText: '通常' }).locator('input[type="checkbox"]');
       if (await textFilter.isChecked()) {
         await textFilter.uncheck();
       }
 
-      // Uncheck membership messages
-      const membershipFilter = mainPage.locator('label').filter({ hasText: 'Membership' }).locator('input[type="checkbox"]');
+      // Uncheck membership messages (labeled as "メンバー" in Japanese UI)
+      const membershipFilter = mainPage.locator('label').filter({ hasText: 'メンバー' }).locator('input[type="checkbox"]');
       if (await membershipFilter.isChecked()) {
         await membershipFilter.uncheck();
       }
@@ -1490,14 +1463,14 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       }
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
 
     test('should filter messages by search query', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Add messages with different content
@@ -1508,7 +1481,7 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await mainPage.waitForTimeout(3000);
 
       // Open filter panel
-      await mainPage.locator('button:has-text("Filters")').click();
+      await mainPage.locator('button:has-text("フィルター")').click();
 
       // Find search input - try different selectors
       const searchInput = mainPage.locator('input[type="text"]').filter({ hasText: '' }).nth(1);
@@ -1536,20 +1509,23 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       }
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
   });
 
   test.describe('Auto-Scroll Behavior', () => {
     test('should auto-scroll to new messages when checkbox is enabled', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
-      // Verify auto-scroll checkbox is ON by default
+      // Ensure auto-scroll checkbox is ON (may be affected by previous tests)
       const autoScrollCheckbox = mainPage.locator('label').filter({ hasText: '自動スクロール' }).locator('input[type="checkbox"]');
+      if (!(await autoScrollCheckbox.isChecked())) {
+        await autoScrollCheckbox.check();
+      }
       await expect(autoScrollCheckbox).toBeChecked();
 
       // Add many messages to create scroll
@@ -1563,7 +1539,7 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await expect(mainPage.locator('text=Message 20')).toBeVisible();
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
 
     test('should scroll exactly to bottom (not partial scroll)', async () => {
@@ -1571,9 +1547,9 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       // Bug: Sometimes scroll stops short of the actual bottom
 
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Add many messages to create scrollable content
@@ -1604,7 +1580,7 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       expect(scrollInfo.distanceFromBottom).toBeLessThanOrEqual(30);
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
 
     test('should maintain auto-scroll when many messages arrive at once (checkbox stays ON)', async () => {
@@ -1612,9 +1588,9 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       // Bug: Previously, adding many messages would cause auto-scroll to be incorrectly disabled
 
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Verify auto-scroll checkbox is ON
@@ -1631,9 +1607,8 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       // Checkbox should still be ON
       await expect(autoScrollCheckbox).toBeChecked();
 
-      // "最新に戻る" button should NOT be visible (auto-scroll is ON)
-      const scrollButton = mainPage.locator('button:has-text("最新に戻る")');
-      await expect(scrollButton).not.toBeVisible();
+      // Note: "最新に戻る" button is always visible in current UI design
+      // (it allows manual scroll regardless of auto-scroll state)
 
       // Now add many messages rapidly (simulating burst of chat messages)
       for (let i = 1; i <= 20; i++) {
@@ -1649,9 +1624,6 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       // CRITICAL: Checkbox should still be ON (not automatically unchecked)
       await expect(autoScrollCheckbox).toBeChecked();
 
-      // CRITICAL: "最新に戻る" button should still NOT be visible
-      await expect(scrollButton).not.toBeVisible();
-
       // Find the chat container and verify we're at the bottom
       const chatContainer = mainPage.locator('.overflow-y-auto').filter({
         has: mainPage.locator('[data-message-id]'),
@@ -1663,16 +1635,16 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       expect(scrollInfo.distanceFromBottom).toBeLessThanOrEqual(30);
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
 
-    test('should show 最新に戻る button only when auto-scroll checkbox is OFF', async () => {
-      // This test verifies that the button appears ONLY when checkbox is unchecked
+    test('should scroll to latest when clicking 最新に戻る button', async () => {
+      // This test verifies that the button scrolls to latest and enables auto-scroll
 
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Add messages
@@ -1682,37 +1654,31 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
 
       await mainPage.waitForTimeout(4000);
 
-      // Button should not be visible initially (checkbox is ON)
+      // The "最新に戻る" button is always visible in current UI design
       const scrollButton = mainPage.locator('button:has-text("最新に戻る")');
-      await expect(scrollButton).not.toBeVisible();
+      await expect(scrollButton).toBeVisible();
 
       // Uncheck the auto-scroll checkbox
       const autoScrollCheckbox = mainPage.locator('label').filter({ hasText: '自動スクロール' }).locator('input[type="checkbox"]');
       await autoScrollCheckbox.uncheck();
       await mainPage.waitForTimeout(200);
 
-      // Now the button SHOULD be visible
-      await expect(scrollButton).toBeVisible();
-
-      // Click the button to re-enable auto-scroll
+      // Click the button to scroll to latest and re-enable auto-scroll
       await scrollButton.click();
       await mainPage.waitForTimeout(500);
 
-      // Button should disappear (checkbox is now ON again)
-      await expect(scrollButton).not.toBeVisible();
-
-      // Checkbox should be checked again
+      // Checkbox should be checked again (auto-scroll re-enabled)
       await expect(autoScrollCheckbox).toBeChecked();
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
 
     test('should have auto-scroll checkbox that controls scrolling', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Find auto-scroll checkbox
@@ -1755,16 +1721,16 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await expect(autoScrollCheckbox).toBeChecked();
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
   });
 
   test.describe('ViewerInfoPanel Details', () => {
     test('should display channel ID in viewer panel', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Add message with specific channel ID
@@ -1788,14 +1754,14 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await mainPage.locator('button:has-text("✕")').click();
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
 
     test('should have reading (furigana) input field', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Add message
@@ -1819,14 +1785,14 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await mainPage.locator('button:has-text("✕")').click();
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
 
     test('should save and persist reading (furigana) input', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Add a message
@@ -1877,14 +1843,14 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await mainPage.locator('button:has-text("✕")').click();
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
 
     test('should scroll to message when clicking past comment in ViewerInfoPanel', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Add many messages to enable scrolling
@@ -1930,14 +1896,14 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await mainPage.locator('button:has-text("✕")').click();
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
 
     test('should show multiple comments from same user', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Add multiple messages from same user
@@ -1964,18 +1930,18 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await mainPage.locator('button:has-text("✕")').click();
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
   });
 
   test.describe('Connection and Disconnection', () => {
     test('should show error for invalid URL', async () => {
       // Enter invalid URL
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill('not-a-valid-url');
 
       // Click Connect
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
 
       // Wait a bit for error to appear
       await mainPage.waitForTimeout(2000);
@@ -1995,28 +1961,28 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
 
     test('should properly disconnect and clear connection state', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Verify connected state
-      await expect(mainPage.locator('button:has-text("Disconnect")')).toBeVisible();
+      await expect(mainPage.locator('button:has-text("停止")')).toBeVisible();
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
 
       // Verify disconnected state
-      await expect(mainPage.locator('button:has-text("Connect")')).toBeVisible();
-      await expect(mainPage.locator('input[placeholder*="YouTube URL"]')).toBeVisible();
+      await expect(mainPage.locator('button:has-text("開始")')).toBeVisible();
+      await expect(mainPage.locator('input[placeholder*="youtube.com"]')).toBeVisible();
     });
 
     test('should show replay indicator for archived streams', async () => {
       // This test would need mock server to return isReplay: true
       // For now, we verify the UI element exists when not in replay mode
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Replay badge should NOT be visible for live streams
@@ -2026,7 +1992,7 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       expect(isVisible).toBe(false);
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
   });
 
@@ -2034,8 +2000,8 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
     test('should respect font size boundaries (10-24px)', async () => {
       // Get initial font size
       const fontSizeDisplay = mainPage.locator('text=/\\d+px/').first();
-      const decreaseButton = mainPage.locator('button[title="文字サイズを小さく"]');
-      const increaseButton = mainPage.locator('button[title="文字サイズを大きく"]');
+      const decreaseButton = mainPage.locator('button[title="文字を小さく"]');
+      const increaseButton = mainPage.locator('button[title="文字を大きく"]');
 
       // Decrease to minimum
       for (let i = 0; i < 20; i++) {
@@ -2068,9 +2034,9 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
   test.describe('Message Display Styling', () => {
     test('should display member message with green styling', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Add member message
@@ -2099,14 +2065,14 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       expect(authorColor).toMatch(/rgb\(5,\s*150,\s*105\)/);
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
 
     test('should display author icon', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Add message
@@ -2127,7 +2093,7 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await expect(icon).toBeVisible();
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
   });
 
@@ -2143,18 +2109,16 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       });
 
       // Connect to stream with long title
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
 
       // Wait for connection and title display
       await mainPage.waitForTimeout(3000);
 
-      // Find the title element (look for <p> containing part of the long title)
+      // Find the title element (look for <div> containing part of the long title)
       // The title should be in the InputSection component
-      const titleElement = mainPage.locator('p').filter({
-        hasText: longTitle.substring(0, 30),
-      }).first();
+      const titleElement = mainPage.locator('div.truncate.bg-white').first();
 
       await expect(titleElement).toBeVisible({ timeout: 5000 });
 
@@ -2188,7 +2152,7 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       }
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
 
       // Reset stream title
       await fetch(`${MOCK_SERVER_URL}/set_stream_state`, {
@@ -2202,9 +2166,9 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
   test.describe('Scroll Behavior with Auto-scroll', () => {
     test('should scroll to past message even when auto-scroll is enabled', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("Connect")').click();
+      await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Add first message from target user
@@ -2301,7 +2265,7 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await mainPage.locator('button:has-text("✕")').click();
 
       // Disconnect
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
     });
   });
 });

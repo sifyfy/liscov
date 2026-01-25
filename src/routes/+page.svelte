@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { chatStore, configStore, websocketStore, viewerStore, analyticsStore, ttsStore, authStore } from '$lib/stores';
-  import { ChatDisplay, FilterPanel, InputSection, StatisticsPanel } from '$lib/components/chat';
+  import { ChatDisplay, FilterPanel, InputSection } from '$lib/components/chat';
   import { ViewerManagement } from '$lib/components/viewer';
   import { RevenueDashboard, ExportPanel } from '$lib/components/analytics';
   import { AuthSettings, TtsSettings, RawResponseSettings } from '$lib/components/settings';
@@ -12,6 +12,17 @@
   let activeTab = $state<Tab>('chat');
   let activeSettingsTab = $state<SettingsTab>('auth');
   let showStorageErrorDialog = $state(false);
+
+  // Tab metadata for integrated header (original liscov style)
+  const tabInfo: Record<Tab, { icon: string; label: string; description: string }> = {
+    chat: { icon: '🔍', label: 'Chat Monitor', description: 'リアルタイムチャット監視' },
+    viewers: { icon: '👥', label: 'Viewer Management', description: '視聴者情報管理' },
+    analytics: { icon: '📊', label: 'Revenue Analytics', description: '収益分析・統計' },
+    settings: { icon: '⚙️', label: 'Settings', description: 'アプリケーション設定' }
+  };
+
+  // Current tab info derived
+  let currentTab = $derived(tabInfo[activeTab]);
 
   // Get broadcaster ID from chat connection
   let broadcasterId = $derived(chatStore.broadcasterChannelId || '');
@@ -34,8 +45,8 @@
     }
     // Setup event listeners for Tauri events
     await chatStore.setupEventListeners();
-    // Check WebSocket status
-    await websocketStore.refreshStatus();
+    // Initialize WebSocket store (sets up event listeners and fetches status)
+    await websocketStore.init();
   });
 
   function openAuthSettings() {
@@ -49,122 +60,114 @@
   });
 </script>
 
-<div class="flex flex-col h-screen">
-  <!-- Header with gradient (original liscov style) -->
-  <header class="px-6 py-4" style="background: linear-gradient(135deg, var(--primary-start) 0%, var(--primary-end) 100%);">
-    <div class="flex items-center justify-between">
-      <div class="flex items-center gap-3">
-        <h1 class="text-2xl font-bold text-white">Liscov</h1>
-        <span class="text-white/70 text-sm">YouTube Live Chat Monitor</span>
+<!-- Main window with gradient background (original liscov style) -->
+<div class="h-screen flex flex-col p-1 overflow-hidden" style="background: linear-gradient(135deg, var(--primary-start) 0%, var(--primary-end) 100%);">
+  <!-- Integrated Header & Tab Navigation (original liscov style) -->
+  <header
+    class="flex items-center justify-between mb-1.5 flex-shrink-0"
+    style="
+      background: linear-gradient(135deg, var(--primary-start) 0%, var(--primary-end) 100%);
+      border-radius: 12px;
+      padding: 6px 12px;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      min-height: 52px;
+    "
+  >
+    <!-- Left: Active tab info -->
+    <div class="flex items-center gap-3 flex-1 min-w-0">
+      <!-- Tab icon (large) -->
+      <div
+        class="flex items-center justify-center text-2xl"
+        style="
+          width: 48px;
+          height: 48px;
+          background: rgba(255, 255, 255, 0.15);
+          border-radius: 12px;
+          backdrop-filter: blur(10px);
+          border: 1px solid rgba(255, 255, 255, 0.2);
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        "
+      >
+        {currentTab.icon}
       </div>
-      <div class="flex items-center gap-4">
-        <!-- Auth indicator -->
+
+      <!-- Tab info text -->
+      <div class="flex flex-col gap-0.5 flex-1 min-w-0">
+        <h1 class="text-lg font-bold text-white leading-tight" style="text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);">
+          {currentTab.label}
+        </h1>
+        <p class="text-sm text-white/80 leading-tight truncate" style="text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);">
+          {currentTab.description}
+        </p>
+      </div>
+
+      <!-- Status indicators (compact) -->
+      <div class="flex items-center gap-2 flex-shrink-0">
         <AuthIndicator onclick={openAuthSettings} />
-        <!-- Connection status -->
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-1.5 px-2 py-1 rounded-lg" style="background: rgba(255, 255, 255, 0.1);">
           <div
             class="w-2 h-2 rounded-full"
             class:bg-green-400={chatStore.isConnected}
             class:bg-gray-400={!chatStore.isConnected}
           ></div>
-          <span class="text-sm text-white/80">
-            {chatStore.isConnected ? 'Connected' : 'Disconnected'}
+          <span class="text-xs text-white/80">
+            {chatStore.isConnected ? '接続中' : '未接続'}
           </span>
         </div>
-        <!-- WebSocket status -->
         {#if websocketStore.isRunning}
-          <div class="flex items-center gap-2 px-3 py-1 bg-white/20 rounded-lg">
+          <div class="flex items-center gap-1.5 px-2 py-1 rounded-lg" style="background: rgba(255, 255, 255, 0.1);">
             <div class="w-2 h-2 rounded-full bg-blue-300"></div>
-            <span class="text-sm text-white">
-              WS: {websocketStore.actualPort}
-              ({websocketStore.connectedClients} clients)
+            <span class="text-xs text-white">
+              WS:{websocketStore.actualPort}({websocketStore.connectedClients})
             </span>
           </div>
         {/if}
       </div>
     </div>
 
-    <!-- Tab navigation -->
-    <div class="flex gap-1 mt-4">
-      <button
-        onclick={() => (activeTab = 'chat')}
-        class="px-4 py-2 rounded-t-lg text-sm font-medium transition-colors {activeTab === 'chat' ? 'bg-white/20 text-white' : 'text-white/70 hover:text-white hover:bg-white/10'}"
-      >
-        Chat
-      </button>
-      <button
-        onclick={() => (activeTab = 'viewers')}
-        class="px-4 py-2 rounded-t-lg text-sm font-medium transition-colors {activeTab === 'viewers' ? 'bg-white/20 text-white' : 'text-white/70 hover:text-white hover:bg-white/10'}"
-      >
-        Viewers
-      </button>
-      <button
-        onclick={() => (activeTab = 'analytics')}
-        class="px-4 py-2 rounded-t-lg text-sm font-medium transition-colors {activeTab === 'analytics' ? 'bg-white/20 text-white' : 'text-white/70 hover:text-white hover:bg-white/10'}"
-      >
-        Analytics
-      </button>
-      <button
-        onclick={() => (activeTab = 'settings')}
-        class="px-4 py-2 rounded-t-lg text-sm font-medium transition-colors {activeTab === 'settings' ? 'bg-white/20 text-white' : 'text-white/70 hover:text-white hover:bg-white/10'}"
-      >
-        Settings
-      </button>
-    </div>
+    <!-- Right: Tab navigation (glass morphism container) -->
+    <nav
+      class="flex gap-1 flex-shrink-0 ml-4"
+      style="
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 10px;
+        padding: 4px;
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+      "
+    >
+      {#each (['chat', 'viewers', 'analytics', 'settings'] as const) as tab}
+        <button
+          onclick={() => (activeTab = tab)}
+          class="flex items-center justify-center gap-1 transition-all"
+          style={activeTab === tab
+            ? 'background: rgba(255, 255, 255, 0.95); color: #333; font-weight: 700; padding: 6px 10px; border-radius: 7px; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15); transform: translateY(-1px); min-width: 70px; font-size: 11px;'
+            : 'background: transparent; color: rgba(255, 255, 255, 0.7); font-weight: 500; padding: 6px 10px; border-radius: 7px; min-width: 70px; font-size: 11px;'}
+        >
+          <span class="text-xs">{tabInfo[tab].icon}</span>
+          <span class="truncate max-w-[50px] text-[10px]">{tabInfo[tab].label.split(' ')[0]}</span>
+        </button>
+      {/each}
+    </nav>
   </header>
 
-  <!-- Main content (white/light gray background) -->
-  <main class="flex-1 flex overflow-hidden bg-[var(--bg-white)]">
+  <!-- Main content area (original liscov layout) -->
+  <main class="flex-1 flex flex-col overflow-hidden rounded-lg bg-[var(--bg-white)]">
     {#if activeTab === 'chat'}
-      <!-- Chat panel -->
-      <div class="flex-1 flex flex-col relative bg-[var(--bg-light)] min-w-0 overflow-hidden">
+      <!-- Top section: Input with integrated stats -->
+      <div class="p-3 bg-[var(--bg-white)]">
         <InputSection />
-        <FilterPanel />
-        <div class="flex-1 overflow-hidden">
-          <ChatDisplay />
-        </div>
       </div>
 
-      <!-- Side panel -->
-      <aside class="w-80 bg-[var(--bg-white)] border-l border-[var(--border-light)] hidden lg:block overflow-y-auto">
-        <div class="p-4 space-y-4">
-          <!-- Statistics Panel -->
-          <StatisticsPanel />
+      <!-- Control bar: Filter, auto-scroll, timestamp, etc. -->
+      <FilterPanel />
 
-          <!-- WebSocket controls -->
-          <div class="p-4 bg-[var(--bg-white)] rounded-lg border border-[var(--border-light)] shadow-sm">
-            <h3 class="text-md font-semibold text-[var(--text-primary)] mb-3">WebSocket API</h3>
-            {#if websocketStore.isRunning}
-              <div class="space-y-2">
-                <p class="text-sm text-[var(--text-secondary)]">
-                  Running on port <span class="text-[var(--text-primary)] font-mono">{websocketStore.actualPort}</span>
-                </p>
-                <p class="text-sm text-[var(--text-secondary)]">
-                  <span class="text-[var(--text-primary)]">{websocketStore.connectedClients}</span> clients connected
-                </p>
-                <button
-                  onclick={() => websocketStore.stop()}
-                  class="w-full px-4 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 transition-colors"
-                >
-                  Stop Server
-                </button>
-              </div>
-            {:else}
-              <button
-                onclick={() => websocketStore.start()}
-                disabled={websocketStore.isStarting}
-                class="w-full px-4 py-2 text-white rounded-lg transition-colors disabled:opacity-50"
-                style="background: linear-gradient(135deg, var(--primary-start) 0%, var(--primary-end) 100%);"
-              >
-                {websocketStore.isStarting ? 'Starting...' : 'Start Server'}
-              </button>
-            {/if}
-            {#if websocketStore.error}
-              <p class="mt-2 text-sm text-red-500">{websocketStore.error}</p>
-            {/if}
-          </div>
-        </div>
-      </aside>
+      <!-- Chat display area (fills remaining space) -->
+      <div class="flex-1 overflow-hidden">
+        <ChatDisplay />
+      </div>
     {:else if activeTab === 'viewers'}
       <!-- Viewers panel -->
       <div class="flex-1 p-4 bg-[var(--bg-light)]">

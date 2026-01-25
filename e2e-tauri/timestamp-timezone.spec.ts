@@ -247,6 +247,20 @@ async function addMockMessageWithTimestamp(message: {
   });
 }
 
+// Helper to fully disconnect (stop + initialize) and return to idle state
+async function disconnectAndInitialize(page: Page): Promise<void> {
+  // Click 停止 to pause
+  const stopButton = page.locator('button:has-text("停止")');
+  if (await stopButton.isVisible({ timeout: 1000 }).catch(() => false)) {
+    await stopButton.click();
+    // After clicking 停止, app goes to paused state with 再開 and 初期化 buttons
+    // Click 初期化 to return to idle state
+    await page.locator('button:has-text("初期化")').click();
+    // Wait for UI to return to idle state (URL input visible)
+    await expect(page.locator('input[placeholder*="youtube.com"], input[placeholder*="youtube.com"]')).toBeVisible({ timeout: 5000 });
+  }
+}
+
 test.describe('Timestamp Timezone Display', () => {
   let browser: Browser;
   let context: BrowserContext;
@@ -280,7 +294,10 @@ test.describe('Timestamp Timezone Display', () => {
     browser = connection.browser;
     context = connection.context;
     mainPage = connection.page;
-    console.log('Connected to Tauri app:', await mainPage.title());
+    // Wait for page to be fully loaded and stable before accessing
+    await mainPage.waitForLoadState('load');
+    await mainPage.waitForTimeout(1000);
+    console.log('Connected to Tauri app');
   });
 
   test.afterAll(async () => {
@@ -309,15 +326,15 @@ test.describe('Timestamp Timezone Display', () => {
     // the displayed time should be "19:00:00", not "10:00:00".
 
     // Enable timestamp display
-    const timestampToggle = mainPage.locator('label:has-text("時刻") input[type="checkbox"]');
+    const timestampToggle = mainPage.locator('label:has-text("タイムスタンプ") input[type="checkbox"]');
     if (!(await timestampToggle.isChecked())) {
       await timestampToggle.check();
     }
 
     // Connect to stream
-    const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+    const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
     await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-    await mainPage.locator('button:has-text("Connect")').click();
+    await mainPage.locator('button:has-text("開始")').click();
     await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
     // Record the current local time BEFORE adding the message
@@ -387,7 +404,7 @@ test.describe('Timestamp Timezone Display', () => {
     if (localTime.getTimezoneOffset() === 0) {
       console.log('Skipping timezone test: system timezone is UTC, cannot detect UTC vs local bug');
       // Disconnect and return
-      await mainPage.locator('button:has-text("Disconnect")').click();
+      await disconnectAndInitialize(mainPage);
       return;
     }
 
@@ -408,22 +425,22 @@ test.describe('Timestamp Timezone Display', () => {
     expect(isWithinLocalTimeRange).toBeTruthy();
 
     // Disconnect
-    await mainPage.locator('button:has-text("Disconnect")').click();
+    await disconnectAndInitialize(mainPage);
   });
 
   test('should display consistent timestamps across multiple messages', async () => {
     // This test verifies that all messages use the same timezone (local)
 
     // Enable timestamp display
-    const timestampToggle = mainPage.locator('label:has-text("時刻") input[type="checkbox"]');
+    const timestampToggle = mainPage.locator('label:has-text("タイムスタンプ") input[type="checkbox"]');
     if (!(await timestampToggle.isChecked())) {
       await timestampToggle.check();
     }
 
     // Connect to stream
-    const urlInput = mainPage.locator('input[placeholder*="YouTube URL"]');
+    const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
     await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-    await mainPage.locator('button:has-text("Connect")').click();
+    await mainPage.locator('button:has-text("開始")').click();
     await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
     // Add multiple messages with short delays
@@ -476,6 +493,6 @@ test.describe('Timestamp Timezone Display', () => {
     }
 
     // Disconnect
-    await mainPage.locator('button:has-text("Disconnect")').click();
+    await disconnectAndInitialize(mainPage);
   });
 });

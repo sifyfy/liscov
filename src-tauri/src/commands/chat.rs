@@ -178,6 +178,30 @@ pub async fn connect_to_stream(
     url: String,
     chat_mode: Option<String>,
 ) -> Result<ConnectionResult, String> {
+    // Increment connection ID to invalidate any running monitoring tasks
+    let new_connection_id = state.connection_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+    tracing::info!("connect_to_stream called with url: {}, chat_mode: {:?}, connection_id: {}", url, chat_mode, new_connection_id);
+
+    // Stop any existing monitoring
+    tracing::debug!("connect_to_stream: acquiring is_monitoring lock...");
+    {
+        let mut monitoring = state.is_monitoring.write().await;
+        *monitoring = false;
+    }
+    tracing::debug!("connect_to_stream: is_monitoring set to false");
+
+    // Clear old client to help old monitoring task exit faster
+    tracing::debug!("connect_to_stream: acquiring innertube_client lock...");
+    {
+        let mut client = state.innertube_client.write().await;
+        *client = None;
+    }
+    tracing::debug!("connect_to_stream: innertube_client cleared");
+
+    // Small delay to allow old task to notice the changes
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    tracing::debug!("connect_to_stream: delay complete, proceeding with connection");
+
     // Extract video ID from URL
     let video_id = extract_video_id(&url).ok_or_else(|| "Invalid YouTube URL".to_string())?;
 
@@ -263,6 +287,7 @@ pub async fn connect_to_stream(
 
         // Start monitoring task
         let is_monitoring = Arc::clone(&state.is_monitoring);
+        let connection_id = Arc::clone(&state.connection_id);
         let innertube_client = Arc::clone(&state.innertube_client);
         let messages = Arc::clone(&state.messages);
         let websocket_server = Arc::clone(&state.websocket_server);
@@ -291,6 +316,8 @@ pub async fn connect_to_stream(
                 current_session_id,
                 current_broadcaster_id,
                 is_monitoring,
+                connection_id,
+                new_connection_id,
                 save_config,
             )
             .await;
@@ -313,35 +340,92 @@ async fn chat_monitoring_task(
     current_session_id: Arc<RwLock<Option<String>>>,
     current_broadcaster_id: Arc<RwLock<Option<String>>>,
     is_monitoring: Arc<RwLock<bool>>,
+    connection_id: Arc<std::sync::atomic::AtomicU64>,
+    my_connection_id: u64,
     save_config: SaveConfig,
 ) {
+    tracing::info!("Chat monitoring task started for connection_id: {}", my_connection_id);
     let poll_interval = std::time::Duration::from_millis(1500);
     let raw_response_saver = RawResponseSaver::new(save_config);
+    let mut poll_count = 0u64;
 
     loop {
         // Check if we should stop monitoring
         {
             let monitoring = is_monitoring.read().await;
             if !*monitoring {
+                tracing::info!("Monitoring stopped by flag after {} polls (connection_id: {})", poll_count, my_connection_id);
                 break;
             }
         }
 
-        // Fetch new messages with raw response
-        let (new_messages, raw_response) = {
-            let mut client_guard = innertube_client.write().await;
-            if let Some(client) = client_guard.as_mut() {
-                match client.fetch_messages_with_raw().await {
-                    Ok((msgs, raw)) => (msgs, Some(raw)),
-                    Err(e) => {
-                        tracing::warn!("Failed to fetch messages: {}", e);
-                        (vec![], None)
-                    }
-                }
-            } else {
+        // Check if connection ID has changed (new connection started)
+        {
+            let current_id = connection_id.load(std::sync::atomic::Ordering::SeqCst);
+            if current_id != my_connection_id {
+                tracing::info!(
+                    "Monitoring stopped: connection ID changed from {} to {} after {} polls",
+                    my_connection_id, current_id, poll_count
+                );
                 break;
             }
+        }
+
+        poll_count += 1;
+
+        // Take client out of the lock to minimize lock hold time during network call
+        let client_opt = {
+            let mut client_guard = innertube_client.write().await;
+            client_guard.take()
         };
+
+        let Some(mut client) = client_opt else {
+            tracing::warn!("No InnerTube client available, stopping monitoring");
+            break;
+        };
+
+        // Check connection ID again before network call (in case disconnect was called)
+        {
+            let current_id = connection_id.load(std::sync::atomic::Ordering::SeqCst);
+            if current_id != my_connection_id {
+                tracing::info!(
+                    "Monitoring stopped before fetch: connection ID changed from {} to {}",
+                    my_connection_id, current_id
+                );
+                // Don't put client back - a new connection will create its own
+                break;
+            }
+        }
+
+        // Fetch new messages with raw response (lock is NOT held during this network call)
+        let (new_messages, raw_response) = match client.fetch_messages_with_raw().await {
+            Ok((msgs, raw)) => {
+                if !msgs.is_empty() {
+                    tracing::debug!("Poll {}: fetched {} messages", poll_count, msgs.len());
+                }
+                (msgs, Some(raw))
+            }
+            Err(e) => {
+                tracing::warn!("Poll {}: Failed to fetch messages: {}", poll_count, e);
+                (vec![], None)
+            }
+        };
+
+        // Put client back, but only if connection ID hasn't changed
+        {
+            let current_id = connection_id.load(std::sync::atomic::Ordering::SeqCst);
+            if current_id == my_connection_id {
+                let mut client_guard = innertube_client.write().await;
+                *client_guard = Some(client);
+            } else {
+                tracing::info!(
+                    "Not restoring client: connection ID changed from {} to {} during fetch",
+                    my_connection_id, current_id
+                );
+                // Don't put client back and exit loop
+                break;
+            }
+        }
 
         // Save raw response if enabled
         if let Some(raw_json) = raw_response {
@@ -403,7 +487,9 @@ async fn chat_monitoring_task(
     }
 
     // End session
+    tracing::debug!("Monitoring task cleanup: checking session (connection_id: {})", my_connection_id);
     if let Some(session_id) = current_session_id.read().await.as_ref() {
+        tracing::debug!("Monitoring task cleanup: ending session {} (connection_id: {})", session_id, my_connection_id);
         let db_guard = database.read().await;
         if let Some(db) = db_guard.as_ref() {
             let conn = db.connection().await;
@@ -413,10 +499,13 @@ async fn chat_monitoring_task(
             if let Err(e) = database::update_session_stats(&conn, session_id) {
                 tracing::warn!("Failed to update session stats: {}", e);
             }
+            tracing::debug!("Monitoring task cleanup: session ended (connection_id: {})", my_connection_id);
         }
+    } else {
+        tracing::debug!("Monitoring task cleanup: no session to end (connection_id: {})", my_connection_id);
     }
 
-    tracing::info!("Chat monitoring task stopped");
+    tracing::info!("Chat monitoring task stopped (connection_id: {}, polls: {})", my_connection_id, poll_count);
 }
 
 /// Disconnect from the current stream
@@ -425,23 +514,29 @@ pub async fn disconnect_stream(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    tracing::info!("disconnect_stream called");
+
     // Stop monitoring
+    tracing::debug!("disconnect_stream: stopping monitoring");
     {
         let mut monitoring = state.is_monitoring.write().await;
         *monitoring = false;
     }
 
     // Clear client
+    tracing::debug!("disconnect_stream: clearing client");
     {
         let mut client = state.innertube_client.write().await;
         *client = None;
     }
 
     // Clear session and broadcaster info
+    tracing::debug!("disconnect_stream: clearing session");
     {
         let mut session = state.current_session_id.write().await;
         *session = None;
     }
+    tracing::debug!("disconnect_stream: clearing broadcaster");
     {
         let mut broadcaster = state.current_broadcaster_id.write().await;
         *broadcaster = None;
