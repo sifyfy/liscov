@@ -32,6 +32,7 @@ use commands::{
     // TTS (spec: 04_tts.md)
     tts_speak, tts_speak_direct, tts_update_config, tts_get_config, tts_test_connection,
     tts_start, tts_stop, tts_clear_queue, tts_get_status,
+    tts_discover_exe, tts_select_exe, tts_launch_backend, tts_kill_backend, tts_get_launch_status,
     // Viewer (spec: 06_viewer.md)
     viewer_get_profile, viewer_get_list, viewer_search, viewer_upsert_custom_info,
     viewer_delete, broadcaster_get_list, broadcaster_delete, get_top_contributors,
@@ -69,6 +70,36 @@ pub fn run() {
             let ws_server = state.websocket_server.clone();
             tauri::async_runtime::spawn(async move {
                 start_websocket_server_auto(app_handle, ws_server).await;
+            });
+
+            // Auto-start TTS processing if enabled
+            let tts_manager = state.tts_manager.clone();
+            let tts_process_manager = state.tts_process_manager.clone();
+            tauri::async_runtime::spawn(async move {
+                let config = tts_manager.get_config().await;
+                if config.enabled {
+                    tts_manager.start_processing().await;
+                }
+
+                // Auto-launch TTS backends if enabled
+                if config.bouyomichan.auto_launch {
+                    let exe_path = config.bouyomichan.exe_path.as_deref();
+                    if let Err(e) = tts_process_manager
+                        .launch(tts::TtsBackendType::Bouyomichan, exe_path)
+                        .await
+                    {
+                        log::error!("Failed to auto-launch Bouyomichan: {}", e);
+                    }
+                }
+                if config.voicevox.auto_launch {
+                    let exe_path = config.voicevox.exe_path.as_deref();
+                    if let Err(e) = tts_process_manager
+                        .launch(tts::TtsBackendType::Voicevox, exe_path)
+                        .await
+                    {
+                        log::error!("Failed to auto-launch VOICEVOX: {}", e);
+                    }
+                }
             });
 
             Ok(())
@@ -118,6 +149,11 @@ pub fn run() {
             tts_stop,
             tts_clear_queue,
             tts_get_status,
+            tts_discover_exe,
+            tts_select_exe,
+            tts_launch_backend,
+            tts_kill_backend,
+            tts_get_launch_status,
             // Viewer (spec: 06_viewer.md)
             viewer_get_profile,
             viewer_get_list,
@@ -134,6 +170,45 @@ pub fn run() {
             raw_response_update_config,
             raw_response_resolve_path,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                // Kill auto-launched TTS processes on exit
+                let state = app_handle.state::<AppState>();
+                let tts_manager = state.tts_manager.clone();
+                let tts_process_manager = state.tts_process_manager.clone();
+
+                tauri::async_runtime::block_on(async move {
+                    let config = tts_manager.get_config().await;
+
+                    // Kill Bouyomichan if auto_close is enabled and it was launched
+                    if config.bouyomichan.auto_close
+                        && tts_process_manager
+                            .is_launched(&tts::TtsBackendType::Bouyomichan)
+                            .await
+                    {
+                        if let Err(e) = tts_process_manager
+                            .kill(&tts::TtsBackendType::Bouyomichan)
+                            .await
+                        {
+                            log::error!("Failed to kill Bouyomichan on exit: {}", e);
+                        }
+                    }
+
+                    // Kill VOICEVOX if auto_close is enabled and it was launched
+                    if config.voicevox.auto_close
+                        && tts_process_manager
+                            .is_launched(&tts::TtsBackendType::Voicevox)
+                            .await
+                    {
+                        if let Err(e) =
+                            tts_process_manager.kill(&tts::TtsBackendType::Voicevox).await
+                        {
+                            log::error!("Failed to kill VOICEVOX on exit: {}", e);
+                        }
+                    }
+                });
+            }
+        });
 }

@@ -3,7 +3,7 @@
 use crate::core::api::{InnerTubeClient, WebSocketServer};
 use crate::core::models::ChatMessage;
 use crate::database::Database;
-use crate::tts::TtsManager;
+use crate::tts::{TtsManager, TtsProcessManager};
 use std::collections::VecDeque;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
@@ -32,6 +32,8 @@ pub struct AppState {
     pub current_broadcaster_id: Arc<RwLock<Option<String>>>,
     /// TTS manager
     pub tts_manager: Arc<TtsManager>,
+    /// TTS process manager
+    pub tts_process_manager: Arc<TtsProcessManager>,
 }
 
 impl AppState {
@@ -48,6 +50,9 @@ impl AppState {
         // Initialize TTS manager with default config
         let tts_manager = TtsManager::default();
 
+        // Initialize TTS process manager
+        let tts_process_manager = TtsProcessManager::new();
+
         Self {
             innertube_client: Arc::new(RwLock::new(None)),
             websocket_server: Arc::new(RwLock::new(None)),
@@ -58,6 +63,7 @@ impl AppState {
             current_session_id: Arc::new(RwLock::new(None)),
             current_broadcaster_id: Arc::new(RwLock::new(None)),
             tts_manager: Arc::new(tts_manager),
+            tts_process_manager: Arc::new(tts_process_manager),
         }
     }
 

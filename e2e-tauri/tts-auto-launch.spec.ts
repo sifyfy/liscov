@@ -1,0 +1,603 @@
+import { test, expect, chromium, BrowserContext, Page, Browser } from '@playwright/test';
+import { exec, execSync } from 'child_process';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+
+/**
+ * E2E tests for TTS VOICEVOX auto-launch feature based on 04_tts.md specification.
+ *
+ * Prerequisites:
+ * - VOICEVOX must be installed at %LOCALAPPDATA%\Programs\VOICEVOX\VOICEVOX.exe
+ *
+ * Tests verify:
+ * - Auto-detect executable path via "検出" button
+ * - Manual launch/stop via buttons
+ * - Auto-launch on app restart
+ * - Auto-close on app exit
+ * - Duplicate launch prevention
+ * - Error display when launch fails
+ *
+ * Run tests:
+ *    pnpm exec playwright test --config e2e-tauri/playwright.config.ts tts-auto-launch.spec.ts
+ */
+
+const CDP_URL = 'http://127.0.0.1:9222';
+const PROJECT_DIR = process.cwd().replace(/[\\/]e2e-tauri$/, '');
+
+// Test isolation: use separate namespace for credentials and data
+const TEST_APP_NAME = 'liscov-test';
+const TEST_KEYRING_SERVICE = 'liscov-test';
+
+// Get VOICEVOX standard installation path
+function getVoicevoxPath(): string | null {
+  const localAppData = process.env.LOCALAPPDATA;
+  if (!localAppData) return null;
+  const voicevoxPath = path.join(localAppData, 'Programs', 'VOICEVOX', 'VOICEVOX.exe');
+  return fs.existsSync(voicevoxPath) ? voicevoxPath : null;
+}
+
+// Check if VOICEVOX process is running
+function isVoicevoxRunning(): boolean {
+  try {
+    const result = execSync('tasklist /FI "IMAGENAME eq VOICEVOX.exe" /NH', { encoding: 'utf8' });
+    return result.includes('VOICEVOX.exe');
+  } catch {
+    return false;
+  }
+}
+
+// Kill all VOICEVOX processes
+function killVoicevox(): void {
+  try {
+    execSync('taskkill /F /IM VOICEVOX.exe 2>nul', { stdio: 'ignore' });
+  } catch {
+    // Process may not exist, which is fine
+  }
+}
+
+// Get test data directories based on platform
+function getTestDataDirs(): string[] {
+  const dirs: string[] = [];
+
+  const configDir = process.platform === 'win32'
+    ? process.env.APPDATA
+    : process.platform === 'darwin'
+      ? path.join(os.homedir(), 'Library', 'Application Support')
+      : path.join(os.homedir(), '.config');
+
+  if (configDir) {
+    dirs.push(path.join(configDir, TEST_APP_NAME));
+  }
+
+  const dataDir = process.platform === 'win32'
+    ? process.env.APPDATA
+    : process.platform === 'darwin'
+      ? path.join(os.homedir(), 'Library', 'Application Support')
+      : path.join(os.homedir(), '.local', 'share');
+
+  if (dataDir && dataDir !== configDir) {
+    dirs.push(path.join(dataDir, TEST_APP_NAME));
+  }
+
+  return dirs;
+}
+
+// Clean up test data directories
+async function cleanupTestData(): Promise<void> {
+  const dirs = getTestDataDirs();
+  for (const dir of dirs) {
+    if (fs.existsSync(dir)) {
+      console.log(`Cleaning up test data directory: ${dir}`);
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+}
+
+// Clean up test keyring credentials (Windows Credential Manager)
+async function cleanupTestCredentials(): Promise<void> {
+  if (process.platform === 'win32') {
+    try {
+      execSync(`cmdkey /delete:youtube_credentials.${TEST_KEYRING_SERVICE} 2>nul`, { stdio: 'ignore' });
+      console.log('Cleaned up test credentials from Windows Credential Manager');
+    } catch {
+      // Credential may not exist, which is fine
+    }
+  }
+}
+
+// Helper to wait for CDP to be available
+async function waitForCDP(timeout = 120000): Promise<void> {
+  const start = Date.now();
+  console.log('Waiting for CDP to be available...');
+  let lastError = '';
+  while (Date.now() - start < timeout) {
+    try {
+      const response = await fetch(`${CDP_URL}/json/version`);
+      if (response.ok) {
+        console.log(`CDP available after ${Date.now() - start}ms`);
+        return;
+      }
+    } catch (e) {
+      lastError = e instanceof Error ? e.message : String(e);
+    }
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+  throw new Error(`CDP not available after ${timeout}ms. Last error: ${lastError}`);
+}
+
+// Helper to connect to Tauri app
+async function connectToApp(): Promise<{ browser: Browser; context: BrowserContext; page: Page }> {
+  const browser = await chromium.connectOverCDP(CDP_URL);
+  const contexts = browser.contexts();
+
+  if (contexts.length === 0) {
+    throw new Error('No browser contexts found');
+  }
+
+  const context = contexts[0];
+  const pages = context.pages();
+
+  if (pages.length === 0) {
+    throw new Error('No pages found in context');
+  }
+
+  return { browser, context, page: pages[0] };
+}
+
+// Helper to kill Tauri app (force kill)
+async function killTauriApp(): Promise<void> {
+  try {
+    if (process.platform === 'win32') {
+      execSync('taskkill /F /IM liscov-tauri.exe 2>nul', { stdio: 'ignore' });
+    } else {
+      execSync('pkill -f liscov-tauri', { stdio: 'ignore' });
+    }
+  } catch {
+    // Process may not exist
+  }
+  // Wait for port to be released
+  await new Promise(resolve => setTimeout(resolve, 1000));
+}
+
+// Helper to gracefully close Tauri app (triggers ExitRequested event)
+async function closeTauriAppGracefully(): Promise<void> {
+  try {
+    if (process.platform === 'win32') {
+      // Send WM_CLOSE message instead of force kill
+      execSync('taskkill /IM liscov-tauri.exe 2>nul', { stdio: 'ignore' });
+      // Wait for graceful shutdown
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      // Force kill if still running
+      execSync('taskkill /F /IM liscov-tauri.exe 2>nul', { stdio: 'ignore' });
+    } else {
+      execSync('pkill -TERM -f liscov-tauri', { stdio: 'ignore' });
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      execSync('pkill -KILL -f liscov-tauri', { stdio: 'ignore' });
+    }
+  } catch {
+    // Process may not exist
+  }
+  // Wait for port to be released
+  await new Promise(resolve => setTimeout(resolve, 1000));
+}
+
+// Helper to start Tauri app with test isolation
+async function startTauriApp(): Promise<void> {
+  const env = {
+    ...process.env,
+    // Test isolation: use separate namespace
+    LISCOV_APP_NAME: TEST_APP_NAME,
+    LISCOV_KEYRING_SERVICE: TEST_KEYRING_SERVICE,
+    // Enable CDP for Playwright
+    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=9222',
+  };
+
+  console.log(`Starting Tauri app with test namespace: ${TEST_APP_NAME}`);
+
+  // Start app in background
+  exec(`cd "${PROJECT_DIR}" && pnpm tauri dev`, { env });
+
+  // Wait for CDP to be available
+  await waitForCDP();
+}
+
+// Navigate to TTS settings tab
+async function navigateToTtsSettings(page: Page): Promise<void> {
+  // Click Settings tab in main navigation
+  await page.getByRole('button', { name: 'Settings' }).click();
+  // Wait for settings sidebar to appear
+  await page.waitForTimeout(500);
+  // Click TTS tab in the settings sidebar (it's a button, not a link)
+  await page.getByRole('button', { name: 'TTS読み上げ' }).click();
+  // Wait for TTS settings to be visible
+  await expect(page.getByRole('heading', { name: 'TTS設定' })).toBeVisible({ timeout: 5000 });
+}
+
+// Select VOICEVOX backend from dropdown
+async function selectVoicevoxBackend(page: Page): Promise<void> {
+  const select = page.locator('#backend');
+  await select.selectOption('voicevox');
+  // Wait for VOICEVOX settings section to appear
+  await expect(page.getByText('VOICEVOX設定')).toBeVisible({ timeout: 5000 });
+}
+
+// Wait for VOICEVOX process to start (with timeout)
+async function waitForVoicevoxToStart(timeoutMs = 30000): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (isVoicevoxRunning()) {
+      return true;
+    }
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+  return false;
+}
+
+// Wait for VOICEVOX process to stop (with timeout)
+async function waitForVoicevoxToStop(timeoutMs = 10000): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (!isVoicevoxRunning()) {
+      return true;
+    }
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  return false;
+}
+
+test.describe('TTS VOICEVOX Auto-Launch', () => {
+  let browser: Browser;
+  let context: BrowserContext;
+  let mainPage: Page;
+
+  // Check VOICEVOX installation before running any tests
+  test.beforeAll(async () => {
+    test.setTimeout(300000); // 5 minutes for setup
+
+    const voicevoxPath = getVoicevoxPath();
+    if (!voicevoxPath) {
+      console.error('='.repeat(60));
+      console.error('ERROR: VOICEVOXがインストールされていません');
+      console.error('このテストを実行するにはVOICEVOXを以下にインストールしてください:');
+      console.error('%LOCALAPPDATA%\\Programs\\VOICEVOX\\VOICEVOX.exe');
+      console.error('Expected path:', path.join(process.env.LOCALAPPDATA || '', 'Programs', 'VOICEVOX', 'VOICEVOX.exe'));
+      console.error('='.repeat(60));
+      test.skip();
+      return;
+    }
+
+    console.log(`VOICEVOX found at: ${voicevoxPath}`);
+
+    // Step 1: Kill any existing processes
+    console.log('Killing any existing Tauri app and VOICEVOX...');
+    await killTauriApp();
+    killVoicevox();
+
+    // Step 2: Clean up test data for a fresh start
+    console.log('Cleaning up test data and credentials...');
+    await cleanupTestData();
+    await cleanupTestCredentials();
+
+    // Step 3: Start Tauri app with test namespace
+    console.log('Starting Tauri app with test namespace...');
+    await startTauriApp();
+
+    // Step 4: Connect to the running Tauri app
+    const connection = await connectToApp();
+    browser = connection.browser;
+    context = connection.context;
+    mainPage = connection.page;
+
+    // Wait for page to be fully loaded
+    await mainPage.waitForLoadState('load');
+    await mainPage.waitForTimeout(1000);
+    console.log('Connected to Tauri app');
+  });
+
+  test.afterAll(async () => {
+    console.log('Cleaning up after tests...');
+
+    // Kill VOICEVOX if running
+    killVoicevox();
+
+    if (browser) {
+      await browser.close();
+    }
+    await killTauriApp();
+
+    // Clean up test data
+    await cleanupTestData();
+    await cleanupTestCredentials();
+  });
+
+  test.beforeEach(async () => {
+    // Navigate to TTS settings
+    // Note: We don't kill VOICEVOX externally here because it desynchronizes app state
+    // Instead, tests should manage VOICEVOX state through the UI
+    await navigateToTtsSettings(mainPage);
+  });
+
+  test('should verify VOICEVOX is installed', async () => {
+    // This test verifies the installation check works
+    // If we reach here, VOICEVOX IS installed (otherwise beforeAll would have skipped)
+    const voicevoxPath = getVoicevoxPath();
+    expect(voicevoxPath).not.toBeNull();
+    console.log(`VOICEVOX is installed at: ${voicevoxPath}`);
+  });
+
+  test('should auto-detect VOICEVOX executable path via detect button', async () => {
+    // Select VOICEVOX backend
+    await selectVoicevoxBackend(mainPage);
+
+    // Find the VOICEVOX exe path input (it's the only one visible when VOICEVOX is selected)
+    const exePathInput = mainPage.locator('input[placeholder="自動検出または参照で指定"]');
+
+    // Clear any existing path first
+    await exePathInput.fill('');
+
+    // Click the detect button
+    await mainPage.getByRole('button', { name: '検出' }).click();
+
+    // Wait for path to be auto-detected
+    await expect(exePathInput).not.toHaveValue('', { timeout: 5000 });
+
+    // Verify the path contains VOICEVOX
+    const detectedPath = await exePathInput.inputValue();
+    expect(detectedPath.toLowerCase()).toContain('voicevox');
+    console.log(`Auto-detected path: ${detectedPath}`);
+  });
+
+  test('should launch VOICEVOX manually via button', async () => {
+    // Select VOICEVOX backend
+    await selectVoicevoxBackend(mainPage);
+
+    // Ensure initial state shows "停止中" (stopped)
+    await expect(mainPage.getByText('停止中')).toBeVisible();
+
+    // Find and click the launch button
+    const launchButton = mainPage.getByRole('button', { name: '起動' });
+    await launchButton.click();
+
+    // Wait for VOICEVOX process to start
+    const started = await waitForVoicevoxToStart();
+    expect(started).toBe(true);
+
+    // Verify UI shows "起動中" (running)
+    await expect(mainPage.getByText('起動中')).toBeVisible({ timeout: 5000 });
+
+    // Verify button text changed to "停止" (stop)
+    await expect(mainPage.getByRole('button', { name: '停止' })).toBeVisible();
+  });
+
+  test('should stop VOICEVOX manually via button', async () => {
+    // Select VOICEVOX backend
+    await selectVoicevoxBackend(mainPage);
+
+    // First, ensure VOICEVOX is launched (via UI)
+    const launchButton = mainPage.getByRole('button', { name: '起動' });
+    const stopButton = mainPage.getByRole('button', { name: '停止' });
+
+    // If "起動" button is visible, click it to launch
+    if (await launchButton.isVisible({ timeout: 1000 }).catch(() => false)) {
+      await launchButton.click();
+      await waitForVoicevoxToStart();
+      // Wait for UI to update to show "停止" button
+      await expect(stopButton).toBeVisible({ timeout: 10000 });
+    }
+
+    // Now VOICEVOX should be running
+    expect(isVoicevoxRunning()).toBe(true);
+
+    // Click the stop button
+    await expect(stopButton).toBeVisible({ timeout: 5000 });
+    await stopButton.click();
+
+    // Wait for VOICEVOX process to stop
+    const stopped = await waitForVoicevoxToStop();
+    expect(stopped).toBe(true);
+
+    // Verify UI shows "停止中"
+    await expect(mainPage.getByText('停止中')).toBeVisible({ timeout: 5000 });
+
+    // Verify button text changed back to "起動"
+    await expect(launchButton).toBeVisible();
+  });
+
+  test('should auto-launch VOICEVOX on app restart', async () => {
+    // Step 1: Configure auto-launch
+    await selectVoicevoxBackend(mainPage);
+
+    // First, ensure VOICEVOX is stopped via UI if running
+    const stopButton = mainPage.getByRole('button', { name: '停止' });
+    if (await stopButton.isVisible({ timeout: 1000 }).catch(() => false)) {
+      await stopButton.click();
+      await waitForVoicevoxToStop();
+    }
+
+    // Find and enable auto-launch toggle
+    // The toggle is a button next to a span containing "アプリ起動時に自動起動"
+    const autoLaunchSpan = mainPage.locator('span:has-text("アプリ起動時に自動起動")');
+    await expect(autoLaunchSpan).toBeVisible({ timeout: 5000 });
+    // The toggle button is a sibling in the same flex container
+    const autoLaunchToggle = autoLaunchSpan.locator('..').locator('button');
+    const toggleClass = await autoLaunchToggle.getAttribute('class');
+    if (!toggleClass?.includes('bg-green-500')) {
+      await autoLaunchToggle.click();
+    }
+
+    // Wait for config to save
+    await mainPage.waitForTimeout(500);
+
+    // Kill any running VOICEVOX process (external kill is okay here since we're restarting app anyway)
+    killVoicevox();
+    await waitForVoicevoxToStop();
+
+    // Step 2: Restart the app
+    await browser.close();
+    await killTauriApp();
+    await startTauriApp();
+
+    // Reconnect
+    const connection = await connectToApp();
+    browser = connection.browser;
+    context = connection.context;
+    mainPage = connection.page;
+
+    // Step 3: Verify VOICEVOX was auto-launched
+    // Wait a bit for auto-launch to trigger
+    const autoLaunched = await waitForVoicevoxToStart(60000);
+    expect(autoLaunched).toBe(true);
+
+    // Also verify UI shows correct state
+    await navigateToTtsSettings(mainPage);
+    await selectVoicevoxBackend(mainPage);
+    await expect(mainPage.getByText('起動中')).toBeVisible({ timeout: 10000 });
+  });
+
+  test('should auto-close VOICEVOX on app exit', async () => {
+    // Step 1: Configure settings
+    await selectVoicevoxBackend(mainPage);
+
+    // Ensure auto-close toggle is enabled
+    const autoCloseSpan = mainPage.locator('span:has-text("アプリ終了時に自動停止")');
+    await expect(autoCloseSpan).toBeVisible({ timeout: 5000 });
+    const autoCloseToggle = autoCloseSpan.locator('..').locator('button');
+    const toggleClass = await autoCloseToggle.getAttribute('class');
+    if (!toggleClass?.includes('bg-green-500')) {
+      await autoCloseToggle.click();
+    }
+
+    await mainPage.waitForTimeout(500);
+
+    // Step 2: Launch VOICEVOX manually via UI
+    const launchButton = mainPage.getByRole('button', { name: '起動' });
+    const stopButton = mainPage.getByRole('button', { name: '停止' });
+
+    // If already running, that's fine. If not, launch it.
+    if (await launchButton.isVisible({ timeout: 1000 }).catch(() => false)) {
+      await launchButton.click();
+      await waitForVoicevoxToStart();
+      await expect(stopButton).toBeVisible({ timeout: 10000 });
+    }
+
+    // Verify VOICEVOX is running
+    expect(isVoicevoxRunning()).toBe(true);
+
+    // Step 3: Exit the app gracefully (triggers ExitRequested event which triggers auto-close)
+    await browser.close();
+    await closeTauriAppGracefully();
+
+    // Step 4: Verify VOICEVOX was auto-closed
+    // Wait a bit for auto-close to take effect
+    const stopped = await waitForVoicevoxToStop(15000);
+    expect(stopped).toBe(true);
+
+    // Restart app for next tests
+    await startTauriApp();
+    const connection = await connectToApp();
+    browser = connection.browser;
+    context = connection.context;
+    mainPage = connection.page;
+  });
+
+  test('should prevent duplicate launch (button state)', async () => {
+    // Select VOICEVOX backend
+    await selectVoicevoxBackend(mainPage);
+
+    // Launch VOICEVOX via UI
+    const launchButton = mainPage.getByRole('button', { name: '起動' });
+    const stopButton = mainPage.getByRole('button', { name: '停止' });
+
+    // If not already running, launch it
+    if (await launchButton.isVisible({ timeout: 1000 }).catch(() => false)) {
+      await launchButton.click();
+      await waitForVoicevoxToStart();
+      await expect(stopButton).toBeVisible({ timeout: 10000 });
+    }
+
+    // Verify VOICEVOX is running and button shows "停止"
+    expect(isVoicevoxRunning()).toBe(true);
+    await expect(stopButton).toBeVisible();
+
+    // The "起動" button should not be visible when already launched
+    // This is the UI-level duplicate prevention
+    await expect(launchButton).not.toBeVisible();
+
+    // Count VOICEVOX processes - should be at least 1
+    try {
+      const result = execSync('tasklist /FI "IMAGENAME eq VOICEVOX.exe" /FO CSV /NH', { encoding: 'utf8' });
+      const lines = result.trim().split('\n').filter(line => line.includes('VOICEVOX.exe'));
+      console.log(`VOICEVOX process count: ${lines.length}`);
+      expect(lines.length).toBeGreaterThan(0);
+    } catch {
+      // If tasklist fails, the button state check is sufficient
+    }
+  });
+
+  test('should show error when launch fails with invalid path', async () => {
+    // Kill any VOICEVOX process externally first to ensure clean state
+    killVoicevox();
+    await waitForVoicevoxToStop();
+
+    // Refresh the page to get updated state
+    await mainPage.reload();
+    await mainPage.waitForLoadState('load');
+
+    // Navigate to TTS settings
+    await navigateToTtsSettings(mainPage);
+
+    // Select VOICEVOX backend
+    await selectVoicevoxBackend(mainPage);
+
+    // Verify launch button is visible (VOICEVOX should be stopped)
+    const launchButton = mainPage.getByRole('button', { name: '起動' });
+    const stopButton = mainPage.getByRole('button', { name: '停止' });
+
+    // If still showing "停止", stop the backend first
+    if (await stopButton.isVisible({ timeout: 1000 }).catch(() => false)) {
+      await stopButton.click();
+      await mainPage.waitForTimeout(2000);
+      await expect(launchButton).toBeVisible({ timeout: 5000 });
+    }
+
+    // Find the VOICEVOX exe path input (use .last() since Bouyomichan has the same placeholder)
+    const exePathInput = mainPage.locator('input[placeholder="自動検出または参照で指定"]').last();
+
+    // Set invalid path using pressSequentially to ensure proper Svelte state sync
+    await exePathInput.click();
+    await exePathInput.fill('');
+    const invalidPath = 'C:\\invalid\\nonexistent\\VOICEVOX.exe';
+    await exePathInput.pressSequentially(invalidPath, { delay: 10 });
+    await exePathInput.blur();
+
+    // Wait for debounced config save
+    await mainPage.waitForTimeout(1000);
+
+    // Verify the path was set
+    expect(await exePathInput.inputValue()).toBe(invalidPath);
+
+    // Click launch button to trigger the error
+    await expect(launchButton).toBeVisible({ timeout: 5000 });
+    await launchButton.click();
+
+    // Wait for error to be set
+    await mainPage.waitForTimeout(2000);
+
+    // Scroll to bottom to see the error display
+    await mainPage.evaluate(() => {
+      const container = document.querySelector('.overflow-y-auto');
+      if (container) {
+        container.scrollTop = container.scrollHeight;
+      }
+    });
+
+    // Verify error message is displayed
+    const errorDisplay = mainPage.locator('div.bg-red-50.rounded-lg.border-red-200 p.text-red-600');
+    await expect(errorDisplay).toBeVisible({ timeout: 10000 });
+
+    // Error should mention "not found"
+    const errorText = await errorDisplay.textContent();
+    expect(errorText?.toLowerCase()).toMatch(/not found|見つかりません|失敗|executable/);
+  });
+});

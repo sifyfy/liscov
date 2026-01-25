@@ -5,6 +5,7 @@
 
 pub mod backends;
 pub mod config;
+pub mod process;
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -12,6 +13,7 @@ use tokio::sync::{mpsc, Mutex, RwLock};
 
 pub use backends::{BouyomichanBackend, TtsBackendEnum, TtsError, VoicevoxBackend};
 pub use config::{BouyomichanConfig, TtsBackendType, TtsConfig, VoicevoxConfig};
+pub use process::TtsProcessManager;
 
 /// TTS message priority
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

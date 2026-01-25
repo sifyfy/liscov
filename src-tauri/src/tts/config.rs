@@ -23,6 +23,16 @@ pub struct BouyomichanConfig {
     pub volume: i32,
     pub speed: i32,
     pub tone: i32,
+    #[serde(default)]
+    pub auto_launch: bool,
+    #[serde(default)]
+    pub exe_path: Option<String>,
+    #[serde(default = "default_true")]
+    pub auto_close: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for BouyomichanConfig {
@@ -34,6 +44,9 @@ impl Default for BouyomichanConfig {
             volume: -1,
             speed: -1,
             tone: -1,
+            auto_launch: false,
+            exe_path: None,
+            auto_close: true,
         }
     }
 }
@@ -48,6 +61,12 @@ pub struct VoicevoxConfig {
     pub speed_scale: f32,
     pub pitch_scale: f32,
     pub intonation_scale: f32,
+    #[serde(default)]
+    pub auto_launch: bool,
+    #[serde(default)]
+    pub exe_path: Option<String>,
+    #[serde(default = "default_true")]
+    pub auto_close: bool,
 }
 
 impl Default for VoicevoxConfig {
@@ -60,6 +79,9 @@ impl Default for VoicevoxConfig {
             speed_scale: 1.0,
             pitch_scale: 0.0,
             intonation_scale: 1.0,
+            auto_launch: false,
+            exe_path: None,
+            auto_close: true,
         }
     }
 }

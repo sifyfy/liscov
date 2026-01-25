@@ -1,7 +1,7 @@
 // Tauri TTS API wrapper
 
 import { invoke } from '@tauri-apps/api/core';
-import type { TtsConfig, TtsPriority, TtsStatus } from '$lib/types';
+import type { TtsConfig, TtsPriority, TtsStatus, TtsLaunchStatus } from '$lib/types';
 
 export interface SpeakOptions {
   priority?: TtsPriority;
@@ -48,4 +48,25 @@ export async function ttsClearQueue(): Promise<void> {
 
 export async function ttsGetStatus(): Promise<TtsStatus> {
   return invoke('tts_get_status');
+}
+
+export async function ttsDiscoverExe(backend: string): Promise<string | null> {
+  return invoke('tts_discover_exe', { backend });
+}
+
+export async function ttsSelectExe(): Promise<string | null> {
+  return invoke('tts_select_exe');
+}
+
+export async function ttsLaunchBackend(backend: string, exePath?: string): Promise<number> {
+  // Tauri v2 converts camelCase args to snake_case for Rust commands
+  return invoke('tts_launch_backend', { backend, exePath });
+}
+
+export async function ttsKillBackend(backend: string): Promise<void> {
+  await invoke('tts_kill_backend', { backend });
+}
+
+export async function ttsGetLaunchStatus(): Promise<TtsLaunchStatus> {
+  return invoke('tts_get_launch_status');
 }

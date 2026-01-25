@@ -9,13 +9,18 @@
 | コマンド | 入力 | 出力 | 説明 |
 |---------|------|------|------|
 | `tts_get_config` | なし | `TtsConfigDto` | 設定取得 |
-| `tts_update_config` | `config: TtsConfigDto` | `()` | 設定更新 |
+| `tts_update_config` | `config: TtsConfigDto` | `()` | 設定更新（enabled変更時は自動でstart/stop） |
 | `tts_speak_direct` | `text: String` | `()` | 直接読み上げ（テスト用） |
 | `tts_test_connection` | `backend: Option<String>` | `bool` | 接続テスト |
 | `tts_start` | なし | `()` | キュー処理開始 |
 | `tts_stop` | なし | `()` | キュー処理停止 |
 | `tts_clear_queue` | なし | `()` | キュークリア |
 | `tts_get_status` | なし | `TtsStatus` | 状態取得 |
+| `tts_discover_exe` | `backend: String` | `Option<String>` | 実行ファイル自動探索 |
+| `tts_select_exe` | なし | `Option<String>` | ファイル選択ダイアログ |
+| `tts_launch_backend` | `backend: String, exe_path: Option<String>` | `u32` | バックエンド手動起動（PIDを返却） |
+| `tts_kill_backend` | `backend: String` | `()` | バックエンド停止 |
+| `tts_get_launch_status` | なし | `TtsLaunchStatus` | 起動状態取得 |
 
 ### TtsStatus
 
@@ -23,6 +28,15 @@
 pub struct TtsStatus {
     pub is_processing: bool,
     pub queue_size: u32,
+}
+```
+
+### TtsLaunchStatus
+
+```rust
+pub struct TtsLaunchStatus {
+    pub bouyomichan_launched: bool,
+    pub voicevox_launched: bool,
 }
 ```
 
@@ -54,6 +68,9 @@ voice = 0
 volume = -1
 speed = -1
 tone = -1
+auto_launch = false
+exe_path = null  # null=自動探索、または実行ファイルパスを指定
+auto_close = true
 
 [voicevox]
 host = "localhost"
@@ -63,6 +80,9 @@ volume_scale = 1.0
 speed_scale = 1.0
 pitch_scale = 0.0
 intonation_scale = 1.0
+auto_launch = false
+exe_path = null
+auto_close = true
 ```
 
 ## 設定項目詳細
@@ -103,6 +123,22 @@ intonation_scale = 1.0
 | `speed_scale` | f32 | `1.0` | 0.5〜2.0 | 話速倍率 |
 | `pitch_scale` | f32 | `0.0` | -0.15〜0.15 | 音高倍率 |
 | `intonation_scale` | f32 | `1.0` | 0.0〜2.0 | 抑揚倍率 |
+
+### 棒読みちゃん自動起動設定
+
+| キー | 型 | デフォルト | 説明 |
+|-----|-----|----------|------|
+| `bouyomichan.auto_launch` | bool | `false` | 棒読みちゃん自動起動 |
+| `bouyomichan.exe_path` | string? | `null` | 実行ファイルパス（null=自動探索） |
+| `bouyomichan.auto_close` | bool | `true` | 終了時に自動停止 |
+
+### VOICEVOX自動起動設定
+
+| キー | 型 | デフォルト | 説明 |
+|-----|-----|----------|------|
+| `voicevox.auto_launch` | bool | `false` | VOICEVOX自動起動 |
+| `voicevox.exe_path` | string? | `null` | 実行ファイルパス（null=自動探索） |
+| `voicevox.auto_close` | bool | `true` | 終了時に自動停止 |
 
 ## 読み上げテキスト生成
 
@@ -183,6 +219,16 @@ pub enum TtsPriority {
 }
 ```
 
+### 自動開始
+
+| 条件 | 動作 |
+|-----|------|
+| アプリ起動時 | `enabled=true`の場合、キュー処理を自動開始 |
+| 設定変更時（無効→有効） | キュー処理を開始 |
+| 設定変更時（有効→無効） | キュー処理を停止 |
+
+手動で`tts_start`/`tts_stop`を呼び出す必要はない。
+
 ### 処理フロー
 
 ```
@@ -208,6 +254,67 @@ pub enum TtsPriority {
 - デフォルト: 50メッセージ
 - 満杯時: 新規メッセージは破棄
 - 処理順: FIFO（先入れ先出し）
+
+## バックエンド自動起動
+
+### 概要
+
+アプリ起動時にTTSバックエンド（棒読みちゃん/VOICEVOX）を自動起動し、アプリ終了時に自動終了する機能。
+
+### 自動探索パス（Windows）
+
+**棒読みちゃん:**
+- `C:\BouyomiChan\BouyomiChan.exe`
+- `C:\Program Files\BouyomiChan\BouyomiChan.exe`
+- `C:\Program Files (x86)\BouyomiChan\BouyomiChan.exe`
+
+**VOICEVOX:**
+- `%LOCALAPPDATA%\Programs\VOICEVOX\VOICEVOX.exe`
+- `C:\Program Files\VOICEVOX\VOICEVOX.exe`
+
+### ライフサイクル
+
+#### 起動時
+
+```
+1. アプリ起動
+        ↓
+2. 設定読み込み
+        ↓
+3. bouyomichan.auto_launch=true?
+   ├─ true → 棒読みちゃん起動（exe_pathまたは自動探索）
+   └─ false → スキップ
+        ↓
+4. voicevox.auto_launch=true?
+   ├─ true → VOICEVOX起動（exe_pathまたは自動探索）
+   └─ false → スキップ
+        ↓
+5. 起動したプロセスのPIDを保持
+```
+
+#### 終了時
+
+```
+1. アプリ終了要求
+        ↓
+2. 「自動起動した」プロセスを確認
+        ↓
+3. bouyomichan.auto_close=true かつ 自動起動済み?
+   ├─ true → プロセスをkill
+   └─ false → スキップ
+        ↓
+4. voicevox.auto_close=true かつ 自動起動済み?
+   ├─ true → プロセスをkill
+   └─ false → スキップ
+        ↓
+5. アプリ終了
+```
+
+### 注意事項
+
+- **自動起動したプロセスのみ終了**: 手動で起動したプロセスは終了しない
+- **Windows限定**: 現在の自動探索パスはWindows専用
+- **VOICEVOXの起動時間**: VOICEVOXは起動に数秒かかる場合がある
 
 ## 棒読みちゃん連携
 
@@ -390,8 +497,18 @@ TTS設定
 │   ├─ 最大文字数
 │   └─ キューサイズ上限
 ├─ バックエンド固有設定
-│   ├─ [棒読みちゃん] ホスト、ポート、声質、音量、速度、音高
-│   └─ [VOICEVOX] ホスト、ポート、話者、音量、速度、音高、抑揚
+│   ├─ [棒読みちゃん]
+│   │   ├─ ホスト、ポート、声質、音量、速度、音高
+│   │   ├─ 自動起動トグル
+│   │   ├─ 実行ファイルパス表示 + 参照ボタン + 自動検出ボタン
+│   │   ├─ 終了時に自動停止トグル
+│   │   └─ 手動起動/停止ボタン + 起動状態表示
+│   └─ [VOICEVOX]
+│       ├─ ホスト、ポート、話者、音量、速度、音高、抑揚
+│       ├─ 自動起動トグル
+│       ├─ 実行ファイルパス表示 + 参照ボタン + 自動検出ボタン
+│       ├─ 終了時に自動停止トグル
+│       └─ 手動起動/停止ボタン + 起動状態表示
 ├─ 接続テストボタン
 └─ テスト読み上げ（テキスト入力 + 読み上げボタン）
 ```
@@ -428,6 +545,9 @@ pub struct BouyomichanConfig {
     pub volume: i32,
     pub speed: i32,
     pub tone: i32,
+    pub auto_launch: bool,
+    pub exe_path: Option<String>,
+    pub auto_close: bool,
 }
 
 pub struct VoicevoxConfig {
@@ -438,6 +558,9 @@ pub struct VoicevoxConfig {
     pub speed_scale: f32,
     pub pitch_scale: f32,
     pub intonation_scale: f32,
+    pub auto_launch: bool,
+    pub exe_path: Option<String>,
+    pub auto_close: bool,
 }
 ```
 
@@ -456,5 +579,35 @@ interface TtsConfigDto {
     queue_size_limit: number;
     bouyomichan: BouyomichanConfig;
     voicevox: VoicevoxConfig;
+}
+
+interface BouyomichanConfig {
+    host: string;
+    port: number;
+    voice: number;
+    volume: number;
+    speed: number;
+    tone: number;
+    auto_launch: boolean;
+    exe_path: string | null;
+    auto_close: boolean;
+}
+
+interface VoicevoxConfig {
+    host: string;
+    port: number;
+    speaker_id: number;
+    volume_scale: number;
+    speed_scale: number;
+    pitch_scale: number;
+    intonation_scale: number;
+    auto_launch: boolean;
+    exe_path: string | null;
+    auto_close: boolean;
+}
+
+interface TtsLaunchStatus {
+    bouyomichan_launched: boolean;
+    voicevox_launched: boolean;
 }
 ```

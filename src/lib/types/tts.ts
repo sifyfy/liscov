@@ -20,6 +20,9 @@ export interface TtsConfig {
   bouyomichan_volume: number;
   bouyomichan_speed: number;
   bouyomichan_tone: number;
+  bouyomichan_auto_launch: boolean;
+  bouyomichan_exe_path: string | null;
+  bouyomichan_auto_close: boolean;
   // VOICEVOX settings
   voicevox_host: string;
   voicevox_port: number;
@@ -28,12 +31,20 @@ export interface TtsConfig {
   voicevox_speed_scale: number;
   voicevox_pitch_scale: number;
   voicevox_intonation_scale: number;
+  voicevox_auto_launch: boolean;
+  voicevox_exe_path: string | null;
+  voicevox_auto_close: boolean;
 }
 
 export interface TtsStatus {
   is_processing: boolean;
   queue_size: number;
   backend_name: string | null;
+}
+
+export interface TtsLaunchStatus {
+  bouyomichan_launched: boolean;
+  voicevox_launched: boolean;
 }
 
 export const defaultTtsConfig: TtsConfig = {
@@ -52,11 +63,17 @@ export const defaultTtsConfig: TtsConfig = {
   bouyomichan_volume: -1,
   bouyomichan_speed: -1,
   bouyomichan_tone: -1,
+  bouyomichan_auto_launch: false,
+  bouyomichan_exe_path: null,
+  bouyomichan_auto_close: true,
   voicevox_host: 'localhost',
   voicevox_port: 50021,
   voicevox_speaker_id: 1,
   voicevox_volume_scale: 1.0,
   voicevox_speed_scale: 1.0,
   voicevox_pitch_scale: 0.0,
-  voicevox_intonation_scale: 1.0
+  voicevox_intonation_scale: 1.0,
+  voicevox_auto_launch: false,
+  voicevox_exe_path: null,
+  voicevox_auto_close: true
 };

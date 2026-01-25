@@ -1,9 +1,10 @@
 //! TTS (Text-to-Speech) commands
 
 use crate::state::AppState;
-use crate::tts::{TtsBackendType, TtsConfig, TtsPriority, TtsQueueItem};
+use crate::tts::{TtsBackendType, TtsConfig, TtsProcessManager, TtsPriority, TtsQueueItem};
 use serde::{Deserialize, Serialize};
 use tauri::State;
+use tauri_plugin_dialog::DialogExt;
 
 /// TTS configuration for frontend
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,6 +25,9 @@ pub struct TtsConfigDto {
     pub bouyomichan_volume: i32,
     pub bouyomichan_speed: i32,
     pub bouyomichan_tone: i32,
+    pub bouyomichan_auto_launch: bool,
+    pub bouyomichan_exe_path: Option<String>,
+    pub bouyomichan_auto_close: bool,
     // VOICEVOX settings
     pub voicevox_host: String,
     pub voicevox_port: u16,
@@ -32,6 +36,9 @@ pub struct TtsConfigDto {
     pub voicevox_speed_scale: f32,
     pub voicevox_pitch_scale: f32,
     pub voicevox_intonation_scale: f32,
+    pub voicevox_auto_launch: bool,
+    pub voicevox_exe_path: Option<String>,
+    pub voicevox_auto_close: bool,
 }
 
 impl From<TtsConfig> for TtsConfigDto {
@@ -56,6 +63,9 @@ impl From<TtsConfig> for TtsConfigDto {
             bouyomichan_volume: config.bouyomichan.volume,
             bouyomichan_speed: config.bouyomichan.speed,
             bouyomichan_tone: config.bouyomichan.tone,
+            bouyomichan_auto_launch: config.bouyomichan.auto_launch,
+            bouyomichan_exe_path: config.bouyomichan.exe_path,
+            bouyomichan_auto_close: config.bouyomichan.auto_close,
             voicevox_host: config.voicevox.host,
             voicevox_port: config.voicevox.port,
             voicevox_speaker_id: config.voicevox.speaker_id,
@@ -63,6 +73,9 @@ impl From<TtsConfig> for TtsConfigDto {
             voicevox_speed_scale: config.voicevox.speed_scale,
             voicevox_pitch_scale: config.voicevox.pitch_scale,
             voicevox_intonation_scale: config.voicevox.intonation_scale,
+            voicevox_auto_launch: config.voicevox.auto_launch,
+            voicevox_exe_path: config.voicevox.exe_path,
+            voicevox_auto_close: config.voicevox.auto_close,
         }
     }
 }
@@ -85,6 +98,9 @@ impl From<TtsConfigDto> for TtsConfig {
                 volume: dto.bouyomichan_volume,
                 speed: dto.bouyomichan_speed,
                 tone: dto.bouyomichan_tone,
+                auto_launch: dto.bouyomichan_auto_launch,
+                exe_path: dto.bouyomichan_exe_path,
+                auto_close: dto.bouyomichan_auto_close,
             },
             voicevox: VoicevoxConfig {
                 host: dto.voicevox_host,
@@ -94,6 +110,9 @@ impl From<TtsConfigDto> for TtsConfig {
                 speed_scale: dto.voicevox_speed_scale,
                 pitch_scale: dto.voicevox_pitch_scale,
                 intonation_scale: dto.voicevox_intonation_scale,
+                auto_launch: dto.voicevox_auto_launch,
+                exe_path: dto.voicevox_exe_path,
+                auto_close: dto.voicevox_auto_close,
             },
             read_author_name: dto.read_author_name,
             add_honorific: dto.add_honorific,
@@ -162,7 +181,18 @@ pub async fn tts_update_config(
     state: State<'_, AppState>,
     config: TtsConfigDto,
 ) -> Result<(), String> {
+    let was_enabled = state.tts_manager.get_config().await.enabled;
+    let will_be_enabled = config.enabled;
+
     state.tts_manager.update_config(config.into()).await;
+
+    // Start/stop processing based on enabled state change
+    if !was_enabled && will_be_enabled {
+        state.tts_manager.start_processing().await;
+    } else if was_enabled && !will_be_enabled {
+        state.tts_manager.stop_processing().await;
+    }
+
     Ok(())
 }
 
@@ -227,5 +257,79 @@ pub async fn tts_get_status(state: State<'_, AppState>) -> Result<TtsStatus, Str
         is_processing: state.tts_manager.is_processing().await,
         queue_size: state.tts_manager.queue_size().await,
         backend_name: state.tts_manager.backend_name().await.map(|s| s.to_string()),
+    })
+}
+
+/// TTS backend launch status
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TtsLaunchStatus {
+    pub bouyomichan_launched: bool,
+    pub voicevox_launched: bool,
+}
+
+/// Discover executable path for a TTS backend
+#[tauri::command]
+pub async fn tts_discover_exe(backend: String) -> Result<Option<String>, String> {
+    let backend_type = match backend.as_str() {
+        "bouyomichan" => TtsBackendType::Bouyomichan,
+        "voicevox" => TtsBackendType::Voicevox,
+        _ => return Ok(None),
+    };
+    Ok(TtsProcessManager::discover_exe(&backend_type))
+}
+
+/// Select executable file via dialog
+#[tauri::command]
+pub async fn tts_select_exe(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let file = app
+        .dialog()
+        .file()
+        .add_filter("実行ファイル", &["exe"])
+        .blocking_pick_file();
+
+    Ok(file.map(|f| f.to_string()))
+}
+
+/// Launch a TTS backend process
+#[tauri::command]
+pub async fn tts_launch_backend(
+    state: State<'_, AppState>,
+    backend: String,
+    exe_path: Option<String>,
+) -> Result<u32, String> {
+    let backend_type = match backend.as_str() {
+        "bouyomichan" => TtsBackendType::Bouyomichan,
+        "voicevox" => TtsBackendType::Voicevox,
+        _ => return Err("Invalid backend type".to_string()),
+    };
+    state
+        .tts_process_manager
+        .launch(backend_type, exe_path.as_deref())
+        .await
+}
+
+/// Kill a TTS backend process
+#[tauri::command]
+pub async fn tts_kill_backend(state: State<'_, AppState>, backend: String) -> Result<(), String> {
+    let backend_type = match backend.as_str() {
+        "bouyomichan" => TtsBackendType::Bouyomichan,
+        "voicevox" => TtsBackendType::Voicevox,
+        _ => return Err("Invalid backend type".to_string()),
+    };
+    state.tts_process_manager.kill(&backend_type).await
+}
+
+/// Get TTS backend launch status
+#[tauri::command]
+pub async fn tts_get_launch_status(state: State<'_, AppState>) -> Result<TtsLaunchStatus, String> {
+    Ok(TtsLaunchStatus {
+        bouyomichan_launched: state
+            .tts_process_manager
+            .is_launched(&TtsBackendType::Bouyomichan)
+            .await,
+        voicevox_launched: state
+            .tts_process_manager
+            .is_launched(&TtsBackendType::Voicevox)
+            .await,
     })
 }
