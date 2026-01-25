@@ -55,7 +55,7 @@
       <input
         type="text"
         bind:value={localSearchQuery}
-        placeholder="Search by name, reading, or notes..."
+        placeholder="名前、読み仮名、メモで検索..."
         class="flex-1 px-3 py-2 rounded-lg bg-[var(--bg-white)] text-[var(--text-primary)] placeholder-[var(--text-muted)] border border-[var(--border-light)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-start)]/50"
       />
       <button
@@ -63,13 +63,13 @@
         class="px-4 py-2 text-white rounded-lg transition-colors"
         style="background: linear-gradient(135deg, var(--primary-start) 0%, var(--primary-end) 100%);"
       >
-        Search
+        検索
       </button>
       <button
         type="button"
         onclick={handleRefresh}
         class="px-3 py-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-light)] rounded-lg transition-colors border border-[var(--border-light)]"
-        title="Refresh"
+        title="更新"
         aria-label="Refresh viewer list"
       >
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -80,27 +80,27 @@
   </div>
 
   <!-- Viewer list -->
-  <div class="flex-1 overflow-y-auto">
+  <div class="flex-1 overflow-y-auto min-h-0">
     {#if viewerStore.isLoading}
       <div class="flex items-center justify-center h-32">
-        <p class="text-[var(--text-muted)]">Loading...</p>
+        <p class="text-[var(--text-muted)]">読み込み中...</p>
       </div>
     {:else if viewerStore.viewers.length === 0}
       <div class="flex items-center justify-center h-32">
-        <p class="text-[var(--text-muted)]">No viewers found</p>
+        <p class="text-[var(--text-muted)]">視聴者が見つかりません</p>
       </div>
     {:else}
       <table class="w-full">
         <thead class="bg-[var(--bg-light)] sticky top-0">
           <tr class="text-left text-[var(--text-secondary)] text-sm">
-            <th class="px-4 py-3">Name</th>
-            <th class="px-4 py-3">Reading</th>
-            <th class="px-4 py-3">First seen</th>
-            <th class="px-4 py-3">Last seen</th>
-            <th class="px-4 py-3">Messages</th>
-            <th class="px-4 py-3">Contribution</th>
-            <th class="px-4 py-3">Tags</th>
-            <th class="px-4 py-3">Notes</th>
+            <th class="px-4 py-3">名前</th>
+            <th class="px-4 py-3">読み仮名</th>
+            <th class="px-4 py-3">初見日時</th>
+            <th class="px-4 py-3">最終確認</th>
+            <th class="px-4 py-3">コメント数</th>
+            <th class="px-4 py-3">貢献額</th>
+            <th class="px-4 py-3">タグ</th>
+            <th class="px-4 py-3">メモ</th>
           </tr>
         </thead>
         <tbody>
@@ -114,7 +114,7 @@
                   <span class="text-[var(--text-primary)] font-medium">{viewer.display_name}</span>
                   {#if viewer.membership_level}
                     <span class="px-1.5 py-0.5 text-xs bg-green-100 text-green-700 rounded border border-green-200">
-                      Member
+                      メンバー
                     </span>
                   {/if}
                 </div>
@@ -159,23 +159,23 @@
   </div>
 
   <!-- Pagination -->
-  <div class="flex items-center justify-between px-4 py-3 bg-[var(--bg-light)] border-t border-[var(--border-light)]">
+  <div class="flex-shrink-0 flex items-center justify-between px-4 py-3 bg-[var(--bg-light)] border-t border-[var(--border-light)]">
     <button
       onclick={() => viewerStore.prevPage()}
       disabled={viewerStore.currentPage === 0}
       class="px-4 py-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-white)] rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-[var(--border-light)]"
     >
-      Previous
+      前へ
     </button>
     <span class="text-[var(--text-muted)] text-sm">
-      Page {viewerStore.currentPage + 1}
+      ページ {viewerStore.currentPage + 1}
     </span>
     <button
       onclick={() => viewerStore.nextPage()}
       disabled={viewerStore.viewers.length < viewerStore.pageSize}
       class="px-4 py-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-white)] rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-[var(--border-light)]"
     >
-      Next
+      次へ
     </button>
   </div>
 </div>

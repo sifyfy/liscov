@@ -17,8 +17,8 @@
   }
 
   async function handleInitialize() {
+    streamUrl = '';  // Clear URL first to avoid race condition
     await chatStore.initialize();
-    streamUrl = '';
   }
 
   async function toggleChatMode() {

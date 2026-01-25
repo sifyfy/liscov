@@ -197,7 +197,7 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
   test('Step 1: Before connecting - Viewer Management should be empty', async () => {
     // Navigate to Viewers tab WITHOUT connecting to a stream first
     await mainPage.locator('button:has-text("Viewer")').click();
-    await expect(mainPage.getByRole('heading', { name: 'Viewer Management' }).first()).toBeVisible();
+    await expect(mainPage.getByRole('heading', { name: '視聴者管理' }).first()).toBeVisible();
 
     // Wait for the broadcaster list to load (async operation)
     await new Promise(resolve => setTimeout(resolve, 2000));
@@ -212,8 +212,8 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
     // CRITICAL: Without connecting to a stream, there should be NO broadcasters
     expect(options.length).toBe(1); // Only placeholder
 
-    // Should show "Select a broadcaster" message (Japanese UI)
-    await expect(mainPage.getByText('Select a broadcaster to view viewers')).toBeVisible();
+    // Should show "配信者を選択してください" message (Japanese UI)
+    await expect(mainPage.getByText('配信者を選択してください')).toBeVisible();
   });
 
   test('Step 2: Authenticate', async () => {
@@ -355,7 +355,7 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
 
     // Navigate to Viewers tab
     await mainPage.locator('button:has-text("Viewer")').click();
-    await expect(mainPage.getByRole('heading', { name: 'Viewer Management' }).first()).toBeVisible();
+    await expect(mainPage.getByRole('heading', { name: '視聴者管理' }).first()).toBeVisible();
 
     // Wait for the store to load and log
     await new Promise(resolve => setTimeout(resolve, 3000));
@@ -404,17 +404,17 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
     const viewerRow = mainPage.locator('tbody tr').first();
     await viewerRow.click();
 
-    await expect(mainPage.getByRole('heading', { name: 'Edit Viewer Info' })).toBeVisible();
+    await expect(mainPage.getByRole('heading', { name: '視聴者情報の編集' })).toBeVisible();
 
     // Set reading
     const readingInput = mainPage.locator('#reading');
     await readingInput.fill('テスト読み仮名');
 
     // Save
-    await mainPage.getByRole('button', { name: 'Save' }).click();
+    await mainPage.getByRole('button', { name: '保存' }).click();
 
     // Modal should close
-    await expect(mainPage.getByRole('heading', { name: 'Edit Viewer Info' })).not.toBeVisible({ timeout: 3000 });
+    await expect(mainPage.getByRole('heading', { name: '視聴者情報の編集' })).not.toBeVisible({ timeout: 3000 });
 
     // Verify reading appears in table
     await expect(mainPage.getByText('テスト読み仮名')).toBeVisible();
@@ -442,7 +442,7 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
 
     // Navigate directly to Viewers tab (without connecting to stream)
     await mainPage.locator('button:has-text("Viewer")').click();
-    await expect(mainPage.getByRole('heading', { name: 'Viewer Management' }).first()).toBeVisible();
+    await expect(mainPage.getByRole('heading', { name: '視聴者管理' }).first()).toBeVisible();
 
     // Wait for the broadcaster list to load (async operation)
     await new Promise(resolve => setTimeout(resolve, 3000));

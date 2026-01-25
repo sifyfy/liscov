@@ -372,7 +372,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
     test.beforeEach(async () => {
       // Navigate to Viewers tab
       await mainPage.locator('button:has-text("Viewer")').click();
-      await expect(mainPage.getByRole('heading', { name: 'Viewer Management' }).first()).toBeVisible();
+      await expect(mainPage.getByRole('heading', { name: '視聴者管理' }).first()).toBeVisible();
     });
 
     test('should use consistent color scheme with CSS variables (not hard-coded colors)', async () => {
@@ -384,7 +384,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
       // - Fixed: text-[var(--text-primary)] (dark text, low luminance ~60)
 
       // Select the h2 heading (not h1 in header) as it uses CSS variables
-      const heading = mainPage.locator('h2').filter({ hasText: 'Viewer Management' });
+      const heading = mainPage.locator('h2').filter({ hasText: '視聴者管理' });
       await expect(heading).toBeVisible();
 
       // Get heading color and convert to RGB
@@ -440,7 +440,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
       await broadcasterSelect.selectOption({ index: 0 }); // Select placeholder
 
       // When no broadcaster is selected, show guidance message
-      const message = mainPage.getByText('Select a broadcaster to view viewers');
+      const message = mainPage.getByText('配信者を選択してください');
       await expect(message).toBeVisible();
     });
 
@@ -459,10 +459,10 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
         // Wait for viewer list to appear
         await expect(mainPage.locator('table')).toBeVisible({ timeout: 5000 });
 
-        // Verify table headers are present
-        await expect(mainPage.getByRole('columnheader', { name: 'Name' })).toBeVisible();
-        await expect(mainPage.getByRole('columnheader', { name: 'Reading' })).toBeVisible();
-        await expect(mainPage.getByRole('columnheader', { name: 'Messages' })).toBeVisible();
+        // Verify table headers are present (Japanese UI)
+        await expect(mainPage.getByRole('columnheader', { name: '名前' })).toBeVisible();
+        await expect(mainPage.getByRole('columnheader', { name: '読み仮名' })).toBeVisible();
+        await expect(mainPage.getByRole('columnheader', { name: 'コメント数' })).toBeVisible();
       }
     });
 
@@ -476,14 +476,14 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
         await broadcasterSelect.selectOption({ index: 1 });
         await expect(mainPage.locator('table')).toBeVisible({ timeout: 5000 });
 
-        const searchInput = mainPage.getByPlaceholder(/Search by name, reading, or notes/i);
+        const searchInput = mainPage.getByPlaceholder(/名前、読み仮名、メモで検索/i);
         await expect(searchInput).toBeVisible();
 
         // Type a search query
         await searchInput.fill('test');
 
-        // Submit the search
-        const searchButton = mainPage.getByRole('button', { name: 'Search' });
+        // Submit the search (Japanese: 検索)
+        const searchButton = mainPage.getByRole('button', { name: '検索' });
         await searchButton.click();
 
         // Wait for results to update
@@ -501,8 +501,8 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
         await broadcasterSelect.selectOption({ index: 1 });
         await expect(mainPage.locator('table')).toBeVisible({ timeout: 5000 });
 
-        const prevButton = mainPage.getByRole('button', { name: 'Previous' });
-        const nextButton = mainPage.getByRole('button', { name: 'Next' });
+        const prevButton = mainPage.getByRole('button', { name: '前へ' });
+        const nextButton = mainPage.getByRole('button', { name: '次へ' });
 
         await expect(prevButton).toBeVisible();
         await expect(nextButton).toBeVisible();
@@ -522,15 +522,15 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
         await broadcasterSelect.selectOption({ index: 1 });
         await expect(mainPage.locator('table')).toBeVisible({ timeout: 5000 });
 
-        // Verify all 8 column headers
-        await expect(mainPage.getByRole('columnheader', { name: 'Name' })).toBeVisible();
-        await expect(mainPage.getByRole('columnheader', { name: 'Reading' })).toBeVisible();
-        await expect(mainPage.getByRole('columnheader', { name: 'First seen' })).toBeVisible();
-        await expect(mainPage.getByRole('columnheader', { name: 'Last seen' })).toBeVisible();
-        await expect(mainPage.getByRole('columnheader', { name: 'Messages' })).toBeVisible();
-        await expect(mainPage.getByRole('columnheader', { name: 'Contribution' })).toBeVisible();
-        await expect(mainPage.getByRole('columnheader', { name: 'Tags' })).toBeVisible();
-        await expect(mainPage.getByRole('columnheader', { name: 'Notes' })).toBeVisible();
+        // Verify all 8 column headers (Japanese UI)
+        await expect(mainPage.getByRole('columnheader', { name: '名前' })).toBeVisible();
+        await expect(mainPage.getByRole('columnheader', { name: '読み仮名' })).toBeVisible();
+        await expect(mainPage.getByRole('columnheader', { name: '初見日時' })).toBeVisible();
+        await expect(mainPage.getByRole('columnheader', { name: '最終確認' })).toBeVisible();
+        await expect(mainPage.getByRole('columnheader', { name: 'コメント数' })).toBeVisible();
+        await expect(mainPage.getByRole('columnheader', { name: '貢献額' })).toBeVisible();
+        await expect(mainPage.getByRole('columnheader', { name: 'タグ' })).toBeVisible();
+        await expect(mainPage.getByRole('columnheader', { name: 'メモ' })).toBeVisible();
       }
     });
 
@@ -566,11 +566,11 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
         await expect(mainPage.locator('table')).toBeVisible({ timeout: 5000 });
 
         // Check initial page indicator
-        const pageIndicator = mainPage.getByText(/Page \d+/);
-        await expect(pageIndicator).toContainText('Page 1');
+        const pageIndicator = mainPage.getByText(/ページ \d+/);
+        await expect(pageIndicator).toContainText('ページ 1');
 
-        const nextButton = mainPage.getByRole('button', { name: 'Next' });
-        const prevButton = mainPage.getByRole('button', { name: 'Previous' });
+        const nextButton = mainPage.getByRole('button', { name: '次へ' });
+        const prevButton = mainPage.getByRole('button', { name: '前へ' });
 
         // If Next button is enabled (has more pages), click it
         if (!await nextButton.isDisabled()) {
@@ -578,7 +578,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
           await new Promise(resolve => setTimeout(resolve, 500));
 
           // Page should change to 2
-          await expect(pageIndicator).toContainText('Page 2');
+          await expect(pageIndicator).toContainText('ページ 2');
 
           // Previous button should now be enabled
           await expect(prevButton).not.toBeDisabled();
@@ -588,7 +588,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
           await new Promise(resolve => setTimeout(resolve, 500));
 
           // Page should be back to 1
-          await expect(pageIndicator).toContainText('Page 1');
+          await expect(pageIndicator).toContainText('ページ 1');
         }
       }
     });
@@ -598,7 +598,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
     test.beforeEach(async () => {
       // Navigate to Viewers tab and select a broadcaster
       await mainPage.locator('button:has-text("Viewer")').click();
-      await expect(mainPage.getByRole('heading', { name: 'Viewer Management' }).first()).toBeVisible();
+      await expect(mainPage.getByRole('heading', { name: '視聴者管理' }).first()).toBeVisible();
 
       const broadcasterSelect = mainPage.locator('#broadcaster-select');
       const options = await broadcasterSelect.locator('option').all();
@@ -618,11 +618,11 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
         await viewerRows[0].click();
 
         // Edit modal should appear
-        const modal = mainPage.getByRole('heading', { name: 'Edit Viewer Info' });
+        const modal = mainPage.getByRole('heading', { name: '視聴者情報の編集' });
         await expect(modal).toBeVisible({ timeout: 3000 });
 
         // Close modal to clean up for next test
-        await mainPage.getByRole('button', { name: 'Cancel' }).click();
+        await mainPage.getByRole('button', { name: 'キャンセル' }).click();
         await expect(modal).not.toBeVisible({ timeout: 3000 });
       }
     });
@@ -633,7 +633,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
 
       if (viewerRows.length > 0) {
         await viewerRows[0].click();
-        await expect(mainPage.getByRole('heading', { name: 'Edit Viewer Info' })).toBeVisible();
+        await expect(mainPage.getByRole('heading', { name: '視聴者情報の編集' })).toBeVisible();
 
         // Check for reading input
         const readingInput = mainPage.locator('#reading');
@@ -648,7 +648,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
         await expect(tagsInput).toBeVisible();
 
         // Close modal
-        await mainPage.getByRole('button', { name: 'Cancel' }).click();
+        await mainPage.getByRole('button', { name: 'キャンセル' }).click();
       }
     });
 
@@ -658,15 +658,15 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
 
       if (viewerRows.length > 0) {
         await viewerRows[0].click();
-        await expect(mainPage.getByRole('heading', { name: 'Edit Viewer Info' })).toBeVisible();
+        await expect(mainPage.getByRole('heading', { name: '視聴者情報の編集' })).toBeVisible();
 
         // Enter tags
         const tagsInput = mainPage.locator('#tags');
         await tagsInput.fill('常連, VIP, スパチャ');
 
         // Save
-        await mainPage.getByRole('button', { name: 'Save' }).click();
-        await expect(mainPage.getByRole('heading', { name: 'Edit Viewer Info' })).not.toBeVisible({ timeout: 3000 });
+        await mainPage.getByRole('button', { name: '保存' }).click();
+        await expect(mainPage.getByRole('heading', { name: '視聴者情報の編集' })).not.toBeVisible({ timeout: 3000 });
 
         // Verify tags appear in the list (Tags column should show badges)
         // Look for at least one of the tags in the table
@@ -680,7 +680,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
 
       if (viewerRows.length > 0) {
         await viewerRows[0].click();
-        await expect(mainPage.getByRole('heading', { name: 'Edit Viewer Info' })).toBeVisible();
+        await expect(mainPage.getByRole('heading', { name: '視聴者情報の編集' })).toBeVisible();
 
         // Enter test data
         const readingInput = mainPage.locator('#reading');
@@ -690,11 +690,11 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
         await notesInput.fill('テストメモ');
 
         // Click save
-        const saveButton = mainPage.getByRole('button', { name: 'Save' });
+        const saveButton = mainPage.getByRole('button', { name: '保存' });
         await saveButton.click();
 
         // Modal should close
-        await expect(mainPage.getByRole('heading', { name: 'Edit Viewer Info' })).not.toBeVisible({ timeout: 3000 });
+        await expect(mainPage.getByRole('heading', { name: '視聴者情報の編集' })).not.toBeVisible({ timeout: 3000 });
 
         // Verify data is reflected in the list (reading column)
         await expect(mainPage.getByText('テストよみがな')).toBeVisible();
@@ -707,14 +707,14 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
 
       if (viewerRows.length > 0) {
         await viewerRows[0].click();
-        await expect(mainPage.getByRole('heading', { name: 'Edit Viewer Info' })).toBeVisible();
+        await expect(mainPage.getByRole('heading', { name: '視聴者情報の編集' })).toBeVisible();
 
         // Delete button should be visible (use exact: true to avoid matching "Delete Broadcaster")
-        const deleteButton = mainPage.getByRole('button', { name: 'Delete', exact: true });
+        const deleteButton = mainPage.getByRole('button', { name: '削除', exact: true });
         await expect(deleteButton).toBeVisible();
 
         // Close modal to clean up
-        await mainPage.getByRole('button', { name: 'Cancel' }).click();
+        await mainPage.getByRole('button', { name: 'キャンセル' }).click();
       }
     });
 
@@ -723,25 +723,25 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
 
       if (viewerRows.length > 0) {
         await viewerRows[0].click();
-        await expect(mainPage.getByRole('heading', { name: 'Edit Viewer Info' })).toBeVisible();
+        await expect(mainPage.getByRole('heading', { name: '視聴者情報の編集' })).toBeVisible();
 
         // Click delete button (use exact: true to avoid matching "Delete Broadcaster")
-        const deleteButton = mainPage.getByRole('button', { name: 'Delete', exact: true });
+        const deleteButton = mainPage.getByRole('button', { name: '削除', exact: true });
         await deleteButton.click();
 
         // Confirmation dialog should appear
-        await expect(mainPage.getByRole('heading', { name: 'Delete Custom Info' })).toBeVisible();
+        await expect(mainPage.getByRole('heading', { name: 'カスタム情報の削除' })).toBeVisible();
 
         // Cancel the delete (use .last() to target the frontmost dialog - the confirmation dialog)
         const confirmDialog = mainPage.getByRole('dialog').last();
-        const cancelButton = confirmDialog.getByRole('button', { name: 'Cancel' });
+        const cancelButton = confirmDialog.getByRole('button', { name: 'キャンセル' });
         await cancelButton.click();
 
         // Confirmation dialog should close
-        await expect(mainPage.getByRole('heading', { name: 'Delete Custom Info' })).not.toBeVisible();
+        await expect(mainPage.getByRole('heading', { name: 'カスタム情報の削除' })).not.toBeVisible();
 
         // Close edit modal to clean up (now only one Cancel button visible)
-        await mainPage.getByRole('button', { name: 'Cancel' }).click();
+        await mainPage.getByRole('button', { name: 'キャンセル' }).click();
       }
     });
 
@@ -754,32 +754,32 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
         const viewerName = await viewerRows[0].locator('td').first().textContent();
 
         await viewerRows[0].click();
-        await expect(mainPage.getByRole('heading', { name: 'Edit Viewer Info' })).toBeVisible();
+        await expect(mainPage.getByRole('heading', { name: '視聴者情報の編集' })).toBeVisible();
 
         // First add some data
         const readingInput = mainPage.locator('#reading');
         await readingInput.fill('削除テスト用');
 
-        await mainPage.getByRole('button', { name: 'Save' }).click();
-        await expect(mainPage.getByRole('heading', { name: 'Edit Viewer Info' })).not.toBeVisible({ timeout: 3000 });
+        await mainPage.getByRole('button', { name: '保存' }).click();
+        await expect(mainPage.getByRole('heading', { name: '視聴者情報の編集' })).not.toBeVisible({ timeout: 3000 });
 
         // Verify data was saved
         await expect(mainPage.getByText('削除テスト用')).toBeVisible();
 
         // Now open the modal again and delete
         await viewerRows[0].click();
-        await expect(mainPage.getByRole('heading', { name: 'Edit Viewer Info' })).toBeVisible();
+        await expect(mainPage.getByRole('heading', { name: '視聴者情報の編集' })).toBeVisible();
 
         // Click delete (use exact: true to avoid matching "Delete Broadcaster")
-        await mainPage.getByRole('button', { name: 'Delete', exact: true }).click();
-        await expect(mainPage.getByRole('heading', { name: 'Delete Custom Info' })).toBeVisible();
+        await mainPage.getByRole('button', { name: '削除', exact: true }).click();
+        await expect(mainPage.getByRole('heading', { name: 'カスタム情報の削除' })).toBeVisible();
 
         // Confirm deletion (use .last() to target the frontmost dialog - the confirmation dialog)
-        const confirmButton = mainPage.getByRole('dialog').last().getByRole('button', { name: 'Delete' });
+        const confirmButton = mainPage.getByRole('dialog').last().getByRole('button', { name: '削除' });
         await confirmButton.click();
 
         // Modal should close
-        await expect(mainPage.getByRole('heading', { name: 'Edit Viewer Info' })).not.toBeVisible({ timeout: 3000 });
+        await expect(mainPage.getByRole('heading', { name: '視聴者情報の編集' })).not.toBeVisible({ timeout: 3000 });
 
         // The reading should no longer be visible (deleted)
         await expect(mainPage.getByText('削除テスト用')).not.toBeVisible({ timeout: 3000 });
@@ -791,14 +791,14 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
 
       if (viewerRows.length > 0) {
         await viewerRows[0].click();
-        await expect(mainPage.getByRole('heading', { name: 'Edit Viewer Info' })).toBeVisible();
+        await expect(mainPage.getByRole('heading', { name: '視聴者情報の編集' })).toBeVisible();
 
         // Click cancel
-        const cancelButton = mainPage.getByRole('button', { name: 'Cancel' });
+        const cancelButton = mainPage.getByRole('button', { name: 'キャンセル' });
         await cancelButton.click();
 
         // Modal should close
-        await expect(mainPage.getByRole('heading', { name: 'Edit Viewer Info' })).not.toBeVisible({ timeout: 3000 });
+        await expect(mainPage.getByRole('heading', { name: '視聴者情報の編集' })).not.toBeVisible({ timeout: 3000 });
       }
     });
   });
@@ -823,7 +823,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
       // After connecting to a stream and receiving messages,
       // viewers should be visible in the Viewer Management
       await mainPage.locator('button:has-text("Viewer")').click();
-      await expect(mainPage.getByRole('heading', { name: 'Viewer Management' }).first()).toBeVisible();
+      await expect(mainPage.getByRole('heading', { name: '視聴者管理' }).first()).toBeVisible();
 
       const broadcasterSelect = mainPage.locator('#broadcaster-select');
       const options = await broadcasterSelect.locator('option').all();
@@ -847,7 +847,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
     test('should be able to edit viewer info for viewers from connected stream', async () => {
       // Verify that we can edit viewer info for viewers we received via the stream
       await mainPage.locator('button:has-text("Viewer")').click();
-      await expect(mainPage.getByRole('heading', { name: 'Viewer Management' }).first()).toBeVisible();
+      await expect(mainPage.getByRole('heading', { name: '視聴者管理' }).first()).toBeVisible();
 
       const broadcasterSelect = mainPage.locator('#broadcaster-select');
       const options = await broadcasterSelect.locator('option').all();
@@ -861,7 +861,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
         if (viewerRows.length > 0) {
           // Click the first viewer
           await viewerRows[0].click();
-          await expect(mainPage.getByRole('heading', { name: 'Edit Viewer Info' })).toBeVisible();
+          await expect(mainPage.getByRole('heading', { name: '視聴者情報の編集' })).toBeVisible();
 
           // Add a reading (furigana) for this viewer
           const readingInput = mainPage.locator('#reading');
@@ -869,8 +869,8 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
           await readingInput.fill(testReading);
 
           // Save
-          await mainPage.getByRole('button', { name: 'Save' }).click();
-          await expect(mainPage.getByRole('heading', { name: 'Edit Viewer Info' })).not.toBeVisible({ timeout: 3000 });
+          await mainPage.getByRole('button', { name: '保存' }).click();
+          await expect(mainPage.getByRole('heading', { name: '視聴者情報の編集' })).not.toBeVisible({ timeout: 3000 });
 
           // Verify the reading is shown in the table
           await expect(mainPage.getByText(testReading)).toBeVisible();
@@ -881,7 +881,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
     test('should persist viewer data across page navigation', async () => {
       // Verify data persists when navigating away and back
       await mainPage.locator('button:has-text("Viewer")').click();
-      await expect(mainPage.getByRole('heading', { name: 'Viewer Management' }).first()).toBeVisible();
+      await expect(mainPage.getByRole('heading', { name: '視聴者管理' }).first()).toBeVisible();
 
       const broadcasterSelect = mainPage.locator('#broadcaster-select');
       const options = await broadcasterSelect.locator('option').all();
@@ -896,7 +896,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
 
         // Navigate back to Viewers tab
         await mainPage.locator('button:has-text("Viewer")').click();
-        await expect(mainPage.getByRole('heading', { name: 'Viewer Management' }).first()).toBeVisible();
+        await expect(mainPage.getByRole('heading', { name: '視聴者管理' }).first()).toBeVisible();
 
         // Re-select the broadcaster
         await broadcasterSelect.selectOption({ index: 1 });
@@ -925,7 +925,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
       // Step 1: We're already connected to Broadcaster A (UC_mock) from beforeAll
       // Navigate to Viewers tab and set up reading for a viewer on Broadcaster A
       await mainPage.locator('button:has-text("Viewer")').click();
-      await expect(mainPage.getByRole('heading', { name: 'Viewer Management' }).first()).toBeVisible();
+      await expect(mainPage.getByRole('heading', { name: '視聴者管理' }).first()).toBeVisible();
 
       const broadcasterSelect = mainPage.locator('#broadcaster-select');
       let options = await broadcasterSelect.locator('option').all();
@@ -950,15 +950,15 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
 
       // Click on the first viewer and set a reading
       await viewerRows[0].click();
-      await expect(mainPage.getByRole('heading', { name: 'Edit Viewer Info' })).toBeVisible();
+      await expect(mainPage.getByRole('heading', { name: '視聴者情報の編集' })).toBeVisible();
 
       // Set a reading specific to Broadcaster A
       const readingForA = '配信者Aでの読み方';
       const readingInput = mainPage.locator('#reading');
       await readingInput.fill(readingForA);
 
-      await mainPage.getByRole('button', { name: 'Save' }).click();
-      await expect(mainPage.getByRole('heading', { name: 'Edit Viewer Info' })).not.toBeVisible({ timeout: 3000 });
+      await mainPage.getByRole('button', { name: '保存' }).click();
+      await expect(mainPage.getByRole('heading', { name: '視聴者情報の編集' })).not.toBeVisible({ timeout: 3000 });
 
       // Verify reading is saved for Broadcaster A
       await expect(mainPage.getByText(readingForA)).toBeVisible();
@@ -1006,7 +1006,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
 
       // Step 5: Navigate to Viewer Management and check Broadcaster B
       await mainPage.locator('button:has-text("Viewer")').click();
-      await expect(mainPage.getByRole('heading', { name: 'Viewer Management' }).first()).toBeVisible();
+      await expect(mainPage.getByRole('heading', { name: '視聴者管理' }).first()).toBeVisible();
 
       // Refresh broadcaster list and find Broadcaster B
       options = await broadcasterSelect.locator('option').all();
@@ -1092,7 +1092,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
     test('should increment message_count when new messages are received', async () => {
       // Navigate to Viewers tab
       await mainPage.locator('button:has-text("Viewer")').click();
-      await expect(mainPage.getByRole('heading', { name: 'Viewer Management' }).first()).toBeVisible();
+      await expect(mainPage.getByRole('heading', { name: '視聴者管理' }).first()).toBeVisible();
 
       const broadcasterSelect = mainPage.locator('#broadcaster-select');
       const options = await broadcasterSelect.locator('option').all();
@@ -1118,7 +1118,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
     test('should update total_contribution when superchat is received', async () => {
       // Navigate to Viewers tab
       await mainPage.locator('button:has-text("Viewer")').click();
-      await expect(mainPage.getByRole('heading', { name: 'Viewer Management' }).first()).toBeVisible();
+      await expect(mainPage.getByRole('heading', { name: '視聴者管理' }).first()).toBeVisible();
 
       const broadcasterSelect = mainPage.locator('#broadcaster-select');
       const options = await broadcasterSelect.locator('option').all();
@@ -1155,7 +1155,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
      */
     test.beforeEach(async () => {
       await mainPage.locator('button:has-text("Viewer")').click();
-      await expect(mainPage.getByRole('heading', { name: 'Viewer Management' }).first()).toBeVisible();
+      await expect(mainPage.getByRole('heading', { name: '視聴者管理' }).first()).toBeVisible();
 
       const broadcasterSelect = mainPage.locator('#broadcaster-select');
       const options = await broadcasterSelect.locator('option').all();
@@ -1172,20 +1172,20 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
       if (viewerRows.length === 0) return;
 
       await viewerRows[0].click();
-      await expect(mainPage.getByRole('heading', { name: 'Edit Viewer Info' })).toBeVisible();
+      await expect(mainPage.getByRole('heading', { name: '視聴者情報の編集' })).toBeVisible();
 
       const uniqueReading = '検索テスト読み' + Date.now();
       const readingInput = mainPage.locator('#reading');
       await readingInput.fill(uniqueReading);
 
-      await mainPage.getByRole('button', { name: 'Save' }).click();
-      await expect(mainPage.getByRole('heading', { name: 'Edit Viewer Info' })).not.toBeVisible({ timeout: 3000 });
+      await mainPage.getByRole('button', { name: '保存' }).click();
+      await expect(mainPage.getByRole('heading', { name: '視聴者情報の編集' })).not.toBeVisible({ timeout: 3000 });
 
       // Now search by reading
-      const searchInput = mainPage.getByPlaceholder(/Search by name, reading, or notes/i);
+      const searchInput = mainPage.getByPlaceholder(/名前、読み仮名、メモで検索/);
       await searchInput.fill('検索テスト読み');
 
-      const searchButton = mainPage.getByRole('button', { name: 'Search' });
+      const searchButton = mainPage.getByRole('button', { name: '検索' });
       await searchButton.click();
 
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -1208,20 +1208,20 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
       if (viewerRows.length === 0) return;
 
       await viewerRows[0].click();
-      await expect(mainPage.getByRole('heading', { name: 'Edit Viewer Info' })).toBeVisible();
+      await expect(mainPage.getByRole('heading', { name: '視聴者情報の編集' })).toBeVisible();
 
       const uniqueNote = '検索テストメモ' + Date.now();
       const notesInput = mainPage.locator('#notes');
       await notesInput.fill(uniqueNote);
 
-      await mainPage.getByRole('button', { name: 'Save' }).click();
-      await expect(mainPage.getByRole('heading', { name: 'Edit Viewer Info' })).not.toBeVisible({ timeout: 3000 });
+      await mainPage.getByRole('button', { name: '保存' }).click();
+      await expect(mainPage.getByRole('heading', { name: '視聴者情報の編集' })).not.toBeVisible({ timeout: 3000 });
 
       // Now search by notes
-      const searchInput = mainPage.getByPlaceholder(/Search by name, reading, or notes/i);
+      const searchInput = mainPage.getByPlaceholder(/名前、読み仮名、メモで検索/);
       await searchInput.fill('検索テストメモ');
 
-      const searchButton = mainPage.getByRole('button', { name: 'Search' });
+      const searchButton = mainPage.getByRole('button', { name: '検索' });
       await searchButton.click();
 
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -1236,10 +1236,10 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
     });
 
     test('should return empty results for non-matching search', async () => {
-      const searchInput = mainPage.getByPlaceholder(/Search by name, reading, or notes/i);
+      const searchInput = mainPage.getByPlaceholder(/名前、読み仮名、メモで検索/);
       await searchInput.fill('これは絶対にマッチしない文字列xyz123abc');
 
-      const searchButton = mainPage.getByRole('button', { name: 'Search' });
+      const searchButton = mainPage.getByRole('button', { name: '検索' });
       await searchButton.click();
 
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -1259,7 +1259,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
   test.describe('Broadcaster Management (Destructive - Run Last)', () => {
     test.beforeEach(async () => {
       await mainPage.locator('button:has-text("Viewer")').click();
-      await expect(mainPage.getByRole('heading', { name: 'Viewer Management' }).first()).toBeVisible();
+      await expect(mainPage.getByRole('heading', { name: '視聴者管理' }).first()).toBeVisible();
     });
 
     test('should show delete broadcaster button when broadcaster is selected', async () => {
@@ -1270,7 +1270,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
         await broadcasterSelect.selectOption({ index: 1 });
 
         // Delete Broadcaster button should appear
-        const deleteButton = mainPage.getByRole('button', { name: 'Delete Broadcaster' });
+        const deleteButton = mainPage.getByRole('button', { name: '配信者を削除' });
         await expect(deleteButton).toBeVisible();
       }
     });
@@ -1282,17 +1282,17 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
       if (options.length > 1) {
         await broadcasterSelect.selectOption({ index: 1 });
 
-        const deleteButton = mainPage.getByRole('button', { name: 'Delete Broadcaster' });
+        const deleteButton = mainPage.getByRole('button', { name: '配信者を削除' });
         await deleteButton.click();
 
         // Confirmation dialog should appear
-        await expect(mainPage.getByRole('heading', { name: 'Delete Broadcaster Data' })).toBeVisible();
+        await expect(mainPage.getByRole('heading', { name: '配信者データの削除' })).toBeVisible();
 
         // Cancel the delete
-        const cancelButton = mainPage.getByRole('button', { name: 'Cancel' });
+        const cancelButton = mainPage.getByRole('button', { name: 'キャンセル' });
         await cancelButton.click();
 
-        await expect(mainPage.getByRole('heading', { name: 'Delete Broadcaster Data' })).not.toBeVisible();
+        await expect(mainPage.getByRole('heading', { name: '配信者データの削除' })).not.toBeVisible();
       }
     });
 
@@ -1307,17 +1307,17 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
         await broadcasterSelect.selectOption({ index: 1 });
         const selectedValue = await broadcasterSelect.inputValue();
 
-        const deleteButton = mainPage.getByRole('button', { name: 'Delete Broadcaster' });
+        const deleteButton = mainPage.getByRole('button', { name: '配信者を削除' });
         await deleteButton.click();
 
-        await expect(mainPage.getByRole('heading', { name: 'Delete Broadcaster Data' })).toBeVisible();
+        await expect(mainPage.getByRole('heading', { name: '配信者データの削除' })).toBeVisible();
 
         // Confirm deletion (use dialog scoping to target the confirm button)
-        const confirmButton = mainPage.getByRole('dialog').getByRole('button', { name: 'Delete' });
+        const confirmButton = mainPage.getByRole('dialog').getByRole('button', { name: '削除' });
         await confirmButton.click();
 
         // Dialog should close
-        await expect(mainPage.getByRole('heading', { name: 'Delete Broadcaster Data' })).not.toBeVisible({ timeout: 3000 });
+        await expect(mainPage.getByRole('heading', { name: '配信者データの削除' })).not.toBeVisible({ timeout: 3000 });
 
         // Wait for list to update
         await new Promise(resolve => setTimeout(resolve, 500));

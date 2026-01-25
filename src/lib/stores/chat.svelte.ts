@@ -240,8 +240,8 @@ async function setupEventListeners(): Promise<void> {
   // Listen for connection status changes
   const unlistenConnection = await listen<ConnectionResult>('chat:connection', (event) => {
     const result = event.payload;
-    // Don't update state if paused (preserve stream info during pause)
-    if (connectionState === 'paused') {
+    // Don't update state if idle (not connected yet)
+    if (connectionState === 'idle') {
       return;
     }
 

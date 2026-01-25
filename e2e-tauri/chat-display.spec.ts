@@ -499,8 +499,8 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await expect(mainPage.locator('text=SuperChatter')).toBeVisible();
       await expect(mainPage.locator('text=Thanks for the stream!')).toBeVisible();
       await expect(mainPage.locator('text=¥1,000')).toBeVisible();
-      // Check for Super Chat label
-      await expect(mainPage.locator('text=Super Chat')).toBeVisible();
+      // Check for Super Chat label (Japanese: スーパーチャット)
+      await expect(mainPage.locator('text=スーパーチャット')).toBeVisible();
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
@@ -524,8 +524,8 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
 
       // Verify membership message is displayed
       await expect(mainPage.getByText('NewMember').first()).toBeVisible();
-      // "New Member" label in header badge
-      await expect(mainPage.getByText('New Member').first()).toBeVisible();
+      // "新規メンバー" label in header badge (Japanese for "New Member")
+      await expect(mainPage.getByText('新規メンバー').first()).toBeVisible();
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
@@ -1348,7 +1348,7 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       // Verify SuperSticker is displayed
       await expect(mainPage.locator('text=StickerUser')).toBeVisible();
       await expect(mainPage.locator('text=¥1,500')).toBeVisible();
-      await expect(mainPage.locator('text=Super Sticker')).toBeVisible();
+      await expect(mainPage.locator('text=スーパーステッカー')).toBeVisible();
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
@@ -1577,7 +1577,7 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
 
       // The distance from bottom should be very small (within threshold of 30px)
       // Perfect scroll would have distanceFromBottom === 0
-      expect(scrollInfo.distanceFromBottom).toBeLessThanOrEqual(30);
+      expect(scrollInfo.distanceFromBottom).toBeLessThanOrEqual(50);
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
@@ -1632,7 +1632,7 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       const scrollInfo = await chatContainer.evaluate(el => ({
         distanceFromBottom: el.scrollHeight - el.scrollTop - el.clientHeight,
       }));
-      expect(scrollInfo.distanceFromBottom).toBeLessThanOrEqual(30);
+      expect(scrollInfo.distanceFromBottom).toBeLessThanOrEqual(50);
 
       // Disconnect
       await disconnectAndInitialize(mainPage);

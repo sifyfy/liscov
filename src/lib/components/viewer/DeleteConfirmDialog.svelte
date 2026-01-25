@@ -12,8 +12,8 @@
   let {
     title,
     message,
-    confirmText = 'Delete',
-    cancelText = 'Cancel',
+    confirmText = '削除',
+    cancelText = 'キャンセル',
     isDeleting = false,
     onConfirm,
     onCancel
@@ -66,7 +66,7 @@
         disabled={isDeleting}
         class="px-6 py-2 bg-red-500 text-white font-semibold rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50"
       >
-        {isDeleting ? 'Deleting...' : confirmText}
+        {isDeleting ? '削除中...' : confirmText}
       </button>
     </div>
   </div>

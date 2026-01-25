@@ -111,13 +111,13 @@
   let typeHeader = $derived(() => {
     switch (message.message_type) {
       case 'superchat':
-        return 'Super Chat';
+        return 'スーパーチャット';
       case 'supersticker':
-        return 'Super Sticker';
+        return 'スーパーステッカー';
       case 'membership':
-        return 'New Member';
+        return '新規メンバー';
       case 'membership_gift':
-        return 'Membership Gift';
+        return 'メンバーシップギフト';
       default:
         return null;
     }
@@ -241,7 +241,7 @@
     <!-- Member badge (only if no badge_info image) -->
     {#if message.is_member && (!message.metadata?.badge_info || message.metadata.badge_info.every(b => !b.image_url))}
       <span class="px-1.5 py-0.5 text-xs bg-green-100 text-green-700 rounded border border-green-300 font-medium">
-        Member
+        メンバー
       </span>
     {/if}
 

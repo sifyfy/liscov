@@ -294,6 +294,7 @@ pub async fn connect_to_stream(
         let database = Arc::clone(&state.database);
         let current_session_id = Arc::clone(&state.current_session_id);
         let current_broadcaster_id = Arc::clone(&state.current_broadcaster_id);
+        let tts_manager = Arc::clone(&state.tts_manager);
         let app_handle = app.clone();
 
         // Get save config for raw response saving
@@ -319,6 +320,7 @@ pub async fn connect_to_stream(
                 connection_id,
                 new_connection_id,
                 save_config,
+                tts_manager,
             )
             .await;
         });
@@ -343,6 +345,7 @@ async fn chat_monitoring_task(
     connection_id: Arc<std::sync::atomic::AtomicU64>,
     my_connection_id: u64,
     save_config: SaveConfig,
+    tts_manager: Arc<crate::tts::TtsManager>,
 ) {
     tracing::info!("Chat monitoring task started for connection_id: {}", my_connection_id);
     let poll_interval = std::time::Duration::from_millis(1500);
@@ -481,6 +484,25 @@ async fn chat_monitoring_task(
                     server.broadcast_message(&msg).await;
                 }
             }
+
+            // Enqueue to TTS
+            let tts_item = crate::tts::TtsQueueItem {
+                text: msg.content.clone(),
+                priority: match &msg.message_type {
+                    crate::core::models::MessageType::SuperChat { .. }
+                    | crate::core::models::MessageType::SuperSticker { .. } => crate::tts::TtsPriority::SuperChat,
+                    crate::core::models::MessageType::Membership { .. }
+                    | crate::core::models::MessageType::MembershipGift { .. } => crate::tts::TtsPriority::Membership,
+                    _ => crate::tts::TtsPriority::Normal,
+                },
+                author_name: Some(msg.author.clone()),
+                amount: match &msg.message_type {
+                    crate::core::models::MessageType::SuperChat { amount }
+                    | crate::core::models::MessageType::SuperSticker { amount } => Some(amount.clone()),
+                    _ => None,
+                },
+            };
+            tts_manager.enqueue(tts_item).await;
         }
 
         tokio::time::sleep(poll_interval).await;

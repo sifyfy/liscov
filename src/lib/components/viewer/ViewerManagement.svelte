@@ -56,9 +56,9 @@
   <div class="px-6 py-4 bg-[var(--bg-light)] border-b border-[var(--border-light)]">
     <div class="flex items-center justify-between mb-3">
       <div>
-        <h2 class="text-xl font-semibold text-[var(--text-primary)]">Viewer Management</h2>
+        <h2 class="text-xl font-semibold text-[var(--text-primary)]">視聴者管理</h2>
         <p class="text-sm text-[var(--text-secondary)] mt-1">
-          Manage viewer profiles and custom information
+          視聴者プロフィールとカスタム情報を管理
         </p>
       </div>
       {#if selectedBroadcasterId}
@@ -66,7 +66,7 @@
           onclick={() => showDeleteBroadcasterConfirm = true}
           class="px-3 py-1.5 text-sm text-red-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors border border-red-200"
         >
-          Delete Broadcaster
+          配信者を削除
         </button>
       {/if}
     </div>
@@ -82,7 +82,7 @@
       <ViewerList broadcasterId={selectedBroadcasterId} />
     {:else}
       <div class="flex items-center justify-center h-full">
-        <p class="text-[var(--text-muted)]">Select a broadcaster to view viewers</p>
+        <p class="text-[var(--text-muted)]">配信者を選択してください</p>
       </div>
     {/if}
   </div>
@@ -100,8 +100,8 @@
 <!-- Delete Broadcaster Confirmation -->
 {#if showDeleteBroadcasterConfirm}
   <DeleteConfirmDialog
-    title="Delete Broadcaster Data"
-    message="This will delete all custom viewer information for this broadcaster. Viewer profiles shared across broadcasters will be kept. Are you sure?"
+    title="配信者データの削除"
+    message="この配信者のすべてのカスタム視聴者情報が削除されます。配信者間で共有される視聴者プロフィールは保持されます。よろしいですか？"
     isDeleting={isDeletingBroadcaster}
     onConfirm={handleDeleteBroadcaster}
     onCancel={() => showDeleteBroadcasterConfirm = false}

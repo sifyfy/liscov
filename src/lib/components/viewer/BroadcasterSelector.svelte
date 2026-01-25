@@ -32,7 +32,7 @@
 
 <div class="flex items-center gap-3">
   <label for="broadcaster-select" class="text-sm text-[var(--text-secondary)] whitespace-nowrap">
-    Broadcaster:
+    配信者:
   </label>
   <select
     id="broadcaster-select"
@@ -40,10 +40,10 @@
     onchange={handleChange}
     class="flex-1 px-3 py-2 rounded-lg bg-[var(--bg-white)] text-[var(--text-primary)] border border-[var(--border-light)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-start)]/50"
   >
-    <option value="">Select a broadcaster...</option>
+    <option value="">配信者を選択...</option>
     {#each viewerStore.broadcasters as broadcaster (broadcaster.channel_id)}
       <option value={broadcaster.channel_id}>
-        {getDisplayName(broadcaster)} ({broadcaster.viewer_count} viewers)
+        {getDisplayName(broadcaster)} ({broadcaster.viewer_count}人)
       </option>
     {/each}
   </select>

@@ -90,7 +90,7 @@
     <!-- Header -->
     <div class="px-6 py-4 bg-[var(--bg-light)] border-b border-[var(--border-light)]">
       <div class="flex items-center justify-between">
-        <h2 class="text-xl font-semibold text-[var(--text-primary)]">Edit Viewer Info</h2>
+        <h2 class="text-xl font-semibold text-[var(--text-primary)]">視聴者情報の編集</h2>
         <button
           onclick={onClose}
           class="p-1 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
@@ -108,22 +108,22 @@
       <!-- Viewer info (read-only) -->
       <div class="space-y-3">
         <div>
-          <span class="text-sm text-[var(--text-secondary)]">Display Name</span>
+          <span class="text-sm text-[var(--text-secondary)]">表示名</span>
           <p class="text-[var(--text-primary)] font-medium">{viewer.display_name}</p>
         </div>
         <div class="grid grid-cols-2 gap-4">
           <div>
-            <span class="text-sm text-[var(--text-secondary)]">Messages</span>
+            <span class="text-sm text-[var(--text-secondary)]">コメント数</span>
             <p class="text-[var(--text-primary)]">{viewer.message_count.toLocaleString()}</p>
           </div>
           <div>
-            <span class="text-sm text-[var(--text-secondary)]">Contribution</span>
+            <span class="text-sm text-[var(--text-secondary)]">貢献額</span>
             <p class="text-yellow-600">{formatContribution(viewer.total_contribution)}</p>
           </div>
         </div>
         {#if viewer.membership_level}
           <div>
-            <span class="text-sm text-[var(--text-secondary)]">Membership</span>
+            <span class="text-sm text-[var(--text-secondary)]">メンバーシップ</span>
             <p class="text-green-600">{viewer.membership_level}</p>
           </div>
         {/if}
@@ -133,28 +133,28 @@
       <div class="space-y-4">
         <div>
           <label for="reading" class="block text-sm text-[var(--text-secondary)] mb-1">
-            Reading (Furigana)
+            読み仮名
           </label>
           <input
             id="reading"
             type="text"
             bind:value={reading}
-            placeholder="Enter reading for TTS..."
+            placeholder="TTS用の読み仮名を入力..."
             class="w-full px-4 py-2 rounded-lg bg-[var(--bg-white)] text-[var(--text-primary)] placeholder-[var(--text-muted)] border border-[var(--border-light)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-start)]/50"
           />
           <p class="mt-1 text-xs text-[var(--text-muted)]">
-            Used for TTS pronunciation
+            TTS読み上げ時に使用されます
           </p>
         </div>
 
         <div>
           <label for="notes" class="block text-sm text-[var(--text-secondary)] mb-1">
-            Notes
+            メモ
           </label>
           <textarea
             id="notes"
             bind:value={notes}
-            placeholder="Add notes about this viewer..."
+            placeholder="視聴者に関するメモを追加..."
             rows="3"
             class="w-full px-4 py-2 rounded-lg bg-[var(--bg-white)] text-[var(--text-primary)] placeholder-[var(--text-muted)] border border-[var(--border-light)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-start)]/50 resize-none"
           ></textarea>
@@ -162,17 +162,17 @@
 
         <div>
           <label for="tags" class="block text-sm text-[var(--text-secondary)] mb-1">
-            Tags
+            タグ
           </label>
           <input
             id="tags"
             type="text"
             bind:value={tagsInput}
-            placeholder="tag1, tag2, tag3..."
+            placeholder="タグ1, タグ2, タグ3..."
             class="w-full px-4 py-2 rounded-lg bg-[var(--bg-white)] text-[var(--text-primary)] placeholder-[var(--text-muted)] border border-[var(--border-light)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-start)]/50"
           />
           <p class="mt-1 text-xs text-[var(--text-muted)]">
-            Comma-separated tags
+            カンマ区切りでタグを入力
           </p>
         </div>
       </div>
@@ -189,14 +189,14 @@
         disabled={isSaving || isDeleting}
         class="px-4 py-2 text-red-500 hover:text-red-600 transition-colors disabled:opacity-50"
       >
-        Delete
+        削除
       </button>
       <div class="flex gap-3">
         <button
           onclick={onClose}
           class="px-4 py-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
         >
-          Cancel
+          キャンセル
         </button>
         <button
           onclick={handleSave}
@@ -204,7 +204,7 @@
           class="px-6 py-2 text-white font-semibold rounded-lg transition-colors disabled:opacity-50"
           style="background: linear-gradient(135deg, var(--primary-start) 0%, var(--primary-end) 100%);"
         >
-          {isSaving ? 'Saving...' : 'Save'}
+          {isSaving ? '保存中...' : '保存'}
         </button>
       </div>
     </div>
@@ -214,8 +214,8 @@
 <!-- Delete Confirmation Dialog -->
 {#if showDeleteConfirm}
   <DeleteConfirmDialog
-    title="Delete Custom Info"
-    message="This will remove the reading and notes for this viewer. The viewer profile will be kept. Are you sure?"
+    title="カスタム情報の削除"
+    message="この視聴者の読み仮名とメモが削除されます。視聴者プロフィールは保持されます。よろしいですか？"
     {isDeleting}
     onConfirm={handleDelete}
     onCancel={() => showDeleteConfirm = false}
