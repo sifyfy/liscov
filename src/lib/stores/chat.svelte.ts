@@ -196,8 +196,28 @@ function clearMessages(): void {
   messages = [];
 }
 
+// Message batching for high-volume streams
+let pendingMessages: ChatMessage[] = [];
+let batchTimeout: ReturnType<typeof setTimeout> | null = null;
+const BATCH_DELAY_MS = 50; // Batch messages within 50ms window
+
+function flushPendingMessages(): void {
+  if (pendingMessages.length === 0) return;
+
+  // Combine pending messages with existing, respecting MAX_MESSAGES limit
+  const newMessages = [...messages, ...pendingMessages];
+  messages = newMessages.slice(-MAX_MESSAGES);
+  pendingMessages = [];
+  batchTimeout = null;
+}
+
 function addMessage(message: ChatMessage): void {
-  messages = [...messages.slice(-(MAX_MESSAGES - 1)), message];
+  pendingMessages.push(message);
+
+  // Schedule a batch flush if not already scheduled
+  if (!batchTimeout) {
+    batchTimeout = setTimeout(flushPendingMessages, BATCH_DELAY_MS);
+  }
 }
 
 function setFontSize(size: number): void {

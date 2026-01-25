@@ -608,4 +608,394 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
       await disconnectAndInitialize(mainPage);
     });
   });
+
+  test.describe('Auto-Message Continuous Flow (実際のYouTubeシミュレーション)', () => {
+    // This test uses auto-message generation to simulate real YouTube's continuous chat flow
+    // Tests the exact scenario reported: connect -> pause -> resume -> no new messages
+
+    async function enableAutoMessages(messagesPerPoll: number = 10): Promise<void> {
+      await fetch(`${MOCK_SERVER_URL}/set_auto_message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: true, messages_per_poll: messagesPerPoll }),
+      });
+    }
+
+    async function disableAutoMessages(): Promise<void> {
+      await fetch(`${MOCK_SERVER_URL}/set_auto_message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: false }),
+      });
+    }
+
+    async function getAutoMessageStatus(): Promise<{ enabled: boolean; total_generated: number }> {
+      const response = await fetch(`${MOCK_SERVER_URL}/auto_message_status`);
+      return response.json();
+    }
+
+    test('should continue receiving auto-generated messages after pause/resume', async () => {
+      // This test reproduces the real YouTube scenario:
+      // - Messages flow continuously
+      // - User pauses
+      // - User resumes
+      // - Messages should continue flowing
+
+      // Step 1: Enable auto-message generation (10 messages per poll)
+      await enableAutoMessages(10);
+
+      // Step 2: Connect to stream
+      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"], input[placeholder*="youtube.com"]');
+      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_auto_msg`);
+      await mainPage.locator('button:has-text("開始")').click();
+      await expect(mainPage.locator('button:has-text("停止")')).toBeVisible({ timeout: 10000 });
+
+      // Step 3: Wait for initial messages to accumulate
+      console.log('Waiting for auto-generated messages...');
+      await mainPage.waitForTimeout(5000);
+
+      // Get message count before pause
+      const messageCountBefore = await mainPage.locator('[data-message-id]').count();
+      console.log(`Messages before pause: ${messageCountBefore}`);
+      expect(messageCountBefore).toBeGreaterThan(20);
+
+      // Record the last message ID before pause
+      const lastMessageBefore = await mainPage.locator('[data-message-id]').last().getAttribute('data-message-id');
+      console.log(`Last message ID before pause: ${lastMessageBefore}`);
+
+      // Step 4: Pause
+      console.log('Pausing...');
+      await mainPage.locator('button:has-text("停止")').click();
+      await expect(mainPage.locator('button:has-text("再開")')).toBeVisible({ timeout: 5000 });
+
+      // Check auto-message status (should continue generating on server)
+      const statusAfterPause = await getAutoMessageStatus();
+      console.log(`Auto-message total after pause: ${statusAfterPause.total_generated}`);
+
+      // Wait a bit (messages continue to be generated server-side)
+      await mainPage.waitForTimeout(2000);
+
+      // Step 5: Resume
+      console.log('Resuming...');
+      await mainPage.locator('button:has-text("再開")').click();
+      await expect(mainPage.locator('button:has-text("停止")')).toBeVisible({ timeout: 10000 });
+      console.log('Resume completed');
+
+      // Step 6: Wait for new messages to arrive
+      console.log('Waiting for new messages after resume...');
+      await mainPage.waitForTimeout(5000);
+
+      // Get message count after resume
+      const messageCountAfter = await mainPage.locator('[data-message-id]').count();
+      console.log(`Messages after resume wait: ${messageCountAfter}`);
+
+      // Get the last message ID after resume
+      const lastMessageAfter = await mainPage.locator('[data-message-id]').last().getAttribute('data-message-id');
+      console.log(`Last message ID after resume: ${lastMessageAfter}`);
+
+      // CRITICAL CHECK: new messages should have arrived
+      // The message count should have increased
+      expect(messageCountAfter).toBeGreaterThan(messageCountBefore);
+
+      // The last message ID should be different
+      expect(lastMessageAfter).not.toBe(lastMessageBefore);
+
+      // Check server auto-message status
+      const statusAfterResume = await getAutoMessageStatus();
+      console.log(`Auto-message total after resume: ${statusAfterResume.total_generated}`);
+      expect(statusAfterResume.total_generated).toBeGreaterThan(statusAfterPause.total_generated);
+
+      // Cleanup
+      await disableAutoMessages();
+      await disconnectAndInitialize(mainPage);
+    });
+
+    test('should not lose messages during rapid pause/resume with auto-generation', async () => {
+      // Stress test: rapid pause/resume while messages are being generated
+
+      // Step 1: Enable high-volume auto-message generation
+      await enableAutoMessages(20);
+
+      // Step 2: Connect
+      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"], input[placeholder*="youtube.com"]');
+      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_rapid_auto`);
+      await mainPage.locator('button:has-text("開始")').click();
+      await expect(mainPage.locator('button:has-text("停止")')).toBeVisible({ timeout: 10000 });
+
+      // Wait for initial messages
+      await mainPage.waitForTimeout(3000);
+      const initialCount = await mainPage.locator('[data-message-id]').count();
+      console.log(`Initial message count: ${initialCount}`);
+
+      // Step 3: Perform 5 rapid pause/resume cycles
+      for (let i = 0; i < 5; i++) {
+        console.log(`Rapid cycle ${i + 1}/5`);
+
+        // Pause
+        await mainPage.locator('button:has-text("停止")').click();
+        await expect(mainPage.locator('button:has-text("再開")')).toBeVisible({ timeout: 5000 });
+
+        // Very short pause
+        await mainPage.waitForTimeout(100);
+
+        // Resume
+        await mainPage.locator('button:has-text("再開")').click();
+        await expect(mainPage.locator('button:has-text("停止")')).toBeVisible({ timeout: 10000 });
+
+        // Very short wait
+        await mainPage.waitForTimeout(100);
+      }
+
+      // Step 4: Wait for messages to stabilize
+      await mainPage.waitForTimeout(3000);
+
+      const finalCount = await mainPage.locator('[data-message-id]').count();
+      console.log(`Final message count after 5 rapid cycles: ${finalCount}`);
+
+      // Messages should have continued increasing
+      expect(finalCount).toBeGreaterThan(initialCount);
+
+      // Cleanup
+      await disableAutoMessages();
+      await disconnectAndInitialize(mainPage);
+    });
+  });
+
+  test.describe('High Volume Resume (UIフリーズ回避)', () => {
+    // This test verifies the fix for the UI freeze bug that occurred when:
+    // 1. Connected to a stream with high message volume (100+ messages)
+    // 2. Paused the connection
+    // 3. Resumed the connection
+    // The bug caused the UI to freeze due to accumulated scrollToBottom() callbacks
+
+    test('should not freeze UI when resuming with high message volume', async () => {
+      // CRITICAL: This test must FAIL if UI freezes after resume
+      // The key is to try UI interaction IMMEDIATELY after resume, not after waiting
+
+      // Step 1: Connect to stream
+      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"], input[placeholder*="youtube.com"]');
+      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await mainPage.locator('button:has-text("開始")').click();
+      await expect(mainPage.locator('button:has-text("停止")')).toBeVisible({ timeout: 10000 });
+
+      // Step 2: Send many messages and WAIT for them to be rendered
+      // This simulates having existing messages before pause (MAX_MESSAGES = 500)
+      console.log('Sending 500 messages to fill message buffer...');
+      const messagePromises = [];
+      for (let i = 0; i < 500; i++) {
+        // Mix different message types to simulate real YouTube
+        const msgType = i % 20 === 0 ? 'superchat' : i % 10 === 0 ? 'membership' : 'text';
+        messagePromises.push(
+          addMockMessage({
+            message_type: msgType,
+            author: `User${i % 50}`,
+            content: `Pre-pause message ${i} with some additional text to make it longer and more realistic like actual YouTube chat messages`,
+            channel_id: `UC_user_${i % 50}`,
+            is_member: i % 5 === 0,
+            amount: msgType === 'superchat' ? '¥500' : undefined,
+          })
+        );
+      }
+      await Promise.all(messagePromises);
+
+      // Wait for messages to be received AND rendered
+      await mainPage.waitForTimeout(5000);
+
+      // Verify messages are actually in the UI
+      const messageCount = await mainPage.locator('[data-message-id]').count();
+      console.log(`Messages in UI before pause: ${messageCount}`);
+      expect(messageCount).toBeGreaterThan(100);
+
+      // Step 3: Pause the connection
+      await mainPage.locator('button:has-text("停止")').click();
+      await expect(mainPage.locator('button:has-text("再開")')).toBeVisible({ timeout: 5000 });
+
+      // Step 4: Add more messages to queue (will be returned on resume)
+      // 200 messages to simulate real YouTube's first poll after resume
+      console.log('Adding 200 messages to queue for resume...');
+      const resumeMessages = [];
+      for (let i = 0; i < 200; i++) {
+        const msgType = i % 15 === 0 ? 'superchat' : i % 8 === 0 ? 'membership' : 'text';
+        resumeMessages.push(
+          addMockMessage({
+            message_type: msgType,
+            author: `ResumeUser${i % 30}`,
+            content: `Resume batch message ${i} - testing high volume scenario with realistic message length`,
+            channel_id: `UC_resume_${i % 30}`,
+            is_member: i % 4 === 0,
+            amount: msgType === 'superchat' ? '¥1000' : undefined,
+          })
+        );
+      }
+      await Promise.all(resumeMessages);
+
+      // Step 5: Resume and IMMEDIATELY try to interact
+      console.log('Clicking resume and immediately trying tab switch...');
+      const resumeButton = mainPage.locator('button:has-text("再開")');
+      const settingsTab = mainPage.locator('button:has-text("Settings")');
+
+      // Click resume
+      await resumeButton.click();
+
+      // IMMEDIATELY try to click settings tab (no waiting!)
+      // If UI freezes, this click won't be processed
+      const interactionStart = Date.now();
+
+      // Try clicking multiple times to detect freeze
+      // Use a Promise.race with a timeout to detect freeze
+      const freezeTimeout = 3000; // 3 seconds max for UI response
+
+      try {
+        await Promise.race([
+          (async () => {
+            // Try clicking the settings tab
+            await settingsTab.click({ timeout: freezeTimeout });
+            // Verify we actually switched tabs by checking for settings content
+            await expect(mainPage.getByRole('heading', { name: 'YouTube認証' })).toBeVisible({ timeout: 1000 });
+          })(),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('UI FREEZE DETECTED: Tab click not processed')), freezeTimeout)
+          ),
+        ]);
+      } catch (error) {
+        const elapsed = Date.now() - interactionStart;
+        console.error(`UI freeze detected after ${elapsed}ms`);
+        throw error;
+      }
+
+      const interactionDuration = Date.now() - interactionStart;
+      console.log(`Tab switch completed in ${interactionDuration}ms`);
+
+      // Strict threshold: should respond within 1 second
+      expect(interactionDuration).toBeLessThan(1000);
+
+      // Go back to chat tab
+      await mainPage.locator('button:has-text("Chat")').click();
+      await mainPage.waitForTimeout(500);
+
+      // Cleanup
+      await disconnectAndInitialize(mainPage);
+    });
+
+    test('should continue receiving messages after multiple pause/resume cycles with high volume', async () => {
+      // Stress test: multiple pause/resume cycles with continuous message flow
+
+      // Step 1: Connect to stream
+      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"], input[placeholder*="youtube.com"]');
+      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await mainPage.locator('button:has-text("開始")').click();
+      await expect(mainPage.locator('button:has-text("停止")')).toBeVisible({ timeout: 10000 });
+
+      // Step 2: Run 3 pause/resume cycles with message bursts
+      for (let cycle = 0; cycle < 3; cycle++) {
+        console.log(`Pause/Resume cycle ${cycle + 1}/3`);
+
+        // Send 50 messages rapidly
+        const messagePromises = [];
+        for (let i = 0; i < 50; i++) {
+          messagePromises.push(
+            addMockMessage({
+              message_type: 'text',
+              author: `CycleUser${i % 5}`,
+              content: `Cycle ${cycle} message ${i}`,
+              channel_id: `UC_cycle_${i % 5}`,
+            })
+          );
+        }
+        await Promise.all(messagePromises);
+        await mainPage.waitForTimeout(1000);
+
+        // Pause
+        await mainPage.locator('button:has-text("停止")').click();
+        await expect(mainPage.locator('button:has-text("再開")')).toBeVisible({ timeout: 5000 });
+
+        // Resume
+        await mainPage.locator('button:has-text("再開")').click();
+        await expect(mainPage.locator('button:has-text("停止")')).toBeVisible({ timeout: 10000 });
+
+        // Verify UI is responsive (tab labels are English)
+        await mainPage.locator('button:has-text("Settings")').click();
+        await mainPage.waitForTimeout(300);
+        await mainPage.locator('button:has-text("Chat")').click();
+        await mainPage.waitForTimeout(300);
+      }
+
+      // Step 3: Final verification - new message should be received
+      const finalContent = `FinalCheck_${Date.now()}`;
+      await addMockMessage({
+        message_type: 'text',
+        author: 'FinalCheckUser',
+        content: finalContent,
+        channel_id: 'UC_final_check',
+      });
+
+      await expect(mainPage.getByText(finalContent)).toBeVisible({ timeout: 10000 });
+      console.log('Final message received after 3 pause/resume cycles!');
+
+      // Cleanup
+      await disconnectAndInitialize(mainPage);
+    });
+
+    test('should handle rapid pause/resume without UI freeze', async () => {
+      // Edge case: very rapid pause/resume clicks
+
+      // Step 1: Connect to stream
+      const urlInput = mainPage.locator('input[placeholder*="YouTube URL"], input[placeholder*="youtube.com"]');
+      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await mainPage.locator('button:has-text("開始")').click();
+      await expect(mainPage.locator('button:has-text("停止")')).toBeVisible({ timeout: 10000 });
+
+      // Step 2: Send initial batch of messages
+      const messagePromises = [];
+      for (let i = 0; i < 100; i++) {
+        messagePromises.push(
+          addMockMessage({
+            message_type: 'text',
+            author: `RapidUser${i % 10}`,
+            content: `Rapid test message ${i}`,
+            channel_id: `UC_rapid_${i % 10}`,
+          })
+        );
+      }
+      await Promise.all(messagePromises);
+      await mainPage.waitForTimeout(2000);
+
+      // Step 3: Rapid pause/resume (5 times in quick succession)
+      console.log('Performing rapid pause/resume cycles...');
+      for (let i = 0; i < 5; i++) {
+        await mainPage.locator('button:has-text("停止")').click();
+        await mainPage.waitForTimeout(200);
+        await mainPage.locator('button:has-text("再開")').click();
+        await mainPage.waitForTimeout(200);
+      }
+
+      // Step 4: Wait for final state to stabilize
+      // Should end in connected state (停止 button visible)
+      await expect(mainPage.locator('button:has-text("停止")')).toBeVisible({ timeout: 10000 });
+
+      // Step 5: Verify UI is still responsive (tab labels are English)
+      const tabClickStart = Date.now();
+      await mainPage.locator('button:has-text("Settings")').click();
+      await mainPage.waitForTimeout(300);
+      await mainPage.locator('button:has-text("Chat")').click();
+      const tabClickDuration = Date.now() - tabClickStart;
+      console.log(`Tab switching after rapid cycles: ${tabClickDuration}ms`);
+      expect(tabClickDuration).toBeLessThan(3000);
+
+      // Step 6: Verify new messages are still received
+      const rapidContent = `AfterRapid_${Date.now()}`;
+      await addMockMessage({
+        message_type: 'text',
+        author: 'RapidTestUser',
+        content: rapidContent,
+        channel_id: 'UC_rapid_final',
+      });
+
+      await expect(mainPage.getByText(rapidContent)).toBeVisible({ timeout: 10000 });
+      console.log('Message received after rapid pause/resume cycles!');
+
+      // Cleanup
+      await disconnectAndInitialize(mainPage);
+    });
+  });
 });

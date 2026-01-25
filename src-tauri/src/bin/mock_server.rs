@@ -169,6 +169,24 @@ struct TokenValidation {
     validation_count: u64,
 }
 
+/// Auto-message generation state
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AutoMessageState {
+    enabled: bool,
+    messages_per_poll: usize,
+    total_generated: u64,
+}
+
+impl Default for AutoMessageState {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            messages_per_poll: 5,
+            total_generated: 0,
+        }
+    }
+}
+
 struct ServerState {
     config: ServerConfig,
     message_queue: Mutex<VecDeque<Value>>,
@@ -180,6 +198,7 @@ struct ServerState {
     stream_state: Mutex<StreamState>,
     last_chat_mode: Mutex<Option<String>>,  // Track chat mode from continuation token
     token_validation: Mutex<TokenValidation>,  // Detailed token validation results
+    auto_message: Mutex<AutoMessageState>,  // Auto-generate messages for stress testing
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -269,6 +288,7 @@ async fn main() {
         stream_state: Mutex::new(StreamState::default()),
         last_chat_mode: Mutex::new(None),
         token_validation: Mutex::new(TokenValidation::default()),
+        auto_message: Mutex::new(AutoMessageState::default()),
     });
     let routes = build_routes(state);
     let addr: SocketAddr = ([127, 0, 0, 1], args.port).into();
@@ -454,20 +474,59 @@ fn build_routes(state: Arc<ServerState>) -> impl Filter<Extract = impl warp::Rep
         *srs.stream_state.lock().unwrap() = StreamState::default();
         *srs.last_chat_mode.lock().unwrap() = None;
         *srs.token_validation.lock().unwrap() = TokenValidation::default();
+        *srs.auto_message.lock().unwrap() = AutoMessageState::default();
         srs.login_page_visits.store(0, Ordering::SeqCst);
         warp::reply::json(&json!({"status":"ok"}))
     });
-    login_page.or(do_login).or(logged_in).or(watch).or(chat).or(acct).or(setauth).or(authst).or(status).or(add).or(setstream).or(chat_mode_status).or(token_validation).or(reset)
+    // Set auto-message generation settings
+    let sam = Arc::clone(&state);
+    let set_auto_message = warp::path("set_auto_message").and(warp::post()).and(warp::body::json())
+        .map(move |b: AutoMsgReq| {
+            let mut auto_msg = sam.auto_message.lock().unwrap();
+            if let Some(enabled) = b.enabled { auto_msg.enabled = enabled; }
+            if let Some(mpp) = b.messages_per_poll { auto_msg.messages_per_poll = mpp; }
+            warp::reply::json(&json!({"status":"ok","auto_message":{"enabled":auto_msg.enabled,"messages_per_poll":auto_msg.messages_per_poll,"total_generated":auto_msg.total_generated}}))
+        });
+    // Get auto-message status
+    let gam = Arc::clone(&state);
+    let auto_message_status = warp::path("auto_message_status").and(warp::get()).map(move || {
+        let auto_msg = gam.auto_message.lock().unwrap();
+        warp::reply::json(&*auto_msg)
+    });
+    login_page.or(do_login).or(logged_in).or(watch).or(chat).or(acct).or(setauth).or(authst).or(status).or(add).or(setstream).or(chat_mode_status).or(token_validation).or(reset).or(set_auto_message).or(auto_message_status)
 }
 
 #[derive(Debug, Deserialize)] struct WQ { v: Option<String> }
 #[derive(Debug, Deserialize)] struct AMR { message_type: String, author: String, #[serde(default = "dcid")] channel_id: String, #[serde(default)] content: String, amount: Option<String>, tier: Option<String>, #[serde(default)] is_member: bool, milestone_months: Option<u32>, gift_count: Option<u32> }
 #[derive(Debug, Deserialize)] struct SAR { session_valid: Option<bool>, expected_sapisid: Option<String>, simulate_error: Option<bool>, auth_channel_name: Option<String>, auth_channel_id: Option<String> }
 #[derive(Debug, Deserialize)] struct SSR { member_only: Option<bool>, require_auth: Option<bool>, title: Option<String>, channel_id: Option<String>, channel_name: Option<String> }
+#[derive(Debug, Deserialize)] struct AutoMsgReq { enabled: Option<bool>, messages_per_poll: Option<usize> }
 fn dcid() -> String { format!("UC_user_{}", rand::random::<u32>() % 1000) }
 
 fn get_actions(s: &ServerState) -> Vec<Value> {
+    // First, drain any queued messages
     { let mut q = s.message_queue.lock().unwrap(); if !q.is_empty() { return q.drain(..).collect(); } }
+
+    // Check if auto-message generation is enabled
+    {
+        let mut auto_msg = s.auto_message.lock().unwrap();
+        if auto_msg.enabled {
+            let mut msgs = Vec::new();
+            for i in 0..auto_msg.messages_per_poll {
+                let msg_num = auto_msg.total_generated + i as u64;
+                let id = format!("auto_msg_{}", s.message_counter.fetch_add(1, Ordering::SeqCst));
+                let ts = format!("{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_micros());
+                let author = format!("AutoUser{}", msg_num % 50);
+                let content = format!("Auto message #{} - simulating real YouTube chat flow", msg_num);
+                let channel_id = format!("UC_auto_{}", msg_num % 50);
+                msgs.push(json!({"addChatItemAction":{"item":{"liveChatTextMessageRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":author},"authorPhoto":{"thumbnails":[{"url":"https://example.com/av.png"}]},"authorExternalChannelId":channel_id,"message":{"runs":[{"text":content}]},"authorBadges":[]}}}}));
+            }
+            auto_msg.total_generated += auto_msg.messages_per_poll as u64;
+            return msgs;
+        }
+    }
+
+    // Fall back to replay entries
     if s.config.replay_entries.is_empty() { return Vec::new(); }
     let mut rs = s.replay_state.lock().unwrap();
     if rs.start_time.is_none() { rs.start_time = Some(Instant::now()); rs.base_timestamp = Some(s.config.replay_entries[0].timestamp); }

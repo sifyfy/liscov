@@ -23,6 +23,9 @@
   // Highlighted message ID (for scroll-to feature)
   let highlightedMessageId = $state<string | null>(null);
 
+  // Debounce timer for auto-scroll
+  let scrollDebounceTimeout: ReturnType<typeof setTimeout> | null = null;
+
   // Reliable scroll to bottom with retry
   function scrollToBottom() {
     if (!chatContainer) return;
@@ -46,13 +49,23 @@
   }
 
   // Auto-scroll when new messages arrive (controlled by checkbox only)
+  // Debounced to prevent UI freeze from rapid message arrivals
   $effect(() => {
     const messages = chatStore.filteredMessages;
     // Skip auto-scroll if suppressed or disabled by checkbox
     if (suppressAutoScroll || !autoScrollEnabled || !chatContainer || messages.length === 0) {
       return;
     }
-    scrollToBottom();
+
+    // Debounce: only scroll 50ms after the last message arrives
+    // The clearTimeout ensures only the last scheduled scroll executes
+    if (scrollDebounceTimeout) {
+      clearTimeout(scrollDebounceTimeout);
+    }
+    scrollDebounceTimeout = setTimeout(() => {
+      scrollToBottom();
+      scrollDebounceTimeout = null;
+    }, 50);
   });
 
   // Respond to scrollToLatest trigger from FilterPanel
