@@ -175,6 +175,11 @@ struct AutoMessageState {
     enabled: bool,
     messages_per_poll: usize,
     total_generated: u64,
+    /// Cache of recently generated message IDs for simulating YouTube's behavior
+    /// where reconnecting returns the same messages with the same IDs
+    recent_message_ids: Vec<String>,
+    /// Maximum number of recent message IDs to cache
+    max_cached_ids: usize,
 }
 
 impl Default for AutoMessageState {
@@ -183,6 +188,8 @@ impl Default for AutoMessageState {
             enabled: false,
             messages_per_poll: 5,
             total_generated: 0,
+            recent_message_ids: Vec::new(),
+            max_cached_ids: 100, // Cache last 100 message IDs
         }
     }
 }
@@ -208,6 +215,10 @@ struct StreamState {
     title_override: Option<String>, // Override stream title for testing
     channel_id_override: Option<String>, // Override broadcaster channel ID for testing
     channel_name_override: Option<String>, // Override broadcaster channel name for testing
+    /// Simulate network delay for /watch page (ms)
+    watch_delay_ms: u64,
+    /// Simulate network delay for chat polling (ms)
+    chat_delay_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -239,6 +250,8 @@ impl Default for StreamState {
             title_override: None,
             channel_id_override: None,
             channel_name_override: None,
+            watch_delay_ms: 0,
+            chat_delay_ms: 0,
         }
     }
 }
@@ -359,52 +372,75 @@ fn build_routes(state: Arc<ServerState>) -> impl Filter<Extract = impl warp::Rep
     });
 
     let sw = Arc::clone(&state);
-    let watch = warp::path("watch").and(warp::query::<WQ>()).map(move |q: WQ| {
-        let vid = q.v.as_deref().unwrap_or(&sw.config.video_id);
-        let stream_state = sw.stream_state.lock().unwrap();
-        let title = stream_state.title_override.as_ref().unwrap_or(&sw.config.stream_title);
-        let channel_id = stream_state.channel_id_override.as_ref().unwrap_or(&sw.config.channel_id);
-        let channel_name = stream_state.channel_name_override.as_ref().unwrap_or(&sw.config.channel_name);
-        warp::reply::html(gen_html(vid, channel_id, channel_name, title))
+    let watch = warp::path("watch").and(warp::query::<WQ>()).and_then(move |q: WQ| {
+        let sw = Arc::clone(&sw);
+        async move {
+            let delay = {
+                let ss = sw.stream_state.lock().unwrap();
+                ss.watch_delay_ms
+            };
+            if delay > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+            }
+            let vid = q.v.as_deref().unwrap_or(&sw.config.video_id);
+            let stream_state = sw.stream_state.lock().unwrap();
+            let title = stream_state.title_override.as_ref().unwrap_or(&sw.config.stream_title);
+            let channel_id = stream_state.channel_id_override.as_ref().unwrap_or(&sw.config.channel_id);
+            let channel_name = stream_state.channel_name_override.as_ref().unwrap_or(&sw.config.channel_name);
+            Ok::<_, warp::Rejection>(warp::reply::html(gen_html(vid, channel_id, channel_name, title)))
+        }
     });
     let sa = Arc::clone(&state);
     let chat = warp::path!("youtubei" / "v1" / "live_chat" / "get_live_chat").and(warp::post()).and(warp::body::json())
-        .map(move |body: Value| {
-            sa.request_count.fetch_add(1, Ordering::SeqCst);
-            // Extract and parse continuation token to detect chat mode
-            // Default to TopChat (4), but preserve from incoming token if available
-            let mut chattype: u8 = 4;
-            if let Some(cont) = body.get("continuation").and_then(|c| c.as_str()) {
-                // Validate and record token details
-                let validation = validate_continuation_token(cont);
-                {
-                    let mut tv = sa.token_validation.lock().unwrap();
-                    tv.received = validation.received;
-                    tv.decode_success = validation.decode_success;
-                    tv.chat_mode_found = validation.chat_mode_found;
-                    tv.detected_mode = validation.detected_mode.clone();
-                    tv.raw_token_preview = validation.raw_token_preview;
-                    tv.decoded_length = validation.decoded_length;
-                    tv.validation_count += 1;
+        .and_then(move |body: Value| {
+            let sa = Arc::clone(&sa);
+            async move {
+                sa.request_count.fetch_add(1, Ordering::SeqCst);
+
+                // Apply chat delay if configured
+                let delay = {
+                    let ss = sa.stream_state.lock().unwrap();
+                    ss.chat_delay_ms
+                };
+                if delay > 0 {
+                    tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
                 }
 
-                if let Some(ref mode) = validation.detected_mode {
-                    let mut cm = sa.last_chat_mode.lock().unwrap();
-                    *cm = Some(mode.clone());
-                    chattype = if mode == "AllChat" { 1 } else { 4 };
+                // Extract and parse continuation token to detect chat mode
+                // Default to TopChat (4), but preserve from incoming token if available
+                let mut chattype: u8 = 4;
+                if let Some(cont) = body.get("continuation").and_then(|c| c.as_str()) {
+                    // Validate and record token details
+                    let validation = validate_continuation_token(cont);
+                    {
+                        let mut tv = sa.token_validation.lock().unwrap();
+                        tv.received = validation.received;
+                        tv.decode_success = validation.decode_success;
+                        tv.chat_mode_found = validation.chat_mode_found;
+                        tv.detected_mode = validation.detected_mode.clone();
+                        tv.raw_token_preview = validation.raw_token_preview;
+                        tv.decoded_length = validation.decoded_length;
+                        tv.validation_count += 1;
+                    }
+
+                    if let Some(ref mode) = validation.detected_mode {
+                        let mut cm = sa.last_chat_mode.lock().unwrap();
+                        *cm = Some(mode.clone());
+                        chattype = if mode == "AllChat" { 1 } else { 4 };
+                    }
+                } else {
+                    // No continuation token received
+                    let mut tv = sa.token_validation.lock().unwrap();
+                    tv.received = false;
+                    tv.decode_success = false;
+                    tv.chat_mode_found = false;
+                    tv.detected_mode = None;
+                    tv.raw_token_preview = String::new();
+                    tv.decoded_length = 0;
+                    tv.validation_count += 1;
                 }
-            } else {
-                // No continuation token received
-                let mut tv = sa.token_validation.lock().unwrap();
-                tv.received = false;
-                tv.decode_success = false;
-                tv.chat_mode_found = false;
-                tv.detected_mode = None;
-                tv.raw_token_preview = String::new();
-                tv.decoded_length = 0;
-                tv.validation_count += 1;
+                Ok::<_, warp::Rejection>(warp::reply::json(&build_resp(get_actions(&sa), chattype)))
             }
-            warp::reply::json(&build_resp(get_actions(&sa), chattype))
         });
     let sac = Arc::clone(&state);
     let acct = warp::path!("youtubei" / "v1" / "account" / "account_menu").and(warp::post())
@@ -445,7 +481,7 @@ fn build_routes(state: Arc<ServerState>) -> impl Filter<Extract = impl warp::Rep
     let sad = Arc::clone(&state);
     let add = warp::path("add_message").and(warp::post()).and(warp::body::json())
         .map(move |b: AMR| { sad.message_queue.lock().unwrap().push_back(gen_msg(&sad, &b)); warp::reply::json(&json!({"status":"ok"})) });
-    // Set stream state (member_only, require_auth, channel_id, channel_name)
+    // Set stream state (member_only, require_auth, channel_id, channel_name, delays)
     let sss = Arc::clone(&state);
     let setstream = warp::path("set_stream_state").and(warp::post()).and(warp::body::json())
         .map(move |b: SSR| {
@@ -455,6 +491,8 @@ fn build_routes(state: Arc<ServerState>) -> impl Filter<Extract = impl warp::Rep
             if let Some(t) = b.title { ss.title_override = if t.is_empty() { None } else { Some(t) }; }
             if let Some(c) = b.channel_id { ss.channel_id_override = if c.is_empty() { None } else { Some(c) }; }
             if let Some(n) = b.channel_name { ss.channel_name_override = if n.is_empty() { None } else { Some(n) }; }
+            if let Some(d) = b.watch_delay_ms { ss.watch_delay_ms = d; }
+            if let Some(d) = b.chat_delay_ms { ss.chat_delay_ms = d; }
             warp::reply::json(&json!({"status":"ok","stream":&*ss}))
         });
     let scm = Arc::clone(&state);
@@ -499,7 +537,7 @@ fn build_routes(state: Arc<ServerState>) -> impl Filter<Extract = impl warp::Rep
 #[derive(Debug, Deserialize)] struct WQ { v: Option<String> }
 #[derive(Debug, Deserialize)] struct AMR { message_type: String, author: String, #[serde(default = "dcid")] channel_id: String, #[serde(default)] content: String, amount: Option<String>, tier: Option<String>, #[serde(default)] is_member: bool, milestone_months: Option<u32>, gift_count: Option<u32> }
 #[derive(Debug, Deserialize)] struct SAR { session_valid: Option<bool>, expected_sapisid: Option<String>, simulate_error: Option<bool>, auth_channel_name: Option<String>, auth_channel_id: Option<String> }
-#[derive(Debug, Deserialize)] struct SSR { member_only: Option<bool>, require_auth: Option<bool>, title: Option<String>, channel_id: Option<String>, channel_name: Option<String> }
+#[derive(Debug, Deserialize)] struct SSR { member_only: Option<bool>, require_auth: Option<bool>, title: Option<String>, channel_id: Option<String>, channel_name: Option<String>, watch_delay_ms: Option<u64>, chat_delay_ms: Option<u64> }
 #[derive(Debug, Deserialize)] struct AutoMsgReq { enabled: Option<bool>, messages_per_poll: Option<usize> }
 fn dcid() -> String { format!("UC_user_{}", rand::random::<u32>() % 1000) }
 
@@ -514,12 +552,96 @@ fn get_actions(s: &ServerState) -> Vec<Value> {
             let mut msgs = Vec::new();
             for i in 0..auto_msg.messages_per_poll {
                 let msg_num = auto_msg.total_generated + i as u64;
-                let id = format!("auto_msg_{}", s.message_counter.fetch_add(1, Ordering::SeqCst));
                 let ts = format!("{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_micros());
                 let author = format!("AutoUser{}", msg_num % 50);
-                let content = format!("Auto message #{} - simulating real YouTube chat flow", msg_num);
                 let channel_id = format!("UC_auto_{}", msg_num % 50);
-                msgs.push(json!({"addChatItemAction":{"item":{"liveChatTextMessageRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":author},"authorPhoto":{"thumbnails":[{"url":"https://example.com/av.png"}]},"authorExternalChannelId":channel_id,"message":{"runs":[{"text":content}]},"authorBadges":[]}}}}));
+
+                // Simulate YouTube's behavior: on reconnect, recent messages are returned again
+                // with the SAME IDs. We achieve this by reusing cached IDs for the first N messages.
+                let id = if !auto_msg.recent_message_ids.is_empty() && (i as usize) < auto_msg.recent_message_ids.len() / 2 {
+                    // Reuse a cached ID (simulating YouTube returning same messages on reconnect)
+                    auto_msg.recent_message_ids[i as usize].clone()
+                } else {
+                    // Generate new unique ID
+                    let new_id = format!("auto_msg_{}", s.message_counter.fetch_add(1, Ordering::SeqCst));
+                    // Cache the new ID
+                    auto_msg.recent_message_ids.push(new_id.clone());
+                    // Trim cache to max size
+                    while auto_msg.recent_message_ids.len() > auto_msg.max_cached_ids {
+                        auto_msg.recent_message_ids.remove(0);
+                    }
+                    new_id
+                };
+
+                // Generate more realistic messages with emojis and varying content
+                // to better simulate real YouTube chat
+                let (runs, badges) = match msg_num % 10 {
+                    0 => {
+                        // Message with emoji
+                        (json!([
+                            {"text": "Great stream! "},
+                            {"emoji": {"emojiId": "UC_emoji_1", "shortcuts": [":fire:"], "image": {"thumbnails": [{"url": "https://yt3.ggpht.com/emoji1.png", "width": 24, "height": 24}]}}},
+                            {"text": " Keep it up!"}
+                        ]), json!([]))
+                    }
+                    1 => {
+                        // Member message with badge
+                        (json!([{"text": format!("Member message #{}", msg_num)}]),
+                        json!([{
+                            "liveChatAuthorBadgeRenderer": {
+                                "customThumbnail": {
+                                    "thumbnails": [{"url": "https://yt3.ggpht.com/badge.png", "width": 16, "height": 16}]
+                                },
+                                "tooltip": "Member (1 year)",
+                                "accessibility": {"accessibilityData": {"label": "Member (1 year)"}}
+                            }
+                        }]))
+                    }
+                    2 => {
+                        // Moderator message
+                        (json!([{"text": format!("Mod message #{}", msg_num)}]),
+                        json!([{
+                            "liveChatAuthorBadgeRenderer": {
+                                "icon": {"iconType": "MODERATOR"},
+                                "tooltip": "Moderator",
+                                "accessibility": {"accessibilityData": {"label": "Moderator"}}
+                            }
+                        }]))
+                    }
+                    3 => {
+                        // Message with multiple emojis
+                        (json!([
+                            {"emoji": {"emojiId": "UC_emoji_2", "shortcuts": [":heart:"], "image": {"thumbnails": [{"url": "https://yt3.ggpht.com/emoji2.png", "width": 24, "height": 24}]}}},
+                            {"emoji": {"emojiId": "UC_emoji_3", "shortcuts": [":thumbsup:"], "image": {"thumbnails": [{"url": "https://yt3.ggpht.com/emoji3.png", "width": 24, "height": 24}]}}},
+                            {"text": " Love this!"}
+                        ]), json!([]))
+                    }
+                    4 => {
+                        // Long message
+                        (json!([{"text": format!("This is a longer message #{} with more content to simulate real YouTube chat messages that can sometimes be quite verbose and contain multiple sentences or thoughts expressed in a single chat message", msg_num)}]),
+                        json!([]))
+                    }
+                    5 => {
+                        // Message with special characters
+                        (json!([{"text": format!("Special chars: äöü ñ 中文 日本語 한국어 émoji! #{}", msg_num)}]),
+                        json!([]))
+                    }
+                    _ => {
+                        // Normal message
+                        (json!([{"text": format!("Auto message #{} - simulating real YouTube chat flow", msg_num)}]),
+                        json!([]))
+                    }
+                };
+
+                msgs.push(json!({"addChatItemAction":{"item":{"liveChatTextMessageRenderer":{
+                    "id": id,
+                    "timestampUsec": ts,
+                    "authorName": {"simpleText": author},
+                    "authorPhoto": {"thumbnails": [{"url": "https://example.com/av.png", "width": 32, "height": 32}]},
+                    "authorExternalChannelId": channel_id,
+                    "message": {"runs": runs},
+                    "authorBadges": badges
+                }}}}));
             }
             auto_msg.total_generated += auto_msg.messages_per_poll as u64;
             return msgs;

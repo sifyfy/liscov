@@ -4,6 +4,15 @@
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		%sveltekit.head%
+		<script>
+			// Global error handler for debugging uncaught exceptions
+			window.addEventListener('error', function(event) {
+				console.error('[GLOBAL_ERROR]', event.message, event.filename, event.lineno, event.colno, event.error);
+			});
+			window.addEventListener('unhandledrejection', function(event) {
+				console.error('[UNHANDLED_REJECTION]', event.reason);
+			});
+		</script>
 	</head>
 	<body data-sveltekit-preload-data="hover">
 		<div style="display: contents">%sveltekit.body%</div>

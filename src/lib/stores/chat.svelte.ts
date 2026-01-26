@@ -116,7 +116,10 @@ async function pause(): Promise<void> {
 
 // Resume monitoring (reconnect to the same stream)
 async function resume(): Promise<ConnectionResult> {
+  console.log('[chat.svelte.ts] resume() called, streamUrl:', streamUrl, 'chatMode:', chatMode);
+
   if (!streamUrl) {
+    console.log('[chat.svelte.ts] resume() - no streamUrl, returning error');
     return {
       success: false,
       stream_title: null,
@@ -127,26 +130,33 @@ async function resume(): Promise<ConnectionResult> {
     };
   }
 
+  console.log('[chat.svelte.ts] resume() - setting connectionState to connecting');
   connectionState = 'connecting';
   error = null;
 
   try {
+    console.log('[chat.svelte.ts] resume() - calling chatApi.connectToStream...');
     const result = await chatApi.connectToStream(streamUrl, chatMode);
+    console.log('[chat.svelte.ts] resume() - connectToStream returned:', JSON.stringify(result));
 
     if (result.success) {
+      console.log('[chat.svelte.ts] resume() - success, updating state...');
       connectionState = 'connected';
       streamTitle = result.stream_title;
       broadcasterName = result.broadcaster_name;
       broadcasterChannelId = result.broadcaster_channel_id;
       isReplay = result.is_replay;
+      console.log('[chat.svelte.ts] resume() - state updated, connectionState:', connectionState);
       // Don't clear messages on resume
     } else {
+      console.log('[chat.svelte.ts] resume() - failed:', result.error);
       connectionState = 'error';
       error = result.error;
     }
 
     return result;
   } catch (e) {
+    console.error('[chat.svelte.ts] resume() - exception:', e);
     connectionState = 'error';
     error = e instanceof Error ? e.message : String(e);
     return {
@@ -212,6 +222,14 @@ function flushPendingMessages(): void {
 }
 
 function addMessage(message: ChatMessage): void {
+  // Skip duplicate IDs (can happen when reconnecting to YouTube)
+  const isDuplicate =
+    messages.some((m) => m.id === message.id) ||
+    pendingMessages.some((m) => m.id === message.id);
+  if (isDuplicate) {
+    return;
+  }
+
   pendingMessages.push(message);
 
   // Schedule a batch flush if not already scheduled
@@ -250,18 +268,33 @@ function setDisplayLimit(limit: number | null): void {
 
 // Event listener setup
 let unlisten: (() => void) | null = null;
+let messageCountSinceResume = 0;
+let lastMessageLogTime = 0;
 
 async function setupEventListeners(): Promise<void> {
+  console.log('[chat.svelte.ts] setupEventListeners() called');
+
   // Listen for new chat messages
   const unlistenMessage = await listen<ChatMessage>('chat:message', (event) => {
+    messageCountSinceResume++;
+    const now = Date.now();
+    // Log every 5 seconds at most
+    if (now - lastMessageLogTime > 5000) {
+      console.log('[chat.svelte.ts] chat:message received, count since last log:', messageCountSinceResume, 'connectionState:', connectionState);
+      messageCountSinceResume = 0;
+      lastMessageLogTime = now;
+    }
     addMessage(event.payload);
   });
 
   // Listen for connection status changes
   const unlistenConnection = await listen<ConnectionResult>('chat:connection', (event) => {
     const result = event.payload;
+    console.log('[chat.svelte.ts] chat:connection received:', JSON.stringify(result), 'current connectionState:', connectionState);
+
     // Don't update state if idle (not connected yet)
     if (connectionState === 'idle') {
+      console.log('[chat.svelte.ts] chat:connection - ignoring because connectionState is idle');
       return;
     }
 
@@ -271,9 +304,11 @@ async function setupEventListeners(): Promise<void> {
       broadcasterName = result.broadcaster_name;
       broadcasterChannelId = result.broadcaster_channel_id;
       isReplay = result.is_replay;
+      console.log('[chat.svelte.ts] chat:connection - updated to connected');
     } else {
       connectionState = 'error';
       error = result.error;
+      console.log('[chat.svelte.ts] chat:connection - updated to error:', error);
     }
   });
 
