@@ -3,7 +3,7 @@
 //! Handles auto-launching and killing TTS backend processes (Bouyomichan/VOICEVOX).
 
 use std::path::PathBuf;
-use std::process::{Child, Command};
+use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -98,7 +98,18 @@ impl TtsProcessManager {
         log::info!("Launching {:?} from {:?}", backend, path);
 
         // Spawn the process
-        let child = Command::new(&path)
+        // - stdin/stdout/stderr を null にリダイレクトしてパイプエラーを防止
+        // - 作業ディレクトリを実行ファイルのディレクトリに設定（WindowsのGUIアプリの標準的な動作）
+        let mut cmd = Command::new(&path);
+        cmd.stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+
+        if let Some(dir) = path.parent() {
+            cmd.current_dir(dir);
+        }
+
+        let child = cmd
             .spawn()
             .map_err(|e| format!("Failed to launch {:?}: {}", backend, e))?;
 

@@ -312,6 +312,34 @@ test.describe('TTS VOICEVOX Auto-Launch', () => {
   });
 
   test.beforeEach(async () => {
+    // ページ接続が有効か確認、無効なら再接続
+    let needsReconnect = false;
+    try {
+      await mainPage.evaluate(() => document.readyState);
+      // ページは存在するが、ロード状態を確認
+      await mainPage.waitForLoadState('load', { timeout: 5000 });
+    } catch {
+      needsReconnect = true;
+    }
+
+    if (needsReconnect) {
+      console.log('Page connection lost, attempting to reconnect...');
+      try {
+        const connection = await connectToApp();
+        browser = connection.browser;
+        context = connection.context;
+        mainPage = connection.page;
+        await mainPage.waitForLoadState('load');
+        console.log('Reconnected to Tauri app');
+      } catch (e) {
+        console.error('Failed to reconnect:', e);
+        throw e;
+      }
+    }
+
+    // 状態安定のための待機
+    await mainPage.waitForTimeout(500);
+
     // Navigate to TTS settings
     // Note: We don't kill VOICEVOX externally here because it desynchronizes app state
     // Instead, tests should manage VOICEVOX state through the UI
@@ -405,6 +433,9 @@ test.describe('TTS VOICEVOX Auto-Launch', () => {
   });
 
   test('should auto-launch VOICEVOX on app restart', async () => {
+    // このテストはアプリ再起動を伴うため、タイムアウトを延長
+    test.setTimeout(180000); // 3分
+
     // Step 1: Configure auto-launch
     await selectVoicevoxBackend(mainPage);
 
@@ -445,9 +476,21 @@ test.describe('TTS VOICEVOX Auto-Launch', () => {
     mainPage = connection.page;
 
     // Step 3: Verify VOICEVOX was auto-launched
-    // Wait a bit for auto-launch to trigger
-    const autoLaunched = await waitForVoicevoxToStart(60000);
+    // Wait a bit for auto-launch to trigger (VOICEVOXは通常10-20秒で起動)
+    const autoLaunched = await waitForVoicevoxToStart(45000);
     expect(autoLaunched).toBe(true);
+
+    // ページ接続が有効か確認、無効なら再接続
+    try {
+      await mainPage.evaluate(() => document.readyState);
+    } catch {
+      console.log('Page connection lost after VOICEVOX check, reconnecting...');
+      const connection = await connectToApp();
+      browser = connection.browser;
+      context = connection.context;
+      mainPage = connection.page;
+      await mainPage.waitForLoadState('load');
+    }
 
     // Also verify UI shows correct state
     await navigateToTtsSettings(mainPage);
@@ -499,6 +542,7 @@ test.describe('TTS VOICEVOX Auto-Launch', () => {
     browser = connection.browser;
     context = connection.context;
     mainPage = connection.page;
+    await mainPage.waitForLoadState('load');
   });
 
   test('should prevent duplicate launch (button state)', async () => {
