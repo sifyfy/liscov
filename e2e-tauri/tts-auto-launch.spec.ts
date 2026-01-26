@@ -206,8 +206,8 @@ async function startTauriApp(): Promise<void> {
 async function navigateToTtsSettings(page: Page): Promise<void> {
   // Click Settings tab in main navigation
   await page.getByRole('button', { name: 'Settings' }).click();
-  // Wait for settings sidebar to appear
-  await page.waitForTimeout(500);
+  // Wait for settings sidebar button to appear (condition-based instead of fixed timeout)
+  await expect(page.getByRole('button', { name: 'TTS読み上げ' })).toBeVisible({ timeout: 5000 });
   // Click TTS tab in the settings sidebar (it's a button, not a link)
   await page.getByRole('button', { name: 'TTS読み上げ' }).click();
   // Wait for TTS settings to be visible
@@ -229,7 +229,7 @@ async function waitForVoicevoxToStart(timeoutMs = 30000): Promise<boolean> {
     if (isVoicevoxRunning()) {
       return true;
     }
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, 300)); // Reduced from 1000ms for faster detection
   }
   return false;
 }
@@ -241,7 +241,7 @@ async function waitForVoicevoxToStop(timeoutMs = 10000): Promise<boolean> {
     if (!isVoicevoxRunning()) {
       return true;
     }
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 300)); // Reduced from 500ms for faster detection
   }
   return false;
 }
@@ -337,8 +337,8 @@ test.describe('TTS VOICEVOX Auto-Launch', () => {
       }
     }
 
-    // 状態安定のための待機
-    await mainPage.waitForTimeout(500);
+    // Wait for UI to stabilize - use condition-based wait instead of fixed timeout
+    await expect(mainPage.getByRole('button', { name: 'Settings' })).toBeVisible({ timeout: 5000 });
 
     // Navigate to TTS settings
     // Note: We don't kill VOICEVOX externally here because it desynchronizes app state
@@ -446,19 +446,15 @@ test.describe('TTS VOICEVOX Auto-Launch', () => {
       await waitForVoicevoxToStop();
     }
 
-    // Find and enable auto-launch toggle
-    // The toggle is a button next to a span containing "アプリ起動時に自動起動"
-    const autoLaunchSpan = mainPage.locator('span:has-text("アプリ起動時に自動起動")');
-    await expect(autoLaunchSpan).toBeVisible({ timeout: 5000 });
-    // The toggle button is a sibling in the same flex container
-    const autoLaunchToggle = autoLaunchSpan.locator('..').locator('button');
-    const toggleClass = await autoLaunchToggle.getAttribute('class');
-    if (!toggleClass?.includes('bg-green-500')) {
+    // Find and enable auto-launch toggle using data-testid for reliability
+    const autoLaunchToggle = mainPage.locator('[data-testid="voicevox-auto-launch-toggle"]');
+    await expect(autoLaunchToggle).toBeVisible({ timeout: 5000 });
+    const isPressed = await autoLaunchToggle.getAttribute('aria-pressed');
+    if (isPressed !== 'true') {
       await autoLaunchToggle.click();
+      // Wait for toggle state to update
+      await expect(autoLaunchToggle).toHaveAttribute('aria-pressed', 'true', { timeout: 3000 });
     }
-
-    // Wait for config to save
-    await mainPage.waitForTimeout(500);
 
     // Kill any running VOICEVOX process (external kill is okay here since we're restarting app anyway)
     killVoicevox();
@@ -502,16 +498,15 @@ test.describe('TTS VOICEVOX Auto-Launch', () => {
     // Step 1: Configure settings
     await selectVoicevoxBackend(mainPage);
 
-    // Ensure auto-close toggle is enabled
-    const autoCloseSpan = mainPage.locator('span:has-text("アプリ終了時に自動停止")');
-    await expect(autoCloseSpan).toBeVisible({ timeout: 5000 });
-    const autoCloseToggle = autoCloseSpan.locator('..').locator('button');
-    const toggleClass = await autoCloseToggle.getAttribute('class');
-    if (!toggleClass?.includes('bg-green-500')) {
+    // Ensure auto-close toggle is enabled using data-testid for reliability
+    const autoCloseToggle = mainPage.locator('[data-testid="voicevox-auto-close-toggle"]');
+    await expect(autoCloseToggle).toBeVisible({ timeout: 5000 });
+    const isPressed = await autoCloseToggle.getAttribute('aria-pressed');
+    if (isPressed !== 'true') {
       await autoCloseToggle.click();
+      // Wait for toggle state to update
+      await expect(autoCloseToggle).toHaveAttribute('aria-pressed', 'true', { timeout: 3000 });
     }
-
-    await mainPage.waitForTimeout(500);
 
     // Step 2: Launch VOICEVOX manually via UI
     const launchButton = mainPage.getByRole('button', { name: '起動' });

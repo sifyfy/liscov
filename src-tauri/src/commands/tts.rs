@@ -3,7 +3,7 @@
 use crate::state::AppState;
 use crate::tts::{TtsBackendType, TtsConfig, TtsProcessManager, TtsPriority, TtsQueueItem};
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{Emitter, State};
 use tauri_plugin_dialog::DialogExt;
 
 /// TTS configuration for frontend
@@ -293,6 +293,7 @@ pub async fn tts_select_exe(app: tauri::AppHandle) -> Result<Option<String>, Str
 /// Launch a TTS backend process
 #[tauri::command]
 pub async fn tts_launch_backend(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     backend: String,
     exe_path: Option<String>,
@@ -302,21 +303,39 @@ pub async fn tts_launch_backend(
         "voicevox" => TtsBackendType::Voicevox,
         _ => return Err("Invalid backend type".to_string()),
     };
-    state
+    let result = state
         .tts_process_manager
         .launch(backend_type, exe_path.as_deref())
-        .await
+        .await;
+
+    // Emit event on successful launch
+    if result.is_ok() {
+        let _ = app.emit("tts:process_launched", &backend);
+    }
+
+    result
 }
 
 /// Kill a TTS backend process
 #[tauri::command]
-pub async fn tts_kill_backend(state: State<'_, AppState>, backend: String) -> Result<(), String> {
+pub async fn tts_kill_backend(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    backend: String,
+) -> Result<(), String> {
     let backend_type = match backend.as_str() {
         "bouyomichan" => TtsBackendType::Bouyomichan,
         "voicevox" => TtsBackendType::Voicevox,
         _ => return Err("Invalid backend type".to_string()),
     };
-    state.tts_process_manager.kill(&backend_type).await
+    let result = state.tts_process_manager.kill(&backend_type).await;
+
+    // Emit event on successful kill
+    if result.is_ok() {
+        let _ = app.emit("tts:process_stopped", &backend);
+    }
+
+    result
 }
 
 /// Get TTS backend launch status

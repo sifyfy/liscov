@@ -153,8 +153,22 @@ impl TtsProcessManager {
     }
 
     /// Check if a backend was launched by this app
+    /// Also removes processes that have exited from the tracking list
     pub async fn is_launched(&self, backend: &TtsBackendType) -> bool {
-        self.processes.lock().await.iter().any(|p| &p.backend == backend)
+        let mut processes = self.processes.lock().await;
+        // Remove exited processes while checking
+        processes.retain_mut(|p| match p.child.try_wait() {
+            Ok(None) => true, // Still running
+            Ok(Some(status)) => {
+                log::info!("{:?} process has exited with status: {:?}", p.backend, status);
+                false
+            }
+            Err(e) => {
+                log::warn!("{:?} process status check failed: {}", p.backend, e);
+                false // Assume exited on error
+            }
+        });
+        processes.iter().any(|p| &p.backend == backend)
     }
 }
 

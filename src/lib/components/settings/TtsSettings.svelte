@@ -255,6 +255,8 @@
               <span class="text-sm text-[var(--text-primary)]">アプリ起動時に自動起動</span>
               <button
                 onclick={() => { config!.bouyomichan_auto_launch = !config!.bouyomichan_auto_launch; handleConfigChange(); }}
+                data-testid="bouyomichan-auto-launch-toggle"
+                aria-pressed={config.bouyomichan_auto_launch}
                 class="{config.bouyomichan_auto_launch ? 'bg-green-500' : 'bg-gray-300'} relative inline-flex h-5 w-9 items-center rounded-full transition-colors"
               >
                 <span class="{config.bouyomichan_auto_launch ? 'translate-x-5' : 'translate-x-1'} inline-block h-3 w-3 transform rounded-full bg-white transition-transform shadow"></span>
@@ -292,6 +294,8 @@
               <span class="text-sm text-[var(--text-primary)]">アプリ終了時に自動停止</span>
               <button
                 onclick={() => { config!.bouyomichan_auto_close = !config!.bouyomichan_auto_close; handleConfigChange(); }}
+                data-testid="bouyomichan-auto-close-toggle"
+                aria-pressed={config.bouyomichan_auto_close}
                 class="{config.bouyomichan_auto_close ? 'bg-green-500' : 'bg-gray-300'} relative inline-flex h-5 w-9 items-center rounded-full transition-colors"
               >
                 <span class="{config.bouyomichan_auto_close ? 'translate-x-5' : 'translate-x-1'} inline-block h-3 w-3 transform rounded-full bg-white transition-transform shadow"></span>
@@ -302,6 +306,7 @@
               <button
                 onclick={() => toggleLaunch('bouyomichan')}
                 disabled={isLaunching.bouyomichan}
+                data-testid="bouyomichan-launch-button"
                 class="px-3 py-2 text-sm rounded-lg border transition-colors disabled:opacity-50 {ttsStore.launchStatus.bouyomichan_launched ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100' : 'bg-green-50 text-green-600 border-green-200 hover:bg-green-100'}"
               >
                 {#if isLaunching.bouyomichan}
@@ -419,6 +424,8 @@
               <span class="text-sm text-[var(--text-primary)]">アプリ起動時に自動起動</span>
               <button
                 onclick={() => { config!.voicevox_auto_launch = !config!.voicevox_auto_launch; handleConfigChange(); }}
+                data-testid="voicevox-auto-launch-toggle"
+                aria-pressed={config.voicevox_auto_launch}
                 class="{config.voicevox_auto_launch ? 'bg-green-500' : 'bg-gray-300'} relative inline-flex h-5 w-9 items-center rounded-full transition-colors"
               >
                 <span class="{config.voicevox_auto_launch ? 'translate-x-5' : 'translate-x-1'} inline-block h-3 w-3 transform rounded-full bg-white transition-transform shadow"></span>
@@ -456,6 +463,8 @@
               <span class="text-sm text-[var(--text-primary)]">アプリ終了時に自動停止</span>
               <button
                 onclick={() => { config!.voicevox_auto_close = !config!.voicevox_auto_close; handleConfigChange(); }}
+                data-testid="voicevox-auto-close-toggle"
+                aria-pressed={config.voicevox_auto_close}
                 class="{config.voicevox_auto_close ? 'bg-green-500' : 'bg-gray-300'} relative inline-flex h-5 w-9 items-center rounded-full transition-colors"
               >
                 <span class="{config.voicevox_auto_close ? 'translate-x-5' : 'translate-x-1'} inline-block h-3 w-3 transform rounded-full bg-white transition-transform shadow"></span>
@@ -466,6 +475,7 @@
               <button
                 onclick={() => toggleLaunch('voicevox')}
                 disabled={isLaunching.voicevox}
+                data-testid="voicevox-launch-button"
                 class="px-3 py-2 text-sm rounded-lg border transition-colors disabled:opacity-50 {ttsStore.launchStatus.voicevox_launched ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100' : 'bg-green-50 text-green-600 border-green-200 hover:bg-green-100'}"
               >
                 {#if isLaunching.voicevox}
