@@ -1,8 +1,21 @@
-import { test, expect, chromium, BrowserContext, Page, Browser } from '@playwright/test';
-import { exec, execSync } from 'child_process';
+import { test, expect, BrowserContext, Page, Browser } from '@playwright/test';
+import { exec } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { log } from './utils/logger';
+import {
+  MOCK_SERVER_URL,
+  CDP_URL,
+  PROJECT_DIR,
+  TEST_APP_NAME,
+  TEST_KEYRING_SERVICE,
+  killTauriApp,
+  cleanupTestData,
+  cleanupTestCredentials,
+  waitForCDP,
+  connectToApp,
+} from './utils/test-helpers';
 
 /**
  * E2E tests for Window State Persistence based on 10_window_state.md specification.
@@ -14,14 +27,6 @@ import * as os from 'os';
  * Run tests:
  *    pnpm exec playwright test --config e2e-tauri/playwright.config.ts window-state.spec.ts
  */
-
-const CDP_URL = 'http://127.0.0.1:9222';
-const MOCK_SERVER_URL = 'http://localhost:3456';
-const PROJECT_DIR = process.cwd().replace(/[\\/]e2e-tauri$/, '');
-
-// Test isolation: use separate namespace for credentials and data
-const TEST_APP_NAME = 'liscov-test';
-const TEST_KEYRING_SERVICE = 'liscov-test';
 
 // Window state file uses the app identifier from tauri.conf.json
 const WINDOW_STATE_APP_ID = 'com.liscov-tauri.app';
@@ -48,115 +53,16 @@ function getWindowStateFilePath(): string {
   return path.join(configDir!, WINDOW_STATE_APP_ID, '.window-state.json');
 }
 
-// Get test data directories based on platform
-function getTestDataDirs(): string[] {
-  const dirs: string[] = [];
-
-  const configDir = process.platform === 'win32'
-    ? process.env.APPDATA
-    : process.platform === 'darwin'
-      ? path.join(os.homedir(), 'Library', 'Application Support')
-      : path.join(os.homedir(), '.config');
-
-  if (configDir) {
-    dirs.push(path.join(configDir, TEST_APP_NAME));
-  }
-
-  const dataDir = process.platform === 'win32'
-    ? process.env.APPDATA
-    : process.platform === 'darwin'
-      ? path.join(os.homedir(), 'Library', 'Application Support')
-      : path.join(os.homedir(), '.local', 'share');
-
-  if (dataDir && dataDir !== configDir) {
-    dirs.push(path.join(dataDir, TEST_APP_NAME));
-  }
-
-  return dirs;
-}
-
-// Clean up test data directories
-async function cleanupTestData(): Promise<void> {
-  const dirs = getTestDataDirs();
-  for (const dir of dirs) {
-    if (fs.existsSync(dir)) {
-      console.log(`Cleaning up test data directory: ${dir}`);
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
-  }
+// Clean up test data directories (extended to include window state file)
+async function cleanupTestDataWithWindowState(): Promise<void> {
+  await cleanupTestData();
 
   // Also clean up window state file
   const windowStateFile = getWindowStateFilePath();
   if (fs.existsSync(windowStateFile)) {
-    console.log(`Cleaning up window state file: ${windowStateFile}`);
+    log.debug(`Cleaning up window state file: ${windowStateFile}`);
     fs.unlinkSync(windowStateFile);
   }
-}
-
-// Clean up test keyring credentials (Windows Credential Manager)
-async function cleanupTestCredentials(): Promise<void> {
-  if (process.platform === 'win32') {
-    try {
-      execSync(`cmdkey /delete:${TEST_KEYRING_SERVICE}:youtube_credentials 2>nul`, { stdio: 'ignore' });
-      console.log('Cleaned up test credentials from Windows Credential Manager');
-    } catch {
-      // Credential may not exist, which is fine
-    }
-  }
-}
-
-// Helper to wait for CDP to be available
-async function waitForCDP(timeout = 120000): Promise<void> {
-  const start = Date.now();
-  console.log('Waiting for CDP to be available...');
-  let lastError = '';
-  while (Date.now() - start < timeout) {
-    try {
-      const response = await fetch(`${CDP_URL}/json/version`);
-      if (response.ok) {
-        console.log(`CDP available after ${Date.now() - start}ms`);
-        return;
-      }
-    } catch (e) {
-      lastError = e instanceof Error ? e.message : String(e);
-    }
-    await new Promise(resolve => setTimeout(resolve, 1000));
-  }
-  throw new Error(`CDP not available after ${timeout}ms. Last error: ${lastError}`);
-}
-
-// Helper to connect to Tauri app
-async function connectToApp(): Promise<{ browser: Browser; context: BrowserContext; page: Page }> {
-  const browser = await chromium.connectOverCDP(CDP_URL);
-  const contexts = browser.contexts();
-
-  if (contexts.length === 0) {
-    throw new Error('No browser contexts found');
-  }
-
-  const context = contexts[0];
-  const pages = context.pages();
-
-  if (pages.length === 0) {
-    throw new Error('No pages found in context');
-  }
-
-  return { browser, context, page: pages[0] };
-}
-
-// Helper to kill Tauri app (force kill)
-async function killTauriApp(): Promise<void> {
-  try {
-    if (process.platform === 'win32') {
-      execSync('taskkill /F /IM liscov-tauri.exe 2>nul', { stdio: 'ignore' });
-    } else {
-      execSync('pkill -f liscov-tauri', { stdio: 'ignore' });
-    }
-  } catch {
-    // Process may not exist
-  }
-  // Wait for port to be released
-  await new Promise(resolve => setTimeout(resolve, 1000));
 }
 
 // Helper to close Tauri app gracefully via window close
@@ -189,7 +95,7 @@ async function startTauriApp(): Promise<void> {
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=9222',
   };
 
-  console.log(`Starting Tauri app with test namespace: ${TEST_APP_NAME}`);
+  log.info(`Starting Tauri app with test namespace: ${TEST_APP_NAME}`);
 
   // Start app in background
   exec(`cd "${PROJECT_DIR}" && pnpm tauri dev`, { env });
@@ -202,7 +108,7 @@ async function startTauriApp(): Promise<void> {
 function readWindowState(): { width?: number; height?: number; x?: number; y?: number } | null {
   const windowStateFile = getWindowStateFilePath();
   if (!fs.existsSync(windowStateFile)) {
-    console.log('Window state file does not exist');
+    log.debug('Window state file does not exist');
     return null;
   }
   try {
@@ -210,7 +116,7 @@ function readWindowState(): { width?: number; height?: number; x?: number; y?: n
     const state = JSON.parse(content);
     return state.main || null;
   } catch (e) {
-    console.log('Failed to parse window state file:', e);
+    log.debug(`Failed to parse window state file: ${e}`);
     return null;
   }
 }
@@ -262,7 +168,7 @@ test.describe('Window State Persistence', () => {
   test.beforeAll(async () => {
     // Clean up before tests
     await killTauriApp();
-    await cleanupTestData();
+    await cleanupTestDataWithWindowState();
     await cleanupTestCredentials();
   });
 
@@ -284,7 +190,7 @@ test.describe('Window State Persistence', () => {
 
     // 初期ウィンドウサイズを確認
     const initialBounds = await getWindowBounds(page);
-    console.log('Initial window bounds:', initialBounds);
+    log.debug('Initial window bounds:', { initialBounds });
 
     // ウィンドウサイズを変更 (1000x700)
     const newWidth = 1000;
@@ -294,7 +200,7 @@ test.describe('Window State Persistence', () => {
 
     // 変更後のサイズを確認
     const changedBounds = await getWindowBounds(page);
-    console.log('Changed window bounds:', changedBounds);
+    log.debug('Changed window bounds:', { changedBounds });
     expect(changedBounds.width).toBe(newWidth);
     expect(changedBounds.height).toBe(newHeight);
 
@@ -304,7 +210,7 @@ test.describe('Window State Persistence', () => {
 
     // 設定ファイルが保存されていることを確認
     const savedState = readWindowState();
-    console.log('Saved window state:', savedState);
+    log.debug('Saved window state:', { savedState });
     expect(savedState).not.toBeNull();
     expect(savedState?.width).toBe(newWidth);
     expect(savedState?.height).toBe(newHeight);
@@ -321,7 +227,7 @@ test.describe('Window State Persistence', () => {
 
     // ウィンドウサイズが維持されていることを確認
     const restoredBounds = await getWindowBounds(page2);
-    console.log('Restored window bounds:', restoredBounds);
+    log.debug('Restored window bounds:', { restoredBounds });
     expect(restoredBounds.width).toBe(newWidth);
     expect(restoredBounds.height).toBe(newHeight);
 
@@ -331,7 +237,7 @@ test.describe('Window State Persistence', () => {
   test('ウィンドウ位置が再起動後も維持される', async () => {
     // Clean slate
     await killTauriApp();
-    await cleanupTestData();
+    await cleanupTestDataWithWindowState();
 
     // ============================================
     // Phase 1: 初回起動、ウィンドウ位置変更
@@ -351,7 +257,7 @@ test.describe('Window State Persistence', () => {
 
     // 変更後の位置を確認（ウィンドウ装飾の影響で数ピクセルずれる可能性あり）
     const changedBounds = await getWindowBounds(page);
-    console.log('Changed window bounds:', changedBounds);
+    log.debug('Changed window bounds:', { changedBounds });
     expect(Math.abs(changedBounds.x - newX)).toBeLessThan(20);
     expect(Math.abs(changedBounds.y - newY)).toBeLessThan(50); // タイトルバー分のずれを許容
 
@@ -361,7 +267,7 @@ test.describe('Window State Persistence', () => {
 
     // 設定ファイルが保存されていることを確認
     const savedState = readWindowState();
-    console.log('Saved window state:', savedState);
+    log.debug('Saved window state:', { savedState });
     expect(savedState).not.toBeNull();
     // 保存された位置も許容範囲で確認
     expect(savedState?.x).toBeDefined();
@@ -379,7 +285,7 @@ test.describe('Window State Persistence', () => {
 
     // ウィンドウ位置が維持されていることを確認（許容範囲あり）
     const restoredBounds = await getWindowBounds(page2);
-    console.log('Restored window bounds:', restoredBounds);
+    log.debug('Restored window bounds:', { restoredBounds });
     // 復元された位置が保存された位置と一致することを確認
     expect(Math.abs(restoredBounds.x - savedState!.x!)).toBeLessThan(20);
     expect(Math.abs(restoredBounds.y - savedState!.y!)).toBeLessThan(50);

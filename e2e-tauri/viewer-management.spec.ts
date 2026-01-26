@@ -1,12 +1,15 @@
-import { test, expect, chromium, BrowserContext, Page, Browser } from '@playwright/test';
-import { exec, execSync, spawn, ChildProcess } from 'child_process';
-import { promisify } from 'util';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
-
-const execAsync = promisify(exec);
-const MOCK_SERVER_URL = 'http://localhost:3456';
+import { test, expect, BrowserContext, Page, Browser } from '@playwright/test';
+import { log } from './utils/logger';
+import {
+  MOCK_SERVER_URL,
+  setupTestEnvironment,
+  teardownTestEnvironment,
+  resetMockServer,
+  addMockMessage,
+  killTauriApp,
+  cleanupTestData,
+  cleanupTestCredentials,
+} from './utils/test-helpers';
 
 /**
  * E2E tests for Viewer Management feature based on 06_viewer.md specification.
@@ -17,223 +20,9 @@ const MOCK_SERVER_URL = 'http://localhost:3456';
  * - Viewer edit modal (reading, notes)
  * - Delete functionality for viewer custom info and broadcaster data
  *
- * Prerequisites:
- * 1. Mock server running on port 3456:
- *    cargo run --manifest-path src-tauri/Cargo.toml --bin mock_server
- *
- * 2. Run tests (app will be started automatically with test namespace):
+ * Run tests:
  *    pnpm exec playwright test --config e2e-tauri/playwright.config.ts viewer-management.spec.ts
  */
-
-const CDP_URL = 'http://127.0.0.1:9222';
-const PROJECT_DIR = process.cwd().replace(/[\\/]e2e-tauri$/, '');
-
-// Test isolation: use separate namespace for credentials and data
-const TEST_APP_NAME = 'liscov-test';
-const TEST_KEYRING_SERVICE = 'liscov-test';
-
-// Get test data directories based on platform
-function getTestDataDirs(): string[] {
-  const dirs: string[] = [];
-
-  const configDir = process.platform === 'win32'
-    ? process.env.APPDATA
-    : process.platform === 'darwin'
-      ? path.join(os.homedir(), 'Library', 'Application Support')
-      : path.join(os.homedir(), '.config');
-
-  if (configDir) {
-    dirs.push(path.join(configDir, TEST_APP_NAME));
-  }
-
-  const dataDir = process.platform === 'win32'
-    ? process.env.APPDATA
-    : process.platform === 'darwin'
-      ? path.join(os.homedir(), 'Library', 'Application Support')
-      : path.join(os.homedir(), '.local', 'share');
-
-  if (dataDir && dataDir !== configDir) {
-    dirs.push(path.join(dataDir, TEST_APP_NAME));
-  }
-
-  return dirs;
-}
-
-// Clean up test data directories
-async function cleanupTestData(): Promise<void> {
-  const dirs = getTestDataDirs();
-  for (const dir of dirs) {
-    if (fs.existsSync(dir)) {
-      console.log(`Cleaning up test data directory: ${dir}`);
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
-  }
-}
-
-// Clean up test keyring credentials (Windows Credential Manager)
-async function cleanupTestCredentials(): Promise<void> {
-  if (process.platform === 'win32') {
-    try {
-      // The keyring crate stores credentials with target format: <user>.<service>
-      execSync(`cmdkey /delete:youtube_credentials.${TEST_KEYRING_SERVICE} 2>nul`, { stdio: 'ignore' });
-      console.log('Cleaned up test credentials from Windows Credential Manager');
-    } catch {
-      // Credential may not exist, which is fine
-    }
-  }
-}
-
-// Mock server process reference
-let mockServerProcess: ChildProcess | null = null;
-
-// Helper to kill mock server process
-async function killMockServer(): Promise<void> {
-  if (mockServerProcess) {
-    console.log('Stopping mock server...');
-    mockServerProcess.kill();
-    mockServerProcess = null;
-  }
-  // Also kill any orphaned mock_server processes
-  try {
-    if (process.platform === 'win32') {
-      execSync('taskkill /F /IM mock_server.exe 2>nul', { stdio: 'ignore' });
-    } else {
-      execSync('pkill -f mock_server', { stdio: 'ignore' });
-    }
-  } catch {
-    // Process may not exist
-  }
-  await new Promise(resolve => setTimeout(resolve, 500));
-}
-
-// Helper to start mock server
-async function startMockServer(): Promise<void> {
-  console.log('Starting mock server...');
-
-  // Kill any existing mock server first
-  await killMockServer();
-
-  // Start mock server as a child process
-  const cargoPath = path.join(PROJECT_DIR, 'src-tauri', 'Cargo.toml');
-  mockServerProcess = spawn('cargo', ['run', '--manifest-path', cargoPath, '--bin', 'mock_server'], {
-    cwd: PROJECT_DIR,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    shell: true,
-  });
-
-  // Log mock server output for debugging
-  mockServerProcess.stdout?.on('data', (data) => {
-    const msg = data.toString().trim();
-    if (msg) console.log(`[mock_server] ${msg}`);
-  });
-  mockServerProcess.stderr?.on('data', (data) => {
-    const msg = data.toString().trim();
-    // Filter out cargo build warnings/info
-    if (msg && !msg.includes('Compiling') && !msg.includes('Finished') && !msg.includes('warning:')) {
-      console.log(`[mock_server] ${msg}`);
-    }
-  });
-
-  // Wait for mock server to be ready
-  const timeout = 60000;
-  const start = Date.now();
-  while (Date.now() - start < timeout) {
-    try {
-      const response = await fetch(`${MOCK_SERVER_URL}/status`);
-      if (response.ok) {
-        console.log(`Mock server ready after ${Date.now() - start}ms`);
-        return;
-      }
-    } catch {
-      // Server not ready yet
-    }
-    await new Promise(resolve => setTimeout(resolve, 500));
-  }
-  throw new Error(`Mock server not ready after ${timeout}ms`);
-}
-
-// Helper to reset mock server state
-async function resetMockServer(): Promise<void> {
-  await fetch(`${MOCK_SERVER_URL}/reset`, { method: 'POST' });
-}
-
-// Helper to wait for CDP to be available
-async function waitForCDP(timeout = 120000): Promise<void> {
-  const start = Date.now();
-  console.log('Waiting for CDP to be available...');
-  let lastError = '';
-  while (Date.now() - start < timeout) {
-    try {
-      const response = await fetch(`${CDP_URL}/json/version`);
-      if (response.ok) {
-        console.log(`CDP available after ${Date.now() - start}ms`);
-        return;
-      }
-    } catch (e) {
-      lastError = e instanceof Error ? e.message : String(e);
-    }
-    await new Promise(resolve => setTimeout(resolve, 1000));
-  }
-  throw new Error(`CDP not available after ${timeout}ms. Last error: ${lastError}`);
-}
-
-// Helper to connect to Tauri app
-async function connectToApp(): Promise<{ browser: Browser; context: BrowserContext; page: Page }> {
-  const browser = await chromium.connectOverCDP(CDP_URL);
-  const contexts = browser.contexts();
-
-  if (contexts.length === 0) {
-    throw new Error('No browser contexts found');
-  }
-
-  const context = contexts[0];
-  const pages = context.pages();
-
-  if (pages.length === 0) {
-    throw new Error('No pages found in context');
-  }
-
-  return { browser, context, page: pages[0] };
-}
-
-// Helper to kill Tauri app
-async function killTauriApp(): Promise<void> {
-  try {
-    if (process.platform === 'win32') {
-      execSync('taskkill /F /IM liscov-tauri.exe 2>nul', { stdio: 'ignore' });
-    } else {
-      execSync('pkill -f liscov-tauri', { stdio: 'ignore' });
-    }
-  } catch {
-    // Process may not exist
-  }
-  // Wait for port to be released
-  await new Promise(resolve => setTimeout(resolve, 1000));
-}
-
-// Helper to start Tauri app with test isolation
-async function startTauriApp(): Promise<void> {
-  const env = {
-    ...process.env,
-    // Test isolation: use separate namespace
-    LISCOV_APP_NAME: TEST_APP_NAME,
-    LISCOV_KEYRING_SERVICE: TEST_KEYRING_SERVICE,
-    // Mock server URLs - CRITICAL: point app to mock server for all YouTube interactions
-    LISCOV_YOUTUBE_BASE_URL: MOCK_SERVER_URL,
-    LISCOV_AUTH_URL: 'http://localhost:3456/?auto_login=true',
-    LISCOV_SESSION_CHECK_URL: 'http://localhost:3456/youtubei/v1/account/account_menu',
-    // Enable CDP for Playwright
-    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=9222',
-  };
-
-  console.log(`Starting Tauri app with test namespace: ${TEST_APP_NAME}`);
-
-  // Start app in background
-  exec(`cd "${PROJECT_DIR}" && pnpm tauri dev`, { env });
-
-  // Wait for CDP to be available
-  await waitForCDP();
-}
 
 // Helper to fully disconnect (stop + initialize) and return to idle state
 async function disconnectAndInitialize(page: Page): Promise<void> {
@@ -259,32 +48,12 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
   test.beforeAll(async () => {
     test.setTimeout(240000); // 4 minutes for setup (includes mock server build time)
 
-    // Step 1: Kill any existing processes
-    console.log('Killing any existing Tauri app...');
-    await killTauriApp();
-
-    // Step 2: Clean up test data and credentials for a fresh start
-    console.log('Cleaning up test data and credentials...');
-    await cleanupTestData();
-    await cleanupTestCredentials();
-
-    // Step 3: Start mock server
-    await startMockServer();
-    await resetMockServer();
-
-    // Step 4: Start Tauri app with test namespace
-    console.log('Starting Tauri app with test namespace...');
-    await startTauriApp();
-
-    // Step 5: Connect to the running Tauri app
-    const connection = await connectToApp();
+    log.info('Setting up test environment for Viewer Management tests...');
+    const connection = await setupTestEnvironment();
     browser = connection.browser;
     context = connection.context;
     mainPage = connection.page;
-    // Wait for page to be fully loaded and stable before accessing
-    await mainPage.waitForLoadState('load');
-    await mainPage.waitForTimeout(1000);
-    console.log('Connected to Tauri app');
+    log.info('Connected to Tauri app');
 
     // Step 6: Authenticate first (required for chat connection)
     await mainPage.locator('button:has-text("Settings")').click();
@@ -298,42 +67,30 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
     }
 
     // Step 7: Add mock chat messages before connecting (so viewers will be created)
-    console.log('Adding mock chat messages...');
-    await fetch(`${MOCK_SERVER_URL}/add_message`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message_type: 'text',
-        author: 'TestViewer1',
-        channel_id: 'UC_test_viewer_1',
-        content: 'Hello from TestViewer1!'
-      })
+    log.info('Adding mock chat messages...');
+    await addMockMessage({
+      message_type: 'text',
+      author: 'TestViewer1',
+      channel_id: 'UC_test_viewer_1',
+      content: 'Hello from TestViewer1!'
     });
-    await fetch(`${MOCK_SERVER_URL}/add_message`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message_type: 'text',
-        author: 'TestViewer2',
-        channel_id: 'UC_test_viewer_2',
-        content: 'Hello from TestViewer2!'
-      })
+    await addMockMessage({
+      message_type: 'text',
+      author: 'TestViewer2',
+      channel_id: 'UC_test_viewer_2',
+      content: 'Hello from TestViewer2!'
     });
-    await fetch(`${MOCK_SERVER_URL}/add_message`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message_type: 'superchat',
-        author: 'SuperChatViewer',
-        channel_id: 'UC_superchat_viewer',
-        content: 'Super chat message!',
-        amount: '¥500'
-      })
+    await addMockMessage({
+      message_type: 'superchat',
+      author: 'SuperChatViewer',
+      channel_id: 'UC_superchat_viewer',
+      content: 'Super chat message!',
+      amount: '¥500'
     });
 
     // Step 8: Navigate to Chat tab and connect to mock chat to generate viewer data
     // THIS IS THE CRITICAL SCENARIO: connecting to a stream creates broadcaster + viewer data
-    console.log('Connecting to mock chat to generate viewer data...');
+    log.info('Connecting to mock chat to generate viewer data...');
     await mainPage.locator('button:has-text("Chat")').click();
 
     // Enter mock stream URL (full URL format to pass validation)
@@ -345,25 +102,24 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
     await connectButton.click();
 
     // Wait for connection success - look for stream title or connected state
-    console.log('Waiting for connection success...');
+    log.info('Waiting for connection success...');
     // The stream title "Mock Live" should appear when connected (use .first() as it appears in multiple places)
     await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 15000 });
-    console.log('Connection successful! Stream title visible.');
+    log.info('Connection successful! Stream title visible.');
 
     // Wait a bit more for chat messages to be fetched and viewers to be saved
     await new Promise(resolve => setTimeout(resolve, 3000));
-    console.log('Viewer data should be generated now.');
+    log.info('Viewer data should be generated now.');
   });
 
   test.afterAll(async () => {
     // Clean up: close browser connection, kill Tauri app, and stop mock server
-    console.log('Cleaning up after tests...');
+    log.info('Cleaning up after tests...');
     if (browser) {
       await browser.close();
     }
     await killTauriApp();
-    await killMockServer();
-    // Clean up test data
+    // Note: teardownTestEnvironment handles killMockServer internally
     await cleanupTestData();
     await cleanupTestCredentials();
   });
@@ -403,7 +159,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
       });
 
       const headingLuminance = (headingColorInfo.r + headingColorInfo.g + headingColorInfo.b) / 3;
-      console.log(`Heading color: ${headingColorInfo.original} -> rgb(${headingColorInfo.r}, ${headingColorInfo.g}, ${headingColorInfo.b}), luminance: ${headingLuminance}`);
+      log.debug(`Heading color: ${headingColorInfo.original} -> rgb(${headingColorInfo.r}, ${headingColorInfo.g}, ${headingColorInfo.b}), luminance: ${headingLuminance}`);
 
       // Purple-300 is rgb(196, 181, 253) with luminance ~210
       // Dark text (--text-primary) should have luminance < 100
@@ -412,7 +168,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
 
       // Additional check: The heading should NOT have high blue component (purple indicator)
       // Purple-300 has B > 250, dark text should have B < 100
-      console.log(`Heading blue component: ${headingColorInfo.b}`);
+      log.debug(`Heading blue component: ${headingColorInfo.b}`);
       expect(headingColorInfo.b).toBeLessThan(150);
     });
 
@@ -431,7 +187,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
 
       // The mock server's broadcaster name should be in the options
       const optionTexts = await Promise.all(options.map(o => o.textContent()));
-      console.log('Available broadcasters:', optionTexts);
+      log.debug('Available broadcasters:', { optionTexts });
     });
 
     test('should show message when no broadcaster is selected', async () => {
@@ -837,7 +593,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
 
         // Should have at least one viewer row (from mock server messages)
         const viewerRows = await mainPage.locator('tbody tr').all();
-        console.log(`Found ${viewerRows.length} viewers from connected stream`);
+        log.debug(`Found ${viewerRows.length} viewers from connected stream`);
 
         // CRITICAL: There should be at least 1 viewer from the stream
         expect(viewerRows.length).toBeGreaterThanOrEqual(1);
@@ -938,7 +694,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
       // Get the selected broadcaster ID and name for later comparison
       const broadcasterAId = await broadcasterSelect.inputValue();
       const broadcasterAOption = await broadcasterSelect.locator('option:checked').textContent();
-      console.log(`Broadcaster A: ${broadcasterAOption} (${broadcasterAId})`);
+      log.debug(`Broadcaster A: ${broadcasterAOption} (${broadcasterAId})`);
 
       // Find a viewer to edit
       const viewerRows = await mainPage.locator('tbody tr').all();
@@ -946,7 +702,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
 
       // Get the viewer's name from the first cell (Name column)
       const viewerName = await viewerRows[0].locator('td').first().textContent();
-      console.log(`Setting reading for viewer: ${viewerName}`);
+      log.debug(`Setting reading for viewer: ${viewerName}`);
 
       // Click on the first viewer and set a reading
       await viewerRows[0].click();
@@ -962,14 +718,14 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
 
       // Verify reading is saved for Broadcaster A
       await expect(mainPage.getByText(readingForA)).toBeVisible();
-      console.log('Reading saved for Broadcaster A');
+      log.info('Reading saved for Broadcaster A');
 
       // Step 2: Disconnect from current stream
       await mainPage.locator('button:has-text("Chat")').click();
       await disconnectAndInitialize(mainPage);
 
       // Step 3: Configure mock server to use Broadcaster B
-      console.log('Switching to Broadcaster B...');
+      log.info('Switching to Broadcaster B...');
       await fetch(`${MOCK_SERVER_URL}/set_stream_state`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -999,7 +755,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
 
       // Wait for connection
       await expect(mainPage.getByText('Mock Live Stream B').first()).toBeVisible({ timeout: 15000 });
-      console.log('Connected to Broadcaster B');
+      log.info('Connected to Broadcaster B');
 
       // Wait for messages to be processed
       await new Promise(resolve => setTimeout(resolve, 3000));
@@ -1010,14 +766,14 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
 
       // Refresh broadcaster list and find Broadcaster B
       options = await broadcasterSelect.locator('option').all();
-      console.log(`Available broadcasters after connecting to B: ${options.length - 1}`);
+      log.debug(`Available broadcasters after connecting to B: ${options.length - 1}`);
 
       // Find and select Broadcaster B
       let broadcasterBFound = false;
       for (let i = 1; i < options.length; i++) {
         const optionText = await options[i].textContent();
         const optionValue = await options[i].getAttribute('value');
-        console.log(`Option ${i}: ${optionText} (${optionValue})`);
+        log.debug(`Option ${i}: ${optionText} (${optionValue})`);
         if (optionValue === 'UC_broadcaster_b' || optionText?.includes('Broadcaster B')) {
           await broadcasterSelect.selectOption({ index: i });
           broadcasterBFound = true;
@@ -1037,7 +793,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
 
         // Step 6: Verify the SAME viewer has NO reading for Broadcaster B
         const viewerRowsB = await mainPage.locator('tbody tr').all();
-        console.log(`Found ${viewerRowsB.length} viewers for Broadcaster B`);
+        log.debug(`Found ${viewerRowsB.length} viewers for Broadcaster B`);
 
         if (viewerRowsB.length > 0) {
           // Check if the viewer exists and has no reading
@@ -1047,7 +803,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
           // CRITICAL ASSERTION: The reading set for Broadcaster A should NOT appear for Broadcaster B
           // This is the key test for broadcaster scoping
           expect(tableText).not.toContain(readingForA);
-          console.log('✓ Verified: Reading from Broadcaster A is NOT visible for Broadcaster B');
+          log.info('Verified: Reading from Broadcaster A is NOT visible for Broadcaster B');
         }
 
         // Step 7: Switch back to Broadcaster A and verify reading is still there
@@ -1064,7 +820,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
 
         // CRITICAL ASSERTION: Reading for Broadcaster A should still be there
         await expect(mainPage.getByText(readingForA)).toBeVisible();
-        console.log('✓ Verified: Reading for Broadcaster A is preserved');
+        log.info('Verified: Reading for Broadcaster A is preserved');
       }
 
       // Cleanup: Reset mock server state for next tests
@@ -1107,7 +863,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
           // Get the Messages column (5th column)
           const messagesCell = viewerRows[0].locator('td').nth(4);
           const initialCount = parseInt(await messagesCell.textContent() || '0');
-          console.log(`Initial message count: ${initialCount}`);
+          log.debug(`Initial message count: ${initialCount}`);
 
           // Ensure message count is at least 1 (from beforeAll setup)
           expect(initialCount).toBeGreaterThanOrEqual(1);
@@ -1137,7 +893,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
           return match && parseInt(match[0].replace(/,/g, '')) > 0;
         });
 
-        console.log('Contributions:', contributions);
+        log.debug('Contributions:', { contributions });
         // Note: This assertion may need adjustment based on how contributions are displayed
         // For now, we just verify the column exists and has content
         expect(contributions.length).toBeGreaterThan(0);

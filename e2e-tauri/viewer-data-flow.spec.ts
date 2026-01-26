@@ -1,16 +1,20 @@
-import { test, expect, chromium, BrowserContext, Page, Browser } from '@playwright/test';
-import { exec, execSync, spawn, ChildProcess } from 'child_process';
-import { promisify } from 'util';
+import { test, expect, BrowserContext, Page, Browser } from '@playwright/test';
+import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
-
-const execAsync = promisify(exec);
-const MOCK_SERVER_URL = 'http://localhost:3456';
-const CDP_URL = 'http://127.0.0.1:9222';
-const PROJECT_DIR = process.cwd().replace(/[\\/]e2e-tauri$/, '');
-const TEST_APP_NAME = 'liscov-test';
-const TEST_KEYRING_SERVICE = 'liscov-test';
+import { log } from './utils/logger';
+import {
+  MOCK_SERVER_URL,
+  setupTestEnvironment,
+  teardownTestEnvironment,
+  resetMockServer,
+  startTauriApp,
+  connectToApp,
+  killTauriApp,
+  cleanupTestData,
+  cleanupTestCredentials,
+  TEST_APP_NAME,
+} from './utils/test-helpers';
 
 /**
  * E2E tests for actual data flow - NOT using fixtures.
@@ -23,144 +27,6 @@ const TEST_KEYRING_SERVICE = 'liscov-test';
  * 5. Data persists across app restarts
  */
 
-function getTestDataDirs(): string[] {
-  const dirs: string[] = [];
-  const configDir = process.platform === 'win32'
-    ? process.env.APPDATA
-    : process.platform === 'darwin'
-      ? path.join(os.homedir(), 'Library', 'Application Support')
-      : path.join(os.homedir(), '.config');
-  if (configDir) dirs.push(path.join(configDir, TEST_APP_NAME));
-  return dirs;
-}
-
-async function cleanupTestData(): Promise<void> {
-  for (const dir of getTestDataDirs()) {
-    if (fs.existsSync(dir)) {
-      console.log(`Cleaning up test data directory: ${dir}`);
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
-  }
-}
-
-async function cleanupTestCredentials(): Promise<void> {
-  if (process.platform === 'win32') {
-    try {
-      execSync(`cmdkey /delete:youtube_credentials.${TEST_KEYRING_SERVICE} 2>nul`, { stdio: 'ignore' });
-    } catch {}
-  }
-}
-
-let mockServerProcess: ChildProcess | null = null;
-
-async function killMockServer(): Promise<void> {
-  if (mockServerProcess) {
-    mockServerProcess.kill();
-    mockServerProcess = null;
-  }
-  try {
-    if (process.platform === 'win32') {
-      execSync('taskkill /F /IM mock_server.exe 2>nul', { stdio: 'ignore' });
-    } else {
-      execSync('pkill -f mock_server', { stdio: 'ignore' });
-    }
-  } catch {}
-  await new Promise(resolve => setTimeout(resolve, 500));
-}
-
-async function startMockServer(): Promise<void> {
-  console.log('Starting mock server...');
-  await killMockServer();
-
-  const cargoPath = path.join(PROJECT_DIR, 'src-tauri', 'Cargo.toml');
-  mockServerProcess = spawn('cargo', ['run', '--manifest-path', cargoPath, '--bin', 'mock_server'], {
-    cwd: PROJECT_DIR,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    shell: true,
-  });
-
-  mockServerProcess.stdout?.on('data', (data) => {
-    const msg = data.toString().trim();
-    if (msg) console.log(`[mock_server] ${msg}`);
-  });
-  mockServerProcess.stderr?.on('data', (data) => {
-    const msg = data.toString().trim();
-    if (msg && !msg.includes('Compiling') && !msg.includes('Finished') && !msg.includes('warning:')) {
-      console.log(`[mock_server] ${msg}`);
-    }
-  });
-
-  const timeout = 60000;
-  const start = Date.now();
-  while (Date.now() - start < timeout) {
-    try {
-      const response = await fetch(`${MOCK_SERVER_URL}/status`);
-      if (response.ok) {
-        console.log(`Mock server ready after ${Date.now() - start}ms`);
-        return;
-      }
-    } catch {}
-    await new Promise(resolve => setTimeout(resolve, 500));
-  }
-  throw new Error(`Mock server not ready after ${timeout}ms`);
-}
-
-async function resetMockServer(): Promise<void> {
-  await fetch(`${MOCK_SERVER_URL}/reset`, { method: 'POST' });
-}
-
-async function waitForCDP(timeout = 120000): Promise<void> {
-  const start = Date.now();
-  console.log('Waiting for CDP...');
-  while (Date.now() - start < timeout) {
-    try {
-      const response = await fetch(`${CDP_URL}/json/version`);
-      if (response.ok) {
-        console.log(`CDP available after ${Date.now() - start}ms`);
-        return;
-      }
-    } catch {}
-    await new Promise(resolve => setTimeout(resolve, 1000));
-  }
-  throw new Error(`CDP not available after ${timeout}ms`);
-}
-
-async function connectToApp(): Promise<{ browser: Browser; context: BrowserContext; page: Page }> {
-  const browser = await chromium.connectOverCDP(CDP_URL);
-  const contexts = browser.contexts();
-  if (contexts.length === 0) throw new Error('No browser contexts found');
-  const context = contexts[0];
-  const pages = context.pages();
-  if (pages.length === 0) throw new Error('No pages found');
-  return { browser, context, page: pages[0] };
-}
-
-async function killTauriApp(): Promise<void> {
-  try {
-    if (process.platform === 'win32') {
-      execSync('taskkill /F /IM liscov-tauri.exe 2>nul', { stdio: 'ignore' });
-    } else {
-      execSync('pkill -f liscov-tauri', { stdio: 'ignore' });
-    }
-  } catch {}
-  await new Promise(resolve => setTimeout(resolve, 1000));
-}
-
-async function startTauriApp(): Promise<void> {
-  const env = {
-    ...process.env,
-    LISCOV_APP_NAME: TEST_APP_NAME,
-    LISCOV_KEYRING_SERVICE: TEST_KEYRING_SERVICE,
-    LISCOV_YOUTUBE_BASE_URL: MOCK_SERVER_URL,
-    LISCOV_AUTH_URL: 'http://localhost:3456/?auto_login=true',
-    LISCOV_SESSION_CHECK_URL: 'http://localhost:3456/youtubei/v1/account/account_menu',
-    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=9222',
-  };
-  console.log(`Starting Tauri app with test namespace: ${TEST_APP_NAME}`);
-  exec(`cd "${PROJECT_DIR}" && pnpm tauri dev`, { env });
-  await waitForCDP();
-}
-
 test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
   let browser: Browser;
   let context: BrowserContext;
@@ -170,26 +36,18 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
     test.setTimeout(240000);
 
     // Clean start - no fixtures, no pre-seeded data
-    console.log('=== CLEAN START - Testing actual data flow ===');
-    await killTauriApp();
-    await cleanupTestData();
-    await cleanupTestCredentials();
-    await startMockServer();
-    await resetMockServer();
-    await startTauriApp();
-
-    const connection = await connectToApp();
+    log.info('=== CLEAN START - Testing actual data flow ===');
+    const connection = await setupTestEnvironment();
     browser = connection.browser;
     context = connection.context;
     mainPage = connection.page;
-    console.log('Connected to Tauri app');
+    log.info('Connected to Tauri app');
   });
 
   test.afterAll(async () => {
-    console.log('Cleaning up...');
+    log.info('Cleaning up...');
     if (browser) await browser.close();
     await killTauriApp();
-    await killMockServer();
     await cleanupTestData();
     await cleanupTestCredentials();
   });
@@ -207,7 +65,7 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
 
     // Should have NO broadcasters (only placeholder)
     const options = await broadcasterSelect.locator('option').all();
-    console.log(`Broadcasters before connecting: ${options.length - 1}`);
+    log.debug(`Broadcasters before connecting: ${options.length - 1}`);
 
     // CRITICAL: Without connecting to a stream, there should be NO broadcasters
     expect(options.length).toBe(1); // Only placeholder
@@ -225,7 +83,7 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
       await loginButton.click();
       const logoutButton = mainPage.getByRole('button', { name: 'ログアウト' });
       await expect(logoutButton).toBeVisible({ timeout: 15000 });
-      console.log('Authentication successful');
+      log.info('Authentication successful');
     }
   });
 
@@ -246,14 +104,14 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
     const jsonStr = html.substring(jsonStart, jsonEnd);
 
     const data = JSON.parse(jsonStr);
-    console.log('Mock server ytInitialData:', JSON.stringify(data, null, 2).slice(0, 500));
+    log.debug('Mock server ytInitialData:', { preview: JSON.stringify(data, null, 2).slice(0, 500) });
 
     // Verify broadcaster info exists in the response
     const owner = data?.contents?.twoColumnWatchNextResults?.results?.results?.contents?.[1]?.videoSecondaryInfoRenderer?.owner?.videoOwnerRenderer;
-    console.log('Owner data:', JSON.stringify(owner, null, 2));
+    log.debug('Owner data:', { owner: JSON.stringify(owner, null, 2) });
 
     const browseId = owner?.navigationEndpoint?.browseEndpoint?.browseId;
-    console.log('BrowseId (broadcaster channel ID):', browseId);
+    log.debug(`BrowseId (broadcaster channel ID): ${browseId}`);
 
     expect(browseId).toBeDefined();
     expect(browseId).toBe('UC_mock');
@@ -262,7 +120,7 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
   test('Step 3: Connect to stream and receive messages', async () => {
     // Add messages to mock server queue BEFORE connecting
     // These will be delivered when the app polls for messages
-    console.log('Adding messages to mock server...');
+    log.info('Adding messages to mock server...');
     await fetch(`${MOCK_SERVER_URL}/add_message`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -295,20 +153,20 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
 
     // Wait for connection and stream title
     await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 15000 });
-    console.log('Connected to stream');
+    log.info('Connected to stream');
 
     // Debug: Check connection status display
     // The connection info should show broadcaster details
     const connectionInfo = mainPage.locator('[data-testid="connection-info"]');
     if (await connectionInfo.isVisible()) {
       const infoText = await connectionInfo.textContent();
-      console.log('Connection info:', infoText);
+      log.debug(`Connection info: ${infoText}`);
     }
 
     // Check for any error messages
     const errorMessage = mainPage.getByText(/error|failed/i);
     if (await errorMessage.count() > 0) {
-      console.log('Error found:', await errorMessage.first().textContent());
+      log.error(`Error found: ${await errorMessage.first().textContent()}`);
     }
 
     // Wait for messages to be fetched and processed
@@ -317,27 +175,27 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
 
     // Verify messages appeared in chat (use first() to avoid strict mode violation)
     await expect(mainPage.getByText('RealViewer1').first()).toBeVisible({ timeout: 10000 });
-    console.log('Messages received in chat');
+    log.info('Messages received in chat');
 
     // Check the database file directly
     const dbPath = path.join(process.env.APPDATA || '', TEST_APP_NAME, 'liscov.db');
-    console.log('Database path:', dbPath);
-    console.log('Database exists:', fs.existsSync(dbPath));
+    log.debug(`Database path: ${dbPath}`);
+    log.debug(`Database exists: ${fs.existsSync(dbPath)}`);
 
     if (fs.existsSync(dbPath)) {
       // Use sqlite3 command to check tables
       try {
         const result = execSync(`sqlite3 "${dbPath}" "SELECT * FROM broadcaster_profiles;"`, { encoding: 'utf-8' });
-        console.log('broadcaster_profiles content:', result || '(empty)');
+        log.debug(`broadcaster_profiles content: ${result || '(empty)'}`);
       } catch (e) {
-        console.log('Error reading broadcaster_profiles:', e);
+        log.debug(`Error reading broadcaster_profiles: ${e}`);
       }
 
       try {
         const result = execSync(`sqlite3 "${dbPath}" "SELECT id, broadcaster_channel_id, broadcaster_name FROM sessions;"`, { encoding: 'utf-8' });
-        console.log('sessions content:', result || '(empty)');
+        log.debug(`sessions content: ${result || '(empty)'}`);
       } catch (e) {
-        console.log('Error reading sessions:', e);
+        log.debug(`Error reading sessions: ${e}`);
       }
     }
   });
@@ -349,7 +207,7 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
       const text = `[browser] ${msg.type()}: ${msg.text()}`;
       consoleLogs.push(text);
       if (msg.text().includes('[viewerStore]')) {
-        console.log(text);
+        log.debug(text);
       }
     });
 
@@ -361,19 +219,19 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
     await new Promise(resolve => setTimeout(resolve, 3000));
 
     // Log any viewerStore related messages
-    console.log('Relevant console logs:');
-    consoleLogs.filter(l => l.includes('[viewerStore]')).forEach(l => console.log(l));
+    log.debug('Relevant console logs:');
+    consoleLogs.filter(l => l.includes('[viewerStore]')).forEach(l => log.debug(l));
 
     const broadcasterSelect = mainPage.locator('#broadcaster-select');
 
     // CRITICAL TEST: After connecting to a stream, broadcaster should appear
     const options = await broadcasterSelect.locator('option').all();
-    console.log(`Broadcasters after connecting: ${options.length - 1}`);
+    log.debug(`Broadcasters after connecting: ${options.length - 1}`);
 
     // Log all options for debugging
     for (let i = 0; i < options.length; i++) {
       const text = await options[i].textContent();
-      console.log(`  Option ${i}: ${text}`);
+      log.debug(`  Option ${i}: ${text}`);
     }
 
     // ASSERTION: There should be at least 1 broadcaster (from the connected stream)
@@ -387,7 +245,7 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
 
     // CRITICAL TEST: Viewers from the stream should appear
     const viewerRows = await mainPage.locator('tbody tr').all();
-    console.log(`Viewers found: ${viewerRows.length}`);
+    log.debug(`Viewers found: ${viewerRows.length}`);
 
     // ASSERTION: Should have at least 2 viewers (RealViewer1 and RealSuperChatter)
     expect(viewerRows.length).toBeGreaterThanOrEqual(2);
@@ -396,7 +254,7 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
     const tableText = await mainPage.locator('table').textContent();
     expect(tableText).toContain('RealViewer1');
     expect(tableText).toContain('RealSuperChatter');
-    console.log('Viewers from stream are visible in Viewer Management');
+    log.info('Viewers from stream are visible in Viewer Management');
   });
 
   test('Step 5: Edit viewer info from Viewer Management', async () => {
@@ -418,14 +276,14 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
 
     // Verify reading appears in table
     await expect(mainPage.getByText('テスト読み仮名')).toBeVisible();
-    console.log('Viewer info saved successfully');
+    log.info('Viewer info saved successfully');
   });
 
   test('Step 6: Data persists after app restart', async () => {
     test.setTimeout(180000);
 
     // Close and restart the app
-    console.log('Restarting app to test persistence...');
+    log.info('Restarting app to test persistence...');
     await browser.close();
     await killTauriApp();
 
@@ -438,7 +296,7 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
     const connection = await connectToApp();
     browser = connection.browser;
     mainPage = connection.page;
-    console.log('App restarted');
+    log.info('App restarted');
 
     // Navigate directly to Viewers tab (without connecting to stream)
     await mainPage.locator('button:has-text("Viewer")').click();
@@ -450,7 +308,7 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
     const broadcasterSelect = mainPage.locator('#broadcaster-select');
     const options = await broadcasterSelect.locator('option').all();
 
-    console.log(`Broadcasters after restart: ${options.length - 1}`);
+    log.debug(`Broadcasters after restart: ${options.length - 1}`);
 
     // CRITICAL: Broadcaster should still exist (persisted in DB)
     expect(options.length).toBeGreaterThan(1);
@@ -461,11 +319,11 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
 
     // CRITICAL: Viewers should still exist
     const viewerRows = await mainPage.locator('tbody tr').all();
-    console.log(`Viewers after restart: ${viewerRows.length}`);
+    log.debug(`Viewers after restart: ${viewerRows.length}`);
     expect(viewerRows.length).toBeGreaterThanOrEqual(2);
 
     // CRITICAL: Custom reading should be persisted
     await expect(mainPage.getByText('テスト読み仮名')).toBeVisible();
-    console.log('Data persisted successfully after restart');
+    log.info('Data persisted successfully after restart');
   });
 });

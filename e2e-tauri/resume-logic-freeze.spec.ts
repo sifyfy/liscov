@@ -1,8 +1,18 @@
-import { test, expect, chromium, BrowserContext, Page, Browser } from '@playwright/test';
-import { exec, execSync, spawn, ChildProcess } from 'child_process';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
+import { test, expect, BrowserContext, Page, Browser } from '@playwright/test';
+import { exec } from 'child_process';
+import { log } from './utils/logger';
+import {
+  MOCK_SERVER_URL,
+  PROJECT_DIR,
+  TEST_APP_NAME,
+  TEST_KEYRING_SERVICE,
+  cleanupTestData,
+  killTauriApp,
+  killMockServer,
+  startMockServer,
+  waitForCDP,
+  connectToApp,
+} from './utils/test-helpers';
 
 /**
  * E2E test to detect the "application logic freeze" bug
@@ -16,116 +26,6 @@ import * as os from 'os';
  *
  * This is DIFFERENT from high-rate UI freeze (which was fixed in fcfa476)
  */
-
-const CDP_URL = 'http://127.0.0.1:9222';
-const MOCK_SERVER_URL = 'http://localhost:3456';
-const PROJECT_DIR = process.cwd().replace(/[\\/]e2e-tauri$/, '');
-const TEST_APP_NAME = 'liscov-test';
-const TEST_KEYRING_SERVICE = 'liscov-test';
-
-function getTestDataDirs(): string[] {
-  const dirs: string[] = [];
-  const configDir = process.platform === 'win32'
-    ? process.env.APPDATA
-    : process.platform === 'darwin'
-      ? path.join(os.homedir(), 'Library', 'Application Support')
-      : path.join(os.homedir(), '.config');
-  if (configDir) {
-    dirs.push(path.join(configDir, TEST_APP_NAME));
-  }
-  return dirs;
-}
-
-async function cleanupTestData(): Promise<void> {
-  for (const dir of getTestDataDirs()) {
-    if (fs.existsSync(dir)) {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
-  }
-}
-
-async function waitForCDP(timeout = 120000): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < timeout) {
-    try {
-      const response = await fetch(`${CDP_URL}/json/version`);
-      if (response.ok) {
-        console.log(`CDP available after ${Date.now() - start}ms`);
-        return;
-      }
-    } catch { }
-    await new Promise(resolve => setTimeout(resolve, 500));
-  }
-  throw new Error(`CDP not available after ${timeout}ms`);
-}
-
-async function connectToApp(): Promise<{ browser: Browser; context: BrowserContext; page: Page }> {
-  const browser = await chromium.connectOverCDP(CDP_URL);
-  const contexts = browser.contexts();
-  if (contexts.length === 0) throw new Error('No browser contexts found');
-  const context = contexts[0];
-  const pages = context.pages();
-  if (pages.length === 0) throw new Error('No pages found in context');
-  return { browser, context, page: pages[0] };
-}
-
-async function killTauriApp(): Promise<void> {
-  try {
-    if (process.platform === 'win32') {
-      execSync('taskkill /F /IM liscov-tauri.exe 2>nul', { stdio: 'ignore' });
-    } else {
-      execSync('pkill -f liscov-tauri', { stdio: 'ignore' });
-    }
-  } catch { }
-  await new Promise(resolve => setTimeout(resolve, 1000));
-}
-
-async function killMockServer(): Promise<void> {
-  try {
-    if (process.platform === 'win32') {
-      execSync('taskkill /F /IM mock_server.exe 2>nul', { stdio: 'ignore' });
-    } else {
-      execSync('pkill -f mock_server', { stdio: 'ignore' });
-    }
-  } catch { }
-  await new Promise(resolve => setTimeout(resolve, 500));
-}
-
-let mockServerProcess: ChildProcess | null = null;
-
-async function startMockServer(): Promise<void> {
-  await killMockServer();
-  const cargoPath = path.join(PROJECT_DIR, 'src-tauri', 'Cargo.toml');
-  mockServerProcess = spawn('cargo', ['run', '--manifest-path', cargoPath, '--bin', 'mock_server'], {
-    cwd: PROJECT_DIR,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    shell: true,
-  });
-  mockServerProcess.stdout?.on('data', (data) => {
-    const msg = data.toString().trim();
-    if (msg && !msg.includes('Compiling')) console.log(`[mock] ${msg}`);
-  });
-  mockServerProcess.stderr?.on('data', (data) => {
-    const msg = data.toString().trim();
-    if (msg && !msg.includes('Compiling') && !msg.includes('Finished') && !msg.includes('warning:')) {
-      console.log(`[mock] ${msg}`);
-    }
-  });
-
-  const timeout = 60000;
-  const start = Date.now();
-  while (Date.now() - start < timeout) {
-    try {
-      const response = await fetch(`${MOCK_SERVER_URL}/status`);
-      if (response.ok) {
-        console.log(`Mock server ready after ${Date.now() - start}ms`);
-        return;
-      }
-    } catch { }
-    await new Promise(resolve => setTimeout(resolve, 500));
-  }
-  throw new Error(`Mock server not ready after ${timeout}ms`);
-}
 
 // Start Tauri app pointing to real YouTube (no mock)
 async function startTauriAppForRealYouTube(): Promise<void> {
@@ -171,10 +71,10 @@ async function testApplicationLogicWorks(page: Page): Promise<{ works: boolean; 
     const testVar = Date.now();
     return { works: true, timestamp: testVar };
   }).catch((e) => ({ works: false, error: String(e) }));
-  console.log(`JS execution test before tab click: ${JSON.stringify(jsTestBefore)}`);
+  log.debug(`JS execution test before tab click: ${JSON.stringify(jsTestBefore)}`);
 
   // Click Settings tab
-  console.log('Clicking Settings tab...');
+  log.debug('Clicking Settings tab...');
   await page.locator('button:has-text("Settings")').click();
 
   // Wait a moment for any potential state change
@@ -192,7 +92,7 @@ async function testApplicationLogicWorks(page: Page): Promise<{ works: boolean; 
       hasPendingMicrotasks: typeof anyWindow.queueMicrotask === 'function'
     };
   }).catch((e) => ({ works: false, error: String(e) }));
-  console.log(`JS execution test after tab click: ${JSON.stringify(jsTestAfter)}`);
+  log.debug(`JS execution test after tab click: ${JSON.stringify(jsTestAfter)}`);
 
   // Check if Settings content is now visible
   const settingsVisibleAfter = await settingsHeading.isVisible().catch(() => false);
@@ -207,7 +107,7 @@ async function testApplicationLogicWorks(page: Page): Promise<{ works: boolean; 
         fontWeight: style.fontWeight
       };
     }).catch(() => ({ error: 'Failed to get button style' }));
-    console.log(`Settings tab button state: ${JSON.stringify(activeTabButton)}`);
+    log.debug(`Settings tab button state: ${JSON.stringify(activeTabButton)}`);
 
     return {
       works: false,
@@ -245,7 +145,7 @@ test.describe('Real YouTube - Application Logic Freeze Detection', () => {
     await killTauriApp();
     await cleanupTestData();
 
-    console.log('Starting Tauri app for real YouTube...');
+    log.info('Starting Tauri app for real YouTube...');
     await startTauriAppForRealYouTube();
 
     const connection = await connectToApp();
@@ -258,15 +158,15 @@ test.describe('Real YouTube - Application Logic Freeze Detection', () => {
       const text = msg.text();
       // Always capture errors and specific debug logs
       if (text.includes('[GLOBAL_ERROR]') || text.includes('[UNHANDLED_REJECTION]')) {
-        console.log(`[CRITICAL] ${text}`);
+        log.error(`[CRITICAL] ${text}`);
       } else if (text.includes('[chat.svelte.ts]') || text.includes('resume') || text.includes('error') || text.includes('Error')) {
-        console.log(`[CONSOLE] ${text}`);
+        log.debug(`[CONSOLE] ${text}`);
       }
     });
 
     await mainPage.waitForLoadState('domcontentloaded');
     await mainPage.waitForTimeout(2000);
-    console.log('Connected to Tauri app');
+    log.info('Connected to Tauri app');
   });
 
   test.afterAll(async () => {
@@ -276,49 +176,49 @@ test.describe('Real YouTube - Application Logic Freeze Detection', () => {
 
   test('should detect application logic freeze after pause/resume with real YouTube', async () => {
     // Step 1: Connect to YouTube stream
-    console.log(`Connecting to: ${YOUTUBE_URL}`);
+    log.info(`Connecting to: ${YOUTUBE_URL}`);
     const urlInput = mainPage.locator('input[placeholder*="YouTube URL"], input[placeholder*="youtube.com"]');
     await urlInput.fill(YOUTUBE_URL);
     await mainPage.locator('button:has-text("開始")').click();
 
     // Wait for connection
     await expect(mainPage.locator('button:has-text("停止")')).toBeVisible({ timeout: 30000 });
-    console.log('Connected to stream');
+    log.info('Connected to stream');
 
     // Step 2: Verify application logic works BEFORE pause
-    console.log('Testing application logic BEFORE pause...');
+    log.info('Testing application logic BEFORE pause...');
     const beforePause = await testApplicationLogicWorks(mainPage);
-    console.log(`Before pause: ${beforePause.details}`);
+    log.info(`Before pause: ${beforePause.details}`);
     expect(beforePause.works).toBe(true);
 
     // Step 3: Wait a bit to ensure stable connection
-    console.log('Waiting 5 seconds for stable connection...');
+    log.info('Waiting 5 seconds for stable connection...');
     await mainPage.waitForTimeout(5000);
 
     // Step 4: Pause
-    console.log('Pausing...');
+    log.info('Pausing...');
     await mainPage.locator('button:has-text("停止")').click();
     await expect(mainPage.locator('button:has-text("再開")')).toBeVisible({ timeout: 5000 });
-    console.log('Paused');
+    log.info('Paused');
 
     // Step 5: Wait while paused
-    console.log('Waiting 3 seconds while paused...');
+    log.info('Waiting 3 seconds while paused...');
     await mainPage.waitForTimeout(3000);
 
     // Step 6: Resume
-    console.log('Resuming...');
+    log.info('Resuming...');
     await mainPage.locator('button:has-text("再開")').click();
     await expect(mainPage.locator('button:has-text("停止")')).toBeVisible({ timeout: 10000 });
-    console.log('Resume completed');
+    log.info('Resume completed');
 
     // Step 7: Test application logic AFTER resume
-    console.log('Testing application logic AFTER resume...');
+    log.info('Testing application logic AFTER resume...');
 
     // Give a moment for any potential issue to manifest
     await mainPage.waitForTimeout(1000);
 
     const afterResume = await testApplicationLogicWorks(mainPage);
-    console.log(`After resume: ${afterResume.details}`);
+    log.info(`After resume: ${afterResume.details}`);
 
     if (!afterResume.works) {
       // Take screenshot for debugging
@@ -326,14 +226,14 @@ test.describe('Real YouTube - Application Logic Freeze Detection', () => {
       throw new Error(`BUG DETECTED: Application logic frozen after resume. ${afterResume.details}`);
     }
 
-    console.log('Test passed: Application logic works after resume');
+    log.info('Test passed: Application logic works after resume');
 
     // Cleanup
     try {
       await mainPage.locator('button:has-text("停止")').click({ timeout: 2000 });
       await mainPage.locator('button:has-text("初期化")').click({ timeout: 2000 });
     } catch {
-      console.log('Cleanup skipped');
+      log.debug('Cleanup skipped');
     }
   });
 });
@@ -351,10 +251,10 @@ test.describe('Mock Server - Application Logic Freeze Detection', () => {
     await killMockServer();
     await cleanupTestData();
 
-    console.log('Starting mock server...');
+    log.info('Starting mock server...');
     await startMockServer();
 
-    console.log('Starting Tauri app for mock server...');
+    log.info('Starting Tauri app for mock server...');
     await startTauriAppForMockServer();
 
     const connection = await connectToApp();
@@ -367,23 +267,19 @@ test.describe('Mock Server - Application Logic Freeze Detection', () => {
       const text = msg.text();
       // Always capture errors and specific debug logs
       if (text.includes('[GLOBAL_ERROR]') || text.includes('[UNHANDLED_REJECTION]')) {
-        console.log(`[CRITICAL] ${text}`);
+        log.error(`[CRITICAL] ${text}`);
       } else if (text.includes('[chat.svelte.ts]') || text.includes('resume') || text.includes('error') || text.includes('Error')) {
-        console.log(`[CONSOLE] ${text}`);
+        log.debug(`[CONSOLE] ${text}`);
       }
     });
 
     await mainPage.waitForLoadState('domcontentloaded');
     await mainPage.waitForTimeout(2000);
-    console.log('Connected to Tauri app');
+    log.info('Connected to Tauri app');
   });
 
   test.afterAll(async () => {
     await killTauriApp();
-    if (mockServerProcess) {
-      mockServerProcess.kill();
-      mockServerProcess = null;
-    }
     await killMockServer();
     await cleanupTestData();
   });
@@ -391,7 +287,7 @@ test.describe('Mock Server - Application Logic Freeze Detection', () => {
   test('should detect application logic freeze after pause/resume with mock server', async () => {
     // Enable auto-message generation to simulate real YouTube's continuous message flow
     // Real YouTube has ~15-20 messages per poll (1.5s interval) = ~10-15 msgs/sec
-    console.log('Enabling auto-messages (20 per poll to match real YouTube)...');
+    log.info('Enabling auto-messages (20 per poll to match real YouTube)...');
     await fetch(`${MOCK_SERVER_URL}/set_auto_message`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -399,50 +295,50 @@ test.describe('Mock Server - Application Logic Freeze Detection', () => {
     });
 
     // Step 1: Connect to mock stream
-    console.log('Connecting to mock stream...');
+    log.info('Connecting to mock stream...');
     const urlInput = mainPage.locator('input[placeholder*="YouTube URL"], input[placeholder*="youtube.com"]');
     await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_logic_freeze`);
     await mainPage.locator('button:has-text("開始")').click();
 
     // Wait for connection
     await expect(mainPage.locator('button:has-text("停止")')).toBeVisible({ timeout: 10000 });
-    console.log('Connected to mock stream');
+    log.info('Connected to mock stream');
 
     // Step 2: Verify application logic works BEFORE pause
-    console.log('Testing application logic BEFORE pause...');
+    log.info('Testing application logic BEFORE pause...');
     const beforePause = await testApplicationLogicWorks(mainPage);
-    console.log(`Before pause: ${beforePause.details}`);
+    log.info(`Before pause: ${beforePause.details}`);
     expect(beforePause.works).toBe(true);
 
     // Step 3: Wait for messages to accumulate (like real YouTube)
-    console.log('Waiting 5 seconds for messages...');
+    log.info('Waiting 5 seconds for messages...');
     await mainPage.waitForTimeout(5000);
 
     const msgCountBefore = await mainPage.locator('[data-message-id]').count();
-    console.log(`Messages before pause: ${msgCountBefore}`);
+    log.debug(`Messages before pause: ${msgCountBefore}`);
 
     // Step 4: Pause
-    console.log('Pausing...');
+    log.info('Pausing...');
     await mainPage.locator('button:has-text("停止")').click();
     await expect(mainPage.locator('button:has-text("再開")')).toBeVisible({ timeout: 5000 });
-    console.log('Paused');
+    log.info('Paused');
 
     // Step 5: Wait while paused (messages continue to be generated server-side)
-    console.log('Waiting 3 seconds while paused...');
+    log.info('Waiting 3 seconds while paused...');
     await mainPage.waitForTimeout(3000);
 
     // Step 6: Resume
-    console.log('Resuming...');
+    log.info('Resuming...');
     await mainPage.locator('button:has-text("再開")').click();
     await expect(mainPage.locator('button:has-text("停止")')).toBeVisible({ timeout: 10000 });
-    console.log('Resume completed');
+    log.info('Resume completed');
 
     // Step 7: Test application logic AFTER resume
-    console.log('Testing application logic AFTER resume...');
+    log.info('Testing application logic AFTER resume...');
     await mainPage.waitForTimeout(1000);
 
     const afterResume = await testApplicationLogicWorks(mainPage);
-    console.log(`After resume: ${afterResume.details}`);
+    log.info(`After resume: ${afterResume.details}`);
 
     if (!afterResume.works) {
       await mainPage.screenshot({ path: 'logic-freeze-mock-server.png' });
@@ -455,7 +351,7 @@ test.describe('Mock Server - Application Logic Freeze Detection', () => {
       throw new Error(`BUG DETECTED: Application logic frozen after resume. ${afterResume.details}`);
     }
 
-    console.log('Test passed: Application logic works after resume');
+    log.info('Test passed: Application logic works after resume');
 
     // Disable auto-messages
     await fetch(`${MOCK_SERVER_URL}/set_auto_message`, {
@@ -469,13 +365,13 @@ test.describe('Mock Server - Application Logic Freeze Detection', () => {
       await mainPage.locator('button:has-text("停止")').click({ timeout: 2000 });
       await mainPage.locator('button:has-text("初期化")').click({ timeout: 2000 });
     } catch {
-      console.log('Cleanup skipped');
+      log.debug('Cleanup skipped');
     }
   });
 
   test('should detect application logic freeze with network delay simulation', async () => {
     // Simulate real YouTube network latency (500ms for /watch, 200ms for chat)
-    console.log('Configuring network delay simulation...');
+    log.info('Configuring network delay simulation...');
     await fetch(`${MOCK_SERVER_URL}/set_stream_state`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -493,45 +389,45 @@ test.describe('Mock Server - Application Logic Freeze Detection', () => {
     });
 
     // Step 1: Connect to mock stream
-    console.log('Connecting to mock stream with delay...');
+    log.info('Connecting to mock stream with delay...');
     const urlInput = mainPage.locator('input[placeholder*="YouTube URL"], input[placeholder*="youtube.com"]');
     await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_delay`);
     await mainPage.locator('button:has-text("開始")').click();
 
     // Wait for connection (may take longer due to delay)
     await expect(mainPage.locator('button:has-text("停止")')).toBeVisible({ timeout: 15000 });
-    console.log('Connected');
+    log.info('Connected');
 
     // Step 2: Verify application logic works BEFORE pause
     const beforePause = await testApplicationLogicWorks(mainPage);
-    console.log(`Before pause: ${beforePause.details}`);
+    log.info(`Before pause: ${beforePause.details}`);
     expect(beforePause.works).toBe(true);
 
     // Step 3: Wait for messages
-    console.log('Waiting 5 seconds for messages...');
+    log.info('Waiting 5 seconds for messages...');
     await mainPage.waitForTimeout(5000);
 
     // Step 4: Pause
-    console.log('Pausing...');
+    log.info('Pausing...');
     await mainPage.locator('button:has-text("停止")').click();
     await expect(mainPage.locator('button:has-text("再開")')).toBeVisible({ timeout: 5000 });
-    console.log('Paused');
+    log.info('Paused');
 
     // Step 5: Wait while paused
     await mainPage.waitForTimeout(3000);
 
     // Step 6: Resume (this is where the bug might occur with delay)
-    console.log('Resuming with network delay...');
+    log.info('Resuming with network delay...');
     await mainPage.locator('button:has-text("再開")').click();
     await expect(mainPage.locator('button:has-text("停止")')).toBeVisible({ timeout: 15000 });
-    console.log('Resume completed');
+    log.info('Resume completed');
 
     // Step 7: Test application logic AFTER resume
-    console.log('Testing application logic AFTER resume with delay...');
+    log.info('Testing application logic AFTER resume with delay...');
     await mainPage.waitForTimeout(1000);
 
     const afterResume = await testApplicationLogicWorks(mainPage);
-    console.log(`After resume with delay: ${afterResume.details}`);
+    log.info(`After resume with delay: ${afterResume.details}`);
 
     // Clean up delays
     await fetch(`${MOCK_SERVER_URL}/set_stream_state`, {
@@ -550,14 +446,14 @@ test.describe('Mock Server - Application Logic Freeze Detection', () => {
       throw new Error(`BUG DETECTED: Application logic frozen after resume with delay. ${afterResume.details}`);
     }
 
-    console.log('Test passed: Application logic works after resume with delay');
+    log.info('Test passed: Application logic works after resume with delay');
 
     // Cleanup
     try {
       await mainPage.locator('button:has-text("停止")').click({ timeout: 2000 });
       await mainPage.locator('button:has-text("初期化")').click({ timeout: 2000 });
     } catch {
-      console.log('Cleanup skipped');
+      log.debug('Cleanup skipped');
     }
   });
 
@@ -570,19 +466,19 @@ test.describe('Mock Server - Application Logic Freeze Detection', () => {
 
     // Perform 3 pause/resume cycles
     for (let i = 0; i < 3; i++) {
-      console.log(`Cycle ${i + 1}/3: Pause...`);
+      log.info(`Cycle ${i + 1}/3: Pause...`);
       await mainPage.locator('button:has-text("停止")').click();
       await expect(mainPage.locator('button:has-text("再開")')).toBeVisible({ timeout: 5000 });
 
       await mainPage.waitForTimeout(1000);
 
-      console.log(`Cycle ${i + 1}/3: Resume...`);
+      log.info(`Cycle ${i + 1}/3: Resume...`);
       await mainPage.locator('button:has-text("再開")').click();
       await expect(mainPage.locator('button:has-text("停止")')).toBeVisible({ timeout: 10000 });
 
       // Test logic after each resume
       const result = await testApplicationLogicWorks(mainPage);
-      console.log(`Cycle ${i + 1}/3: ${result.details}`);
+      log.info(`Cycle ${i + 1}/3: ${result.details}`);
 
       if (!result.works) {
         await mainPage.screenshot({ path: `logic-freeze-cycle-${i + 1}.png` });
@@ -590,14 +486,14 @@ test.describe('Mock Server - Application Logic Freeze Detection', () => {
       }
     }
 
-    console.log('All 3 cycles passed');
+    log.info('All 3 cycles passed');
 
     // Cleanup
     try {
       await mainPage.locator('button:has-text("停止")').click({ timeout: 2000 });
       await mainPage.locator('button:has-text("初期化")').click({ timeout: 2000 });
     } catch {
-      console.log('Cleanup skipped');
+      log.debug('Cleanup skipped');
     }
   });
 });

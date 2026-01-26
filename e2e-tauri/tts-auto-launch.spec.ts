@@ -1,8 +1,17 @@
-import { test, expect, chromium, BrowserContext, Page, Browser } from '@playwright/test';
-import { exec, execSync } from 'child_process';
+import { test, expect, BrowserContext, Page, Browser } from '@playwright/test';
+import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
+import { log } from './utils/logger';
+import {
+  setupTestEnvironment,
+  teardownTestEnvironment,
+  startTauriApp,
+  connectToApp,
+  killTauriApp,
+  cleanupTestData,
+  cleanupTestCredentials,
+} from './utils/test-helpers';
 
 /**
  * E2E tests for TTS VOICEVOX auto-launch feature based on 04_tts.md specification.
@@ -21,13 +30,6 @@ import * as os from 'os';
  * Run tests:
  *    pnpm exec playwright test --config e2e-tauri/playwright.config.ts tts-auto-launch.spec.ts
  */
-
-const CDP_URL = 'http://127.0.0.1:9222';
-const PROJECT_DIR = process.cwd().replace(/[\\/]e2e-tauri$/, '');
-
-// Test isolation: use separate namespace for credentials and data
-const TEST_APP_NAME = 'liscov-test';
-const TEST_KEYRING_SERVICE = 'liscov-test';
 
 // Get VOICEVOX standard installation path
 function getVoicevoxPath(): string | null {
@@ -56,110 +58,6 @@ function killVoicevox(): void {
   }
 }
 
-// Get test data directories based on platform
-function getTestDataDirs(): string[] {
-  const dirs: string[] = [];
-
-  const configDir = process.platform === 'win32'
-    ? process.env.APPDATA
-    : process.platform === 'darwin'
-      ? path.join(os.homedir(), 'Library', 'Application Support')
-      : path.join(os.homedir(), '.config');
-
-  if (configDir) {
-    dirs.push(path.join(configDir, TEST_APP_NAME));
-  }
-
-  const dataDir = process.platform === 'win32'
-    ? process.env.APPDATA
-    : process.platform === 'darwin'
-      ? path.join(os.homedir(), 'Library', 'Application Support')
-      : path.join(os.homedir(), '.local', 'share');
-
-  if (dataDir && dataDir !== configDir) {
-    dirs.push(path.join(dataDir, TEST_APP_NAME));
-  }
-
-  return dirs;
-}
-
-// Clean up test data directories
-async function cleanupTestData(): Promise<void> {
-  const dirs = getTestDataDirs();
-  for (const dir of dirs) {
-    if (fs.existsSync(dir)) {
-      console.log(`Cleaning up test data directory: ${dir}`);
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
-  }
-}
-
-// Clean up test keyring credentials (Windows Credential Manager)
-async function cleanupTestCredentials(): Promise<void> {
-  if (process.platform === 'win32') {
-    try {
-      execSync(`cmdkey /delete:youtube_credentials.${TEST_KEYRING_SERVICE} 2>nul`, { stdio: 'ignore' });
-      console.log('Cleaned up test credentials from Windows Credential Manager');
-    } catch {
-      // Credential may not exist, which is fine
-    }
-  }
-}
-
-// Helper to wait for CDP to be available
-async function waitForCDP(timeout = 120000): Promise<void> {
-  const start = Date.now();
-  console.log('Waiting for CDP to be available...');
-  let lastError = '';
-  while (Date.now() - start < timeout) {
-    try {
-      const response = await fetch(`${CDP_URL}/json/version`);
-      if (response.ok) {
-        console.log(`CDP available after ${Date.now() - start}ms`);
-        return;
-      }
-    } catch (e) {
-      lastError = e instanceof Error ? e.message : String(e);
-    }
-    await new Promise(resolve => setTimeout(resolve, 1000));
-  }
-  throw new Error(`CDP not available after ${timeout}ms. Last error: ${lastError}`);
-}
-
-// Helper to connect to Tauri app
-async function connectToApp(): Promise<{ browser: Browser; context: BrowserContext; page: Page }> {
-  const browser = await chromium.connectOverCDP(CDP_URL);
-  const contexts = browser.contexts();
-
-  if (contexts.length === 0) {
-    throw new Error('No browser contexts found');
-  }
-
-  const context = contexts[0];
-  const pages = context.pages();
-
-  if (pages.length === 0) {
-    throw new Error('No pages found in context');
-  }
-
-  return { browser, context, page: pages[0] };
-}
-
-// Helper to kill Tauri app (force kill)
-async function killTauriApp(): Promise<void> {
-  try {
-    if (process.platform === 'win32') {
-      execSync('taskkill /F /IM liscov-tauri.exe 2>nul', { stdio: 'ignore' });
-    } else {
-      execSync('pkill -f liscov-tauri', { stdio: 'ignore' });
-    }
-  } catch {
-    // Process may not exist
-  }
-  // Wait for port to be released
-  await new Promise(resolve => setTimeout(resolve, 1000));
-}
-
 // Helper to gracefully close Tauri app (triggers ExitRequested event)
 async function closeTauriAppGracefully(): Promise<void> {
   try {
@@ -180,26 +78,6 @@ async function closeTauriAppGracefully(): Promise<void> {
   }
   // Wait for port to be released
   await new Promise(resolve => setTimeout(resolve, 1000));
-}
-
-// Helper to start Tauri app with test isolation
-async function startTauriApp(): Promise<void> {
-  const env = {
-    ...process.env,
-    // Test isolation: use separate namespace
-    LISCOV_APP_NAME: TEST_APP_NAME,
-    LISCOV_KEYRING_SERVICE: TEST_KEYRING_SERVICE,
-    // Enable CDP for Playwright
-    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=9222',
-  };
-
-  console.log(`Starting Tauri app with test namespace: ${TEST_APP_NAME}`);
-
-  // Start app in background
-  exec(`cd "${PROJECT_DIR}" && pnpm tauri dev`, { env });
-
-  // Wait for CDP to be available
-  await waitForCDP();
 }
 
 // Navigate to TTS settings tab
@@ -257,30 +135,30 @@ test.describe('TTS VOICEVOX Auto-Launch', () => {
 
     const voicevoxPath = getVoicevoxPath();
     if (!voicevoxPath) {
-      console.error('='.repeat(60));
-      console.error('ERROR: VOICEVOXがインストールされていません');
-      console.error('このテストを実行するにはVOICEVOXを以下にインストールしてください:');
-      console.error('%LOCALAPPDATA%\\Programs\\VOICEVOX\\VOICEVOX.exe');
-      console.error('Expected path:', path.join(process.env.LOCALAPPDATA || '', 'Programs', 'VOICEVOX', 'VOICEVOX.exe'));
-      console.error('='.repeat(60));
+      log.error('='.repeat(60));
+      log.error('ERROR: VOICEVOXがインストールされていません');
+      log.error('このテストを実行するにはVOICEVOXを以下にインストールしてください:');
+      log.error('%LOCALAPPDATA%\\Programs\\VOICEVOX\\VOICEVOX.exe');
+      log.error('Expected path:', { path: path.join(process.env.LOCALAPPDATA || '', 'Programs', 'VOICEVOX', 'VOICEVOX.exe') });
+      log.error('='.repeat(60));
       test.skip();
       return;
     }
 
-    console.log(`VOICEVOX found at: ${voicevoxPath}`);
+    log.info(`VOICEVOX found at: ${voicevoxPath}`);
 
     // Step 1: Kill any existing processes
-    console.log('Killing any existing Tauri app and VOICEVOX...');
+    log.info('Killing any existing Tauri app and VOICEVOX...');
     await killTauriApp();
     killVoicevox();
 
     // Step 2: Clean up test data for a fresh start
-    console.log('Cleaning up test data and credentials...');
+    log.info('Cleaning up test data and credentials...');
     await cleanupTestData();
     await cleanupTestCredentials();
 
     // Step 3: Start Tauri app with test namespace
-    console.log('Starting Tauri app with test namespace...');
+    log.info('Starting Tauri app with test namespace...');
     await startTauriApp();
 
     // Step 4: Connect to the running Tauri app
@@ -292,11 +170,11 @@ test.describe('TTS VOICEVOX Auto-Launch', () => {
     // Wait for page to be fully loaded
     await mainPage.waitForLoadState('load');
     await mainPage.waitForTimeout(1000);
-    console.log('Connected to Tauri app');
+    log.info('Connected to Tauri app');
   });
 
   test.afterAll(async () => {
-    console.log('Cleaning up after tests...');
+    log.info('Cleaning up after tests...');
 
     // Kill VOICEVOX if running
     killVoicevox();
@@ -323,16 +201,16 @@ test.describe('TTS VOICEVOX Auto-Launch', () => {
     }
 
     if (needsReconnect) {
-      console.log('Page connection lost, attempting to reconnect...');
+      log.info('Page connection lost, attempting to reconnect...');
       try {
         const connection = await connectToApp();
         browser = connection.browser;
         context = connection.context;
         mainPage = connection.page;
         await mainPage.waitForLoadState('load');
-        console.log('Reconnected to Tauri app');
+        log.info('Reconnected to Tauri app');
       } catch (e) {
-        console.error('Failed to reconnect:', e);
+        log.error('Failed to reconnect:', { error: e });
         throw e;
       }
     }
@@ -351,7 +229,7 @@ test.describe('TTS VOICEVOX Auto-Launch', () => {
     // If we reach here, VOICEVOX IS installed (otherwise beforeAll would have skipped)
     const voicevoxPath = getVoicevoxPath();
     expect(voicevoxPath).not.toBeNull();
-    console.log(`VOICEVOX is installed at: ${voicevoxPath}`);
+    log.info(`VOICEVOX is installed at: ${voicevoxPath}`);
   });
 
   test('should auto-detect VOICEVOX executable path via detect button', async () => {
@@ -373,7 +251,7 @@ test.describe('TTS VOICEVOX Auto-Launch', () => {
     // Verify the path contains VOICEVOX
     const detectedPath = await exePathInput.inputValue();
     expect(detectedPath.toLowerCase()).toContain('voicevox');
-    console.log(`Auto-detected path: ${detectedPath}`);
+    log.info(`Auto-detected path: ${detectedPath}`);
   });
 
   test('should launch VOICEVOX manually via button', async () => {
@@ -480,7 +358,7 @@ test.describe('TTS VOICEVOX Auto-Launch', () => {
     try {
       await mainPage.evaluate(() => document.readyState);
     } catch {
-      console.log('Page connection lost after VOICEVOX check, reconnecting...');
+      log.info('Page connection lost after VOICEVOX check, reconnecting...');
       const connection = await connectToApp();
       browser = connection.browser;
       context = connection.context;
@@ -567,7 +445,7 @@ test.describe('TTS VOICEVOX Auto-Launch', () => {
     try {
       const result = execSync('tasklist /FI "IMAGENAME eq VOICEVOX.exe" /FO CSV /NH', { encoding: 'utf8' });
       const lines = result.trim().split('\n').filter(line => line.includes('VOICEVOX.exe'));
-      console.log(`VOICEVOX process count: ${lines.length}`);
+      log.debug(`VOICEVOX process count: ${lines.length}`);
       expect(lines.length).toBeGreaterThan(0);
     } catch {
       // If tasklist fails, the button state check is sufficient

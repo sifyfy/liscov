@@ -1,8 +1,20 @@
-import { test, expect, chromium, BrowserContext, Page, Browser } from '@playwright/test';
-import { exec, execSync } from 'child_process';
+import { test, expect, BrowserContext, Page, Browser } from '@playwright/test';
+import { exec } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { log } from './utils/logger';
+import {
+  MOCK_SERVER_URL,
+  PROJECT_DIR,
+  TEST_APP_NAME,
+  TEST_KEYRING_SERVICE,
+  killTauriApp,
+  cleanupTestData,
+  cleanupTestCredentials,
+  waitForCDP,
+  connectToApp,
+} from './utils/test-helpers';
 
 /**
  * E2E tests for Font Size Persistence based on 09_config.md specification.
@@ -15,14 +27,6 @@ import * as os from 'os';
  *    pnpm exec playwright test --config e2e-tauri/playwright.config.ts font-size-persistence.spec.ts
  */
 
-const CDP_URL = 'http://127.0.0.1:9222';
-const MOCK_SERVER_URL = 'http://localhost:3456';
-const PROJECT_DIR = process.cwd().replace(/[\\/]e2e-tauri$/, '');
-
-// Test isolation: use separate namespace for credentials and data
-const TEST_APP_NAME = 'liscov-test';
-const TEST_KEYRING_SERVICE = 'liscov-test';
-
 // Get test config directory based on platform
 function getTestConfigDir(): string {
   const configDir = process.platform === 'win32'
@@ -32,110 +36,6 @@ function getTestConfigDir(): string {
       : path.join(os.homedir(), '.config');
 
   return path.join(configDir!, TEST_APP_NAME);
-}
-
-// Get test data directories based on platform
-function getTestDataDirs(): string[] {
-  const dirs: string[] = [];
-
-  const configDir = process.platform === 'win32'
-    ? process.env.APPDATA
-    : process.platform === 'darwin'
-      ? path.join(os.homedir(), 'Library', 'Application Support')
-      : path.join(os.homedir(), '.config');
-
-  if (configDir) {
-    dirs.push(path.join(configDir, TEST_APP_NAME));
-  }
-
-  const dataDir = process.platform === 'win32'
-    ? process.env.APPDATA
-    : process.platform === 'darwin'
-      ? path.join(os.homedir(), 'Library', 'Application Support')
-      : path.join(os.homedir(), '.local', 'share');
-
-  if (dataDir && dataDir !== configDir) {
-    dirs.push(path.join(dataDir, TEST_APP_NAME));
-  }
-
-  return dirs;
-}
-
-// Clean up test data directories
-async function cleanupTestData(): Promise<void> {
-  const dirs = getTestDataDirs();
-  for (const dir of dirs) {
-    if (fs.existsSync(dir)) {
-      console.log(`Cleaning up test data directory: ${dir}`);
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
-  }
-}
-
-// Clean up test keyring credentials (Windows Credential Manager)
-async function cleanupTestCredentials(): Promise<void> {
-  if (process.platform === 'win32') {
-    try {
-      execSync(`cmdkey /delete:${TEST_KEYRING_SERVICE}:youtube_credentials 2>nul`, { stdio: 'ignore' });
-      console.log('Cleaned up test credentials from Windows Credential Manager');
-    } catch {
-      // Credential may not exist, which is fine
-    }
-  }
-}
-
-// Helper to wait for CDP to be available
-async function waitForCDP(timeout = 120000): Promise<void> {
-  const start = Date.now();
-  console.log('Waiting for CDP to be available...');
-  let lastError = '';
-  while (Date.now() - start < timeout) {
-    try {
-      const response = await fetch(`${CDP_URL}/json/version`);
-      if (response.ok) {
-        console.log(`CDP available after ${Date.now() - start}ms`);
-        return;
-      }
-    } catch (e) {
-      lastError = e instanceof Error ? e.message : String(e);
-    }
-    await new Promise(resolve => setTimeout(resolve, 1000));
-  }
-  throw new Error(`CDP not available after ${timeout}ms. Last error: ${lastError}`);
-}
-
-// Helper to connect to Tauri app
-async function connectToApp(): Promise<{ browser: Browser; context: BrowserContext; page: Page }> {
-  const browser = await chromium.connectOverCDP(CDP_URL);
-  const contexts = browser.contexts();
-
-  if (contexts.length === 0) {
-    throw new Error('No browser contexts found');
-  }
-
-  const context = contexts[0];
-  const pages = context.pages();
-
-  if (pages.length === 0) {
-    throw new Error('No pages found in context');
-  }
-
-  return { browser, context, page: pages[0] };
-}
-
-// Helper to kill Tauri app
-async function killTauriApp(): Promise<void> {
-  try {
-    if (process.platform === 'win32') {
-      execSync('taskkill /F /IM liscov-tauri.exe 2>nul', { stdio: 'ignore' });
-    } else {
-      execSync('pkill -f liscov-tauri', { stdio: 'ignore' });
-    }
-  } catch {
-    // Process may not exist
-  }
-  // Wait for port to be released
-  await new Promise(resolve => setTimeout(resolve, 1000));
 }
 
 // Helper to start Tauri app with test isolation
@@ -153,7 +53,7 @@ async function startTauriApp(): Promise<void> {
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=9222',
   };
 
-  console.log(`Starting Tauri app with test namespace: ${TEST_APP_NAME}`);
+  log.info(`Starting Tauri app with test namespace: ${TEST_APP_NAME}`);
 
   // Start app in background
   exec(`cd "${PROJECT_DIR}" && pnpm tauri dev`, { env });
@@ -219,6 +119,7 @@ test.describe('Font Size Persistence', () => {
 
     // config.toml に保存されていることを確認
     const savedFontSize = readConfigFontSize();
+    log.debug(`Saved font size: ${savedFontSize}`);
     expect(savedFontSize).toBe(16);
 
     await browser.close();
