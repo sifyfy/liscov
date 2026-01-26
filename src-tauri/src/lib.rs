@@ -11,6 +11,7 @@ pub use database::Database;
 pub use state::AppState;
 
 use tauri::Manager;
+use tauri_plugin_window_state::StateFlags;
 
 // Re-export command functions for registration
 use commands::{
@@ -55,6 +56,11 @@ pub fn run() {
         .manage(SaveConfigState::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(StateFlags::SIZE | StateFlags::POSITION)
+                .build(),
+        )
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -63,6 +69,10 @@ pub fn run() {
                         .build(),
                 )?;
             }
+
+            // Show window after state restoration (window starts hidden)
+            let window = app.get_webview_window("main").expect("main window not found");
+            window.show().expect("failed to show window");
 
             // Auto-start WebSocket server
             let app_handle = app.handle().clone();
