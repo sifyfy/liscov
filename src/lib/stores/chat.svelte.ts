@@ -2,6 +2,7 @@
 import { listen } from '@tauri-apps/api/event';
 import type { ChatMessage, ConnectionResult, ChatMode, ChatFilter } from '$lib/types';
 import * as chatApi from '$lib/tauri/chat';
+import { configStore } from './config.svelte';
 
 const MAX_MESSAGES = 500;
 
@@ -239,7 +240,10 @@ function addMessage(message: ChatMessage): void {
 }
 
 function setFontSize(size: number): void {
-  messageFontSize = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, size));
+  const clampedSize = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, size));
+  messageFontSize = clampedSize;
+  // 永続化 (spec: 09_config.md)
+  configStore.setMessageFontSize(clampedSize);
 }
 
 function increaseFontSize(): void {
@@ -325,6 +329,15 @@ function cleanup(): void {
   }
 }
 
+// Initialize display settings from config (spec: 09_config.md)
+function initDisplaySettings(): void {
+  if (configStore.isLoaded) {
+    messageFontSize = configStore.messageFontSize;
+    showTimestamps = configStore.showTimestamps;
+    autoScroll = configStore.autoScrollEnabled;
+  }
+}
+
 // Export store interface
 export const chatStore = {
   // Getters (reactive)
@@ -400,5 +413,6 @@ export const chatStore = {
   scrollToLatest,
   setDisplayLimit,
   setupEventListeners,
-  cleanup
+  cleanup,
+  initDisplaySettings
 };

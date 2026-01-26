@@ -33,6 +33,8 @@
   onMount(async () => {
     // Load configuration at startup (spec: 09_config.md)
     await configStore.load();
+    // Initialize chat display settings from config (spec: 09_config.md)
+    chatStore.initDisplaySettings();
     // Check auth status (spec: 01_auth.md)
     await authStore.refreshStatus();
     // Show storage error dialog if needed
