@@ -126,11 +126,11 @@
   }
 </script>
 
-<div class="flex flex-col h-full bg-[var(--bg-white)] relative">
-  <!-- Messages (no header - controls are in FilterPanel) -->
+<div class="flex flex-col h-full bg-[var(--bg-surface-1)] relative">
+  <!-- Messages -->
   <div
     bind:this={chatContainer}
-    class="flex-1 overflow-y-auto p-3 space-y-2"
+    class="flex-1 overflow-y-auto p-3 space-y-1"
     style="font-size: {chatStore.messageFontSize}px;"
   >
     {#if chatStore.filteredMessages.length === 0}

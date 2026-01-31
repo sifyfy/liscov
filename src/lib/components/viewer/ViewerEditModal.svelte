@@ -86,9 +86,9 @@
   tabindex="-1"
 >
   <!-- Modal content -->
-  <div class="bg-[var(--bg-white)] rounded-xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden border border-[var(--border-light)]">
+  <div class="bg-[var(--bg-surface-2)] rounded-xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden border border-[var(--border-default)]">
     <!-- Header -->
-    <div class="px-6 py-4 bg-[var(--bg-light)] border-b border-[var(--border-light)]">
+    <div class="px-6 py-4 bg-[var(--bg-surface-3)] border-b border-[var(--border-default)]">
       <div class="flex items-center justify-between">
         <h2 class="text-xl font-semibold text-[var(--text-primary)]">視聴者情報の編集</h2>
         <button
@@ -118,13 +118,13 @@
           </div>
           <div>
             <span class="text-sm text-[var(--text-secondary)]">貢献額</span>
-            <p class="text-yellow-600">{formatContribution(viewer.total_contribution)}</p>
+            <p class="text-yellow-400">{formatContribution(viewer.total_contribution)}</p>
           </div>
         </div>
         {#if viewer.membership_level}
           <div>
             <span class="text-sm text-[var(--text-secondary)]">メンバーシップ</span>
-            <p class="text-green-600">{viewer.membership_level}</p>
+            <p class="text-[var(--success)]">{viewer.membership_level}</p>
           </div>
         {/if}
       </div>
@@ -140,7 +140,7 @@
             type="text"
             bind:value={reading}
             placeholder="TTS用の読み仮名を入力..."
-            class="w-full px-4 py-2 rounded-lg bg-[var(--bg-white)] text-[var(--text-primary)] placeholder-[var(--text-muted)] border border-[var(--border-light)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-start)]/50"
+            class="w-full px-4 py-2 rounded-lg bg-[var(--bg-surface-2)] text-[var(--text-primary)] placeholder-[var(--text-muted)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/50"
           />
           <p class="mt-1 text-xs text-[var(--text-muted)]">
             TTS読み上げ時に使用されます
@@ -156,7 +156,7 @@
             bind:value={notes}
             placeholder="視聴者に関するメモを追加..."
             rows="3"
-            class="w-full px-4 py-2 rounded-lg bg-[var(--bg-white)] text-[var(--text-primary)] placeholder-[var(--text-muted)] border border-[var(--border-light)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-start)]/50 resize-none"
+            class="w-full px-4 py-2 rounded-lg bg-[var(--bg-surface-2)] text-[var(--text-primary)] placeholder-[var(--text-muted)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/50 resize-none"
           ></textarea>
         </div>
 
@@ -169,7 +169,7 @@
             type="text"
             bind:value={tagsInput}
             placeholder="タグ1, タグ2, タグ3..."
-            class="w-full px-4 py-2 rounded-lg bg-[var(--bg-white)] text-[var(--text-primary)] placeholder-[var(--text-muted)] border border-[var(--border-light)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-start)]/50"
+            class="w-full px-4 py-2 rounded-lg bg-[var(--bg-surface-2)] text-[var(--text-primary)] placeholder-[var(--text-muted)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/50"
           />
           <p class="mt-1 text-xs text-[var(--text-muted)]">
             カンマ区切りでタグを入力
@@ -178,16 +178,16 @@
       </div>
 
       {#if error}
-        <p class="text-red-500 text-sm">{error}</p>
+        <p class="text-[var(--error)] text-sm">{error}</p>
       {/if}
     </div>
 
     <!-- Footer -->
-    <div class="px-6 py-4 bg-[var(--bg-light)] border-t border-[var(--border-light)] flex justify-between">
+    <div class="px-6 py-4 bg-[var(--bg-surface-3)] border-t border-[var(--border-default)] flex justify-between">
       <button
         onclick={() => showDeleteConfirm = true}
         disabled={isSaving || isDeleting}
-        class="px-4 py-2 text-red-500 hover:text-red-600 transition-colors disabled:opacity-50"
+        class="px-4 py-2 text-[var(--error)] hover:opacity-80 transition-colors disabled:opacity-50"
       >
         削除
       </button>
@@ -201,8 +201,8 @@
         <button
           onclick={handleSave}
           disabled={isSaving}
-          class="px-6 py-2 text-white font-semibold rounded-lg transition-colors disabled:opacity-50"
-          style="background: linear-gradient(135deg, var(--primary-start) 0%, var(--primary-end) 100%);"
+          class="px-6 py-2 text-[var(--text-inverse)] font-semibold rounded-lg transition-colors disabled:opacity-50"
+          style="background: var(--accent);"
         >
           {isSaving ? '保存中...' : '保存'}
         </button>

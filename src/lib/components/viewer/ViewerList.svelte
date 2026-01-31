@@ -44,7 +44,7 @@
 
 <div class="flex flex-col h-full">
   <!-- Search bar -->
-  <div class="p-4 bg-[var(--bg-light)] border-b border-[var(--border-light)]">
+  <div class="p-4 bg-[var(--bg-surface-3)] border-b border-[var(--border-default)]">
     <form
       class="flex gap-2"
       onsubmit={(e) => {
@@ -56,19 +56,19 @@
         type="text"
         bind:value={localSearchQuery}
         placeholder="名前、読み仮名、メモで検索..."
-        class="flex-1 px-3 py-2 rounded-lg bg-[var(--bg-white)] text-[var(--text-primary)] placeholder-[var(--text-muted)] border border-[var(--border-light)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-start)]/50"
+        class="flex-1 px-3 py-2 rounded-lg bg-[var(--bg-surface-2)] text-[var(--text-primary)] placeholder-[var(--text-muted)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/50"
       />
       <button
         type="submit"
-        class="px-4 py-2 text-white rounded-lg transition-colors"
-        style="background: linear-gradient(135deg, var(--primary-start) 0%, var(--primary-end) 100%);"
+        class="px-4 py-2 text-[var(--text-inverse)] rounded-lg transition-colors"
+        style="background: var(--accent);"
       >
         検索
       </button>
       <button
         type="button"
         onclick={handleRefresh}
-        class="px-3 py-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-light)] rounded-lg transition-colors border border-[var(--border-light)]"
+        class="px-3 py-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-3)] rounded-lg transition-colors border border-[var(--border-default)]"
         title="更新"
         aria-label="Refresh viewer list"
       >
@@ -91,7 +91,7 @@
       </div>
     {:else}
       <table class="w-full">
-        <thead class="bg-[var(--bg-light)] sticky top-0">
+        <thead class="bg-[var(--bg-surface-3)] sticky top-0">
           <tr class="text-left text-[var(--text-secondary)] text-sm">
             <th class="px-4 py-3">名前</th>
             <th class="px-4 py-3">読み仮名</th>
@@ -106,14 +106,14 @@
         <tbody>
           {#each viewerStore.viewers as viewer (viewer.channel_id)}
             <tr
-              class="border-b border-[var(--border-light)] hover:bg-[var(--bg-light)] cursor-pointer transition-colors {viewerStore.selectedViewer?.channel_id === viewer.channel_id ? 'bg-[var(--primary-start)]/10' : ''}"
+              class="border-b border-[var(--border-default)] hover:bg-[var(--bg-surface-3)] cursor-pointer transition-colors {viewerStore.selectedViewer?.channel_id === viewer.channel_id ? 'bg-[var(--accent)]/10' : ''}"
               onclick={() => viewerStore.selectViewer(viewer)}
             >
               <td class="px-4 py-3">
                 <div class="flex items-center gap-2">
                   <span class="text-[var(--text-primary)] font-medium">{viewer.display_name}</span>
                   {#if viewer.membership_level}
-                    <span class="px-1.5 py-0.5 text-xs bg-green-100 text-green-700 rounded border border-green-200">
+                    <span class="px-1.5 py-0.5 text-xs bg-[var(--success-subtle)] text-[var(--success)] rounded border border-[var(--border-default)]">
                       メンバー
                     </span>
                   {/if}
@@ -131,14 +131,14 @@
               <td class="px-4 py-3 text-[var(--text-secondary)]">
                 {viewer.message_count.toLocaleString()}
               </td>
-              <td class="px-4 py-3 text-yellow-600">
+              <td class="px-4 py-3 text-yellow-400">
                 {formatContribution(viewer.total_contribution)}
               </td>
               <td class="px-4 py-3 text-[var(--text-secondary)] text-sm">
                 {#if viewer.tags && viewer.tags.length > 0}
                   <div class="flex flex-wrap gap-1">
                     {#each viewer.tags.slice(0, 3) as tag}
-                      <span class="px-1.5 py-0.5 text-xs bg-[var(--primary-start)]/10 text-[var(--primary-start)] rounded">{tag}</span>
+                      <span class="px-1.5 py-0.5 text-xs bg-[var(--accent)]/10 text-[var(--accent)] rounded">{tag}</span>
                     {/each}
                     {#if viewer.tags.length > 3}
                       <span class="text-[var(--text-muted)]">+{viewer.tags.length - 3}</span>
@@ -159,11 +159,11 @@
   </div>
 
   <!-- Pagination -->
-  <div class="flex-shrink-0 flex items-center justify-between px-4 py-3 bg-[var(--bg-light)] border-t border-[var(--border-light)]">
+  <div class="flex-shrink-0 flex items-center justify-between px-4 py-3 bg-[var(--bg-surface-3)] border-t border-[var(--border-default)]">
     <button
       onclick={() => viewerStore.prevPage()}
       disabled={viewerStore.currentPage === 0}
-      class="px-4 py-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-white)] rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-[var(--border-light)]"
+      class="px-4 py-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-2)] rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-[var(--border-default)]"
     >
       前へ
     </button>
@@ -173,7 +173,7 @@
     <button
       onclick={() => viewerStore.nextPage()}
       disabled={viewerStore.viewers.length < viewerStore.pageSize}
-      class="px-4 py-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-white)] rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-[var(--border-light)]"
+      class="px-4 py-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-2)] rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-[var(--border-default)]"
     >
       次へ
     </button>

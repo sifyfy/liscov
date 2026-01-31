@@ -51,12 +51,12 @@
   }
 </script>
 
-<div class="flex flex-col h-full bg-[var(--bg-white)] rounded-xl overflow-hidden border border-[var(--border-light)] shadow-sm">
+<div class="flex flex-col h-full bg-[var(--bg-surface-2)] rounded-xl overflow-hidden border border-[var(--border-default)]">
   <!-- Header -->
-  <div class="px-6 py-4 bg-[var(--bg-light)] border-b border-[var(--border-light)]">
+  <div class="px-6 py-4 bg-[var(--bg-surface-3)] border-b border-[var(--border-default)]">
     <div class="flex items-center justify-between mb-3">
       <div>
-        <h2 class="text-xl font-semibold text-[var(--text-primary)]">視聴者管理</h2>
+        <h2 class="text-xl font-semibold text-[var(--text-primary)]" style="font-family: var(--font-heading);">視聴者管理</h2>
         <p class="text-sm text-[var(--text-secondary)] mt-1">
           視聴者プロフィールとカスタム情報を管理
         </p>
@@ -64,7 +64,7 @@
       {#if selectedBroadcasterId}
         <button
           onclick={() => showDeleteBroadcasterConfirm = true}
-          class="px-3 py-1.5 text-sm text-red-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors border border-red-200"
+          class="px-3 py-1.5 text-sm text-[var(--error)] hover:opacity-80 rounded transition-colors border border-[var(--border-default)]"
         >
           配信者を削除
         </button>

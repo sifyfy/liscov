@@ -38,8 +38,7 @@ describe('ChatMessage', () => {
 				amount: '¥3,000',
 				metadata: {
 					amount: '¥3,000',
-					currency: 'JPY',
-					superchat_colors: {
+						superchat_colors: {
 						header_background: '#E62117',
 						header_text: '#FFFFFF',
 						body_background: '#FFB300',
@@ -67,8 +66,7 @@ describe('ChatMessage', () => {
 				amount: '¥500',
 				metadata: {
 					amount: '¥500',
-					currency: 'JPY',
-					superchat_colors: {
+						superchat_colors: {
 						header_background: '#00BCD4',
 						header_text: '#FFFFFF',
 						body_background: '#00BCD4',
@@ -105,8 +103,7 @@ describe('ChatMessage', () => {
 				amount: '¥3,000',
 				metadata: {
 					amount: '¥3,000',
-					currency: 'JPY',
-					superchat_colors: {
+						superchat_colors: {
 						header_background: '#E62117',
 						header_text: '#FFFFFF',
 						body_background: '#FFB300',
@@ -124,7 +121,7 @@ describe('ChatMessage', () => {
 			const { container } = render(ChatMessage, { props: { message } });
 			const metadataRow = container.querySelector('.flex.items-center.gap-2') as HTMLElement;
 
-			expect(metadataRow.classList.contains('bg-white/80')).toBe(true);
+			expect(metadataRow.classList.contains('bg-[var(--bg-surface-2)]/80')).toBe(true);
 		});
 
 		it('通常メッセージのメタデータ行には白背景を適用しない', () => {
@@ -133,7 +130,7 @@ describe('ChatMessage', () => {
 			const { container } = render(ChatMessage, { props: { message } });
 			const metadataRow = container.querySelector('.flex.items-center.gap-2') as HTMLElement;
 
-			expect(metadataRow.classList.contains('bg-white/80')).toBe(false);
+			expect(metadataRow.classList.contains('bg-[var(--bg-surface-2)]/80')).toBe(false);
 		});
 
 		it('superchat_colorsがnullの場合はデフォルト色を使用する', () => {
@@ -142,8 +139,7 @@ describe('ChatMessage', () => {
 				amount: '¥100',
 				metadata: {
 					amount: '¥100',
-					currency: 'JPY',
-					superchat_colors: null,
+						superchat_colors: null,
 					badge_info: [],
 					is_moderator: false,
 					is_verified: false,

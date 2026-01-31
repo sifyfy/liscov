@@ -1,5 +1,5 @@
 // Config state management using Svelte 5 runes
-import type { Config, StorageMode } from '$lib/types';
+import type { Config, StorageMode, Theme } from '$lib/types';
 import * as configApi from '$lib/tauri/config';
 
 // Reactive state
@@ -9,6 +9,9 @@ let config = $state<Config>({
     message_font_size: 13,
     show_timestamps: true,
     auto_scroll_enabled: true
+  },
+  ui: {
+    theme: 'dark'
   }
 });
 let isLoaded = $state(false);
@@ -18,12 +21,14 @@ let error = $state<string | null>(null);
 async function load(): Promise<Config> {
   try {
     config = await configApi.configLoad();
+    applyTheme(config.ui.theme);
     isLoaded = true;
     error = null;
     return config;
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
     // Use defaults on error
+    applyTheme(config.ui.theme);
     isLoaded = true;
     return config;
   }
@@ -81,6 +86,23 @@ async function setAutoScrollEnabled(enabled: boolean): Promise<void> {
   }
 }
 
+async function setTheme(theme: Theme): Promise<void> {
+  config.ui.theme = theme;
+  applyTheme(theme);
+  try {
+    await configApi.configSetValue('ui', 'theme', theme);
+    error = null;
+  } catch (e) {
+    error = e instanceof Error ? e.message : String(e);
+  }
+}
+
+function applyTheme(theme: Theme): void {
+  if (typeof document !== 'undefined') {
+    document.documentElement.setAttribute('data-theme', theme);
+  }
+}
+
 // Export store interface
 export const configStore = {
   // Getters (reactive)
@@ -99,6 +121,9 @@ export const configStore = {
   get autoScrollEnabled() {
     return config.chat_display.auto_scroll_enabled;
   },
+  get theme() {
+    return config.ui.theme;
+  },
   get isLoaded() {
     return isLoaded;
   },
@@ -112,5 +137,6 @@ export const configStore = {
   setStorageMode,
   setMessageFontSize,
   setShowTimestamps,
-  setAutoScrollEnabled
+  setAutoScrollEnabled,
+  setTheme
 };

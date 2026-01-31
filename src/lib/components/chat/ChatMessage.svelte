@@ -23,7 +23,7 @@
   // Determine container styles based on message type (original liscov style: left border frame)
   let containerStyle = $derived(() => {
     // Base style: white background with left border frame (original liscov style)
-    const baseStyle = 'bg-white rounded shadow-sm';
+    const baseStyle = 'rounded';
 
     switch (message.message_type) {
       case 'superchat':
@@ -59,28 +59,28 @@
         if (colors) {
           return `border-left-color: ${colors.body_background}; background: linear-gradient(135deg, ${colors.header_background}33 0%, ${colors.body_background} 100%);`;
         }
-        return 'border-left-color: #f6ad55; background: linear-gradient(135deg, #fff7ed 0%, #fed7aa 100%);';
+        return 'border-left-color: #f6ad55; background: var(--bg-surface-2);';
       case 'supersticker':
         if (colors) {
           return `border-left-color: ${colors.body_background}; background: linear-gradient(135deg, ${colors.header_background}33 0%, ${colors.body_background} 100%);`;
         }
-        return 'border-left-color: #fc8181; background: #fef2f2;';
+        return 'border-left-color: #fc8181; background: var(--bg-surface-2);';
       case 'membership':
         // Check if milestone
         if (message.metadata?.milestone_months) {
-          return 'border-left-color: #9f7aea; background: linear-gradient(135deg, #faf5ff 0%, #e9d5ff 100%);';
+          return 'border-left-color: #9f7aea; background: var(--bg-surface-2);';
         }
-        return 'border-left-color: #48bb78; background: linear-gradient(135deg, #f0fff4 0%, #c6f6d5 100%);';
+        return 'border-left-color: var(--member-accent); background: var(--member-subtle);';
       case 'membership_gift':
-        return 'border-left-color: #4299e1; background: linear-gradient(135deg, #eff6ff 0%, #bfdbfe 100%);';
+        return 'border-left-color: #4299e1; background: var(--info-subtle);';
       case 'system':
-        return 'border-left-color: #4299e1; background: #eff6ff;';
+        return 'border-left-color: #4299e1; background: var(--info-subtle);';
       default:
         // Normal text or member
         if (message.is_member) {
-          return 'border-left-color: #16a34a; background: #f0f9f0;';
+          return 'border-left-color: var(--member-accent); background: var(--member-subtle);';
         }
-        return 'border-left-color: #667eea; background: white;';
+        return 'border-left-color: var(--accent); background: var(--bg-surface-2);';
     }
   });
 
@@ -161,8 +161,8 @@
 </script>
 
 <div
-  class="px-3 py-2 cursor-pointer hover:ring-2 hover:ring-[var(--primary-start)]/30 transition-all {containerStyle()}"
-  style="{dynamicStyle()}{highlighted ? 'border: 2px solid #5865f2; box-shadow: 0 0 8px rgba(88, 101, 242, 0.4);' : ''}"
+  class="px-3 py-2 cursor-pointer hover:ring-2 hover:ring-[var(--accent)]/30 transition-all {containerStyle()}"
+  style="{dynamicStyle()}{highlighted ? 'border: 2px solid var(--accent); box-shadow: 0 0 8px rgba(56, 189, 248, 0.4);' : ''}"
   data-message-id={message.id}
   onclick={onClick}
   role="button"
@@ -197,7 +197,7 @@
   {/if}
 
   <!-- Row 1: Metadata (icon, name, badges, comment count, timestamp) -->
-  <div class="flex items-center gap-2 {superchatColors() ? 'bg-white/80 -mx-1 px-1 py-0.5 rounded-md' : ''}" style="font-size: {fontSize}px;">
+  <div class="flex items-center gap-2 {superchatColors() ? 'bg-[var(--bg-surface-2)]/80 -mx-1 px-1 py-0.5 rounded-md' : ''}" style="font-size: {fontSize}px;">
     <!-- Author icon -->
     {#if message.author_icon_url}
       <img
@@ -208,7 +208,7 @@
     {:else}
       <div
         class="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-white text-xs font-bold"
-        style="background: linear-gradient(135deg, var(--primary-start) 0%, var(--primary-end) 100%);"
+        style="background: var(--accent);"
       >
         {message.author.charAt(0).toUpperCase()}
       </div>
@@ -217,7 +217,7 @@
     <!-- Author name (member=green, non-member=blue) -->
     <span
       class="font-medium truncate max-w-[200px]"
-      style="color: {message.is_member ? '#059669' : '#2563eb'};"
+      style="color: {message.is_member ? 'var(--member-accent)' : 'var(--accent)'};"
     >
       {message.author}
     </span>
@@ -238,35 +238,35 @@
 
     <!-- Moderator badge -->
     {#if message.metadata?.is_moderator}
-      <span class="px-1 py-0.5 text-xs bg-blue-100 text-blue-700 rounded border border-blue-300 font-medium" title="モデレーター">
+      <span class="px-1 py-0.5 text-xs bg-[var(--info-subtle)] text-[var(--info)] rounded border border-[var(--border-default)] font-medium" title="モデレーター">
         🔧
       </span>
     {/if}
 
     <!-- Verified badge -->
     {#if message.metadata?.is_verified}
-      <span class="px-1 py-0.5 text-xs bg-gray-100 text-gray-700 rounded border border-gray-300 font-medium" title="認証済み">
+      <span class="px-1 py-0.5 text-xs bg-[var(--bg-surface-3)] text-[var(--text-secondary)] rounded border border-[var(--border-default)] font-medium" title="認証済み">
         ✓
       </span>
     {/if}
 
     <!-- Member badge (only if no badge_info image) -->
     {#if message.is_member && (!message.metadata?.badge_info || message.metadata.badge_info.every(b => !b.image_url))}
-      <span class="px-1.5 py-0.5 text-xs bg-green-100 text-green-700 rounded border border-green-300 font-medium">
+      <span class="px-1.5 py-0.5 text-xs bg-[var(--member-subtle)] text-[var(--member-accent)] rounded border border-[var(--border-default)] font-medium">
         メンバー
       </span>
     {/if}
 
     <!-- Comment count -->
     {#if commentCountDisplay()}
-      <span class="text-xs {message.comment_count === 1 ? 'text-orange-600 font-bold' : 'text-[var(--text-muted)]'}">
+      <span class="text-xs {message.comment_count === 1 ? 'text-[var(--warning)] font-bold' : 'text-[var(--text-muted)]'}">
         {commentCountDisplay()}
       </span>
     {/if}
 
     <!-- Amount badge for SuperChat (when not shown in header) -->
     {#if message.amount && !typeHeader()}
-      <span class="px-1.5 py-0.5 text-xs bg-yellow-100 text-yellow-800 rounded border border-yellow-300 font-bold">
+      <span class="px-1.5 py-0.5 text-xs bg-[var(--warning-subtle)] text-[var(--warning)] rounded border border-[var(--border-default)] font-bold">
         {message.amount}
       </span>
     {/if}

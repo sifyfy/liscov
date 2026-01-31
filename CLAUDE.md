@@ -21,16 +21,25 @@ liscov-tauri プロジェクトの開発ガイド
 ```bash
 pnpm dev          # 開発サーバー
 pnpm build        # ビルド
-pnpm check        # 型チェック
-pnpm test:e2e     # E2Eテスト
+pnpm check        # 型チェック (svelte-check)
 ```
+
+### ユニットテスト (Vitest)
+
+```bash
+pnpm test         # ウォッチモード
+pnpm test:run     # 単発実行
+pnpm test:coverage # カバレッジ測定
+```
+
+テストファイル: `src/**/*.{test,spec}.ts`、環境: jsdom、Tauri APIはモック済み (`src/lib/test/setup.ts`)。
 
 ### Rust (バックエンド)
 
 ```bash
-# 通常のcargoコマンドで実行可能
 cargo check --manifest-path src-tauri/Cargo.toml
 cargo build --manifest-path src-tauri/Cargo.toml
+cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
 > **Note**: Git Bash環境でのlink.exe競合問題は `.cargo/config.toml` で明示的にリンカパスを指定することで解決済み。Developer PowerShellは不要。
@@ -60,6 +69,8 @@ pnpm exec playwright test --config e2e-tauri/playwright.config.ts e2e-tauri/view
 ```
 
 > **Note**: モックサーバーはテスト実行時に自動的に起動・停止されます。手動起動は不要です。
+
+**ログレベル制御**: 環境変数 `E2E_LOG_LEVEL` で制御（`debug`|`info`|`warn`|`error`|`silent`）。
 
 **テスト分離**: E2Eテストは本番データと分離された専用の名前空間を使用します。
 
@@ -110,7 +121,7 @@ liscov-tauri/
 │   │   ├── bin/                  # スタンドアロンバイナリ
 │   │   │   └── mock_server.rs    # E2Eテスト用モックサーバー
 │   │   ├── commands/             # Tauri commands
-│   │   ├── core/                 # コアモジュール・モデル
+│   │   ├── core/                 # コアモジュール (api/, models/)
 │   │   ├── database/             # SQLiteデータベース操作
 │   │   └── tts/                  # TTS (棒読みちゃん/VOICEVOX)
 │   └── Cargo.toml
@@ -144,7 +155,19 @@ src/lib/stores/*.svelte.ts   AppState (state.rs)
 src/lib/components/         core/api/ (InnerTubeClient, WebSocket)
 ```
 
-**Tauri Commands**: フロントエンドは `invoke()` でRust関数を呼び出す。各コマンドは `docs/specs/` の仕様書に対応。
+**Tauri Commands**: フロントエンドは `invoke()` でRust関数を呼び出す。コマンドは `src-tauri/src/lib.rs` の `invoke_handler!` マクロで登録。
+
+| コマンドモジュール | 仕様書 |
+| --- | --- |
+| `commands/auth.rs`, `auth_window.rs` | `docs/specs/01_auth.md` |
+| `commands/chat.rs` | `docs/specs/02_chat.md` |
+| `commands/websocket.rs` | `docs/specs/03_websocket.md` |
+| `commands/tts.rs` | `docs/specs/04_tts.md` |
+| `commands/raw_response.rs` | `docs/specs/05_raw_response.md` |
+| `commands/viewer.rs` | `docs/specs/06_viewer.md` |
+| `commands/analytics.rs` | `docs/specs/07_revenue.md` |
+| `commands/database.rs` | `docs/specs/08_database.md` |
+| `commands/config.rs` | `docs/specs/09_config.md` |
 
 **Tauri Events**: バックエンドからフロントエンドへのリアルタイム通知。
 - `chat:message` - 新規チャットメッセージ
@@ -187,5 +210,5 @@ src/lib/components/         core/api/ (InnerTubeClient, WebSocket)
 ## 重要な注意事項
 
 1. **Svelte 5 Runes**: `$state`, `$derived`, `$effect` を使用
-2. **CSS変数**: `app.css` でカラーテーマを定義（`--primary-start`, `--bg-main` 等）
+2. **CSS変数テーマ**: `app.css` でダーク/ライトテーマをCSS変数で定義（`--bg-base`, `--bg-surface-1`〜`3`, `--accent`, `--text-primary` 等）。`data-theme` 属性で切替。
 3. **Tauri Events**: フロントエンドへのリアルタイム通知に使用

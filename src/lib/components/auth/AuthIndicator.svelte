@@ -20,39 +20,39 @@
     spin?: boolean;
   }> = {
     unauthenticated: {
-      color: 'text-gray-400',
-      bgColor: 'bg-gray-400/20',
+      color: 'text-[var(--text-muted)]',
+      bgColor: 'bg-[var(--bg-surface-3)]',
       icon: 'lock',
       tooltip: '未ログイン'
     },
     authenticated_valid: {
-      color: 'text-green-400',
-      bgColor: 'bg-green-400/20',
+      color: 'text-[var(--success)]',
+      bgColor: 'bg-[var(--success-subtle)]',
       icon: 'unlock',
       tooltip: 'ログイン中: 有効'
     },
     authenticated_checking: {
-      color: 'text-yellow-400',
-      bgColor: 'bg-yellow-400/20',
+      color: 'text-[var(--warning)]',
+      bgColor: 'bg-[var(--warning-subtle)]',
       icon: 'spinner',
       tooltip: 'ログイン中: 検証中...',
       spin: true
     },
     authenticated_invalid: {
-      color: 'text-red-400',
-      bgColor: 'bg-red-400/20',
+      color: 'text-[var(--error)]',
+      bgColor: 'bg-[var(--error-subtle)]',
       icon: 'warning',
       tooltip: 'ログイン中: セッション切れ - 再ログインが必要'
     },
     authenticated_error: {
-      color: 'text-orange-400',
-      bgColor: 'bg-orange-400/20',
+      color: 'text-[var(--warning)]',
+      bgColor: 'bg-[var(--warning-subtle)]',
       icon: 'question',
       tooltip: 'ログイン中: 検証失敗（ネットワークエラー）'
     },
     storage_error: {
-      color: 'text-red-400',
-      bgColor: 'bg-red-400/20',
+      color: 'text-[var(--error)]',
+      bgColor: 'bg-[var(--error-subtle)]',
       icon: 'exclamation',
       tooltip: 'ストレージエラー - 設定を確認してください'
     }
@@ -63,7 +63,7 @@
 
 <button
   data-testid="auth-indicator"
-  class="flex items-center gap-2 px-3 py-1.5 rounded-lg transition-colors hover:bg-white/10 {config.bgColor}"
+  class="flex items-center gap-2 px-3 py-1.5 rounded-lg transition-colors hover:bg-[var(--bg-surface-3)] {config.bgColor}"
   title={config.tooltip}
   onclick={onclick}
 >
@@ -95,7 +95,7 @@
       </svg>
     {/if}
   </span>
-  <span class="text-sm text-white/80">
+  <span class="text-sm text-[var(--text-secondary)]">
     {#if state === 'unauthenticated'}
       未ログイン
     {:else if state === 'authenticated_valid'}

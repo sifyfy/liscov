@@ -128,13 +128,13 @@
 
 <div class="p-6 space-y-6">
   <div class="flex items-center justify-between">
-    <h2 class="text-xl font-semibold text-[var(--text-primary)]">TTS設定</h2>
+    <h2 class="text-xl font-semibold text-[var(--text-primary)]" style="font-family: var(--font-heading);">TTS設定</h2>
     <div class="flex items-center gap-4">
       <span class="text-sm text-[var(--text-muted)]">
         キュー: {ttsStore.status.queue_size}件
       </span>
       {#if ttsStore.status.is_processing}
-        <span class="px-2 py-1 text-xs bg-green-100 text-green-700 rounded border border-green-200">処理中</span>
+        <span class="px-2 py-1 text-xs bg-[var(--success-subtle)] text-[var(--success)] rounded border border-[var(--border-default)]">処理中</span>
       {/if}
     </div>
   </div>
@@ -143,7 +143,7 @@
     <div class="text-center text-[var(--text-muted)]">読み込み中...</div>
   {:else if config}
     <!-- Enable/Disable Toggle -->
-    <div class="flex items-center justify-between p-4 bg-[var(--bg-white)] rounded-lg border border-[var(--border-light)] shadow-sm">
+    <div class="flex items-center justify-between p-4 bg-[var(--bg-surface-2)] rounded-lg border border-[var(--border-default)]">
       <div>
         <h3 class="text-[var(--text-primary)] font-medium">TTS読み上げ</h3>
         <p class="text-sm text-[var(--text-secondary)]">チャットメッセージを音声で読み上げます</p>
@@ -151,7 +151,7 @@
       <button
         onclick={toggleEnabled}
         aria-label={config.enabled ? 'TTSを無効にする' : 'TTSを有効にする'}
-        class="{config.enabled ? 'bg-green-500' : 'bg-gray-300'} relative inline-flex h-6 w-11 items-center rounded-full transition-colors"
+        class="{config.enabled ? 'bg-[var(--success)]' : 'bg-[var(--bg-surface-3)]'} relative inline-flex h-6 w-11 items-center rounded-full transition-colors"
       >
         <span
           class="{config.enabled ? 'translate-x-6' : 'translate-x-1'} inline-block h-4 w-4 transform rounded-full bg-white transition-transform shadow"
@@ -160,7 +160,7 @@
     </div>
 
     <!-- Backend Selection -->
-    <div class="p-4 bg-[var(--bg-white)] rounded-lg border border-[var(--border-light)] shadow-sm space-y-4">
+    <div class="p-4 bg-[var(--bg-surface-2)] rounded-lg border border-[var(--border-default)] space-y-4">
       <h3 class="text-[var(--text-primary)] font-medium">バックエンド設定</h3>
 
       <div>
@@ -169,7 +169,7 @@
           id="backend"
           value={config.backend}
           onchange={handleBackendChange}
-          class="w-full px-3 py-2 rounded-lg bg-[var(--bg-light)] text-[var(--text-primary)] border border-[var(--border-light)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-start)]"
+          class="w-full px-3 py-2 rounded-lg bg-[var(--bg-surface-3)] text-[var(--text-primary)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
         >
           <option value="none">なし</option>
           <option value="bouyomichan">棒読みちゃん</option>
@@ -179,7 +179,7 @@
 
       {#if config.backend === 'bouyomichan'}
         <!-- Bouyomichan Settings -->
-        <div class="space-y-3 pt-2 border-t border-[var(--border-light)]">
+        <div class="space-y-3 pt-2 border-t border-[var(--border-default)]">
           <h4 class="text-sm text-[var(--text-secondary)] font-medium">棒読みちゃん設定</h4>
           <div class="grid grid-cols-2 gap-3">
             <div>
@@ -189,7 +189,7 @@
                 type="text"
                 bind:value={config.bouyomichan_host}
                 onchange={handleConfigChange}
-                class="w-full px-3 py-2 rounded-lg bg-[var(--bg-light)] text-[var(--text-primary)] border border-[var(--border-light)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-start)]"
+                class="w-full px-3 py-2 rounded-lg bg-[var(--bg-surface-3)] text-[var(--text-primary)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
               />
             </div>
             <div>
@@ -199,7 +199,7 @@
                 type="number"
                 bind:value={config.bouyomichan_port}
                 onchange={handleConfigChange}
-                class="w-full px-3 py-2 rounded-lg bg-[var(--bg-light)] text-[var(--text-primary)] border border-[var(--border-light)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-start)]"
+                class="w-full px-3 py-2 rounded-lg bg-[var(--bg-surface-3)] text-[var(--text-primary)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
               />
             </div>
           </div>
@@ -211,7 +211,7 @@
                 type="number"
                 bind:value={config.bouyomichan_voice}
                 onchange={handleConfigChange}
-                class="w-full px-3 py-2 rounded-lg bg-[var(--bg-light)] text-[var(--text-primary)] border border-[var(--border-light)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-start)]"
+                class="w-full px-3 py-2 rounded-lg bg-[var(--bg-surface-3)] text-[var(--text-primary)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
               />
             </div>
             <div>
@@ -221,7 +221,7 @@
                 type="number"
                 bind:value={config.bouyomichan_volume}
                 onchange={handleConfigChange}
-                class="w-full px-3 py-2 rounded-lg bg-[var(--bg-light)] text-[var(--text-primary)] border border-[var(--border-light)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-start)]"
+                class="w-full px-3 py-2 rounded-lg bg-[var(--bg-surface-3)] text-[var(--text-primary)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
               />
             </div>
             <div>
@@ -231,7 +231,7 @@
                 type="number"
                 bind:value={config.bouyomichan_speed}
                 onchange={handleConfigChange}
-                class="w-full px-3 py-2 rounded-lg bg-[var(--bg-light)] text-[var(--text-primary)] border border-[var(--border-light)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-start)]"
+                class="w-full px-3 py-2 rounded-lg bg-[var(--bg-surface-3)] text-[var(--text-primary)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
               />
             </div>
             <div>
@@ -241,14 +241,14 @@
                 type="number"
                 bind:value={config.bouyomichan_tone}
                 onchange={handleConfigChange}
-                class="w-full px-3 py-2 rounded-lg bg-[var(--bg-light)] text-[var(--text-primary)] border border-[var(--border-light)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-start)]"
+                class="w-full px-3 py-2 rounded-lg bg-[var(--bg-surface-3)] text-[var(--text-primary)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
               />
             </div>
           </div>
           <p class="text-xs text-[var(--text-muted)]">-1を指定すると棒読みちゃん側の設定が使用されます</p>
 
           <!-- Auto-launch settings -->
-          <div class="pt-3 mt-3 border-t border-[var(--border-light)] space-y-3">
+          <div class="pt-3 mt-3 border-t border-[var(--border-default)] space-y-3">
             <h5 class="text-xs text-[var(--text-secondary)] font-medium">自動起動設定</h5>
 
             <div class="flex items-center justify-between">
@@ -257,7 +257,7 @@
                 onclick={() => { config!.bouyomichan_auto_launch = !config!.bouyomichan_auto_launch; handleConfigChange(); }}
                 data-testid="bouyomichan-auto-launch-toggle"
                 aria-pressed={config.bouyomichan_auto_launch}
-                class="{config.bouyomichan_auto_launch ? 'bg-green-500' : 'bg-gray-300'} relative inline-flex h-5 w-9 items-center rounded-full transition-colors"
+                class="{config.bouyomichan_auto_launch ? 'bg-[var(--success)]' : 'bg-[var(--bg-surface-3)]'} relative inline-flex h-5 w-9 items-center rounded-full transition-colors"
               >
                 <span class="{config.bouyomichan_auto_launch ? 'translate-x-5' : 'translate-x-1'} inline-block h-3 w-3 transform rounded-full bg-white transition-transform shadow"></span>
               </button>
@@ -271,18 +271,18 @@
                   bind:value={config.bouyomichan_exe_path}
                   oninput={handleConfigChange}
                   placeholder="自動検出または参照で指定"
-                  class="flex-1 px-3 py-2 text-sm rounded-lg bg-[var(--bg-light)] text-[var(--text-primary)] placeholder-[var(--text-muted)] border border-[var(--border-light)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-start)]"
+                  class="flex-1 px-3 py-2 text-sm rounded-lg bg-[var(--bg-surface-3)] text-[var(--text-primary)] placeholder-[var(--text-muted)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
                 />
                 <button
                   onclick={() => discoverExe('bouyomichan')}
-                  class="px-3 py-2 text-xs bg-[var(--bg-light)] text-[var(--text-secondary)] rounded-lg border border-[var(--border-light)] hover:bg-[var(--bg-main)] transition-colors"
+                  class="px-3 py-2 text-xs bg-[var(--bg-surface-3)] text-[var(--text-secondary)] rounded-lg border border-[var(--border-default)] hover:bg-[var(--bg-base)] transition-colors"
                   title="自動検出"
                 >
                   検出
                 </button>
                 <button
                   onclick={() => browseExe('bouyomichan')}
-                  class="px-3 py-2 text-xs bg-[var(--bg-light)] text-[var(--text-secondary)] rounded-lg border border-[var(--border-light)] hover:bg-[var(--bg-main)] transition-colors"
+                  class="px-3 py-2 text-xs bg-[var(--bg-surface-3)] text-[var(--text-secondary)] rounded-lg border border-[var(--border-default)] hover:bg-[var(--bg-base)] transition-colors"
                   title="ファイル参照"
                 >
                   参照
@@ -296,7 +296,7 @@
                 onclick={() => { config!.bouyomichan_auto_close = !config!.bouyomichan_auto_close; handleConfigChange(); }}
                 data-testid="bouyomichan-auto-close-toggle"
                 aria-pressed={config.bouyomichan_auto_close}
-                class="{config.bouyomichan_auto_close ? 'bg-green-500' : 'bg-gray-300'} relative inline-flex h-5 w-9 items-center rounded-full transition-colors"
+                class="{config.bouyomichan_auto_close ? 'bg-[var(--success)]' : 'bg-[var(--bg-surface-3)]'} relative inline-flex h-5 w-9 items-center rounded-full transition-colors"
               >
                 <span class="{config.bouyomichan_auto_close ? 'translate-x-5' : 'translate-x-1'} inline-block h-3 w-3 transform rounded-full bg-white transition-transform shadow"></span>
               </button>
@@ -307,7 +307,7 @@
                 onclick={() => toggleLaunch('bouyomichan')}
                 disabled={isLaunching.bouyomichan}
                 data-testid="bouyomichan-launch-button"
-                class="px-3 py-2 text-sm rounded-lg border transition-colors disabled:opacity-50 {ttsStore.launchStatus.bouyomichan_launched ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100' : 'bg-green-50 text-green-600 border-green-200 hover:bg-green-100'}"
+                class="px-3 py-2 text-sm rounded-lg border transition-colors disabled:opacity-50 {ttsStore.launchStatus.bouyomichan_launched ? 'bg-[var(--error-subtle)] text-[var(--error)] border-[var(--border-default)] hover:opacity-80' : 'bg-[var(--success-subtle)] text-[var(--success)] border-[var(--border-default)] hover:opacity-80'}"
               >
                 {#if isLaunching.bouyomichan}
                   処理中...
@@ -317,7 +317,7 @@
                   起動
                 {/if}
               </button>
-              <span class="text-xs {ttsStore.launchStatus.bouyomichan_launched ? 'text-green-600' : 'text-[var(--text-muted)]'}">
+              <span class="text-xs {ttsStore.launchStatus.bouyomichan_launched ? 'text-[var(--success)]' : 'text-[var(--text-muted)]'}">
                 {ttsStore.launchStatus.bouyomichan_launched ? '起動中' : '停止中'}
               </span>
             </div>
@@ -327,7 +327,7 @@
 
       {#if config.backend === 'voicevox'}
         <!-- VOICEVOX Settings -->
-        <div class="space-y-3 pt-2 border-t border-[var(--border-light)]">
+        <div class="space-y-3 pt-2 border-t border-[var(--border-default)]">
           <h4 class="text-sm text-[var(--text-secondary)] font-medium">VOICEVOX設定</h4>
           <div class="grid grid-cols-2 gap-3">
             <div>
@@ -337,7 +337,7 @@
                 type="text"
                 bind:value={config.voicevox_host}
                 onchange={handleConfigChange}
-                class="w-full px-3 py-2 rounded-lg bg-[var(--bg-light)] text-[var(--text-primary)] border border-[var(--border-light)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-start)]"
+                class="w-full px-3 py-2 rounded-lg bg-[var(--bg-surface-3)] text-[var(--text-primary)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
               />
             </div>
             <div>
@@ -347,7 +347,7 @@
                 type="number"
                 bind:value={config.voicevox_port}
                 onchange={handleConfigChange}
-                class="w-full px-3 py-2 rounded-lg bg-[var(--bg-light)] text-[var(--text-primary)] border border-[var(--border-light)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-start)]"
+                class="w-full px-3 py-2 rounded-lg bg-[var(--bg-surface-3)] text-[var(--text-primary)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
               />
             </div>
           </div>
@@ -358,7 +358,7 @@
               type="number"
               bind:value={config.voicevox_speaker_id}
               onchange={handleConfigChange}
-              class="w-full px-3 py-2 rounded-lg bg-[var(--bg-light)] text-[var(--text-primary)] border border-[var(--border-light)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-start)]"
+              class="w-full px-3 py-2 rounded-lg bg-[var(--bg-surface-3)] text-[var(--text-primary)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
             />
           </div>
           <div class="grid grid-cols-2 gap-3">
@@ -372,7 +372,7 @@
                 step="0.1"
                 bind:value={config.voicevox_volume_scale}
                 oninput={handleConfigChange}
-                class="w-full accent-[var(--primary-start)]"
+                class="w-full accent-[var(--accent)]"
               />
             </div>
             <div>
@@ -385,7 +385,7 @@
                 step="0.1"
                 bind:value={config.voicevox_speed_scale}
                 oninput={handleConfigChange}
-                class="w-full accent-[var(--primary-start)]"
+                class="w-full accent-[var(--accent)]"
               />
             </div>
             <div>
@@ -398,7 +398,7 @@
                 step="0.01"
                 bind:value={config.voicevox_pitch_scale}
                 oninput={handleConfigChange}
-                class="w-full accent-[var(--primary-start)]"
+                class="w-full accent-[var(--accent)]"
               />
             </div>
             <div>
@@ -411,13 +411,13 @@
                 step="0.1"
                 bind:value={config.voicevox_intonation_scale}
                 oninput={handleConfigChange}
-                class="w-full accent-[var(--primary-start)]"
+                class="w-full accent-[var(--accent)]"
               />
             </div>
           </div>
 
           <!-- Auto-launch settings -->
-          <div class="pt-3 mt-3 border-t border-[var(--border-light)] space-y-3">
+          <div class="pt-3 mt-3 border-t border-[var(--border-default)] space-y-3">
             <h5 class="text-xs text-[var(--text-secondary)] font-medium">自動起動設定</h5>
 
             <div class="flex items-center justify-between">
@@ -426,7 +426,7 @@
                 onclick={() => { config!.voicevox_auto_launch = !config!.voicevox_auto_launch; handleConfigChange(); }}
                 data-testid="voicevox-auto-launch-toggle"
                 aria-pressed={config.voicevox_auto_launch}
-                class="{config.voicevox_auto_launch ? 'bg-green-500' : 'bg-gray-300'} relative inline-flex h-5 w-9 items-center rounded-full transition-colors"
+                class="{config.voicevox_auto_launch ? 'bg-[var(--success)]' : 'bg-[var(--bg-surface-3)]'} relative inline-flex h-5 w-9 items-center rounded-full transition-colors"
               >
                 <span class="{config.voicevox_auto_launch ? 'translate-x-5' : 'translate-x-1'} inline-block h-3 w-3 transform rounded-full bg-white transition-transform shadow"></span>
               </button>
@@ -440,18 +440,18 @@
                   bind:value={config.voicevox_exe_path}
                   oninput={handleConfigChange}
                   placeholder="自動検出または参照で指定"
-                  class="flex-1 px-3 py-2 text-sm rounded-lg bg-[var(--bg-light)] text-[var(--text-primary)] placeholder-[var(--text-muted)] border border-[var(--border-light)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-start)]"
+                  class="flex-1 px-3 py-2 text-sm rounded-lg bg-[var(--bg-surface-3)] text-[var(--text-primary)] placeholder-[var(--text-muted)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
                 />
                 <button
                   onclick={() => discoverExe('voicevox')}
-                  class="px-3 py-2 text-xs bg-[var(--bg-light)] text-[var(--text-secondary)] rounded-lg border border-[var(--border-light)] hover:bg-[var(--bg-main)] transition-colors"
+                  class="px-3 py-2 text-xs bg-[var(--bg-surface-3)] text-[var(--text-secondary)] rounded-lg border border-[var(--border-default)] hover:bg-[var(--bg-base)] transition-colors"
                   title="自動検出"
                 >
                   検出
                 </button>
                 <button
                   onclick={() => browseExe('voicevox')}
-                  class="px-3 py-2 text-xs bg-[var(--bg-light)] text-[var(--text-secondary)] rounded-lg border border-[var(--border-light)] hover:bg-[var(--bg-main)] transition-colors"
+                  class="px-3 py-2 text-xs bg-[var(--bg-surface-3)] text-[var(--text-secondary)] rounded-lg border border-[var(--border-default)] hover:bg-[var(--bg-base)] transition-colors"
                   title="ファイル参照"
                 >
                   参照
@@ -465,7 +465,7 @@
                 onclick={() => { config!.voicevox_auto_close = !config!.voicevox_auto_close; handleConfigChange(); }}
                 data-testid="voicevox-auto-close-toggle"
                 aria-pressed={config.voicevox_auto_close}
-                class="{config.voicevox_auto_close ? 'bg-green-500' : 'bg-gray-300'} relative inline-flex h-5 w-9 items-center rounded-full transition-colors"
+                class="{config.voicevox_auto_close ? 'bg-[var(--success)]' : 'bg-[var(--bg-surface-3)]'} relative inline-flex h-5 w-9 items-center rounded-full transition-colors"
               >
                 <span class="{config.voicevox_auto_close ? 'translate-x-5' : 'translate-x-1'} inline-block h-3 w-3 transform rounded-full bg-white transition-transform shadow"></span>
               </button>
@@ -476,7 +476,7 @@
                 onclick={() => toggleLaunch('voicevox')}
                 disabled={isLaunching.voicevox}
                 data-testid="voicevox-launch-button"
-                class="px-3 py-2 text-sm rounded-lg border transition-colors disabled:opacity-50 {ttsStore.launchStatus.voicevox_launched ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100' : 'bg-green-50 text-green-600 border-green-200 hover:bg-green-100'}"
+                class="px-3 py-2 text-sm rounded-lg border transition-colors disabled:opacity-50 {ttsStore.launchStatus.voicevox_launched ? 'bg-[var(--error-subtle)] text-[var(--error)] border-[var(--border-default)] hover:opacity-80' : 'bg-[var(--success-subtle)] text-[var(--success)] border-[var(--border-default)] hover:opacity-80'}"
               >
                 {#if isLaunching.voicevox}
                   処理中...
@@ -486,7 +486,7 @@
                   起動
                 {/if}
               </button>
-              <span class="text-xs {ttsStore.launchStatus.voicevox_launched ? 'text-green-600' : 'text-[var(--text-muted)]'}">
+              <span class="text-xs {ttsStore.launchStatus.voicevox_launched ? 'text-[var(--success)]' : 'text-[var(--text-muted)]'}">
                 {ttsStore.launchStatus.voicevox_launched ? '起動中' : '停止中'}
               </span>
             </div>
@@ -500,16 +500,16 @@
           <button
             onclick={testConnection}
             disabled={ttsStore.testingBackend !== null}
-            class="px-4 py-2 text-white rounded-lg transition-colors disabled:opacity-50"
-            style="background: linear-gradient(135deg, var(--primary-start) 0%, var(--primary-end) 100%);"
+            class="px-4 py-2 text-[var(--text-inverse)] rounded-lg transition-colors disabled:opacity-50"
+            style="background: var(--accent);"
           >
             {ttsStore.testingBackend ? '接続テスト中...' : '接続テスト'}
           </button>
           {#if ttsStore.connectionTestResult !== null}
             {#if ttsStore.connectionTestResult}
-              <span class="text-green-600">接続成功</span>
+              <span class="text-[var(--success)]">接続成功</span>
             {:else}
-              <span class="text-red-600">接続失敗</span>
+              <span class="text-[var(--error)]">接続失敗</span>
             {/if}
           {/if}
         </div>
@@ -517,7 +517,7 @@
     </div>
 
     <!-- Reading Options -->
-    <div class="p-4 bg-[var(--bg-white)] rounded-lg border border-[var(--border-light)] shadow-sm space-y-4">
+    <div class="p-4 bg-[var(--bg-surface-2)] rounded-lg border border-[var(--border-default)] space-y-4">
       <h3 class="text-[var(--text-primary)] font-medium">読み上げオプション</h3>
 
       <div class="space-y-2">
@@ -526,7 +526,7 @@
             type="checkbox"
             bind:checked={config.read_author_name}
             onchange={handleConfigChange}
-            class="rounded text-[var(--primary-start)] focus:ring-[var(--primary-start)]"
+            class="rounded text-[var(--accent)] focus:ring-[var(--accent)]"
           />
           <span class="text-[var(--text-primary)] text-sm">投稿者名を読み上げる</span>
         </label>
@@ -538,7 +538,7 @@
                 type="checkbox"
                 bind:checked={config.add_honorific}
                 onchange={handleConfigChange}
-                class="rounded text-[var(--primary-start)] focus:ring-[var(--primary-start)]"
+                class="rounded text-[var(--accent)] focus:ring-[var(--accent)]"
               />
               <span class="text-[var(--text-primary)] text-sm">「さん」を付ける</span>
             </label>
@@ -547,7 +547,7 @@
                 type="checkbox"
                 bind:checked={config.strip_at_prefix}
                 onchange={handleConfigChange}
-                class="rounded text-[var(--primary-start)] focus:ring-[var(--primary-start)]"
+                class="rounded text-[var(--accent)] focus:ring-[var(--accent)]"
               />
               <span class="text-[var(--text-primary)] text-sm">@プレフィックスを除去</span>
             </label>
@@ -556,7 +556,7 @@
                 type="checkbox"
                 bind:checked={config.strip_handle_suffix}
                 onchange={handleConfigChange}
-                class="rounded text-[var(--primary-start)] focus:ring-[var(--primary-start)]"
+                class="rounded text-[var(--accent)] focus:ring-[var(--accent)]"
               />
               <span class="text-[var(--text-primary)] text-sm">ハンドルサフィックスを除去</span>
             </label>
@@ -568,7 +568,7 @@
             type="checkbox"
             bind:checked={config.read_superchat_amount}
             onchange={handleConfigChange}
-            class="rounded text-[var(--primary-start)] focus:ring-[var(--primary-start)]"
+            class="rounded text-[var(--accent)] focus:ring-[var(--accent)]"
           />
           <span class="text-[var(--text-primary)] text-sm">スーパーチャット金額を読み上げる</span>
         </label>
@@ -584,7 +584,7 @@
             max="500"
             bind:value={config.max_text_length}
             onchange={handleConfigChange}
-            class="w-full px-3 py-2 rounded-lg bg-[var(--bg-light)] text-[var(--text-primary)] border border-[var(--border-light)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-start)]"
+            class="w-full px-3 py-2 rounded-lg bg-[var(--bg-surface-3)] text-[var(--text-primary)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
           />
         </div>
         <div>
@@ -596,14 +596,14 @@
             max="200"
             bind:value={config.queue_size_limit}
             onchange={handleConfigChange}
-            class="w-full px-3 py-2 rounded-lg bg-[var(--bg-light)] text-[var(--text-primary)] border border-[var(--border-light)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-start)]"
+            class="w-full px-3 py-2 rounded-lg bg-[var(--bg-surface-3)] text-[var(--text-primary)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
           />
         </div>
       </div>
     </div>
 
     <!-- Test Section -->
-    <div class="p-4 bg-[var(--bg-white)] rounded-lg border border-[var(--border-light)] shadow-sm space-y-4">
+    <div class="p-4 bg-[var(--bg-surface-2)] rounded-lg border border-[var(--border-default)] space-y-4">
       <h3 class="text-[var(--text-primary)] font-medium">読み上げテスト</h3>
 
       <div class="flex gap-2">
@@ -611,13 +611,13 @@
           type="text"
           bind:value={testText}
           placeholder="テスト文を入力"
-          class="flex-1 px-3 py-2 rounded-lg bg-[var(--bg-light)] text-[var(--text-primary)] placeholder-[var(--text-muted)] border border-[var(--border-light)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-start)]"
+          class="flex-1 px-3 py-2 rounded-lg bg-[var(--bg-surface-3)] text-[var(--text-primary)] placeholder-[var(--text-muted)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
         />
         <button
           onclick={testSpeak}
           disabled={!testText || config.backend === 'none' || isSpeaking}
-          class="px-4 py-2 text-white rounded-lg transition-colors disabled:opacity-50 min-w-[100px]"
-          style="background: linear-gradient(135deg, var(--primary-start) 0%, var(--primary-end) 100%);"
+          class="px-4 py-2 text-[var(--text-inverse)] rounded-lg transition-colors disabled:opacity-50 min-w-[100px]"
+          style="background: var(--accent);"
         >
           {#if isSpeaking}
             <span class="flex items-center justify-center gap-2">
@@ -634,7 +634,7 @@
     </div>
 
     <!-- Queue Control -->
-    <div class="p-4 bg-[var(--bg-white)] rounded-lg border border-[var(--border-light)] shadow-sm">
+    <div class="p-4 bg-[var(--bg-surface-2)] rounded-lg border border-[var(--border-default)]">
       <div class="flex items-center justify-between">
         <div>
           <h3 class="text-[var(--text-primary)] font-medium">キュー管理</h3>
@@ -643,7 +643,7 @@
         <button
           onclick={() => ttsStore.clearQueue()}
           disabled={ttsStore.status.queue_size === 0}
-          class="px-4 py-2 bg-red-50 text-red-600 rounded-lg border border-red-200 hover:bg-red-100 transition-colors disabled:opacity-50"
+          class="px-4 py-2 bg-[var(--error-subtle)] text-[var(--error)] rounded-lg border border-[var(--border-default)] hover:opacity-80 transition-colors disabled:opacity-50"
         >
           キューをクリア
         </button>
@@ -652,8 +652,8 @@
 
     <!-- Error Display -->
     {#if ttsStore.error}
-      <div class="p-3 bg-red-50 rounded-lg border border-red-200">
-        <p class="text-red-600 text-sm">{ttsStore.error}</p>
+      <div class="p-3 bg-[var(--error-subtle)] rounded-lg border border-[var(--border-default)]">
+        <p class="text-[var(--error)] text-sm">{ttsStore.error}</p>
       </div>
     {/if}
   {/if}

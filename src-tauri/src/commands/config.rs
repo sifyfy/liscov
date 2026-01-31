@@ -38,6 +38,35 @@ impl Default for StorageConfig {
     }
 }
 
+/// UI theme
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    Dark,
+    Light,
+}
+
+impl Default for Theme {
+    fn default() -> Self {
+        Theme::Dark
+    }
+}
+
+/// UI configuration section
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiConfig {
+    #[serde(default)]
+    pub theme: Theme,
+}
+
+impl Default for UiConfig {
+    fn default() -> Self {
+        Self {
+            theme: Theme::Dark,
+        }
+    }
+}
+
 /// Chat display configuration section
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatDisplayConfig {
@@ -74,6 +103,8 @@ pub struct Config {
     pub storage: StorageConfig,
     #[serde(default)]
     pub chat_display: ChatDisplayConfig,
+    #[serde(default)]
+    pub ui: UiConfig,
 }
 
 /// Configuration state for managing in-memory config
@@ -207,6 +238,10 @@ pub async fn config_get_value(
             "auto_scroll_enabled" => Some(serde_json::to_value(config.chat_display.auto_scroll_enabled).unwrap()),
             _ => None,
         },
+        "ui" => match key.as_str() {
+            "theme" => Some(serde_json::to_value(&config.ui.theme).unwrap()),
+            _ => None,
+        },
         _ => None,
     };
 
@@ -250,6 +285,13 @@ pub async fn config_set_value(
                     .map_err(|e| format!("Invalid auto_scroll_enabled value: {}", e))?;
             }
             _ => return Err(format!("Unknown key in chat_display section: {}", key)),
+        },
+        "ui" => match key.as_str() {
+            "theme" => {
+                config.ui.theme = serde_json::from_value(value)
+                    .map_err(|e| format!("Invalid theme value: {}", e))?;
+            }
+            _ => return Err(format!("Unknown key in ui section: {}", key)),
         },
         _ => return Err(format!("Unknown section: {}", section)),
     }

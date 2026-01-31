@@ -69,7 +69,7 @@
   }
 </script>
 
-<div class="p-4 bg-[var(--bg-white)] rounded-lg border border-[var(--border-light)] shadow-sm space-y-4">
+<div class="p-4 bg-[var(--bg-surface-2)] rounded-lg border border-[var(--border-default)] space-y-4">
   <h3 class="text-lg font-medium text-[var(--text-primary)]">Export Data</h3>
 
   <!-- Format selection -->
@@ -82,7 +82,7 @@
           name="format"
           value="json"
           bind:group={format}
-          class="text-[var(--primary-start)] focus:ring-[var(--primary-start)]"
+          class="text-[var(--accent)] focus:ring-[var(--accent)]"
         />
         <span class="text-[var(--text-primary)]">JSON</span>
       </label>
@@ -92,7 +92,7 @@
           name="format"
           value="csv"
           bind:group={format}
-          class="text-[var(--primary-start)] focus:ring-[var(--primary-start)]"
+          class="text-[var(--accent)] focus:ring-[var(--accent)]"
         />
         <span class="text-[var(--text-primary)]">CSV</span>
       </label>
@@ -105,7 +105,7 @@
       <input
         type="checkbox"
         bind:checked={includeMetadata}
-        class="rounded text-[var(--primary-start)] focus:ring-[var(--primary-start)]"
+        class="rounded text-[var(--accent)] focus:ring-[var(--accent)]"
       />
       <span class="text-[var(--text-primary)] text-sm">Include metadata</span>
     </label>
@@ -113,7 +113,7 @@
       <input
         type="checkbox"
         bind:checked={includeSystemMessages}
-        class="rounded text-[var(--primary-start)] focus:ring-[var(--primary-start)]"
+        class="rounded text-[var(--accent)] focus:ring-[var(--accent)]"
       />
       <span class="text-[var(--text-primary)] text-sm">Include system messages</span>
     </label>
@@ -128,20 +128,20 @@
       bind:value={maxRecords}
       min="1"
       placeholder="All records"
-      class="w-full px-3 py-2 rounded-lg bg-[var(--bg-light)] text-[var(--text-primary)] placeholder-[var(--text-muted)] border border-[var(--border-light)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-start)]"
+      class="w-full px-3 py-2 rounded-lg bg-[var(--bg-surface-3)] text-[var(--text-primary)] placeholder-[var(--text-muted)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
     />
   </div>
 
   <!-- Error/Success messages -->
   {#if exportError}
-    <div class="p-3 bg-red-50 rounded-lg border border-red-200">
-      <p class="text-red-600 text-sm">{exportError}</p>
+    <div class="p-3 bg-[var(--error-subtle)] rounded-lg border border-[var(--border-default)]">
+      <p class="text-[var(--error)] text-sm">{exportError}</p>
     </div>
   {/if}
 
   {#if exportSuccess}
-    <div class="p-3 bg-green-50 rounded-lg border border-green-200">
-      <p class="text-green-700 text-sm">Export completed successfully!</p>
+    <div class="p-3 bg-[var(--success-subtle)] rounded-lg border border-[var(--border-default)]">
+      <p class="text-[var(--success)] text-sm">Export completed successfully!</p>
     </div>
   {/if}
 
@@ -149,8 +149,8 @@
   <button
     onclick={handleExport}
     disabled={isExporting}
-    class="w-full px-4 py-2 text-white font-semibold rounded-lg transition-colors disabled:opacity-50"
-    style="background: linear-gradient(135deg, var(--primary-start) 0%, var(--primary-end) 100%);"
+    class="w-full px-4 py-2 text-[var(--text-inverse)] font-semibold rounded-lg transition-colors disabled:opacity-50"
+    style="background: var(--accent);"
   >
     {isExporting ? 'Exporting...' : sessionId ? 'Export Session' : 'Export Current Messages'}
   </button>

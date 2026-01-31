@@ -2,6 +2,8 @@
 
 export type StorageMode = 'secure' | 'fallback';
 
+export type Theme = 'dark' | 'light';
+
 export interface StorageConfig {
   mode: StorageMode;
 }
@@ -12,9 +14,14 @@ export interface ChatDisplayConfig {
   auto_scroll_enabled: boolean;
 }
 
+export interface UiConfig {
+  theme: Theme;
+}
+
 export interface Config {
   storage: StorageConfig;
   chat_display: ChatDisplayConfig;
+  ui: UiConfig;
 }
 
 // Default values
@@ -26,5 +33,8 @@ export const DEFAULT_CONFIG: Config = {
     message_font_size: 13,
     show_timestamps: true,
     auto_scroll_enabled: true
+  },
+  ui: {
+    theme: 'dark'
   }
 };

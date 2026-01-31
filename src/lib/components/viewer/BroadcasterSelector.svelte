@@ -38,7 +38,7 @@
     id="broadcaster-select"
     value={selected || ''}
     onchange={handleChange}
-    class="flex-1 px-3 py-2 rounded-lg bg-[var(--bg-white)] text-[var(--text-primary)] border border-[var(--border-light)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-start)]/50"
+    class="flex-1 px-3 py-2 rounded-lg bg-[var(--bg-surface-2)] text-[var(--text-primary)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/50"
   >
     <option value="">配信者を選択...</option>
     {#each viewerStore.broadcasters as broadcaster (broadcaster.channel_id)}

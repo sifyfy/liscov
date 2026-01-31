@@ -55,57 +55,57 @@
 <div class="space-y-6">
   <!-- Header -->
   <div class="flex items-center justify-between">
-    <h2 class="text-xl font-semibold text-[var(--text-primary)]">Revenue Analytics</h2>
+    <h2 class="text-xl font-semibold text-[var(--text-primary)]" style="font-family: var(--font-heading);">Revenue Analytics</h2>
     <button
       onclick={() => analyticsStore.loadAnalytics()}
       disabled={analyticsStore.isLoading}
-      class="px-4 py-2 text-sm text-white rounded-lg transition-colors disabled:opacity-50"
-      style="background: linear-gradient(135deg, var(--primary-start) 0%, var(--primary-end) 100%);"
+      class="px-4 py-2 text-sm text-[var(--text-inverse)] rounded-lg transition-colors disabled:opacity-50"
+      style="background: var(--accent);"
     >
       {analyticsStore.isLoading ? 'Loading...' : 'Refresh'}
     </button>
   </div>
 
   {#if analyticsStore.error}
-    <div class="p-4 bg-red-50 rounded-lg border border-red-200">
-      <p class="text-red-600">{analyticsStore.error}</p>
+    <div class="p-4 bg-[var(--error-subtle)] rounded-lg border border-[var(--border-default)]">
+      <p class="text-[var(--error)]">{analyticsStore.error}</p>
     </div>
   {/if}
 
   {#if analyticsStore.analytics}
     <!-- Main stats grid -->
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-      <div class="p-4 bg-[var(--bg-white)] rounded-lg border border-[var(--border-light)] shadow-sm">
+      <div class="p-4 bg-[var(--bg-surface-2)] rounded-lg border border-[var(--border-default)]">
         <p class="text-sm text-[var(--text-muted)]">Total Paid Messages</p>
-        <p class="text-2xl font-bold text-[var(--text-primary)]">
+        <p class="text-2xl font-bold text-[var(--text-primary)]" style="font-family: var(--font-mono);">
           {formatNumber(analyticsStore.totalPaidCount)}
         </p>
       </div>
 
-      <div class="p-4 bg-[var(--bg-white)] rounded-lg border border-[var(--border-light)] shadow-sm">
+      <div class="p-4 bg-[var(--bg-surface-2)] rounded-lg border border-[var(--border-default)]">
         <p class="text-sm text-[var(--text-muted)]">Super Chats</p>
-        <p class="text-2xl font-bold text-yellow-600">
+        <p class="text-2xl font-bold text-yellow-400" style="font-family: var(--font-mono);">
           {formatNumber(analyticsStore.analytics.super_chat_count)}
         </p>
       </div>
 
-      <div class="p-4 bg-[var(--bg-white)] rounded-lg border border-[var(--border-light)] shadow-sm">
+      <div class="p-4 bg-[var(--bg-surface-2)] rounded-lg border border-[var(--border-default)]">
         <p class="text-sm text-[var(--text-muted)]">Super Stickers</p>
-        <p class="text-2xl font-bold text-pink-600">
+        <p class="text-2xl font-bold text-pink-400" style="font-family: var(--font-mono);">
           {formatNumber(analyticsStore.analytics.super_sticker_count)}
         </p>
       </div>
 
-      <div class="p-4 bg-[var(--bg-white)] rounded-lg border border-[var(--border-light)] shadow-sm">
+      <div class="p-4 bg-[var(--bg-surface-2)] rounded-lg border border-[var(--border-default)]">
         <p class="text-sm text-[var(--text-muted)]">Memberships</p>
-        <p class="text-2xl font-bold text-green-600">
+        <p class="text-2xl font-bold text-[var(--success)]" style="font-family: var(--font-mono);">
           {formatNumber(analyticsStore.analytics.membership_gains)}
         </p>
       </div>
     </div>
 
     <!-- Tier Distribution -->
-    <div class="p-4 bg-[var(--bg-white)] rounded-lg border border-[var(--border-light)] shadow-sm">
+    <div class="p-4 bg-[var(--bg-surface-2)] rounded-lg border border-[var(--border-default)]">
       <h3 class="text-lg font-medium text-[var(--text-primary)] mb-4">Super Chat Tier Distribution</h3>
       <div class="space-y-3">
         {#each getTierStats() as { tier, count }}
@@ -116,7 +116,7 @@
             <span class="w-20 px-2 py-1 text-sm font-medium rounded {config.bgColor} {config.textColor} text-center">
               {config.label}
             </span>
-            <div class="flex-1 h-6 bg-[var(--bg-light)] rounded overflow-hidden border border-[var(--border-light)]">
+            <div class="flex-1 h-6 bg-[var(--bg-surface-3)] rounded overflow-hidden border border-[var(--border-default)]">
               <div class="{config.bgColor} h-full transition-all opacity-80" style="width: {width}%"></div>
             </div>
             <span class="w-12 text-sm font-medium text-[var(--text-primary)] text-right">{count}</span>
@@ -127,13 +127,13 @@
 
     <!-- Top Contributors -->
     {#if analyticsStore.analytics.top_contributors.length > 0}
-      <div class="p-4 bg-[var(--bg-white)] rounded-lg border border-[var(--border-light)] shadow-sm">
+      <div class="p-4 bg-[var(--bg-surface-2)] rounded-lg border border-[var(--border-default)]">
         <h3 class="text-lg font-medium text-[var(--text-primary)] mb-3">Top Contributors</h3>
         <div class="space-y-2">
           {#each analyticsStore.analytics.top_contributors as contributor, index}
             {@const config = tierConfig[contributor.highest_tier]}
-            <div class="flex items-center gap-3 py-2 {index !== analyticsStore.analytics.top_contributors.length - 1 ? 'border-b border-[var(--border-light)]' : ''}">
-              <span class="w-6 h-6 flex items-center justify-center text-sm font-bold rounded-full {index === 0 ? 'bg-yellow-500 text-black' : index === 1 ? 'bg-gray-400 text-black' : index === 2 ? 'bg-orange-600 text-white' : 'bg-[var(--bg-light)] text-[var(--text-primary)]'}">
+            <div class="flex items-center gap-3 py-2 {index !== analyticsStore.analytics.top_contributors.length - 1 ? 'border-b border-[var(--border-default)]' : ''}">
+              <span class="w-6 h-6 flex items-center justify-center text-sm font-bold rounded-full {index === 0 ? 'bg-yellow-500 text-black' : index === 1 ? 'bg-gray-400 text-black' : index === 2 ? 'bg-orange-600 text-white' : 'bg-[var(--bg-surface-3)] text-[var(--text-primary)]'}">
                 {index + 1}
               </span>
               <span class="flex-1 text-[var(--text-primary)] font-medium">{contributor.display_name}</span>

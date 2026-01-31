@@ -118,7 +118,7 @@
 </script>
 
 <div class="p-6">
-  <h2 class="text-xl font-bold text-[var(--text-primary)] mb-6">
+  <h2 class="text-xl font-bold text-[var(--text-primary)] mb-6" style="font-family: var(--font-heading);">
     生レスポンス保存設定
   </h2>
 
@@ -127,13 +127,13 @@
   {:else}
     <div class="space-y-6">
       <!-- Enable/Disable Toggle -->
-      <div class="bg-[var(--bg-white)] rounded-lg border border-[var(--border-light)] p-4">
+      <div class="bg-[var(--bg-surface-2)] rounded-lg border border-[var(--border-default)] p-4">
         <label class="flex items-center gap-3 cursor-pointer">
           <input
             type="checkbox"
             checked={config.enabled}
             onchange={handleEnabledChange}
-            class="w-5 h-5 rounded border-[var(--border-light)] text-[var(--primary-start)] focus:ring-[var(--primary-start)]"
+            class="w-5 h-5 rounded border-[var(--border-default)] text-[var(--accent)] focus:ring-[var(--accent)]"
           />
           <span class="text-[var(--text-primary)] font-medium">
             生レスポンス保存を有効化
@@ -146,7 +146,7 @@
 
       {#if config.enabled}
         <!-- File Path -->
-        <div class="bg-[var(--bg-white)] rounded-lg border border-[var(--border-light)] p-4">
+        <div class="bg-[var(--bg-surface-2)] rounded-lg border border-[var(--border-default)] p-4">
           <label class="block">
             <span class="text-[var(--text-primary)] font-medium">保存ファイルパス</span>
             <div class="flex gap-2 mt-2">
@@ -156,13 +156,13 @@
                 oninput={handleFilePathChange}
                 onblur={handleFilePathBlur}
                 placeholder="例: C:\Users\Username\Documents\raw_responses.ndjson"
-                class="flex-1 px-3 py-2 border border-[var(--border-light)] rounded-lg text-[var(--text-primary)] bg-[var(--bg-white)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-start)]/50"
+                class="flex-1 px-3 py-2 border border-[var(--border-default)] rounded-lg text-[var(--text-primary)] bg-[var(--bg-surface-2)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/50"
               />
               <button
                 type="button"
                 onclick={browseFile}
-                class="px-4 py-2 text-white rounded-lg transition-colors"
-                style="background: linear-gradient(135deg, var(--primary-start) 0%, var(--primary-end) 100%);"
+                class="px-4 py-2 text-[var(--text-inverse)] rounded-lg transition-colors"
+                style="background: var(--accent);"
               >
                 参照
               </button>
@@ -171,17 +171,17 @@
         </div>
 
         <!-- Resolved Path Display -->
-        <div class="bg-[var(--bg-light)] rounded-lg border border-[var(--border-light)] p-4">
+        <div class="bg-[var(--bg-surface-3)] rounded-lg border border-[var(--border-default)] p-4">
           <div class="flex items-start gap-2">
             <span class="text-[var(--text-muted)] text-sm">実際の保存先:</span>
-            <code class="text-sm text-[var(--text-primary)] bg-[var(--bg-white)] px-2 py-1 rounded border border-[var(--border-light)] break-all">
+            <code class="text-sm text-[var(--text-primary)] bg-[var(--bg-surface-2)] px-2 py-1 rounded border border-[var(--border-default)] break-all">
               {resolvedPath}
             </code>
           </div>
         </div>
 
         <!-- Max File Size -->
-        <div class="bg-[var(--bg-white)] rounded-lg border border-[var(--border-light)] p-4">
+        <div class="bg-[var(--bg-surface-2)] rounded-lg border border-[var(--border-default)] p-4">
           <label class="block">
             <span class="text-[var(--text-primary)] font-medium">最大ファイルサイズ (MB)</span>
             <input
@@ -190,19 +190,19 @@
               onchange={handleMaxSizeChange}
               min="1"
               max="1000"
-              class="mt-2 w-32 px-3 py-2 border border-[var(--border-light)] rounded-lg text-[var(--text-primary)] bg-[var(--bg-white)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-start)]/50"
+              class="mt-2 w-32 px-3 py-2 border border-[var(--border-default)] rounded-lg text-[var(--text-primary)] bg-[var(--bg-surface-2)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/50"
             />
           </label>
         </div>
 
         <!-- File Rotation -->
-        <div class="bg-[var(--bg-white)] rounded-lg border border-[var(--border-light)] p-4">
+        <div class="bg-[var(--bg-surface-2)] rounded-lg border border-[var(--border-default)] p-4">
           <label class="flex items-center gap-3 cursor-pointer">
             <input
               type="checkbox"
               checked={config.enable_rotation}
               onchange={handleRotationChange}
-              class="w-5 h-5 rounded border-[var(--border-light)] text-[var(--primary-start)] focus:ring-[var(--primary-start)]"
+              class="w-5 h-5 rounded border-[var(--border-default)] text-[var(--accent)] focus:ring-[var(--accent)]"
             />
             <span class="text-[var(--text-primary)] font-medium">
               ファイルローテーションを有効化
@@ -214,9 +214,9 @@
         </div>
 
         <!-- Info Box -->
-        <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <h4 class="font-medium text-blue-800 mb-2">ヒント</h4>
-          <ul class="text-sm text-blue-700 space-y-1 list-disc list-inside">
+        <div class="bg-[var(--info-subtle)] border border-[var(--border-default)] rounded-lg p-4">
+          <h4 class="font-medium text-[var(--info)] mb-2">ヒント</h4>
+          <ul class="text-sm text-[var(--info)] space-y-1 list-disc list-inside">
             <li>生レスポンスは将来のAPI変更に対応するために保存されます</li>
             <li>ファイルはndjson形式で保存されます</li>
             <li>ローテーション有効時、サイズ上限に達すると自動で新ファイルが作成されます</li>
@@ -227,7 +227,7 @@
 
       <!-- Save Message -->
       {#if saveMessage}
-        <div class="text-sm text-green-600 bg-green-50 border border-green-200 rounded-lg px-4 py-2">
+        <div class="text-sm text-[var(--success)] bg-[var(--success-subtle)] border border-[var(--border-default)] rounded-lg px-4 py-2">
           {saveMessage}
         </div>
       {/if}

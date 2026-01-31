@@ -2,6 +2,7 @@
   import { authStore } from '$lib/stores';
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
+  import Icon from '$lib/components/ui/Icon.svelte';
 
   let isLoggingIn = $state(false);
   let loginError = $state<string | null>(null);
@@ -43,20 +44,20 @@
 
 <div class="p-6 space-y-6">
   <div class="flex items-center justify-between">
-    <h2 class="text-xl font-semibold text-[var(--text-primary)]">YouTube認証</h2>
+    <h2 class="text-xl font-semibold text-[var(--text-primary)]" style="font-family: var(--font-heading);">YouTube認証</h2>
     <div class="flex items-center gap-2">
       {#if authStore.isAuthenticated}
-        <span class="px-2 py-1 text-xs bg-green-100 text-green-700 rounded border border-green-200">認証済み</span>
+        <span class="px-2 py-1 text-xs bg-[var(--success-subtle)] text-[var(--success)] rounded border border-[var(--border-default)]">認証済み</span>
       {:else}
-        <span class="px-2 py-1 text-xs bg-yellow-100 text-yellow-700 rounded border border-yellow-200">未認証</span>
+        <span class="px-2 py-1 text-xs bg-[var(--warning-subtle)] text-[var(--warning)] rounded border border-[var(--border-default)]">未認証</span>
       {/if}
     </div>
   </div>
 
   <!-- Main Authentication Section -->
-  <div class="p-4 bg-[var(--bg-white)] rounded-lg border border-[var(--border-light)] shadow-sm space-y-4">
+  <div class="p-4 bg-[var(--bg-surface-2)] rounded-lg border border-[var(--border-default)] space-y-4">
     <div class="flex items-center gap-3">
-      <span class="text-2xl">{authStore.isAuthenticated ? '🔓' : '🔒'}</span>
+      <Icon name={authStore.isAuthenticated ? 'unlock' : 'lock'} size={24} class="text-[var(--accent)]" />
       <div>
         <h3 class="text-[var(--text-primary)] font-medium">メンバー限定配信</h3>
         <p class="text-sm text-[var(--text-muted)]">
@@ -72,8 +73,8 @@
         <button
           onclick={handleLogin}
           disabled={isLoggingIn}
-          class="w-full px-4 py-3 text-white rounded-lg transition-colors disabled:opacity-50 font-medium"
-          style="background: linear-gradient(135deg, var(--primary-start) 0%, var(--primary-end) 100%);"
+          class="w-full px-4 py-3 text-[var(--text-inverse)] rounded-lg transition-colors disabled:opacity-50 font-medium"
+          style="background: var(--accent);"
         >
           {#if isLoggingIn}
             <span class="flex items-center justify-center gap-2">
@@ -88,14 +89,14 @@
           {/if}
         </button>
 
-        <div class="p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
+        <div class="p-3 bg-[var(--info-subtle)] border border-[var(--border-default)] rounded-lg text-sm text-[var(--info)]">
           <p>ボタンをクリックすると別ウィンドウでYouTubeのログイン画面が開きます。ログイン完了後、自動的に認証情報が保存されます。</p>
         </div>
       </div>
     {:else}
       <button
         onclick={handleLogout}
-        class="px-4 py-2 bg-red-50 text-red-600 rounded-lg border border-red-200 hover:bg-red-100 transition-colors"
+        class="px-4 py-2 bg-[var(--error-subtle)] text-[var(--error)] rounded-lg border border-[var(--border-default)] hover:opacity-80 transition-colors"
       >
         ログアウト
       </button>
@@ -104,19 +105,19 @@
 
   <!-- Error Message -->
   {#if loginError}
-    <div class="p-3 bg-red-50 rounded-lg border border-red-200">
-      <p class="text-red-600 text-sm">{loginError}</p>
+    <div class="p-3 bg-[var(--error-subtle)] rounded-lg border border-[var(--border-default)]">
+      <p class="text-[var(--error)] text-sm">{loginError}</p>
     </div>
   {/if}
 
   {#if authStore.error}
-    <div class="p-3 bg-red-50 rounded-lg border border-red-200">
-      <p class="text-red-600 text-sm">{authStore.error}</p>
+    <div class="p-3 bg-[var(--error-subtle)] rounded-lg border border-[var(--border-default)]">
+      <p class="text-[var(--error)] text-sm">{authStore.error}</p>
     </div>
   {/if}
 
   <!-- Help Section -->
-  <div class="p-4 bg-[var(--bg-light)] rounded-lg border border-[var(--border-light)] space-y-2">
+  <div class="p-4 bg-[var(--bg-surface-2)] rounded-lg border border-[var(--border-default)] space-y-2">
     <h4 class="text-[var(--text-primary)] font-medium text-sm">ヘルプ</h4>
     <div class="text-xs text-[var(--text-secondary)] space-y-1">
       <p>「YouTubeにログイン」ボタンをクリックすると、アプリ内でYouTubeのログイン画面が開きます。</p>

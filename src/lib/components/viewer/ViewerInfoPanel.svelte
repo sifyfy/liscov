@@ -112,16 +112,16 @@
   function formatMessageType(msg: ChatMessage): { text: string; style: string } | null {
     if (msg.message_type === 'text') return null;
     if (msg.message_type === 'superchat') {
-      return { text: `${msg.amount}`, style: 'bg-yellow-100 text-yellow-800' };
+      return { text: `${msg.amount}`, style: 'bg-yellow-400/20 text-yellow-400' };
     }
     if (msg.message_type === 'supersticker') {
-      return { text: `${msg.amount}`, style: 'bg-purple-100 text-purple-800' };
+      return { text: `${msg.amount}`, style: 'bg-purple-400/20 text-purple-400' };
     }
     if (msg.message_type === 'membership') {
-      return { text: 'メンバー', style: 'bg-green-100 text-green-800' };
+      return { text: 'メンバー', style: 'bg-[var(--success-subtle)] text-[var(--success)]' };
     }
     if (msg.message_type === 'membership_gift') {
-      return { text: 'ギフト', style: 'bg-pink-100 text-pink-800' };
+      return { text: 'ギフト', style: 'bg-pink-400/20 text-pink-400' };
     }
     return null;
   }
@@ -148,18 +148,18 @@
 <!-- Slide-in panel (original liscov dark theme style) -->
 <div
   class="fixed right-0 top-0 h-full w-80 shadow-[-4px_0_12px_rgba(0,0,0,0.3)] z-50 flex flex-col animate-slide-in"
-  style="background: #2d2d3d;"
+  style="background: var(--bg-surface-1);"
 >
   <!-- Header (dark theme) -->
   <div
     class="flex items-center justify-between px-5 py-4 flex-shrink-0"
-    style="background: #363648; border-bottom: 1px solid #555;"
+    style="background: var(--bg-surface-2); border-bottom: 1px solid var(--border-default);"
   >
-    <h2 class="text-lg font-semibold text-white">視聴者情報</h2>
+    <h2 class="text-lg font-semibold text-[var(--text-primary)]">視聴者情報</h2>
     <button
       onclick={onClose}
-      class="px-3 py-1 rounded text-white transition-colors"
-      style="background: #555; hover:background: #666;"
+      class="px-3 py-1 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+      style="background: var(--bg-surface-3); hover:background: #666;"
       title="閉じる"
     >
       ✕
@@ -177,28 +177,26 @@
           class="w-14 h-14 rounded-full"
         />
       {:else}
-        <div class="w-14 h-14 rounded-full flex items-center justify-center text-2xl" style="background: #3d3d4d;">
-          👤
-        </div>
+        <div class="w-14 h-14 rounded-full flex items-center justify-center text-[var(--text-muted)]" style="background: var(--bg-surface-3);"><svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg></div>
       {/if}
       <div>
-        <p class="text-lg font-semibold text-white">{viewer.displayName}</p>
+        <p class="text-lg font-semibold text-[var(--text-primary)]">{viewer.displayName}</p>
         {#if reading}
-          <p class="text-sm" style="color: #a78bfa;">({reading})</p>
+          <p class="text-sm" style="color: var(--accent);">({reading})</p>
         {/if}
       </div>
     </div>
 
     <!-- Channel ID -->
-    <p class="text-xs break-all mb-5" style="color: #9ca3af;">
+    <p class="text-xs break-all mb-5" style="color: var(--text-muted);">
       Channel ID: {viewer.channelId}
     </p>
 
-    <hr class="my-5" style="border-color: #555;" />
+    <hr class="my-5" style="border-color: var(--border-default);" />
 
     <!-- Reading input -->
     <div class="mb-5">
-      <label for="viewer-reading" class="block text-sm font-semibold text-white mb-2">
+      <label for="viewer-reading" class="block text-sm font-semibold text-[var(--text-primary)] mb-2">
         読み仮名（ふりがな）
       </label>
       <input
@@ -206,17 +204,17 @@
         type="text"
         placeholder="例: やまだ たろう"
         bind:value={reading}
-        class="w-full px-3 py-2 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-400/50"
-        style="background: #3d3d4d; border: 1px solid #555;"
+        class="w-full px-3 py-2 rounded-lg text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/50"
+        style="background: var(--bg-surface-3); border: 1px solid var(--border-default);"
       />
-      <p class="text-xs mt-1" style="color: #9ca3af;">
+      <p class="text-xs mt-1" style="color: var(--text-muted);">
         視聴者名の横に括弧書きで表示されます
       </p>
     </div>
 
     <!-- Notes input -->
     <div class="mb-5">
-      <label for="viewer-notes" class="block text-sm font-semibold text-white mb-2">
+      <label for="viewer-notes" class="block text-sm font-semibold text-[var(--text-primary)] mb-2">
         メモ
       </label>
       <textarea
@@ -224,8 +222,8 @@
         placeholder="この視聴者についてのメモ..."
         bind:value={notes}
         rows="3"
-        class="w-full px-3 py-2 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-400/50 resize-none"
-        style="background: #3d3d4d; border: 1px solid #555;"
+        class="w-full px-3 py-2 rounded-lg text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/50 resize-none"
+        style="background: var(--bg-surface-3); border: 1px solid var(--border-default);"
       ></textarea>
     </div>
 
@@ -234,21 +232,21 @@
       <button
         onclick={handleSave}
         disabled={isSaving}
-        class="flex-1 px-4 py-2 text-white rounded-lg transition-colors disabled:opacity-50"
-        style="background: linear-gradient(135deg, var(--primary-start) 0%, var(--primary-end) 100%);"
+        class="flex-1 px-4 py-2 text-[var(--text-inverse)] rounded-lg transition-colors disabled:opacity-50"
+        style="background: var(--accent);"
       >
         {isSaving ? '保存中...' : '保存'}
       </button>
       {#if saveMessage}
-        <span class="text-sm" style="color: #4ade80;">{saveMessage}</span>
+        <span class="text-sm" style="color: var(--success);">{saveMessage}</span>
       {/if}
     </div>
 
-    <hr class="my-5" style="border-color: #555;" />
+    <hr class="my-5" style="border-color: var(--border-default);" />
 
     <!-- Viewer's messages -->
     <div class="flex-1 flex flex-col min-h-0">
-      <h3 class="text-sm font-semibold text-white mb-3 flex-shrink-0">
+      <h3 class="text-sm font-semibold text-[var(--text-primary)] mb-3 flex-shrink-0">
         投稿されたコメント ({viewerMessages.length}件)
       </h3>
       <div class="flex-1 overflow-y-auto space-y-2">
@@ -257,11 +255,11 @@
           {@const badge = formatMessageType(message)}
           <button
             class="w-full text-left p-3 rounded-lg cursor-pointer transition-colors"
-            style="background: #3d3d4d; border: 1px solid {isClicked ? '#a78bfa' : '#555'}; {isClicked ? 'box-shadow: 0 0 8px rgba(167, 139, 250, 0.4);' : ''}"
+            style="background: var(--bg-surface-3); border: 1px solid {isClicked ? 'var(--accent)' : 'var(--border-default)'}; {isClicked ? 'box-shadow: 0 0 8px rgba(56, 189, 248, 0.4);' : ''}"
             onclick={() => onMessageClick?.(message)}
           >
-            <p class="text-xs mb-1" style="color: #9ca3af;">{formatTimestamp(message.timestamp)}</p>
-            <p class="text-sm text-white break-words leading-relaxed">{message.content}</p>
+            <p class="text-xs mb-1" style="color: var(--text-muted);">{formatTimestamp(message.timestamp)}</p>
+            <p class="text-sm text-[var(--text-primary)] break-words leading-relaxed">{message.content}</p>
             {#if badge}
               <span class="inline-block mt-2 px-2 py-0.5 text-xs rounded {badge.style}">
                 {badge.text}

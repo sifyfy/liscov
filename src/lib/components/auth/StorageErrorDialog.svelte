@@ -35,7 +35,7 @@
   >
     <!-- Dialog -->
     <div
-      class="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6"
+      class="bg-[var(--bg-surface-2)] rounded-lg shadow-xl max-w-md w-full mx-4 p-6"
       onclick={(e) => e.stopPropagation()}
       role="dialog"
       aria-modal="true"
@@ -43,23 +43,23 @@
     >
       <!-- Header -->
       <div class="flex items-center gap-3 mb-4">
-        <div class="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
-          <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div class="w-10 h-10 rounded-full bg-[var(--error)]/20 flex items-center justify-center">
+          <svg class="w-6 h-6 text-[var(--error)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
           </svg>
         </div>
-        <h2 id="dialog-title" class="text-lg font-semibold text-gray-900">
+        <h2 id="dialog-title" class="text-lg font-semibold text-[var(--text-primary)]">
           セキュアストレージが利用できません
         </h2>
       </div>
 
       <!-- Content -->
       <div class="space-y-3 mb-6">
-        <p class="text-gray-700">
+        <p class="text-[var(--text-secondary)]">
           Windows資格情報マネージャーにアクセスできません。
           代わりにファイル保存（credentials.toml）を使用しますか？
         </p>
-        <p class="text-sm text-amber-600 bg-amber-50 px-3 py-2 rounded-md">
+        <p class="text-sm text-[var(--warning)] bg-[var(--warning-subtle)] px-3 py-2 rounded-md">
           ※ファイル保存はセキュリティが低下します
         </p>
       </div>
@@ -68,19 +68,19 @@
       <div class="flex gap-3">
         <button
           onclick={handleUseFallback}
-          class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+          class="flex-1 px-4 py-2 bg-[var(--accent)] text-[var(--text-inverse)] rounded-lg hover:bg-[var(--accent-hover)] transition-colors font-medium"
         >
           ファイル保存を使用
         </button>
         <button
           onclick={handleOpenSettings}
-          class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+          class="px-4 py-2 bg-[var(--bg-surface-3)] text-[var(--text-secondary)] rounded-lg hover:bg-[var(--bg-elevated)] transition-colors"
         >
           設定を開く
         </button>
         <button
           onclick={handleIgnore}
-          class="px-4 py-2 text-gray-500 hover:text-gray-700 transition-colors"
+          class="px-4 py-2 text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
         >
           無視
         </button>

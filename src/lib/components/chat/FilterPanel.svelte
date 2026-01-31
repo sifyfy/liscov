@@ -28,23 +28,23 @@
 </script>
 
 <!-- Original liscov style: Control bar -->
-<div class="bg-white border-b border-[var(--border-light)]">
+<div class="bg-[var(--bg-surface-1)] border-b" style="border-color: var(--border-subtle);">
   <!-- Main control bar (1 row) -->
   <div class="flex items-center gap-2 px-3 py-2">
     <!-- Filter toggle button -->
     <button
       onclick={() => (showFilterPanel = !showFilterPanel)}
-      class="flex items-center gap-1.5 px-3 py-1 text-sm rounded border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors"
+      class="flex items-center gap-1.5 px-3 py-1 text-sm rounded border border-[var(--border-default)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:bg-[var(--bg-surface-3)] transition-colors"
     >
-      🔍 フィルター
+      フィルター
     </button>
 
     <!-- Scroll to latest button -->
     <button
       onclick={scrollToLatest}
-      class="flex items-center gap-1.5 px-3 py-1 text-sm rounded border border-green-300 bg-green-50 text-green-700 hover:bg-green-100 transition-colors"
+      class="flex items-center gap-1.5 px-3 py-1 text-sm rounded border border-[var(--border-default)] bg-[var(--success-subtle)] text-[var(--success)] hover:bg-[var(--bg-surface-3)] transition-colors"
     >
-      📍 最新に戻る
+      最新に戻る
     </button>
 
     <!-- Auto scroll checkbox -->
@@ -53,7 +53,7 @@
         type="checkbox"
         checked={chatStore.autoScroll}
         onchange={(e) => chatStore.setAutoScroll(e.currentTarget.checked)}
-        class="w-4 h-4 rounded accent-[#667eea]"
+        class="w-4 h-4 rounded accent-[var(--accent)]"
       />
       <span class="text-sm text-[var(--text-primary)]">自動スクロール</span>
     </label>
@@ -64,7 +64,7 @@
         type="checkbox"
         checked={chatStore.showTimestamps}
         onchange={(e) => chatStore.setShowTimestamps(e.currentTarget.checked)}
-        class="w-4 h-4 rounded accent-[#667eea]"
+        class="w-4 h-4 rounded accent-[var(--accent)]"
       />
       <span class="text-sm text-[var(--text-primary)]">タイムスタンプ</span>
     </label>
@@ -73,7 +73,7 @@
     <div class="flex items-center gap-1 ml-auto">
       <button
         onclick={() => chatStore.decreaseFontSize()}
-        class="w-7 h-7 flex items-center justify-center text-sm rounded border border-[var(--border-light)] bg-white text-[var(--text-secondary)] hover:bg-gray-100 transition-colors"
+        class="w-7 h-7 flex items-center justify-center text-sm rounded border border-[var(--border-default)] bg-[var(--bg-surface-2)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface-3)] transition-colors"
         title="文字を小さく"
       >
         A-
@@ -81,7 +81,7 @@
       <span class="text-xs text-[var(--text-muted)] w-8 text-center">{chatStore.messageFontSize}px</span>
       <button
         onclick={() => chatStore.increaseFontSize()}
-        class="w-7 h-7 flex items-center justify-center text-sm rounded border border-[var(--border-light)] bg-white text-[var(--text-secondary)] hover:bg-gray-100 transition-colors"
+        class="w-7 h-7 flex items-center justify-center text-sm rounded border border-[var(--border-default)] bg-[var(--bg-surface-2)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface-3)] transition-colors"
         title="文字を大きく"
       >
         A+
@@ -92,7 +92,7 @@
     <div class="flex items-center gap-1.5">
       <span class="text-sm text-[var(--text-muted)]">表示:</span>
       <select
-        class="px-2 py-1 text-sm rounded border border-[var(--border-light)] bg-white text-[var(--text-primary)]"
+        class="px-2 py-1 text-sm rounded border border-[var(--border-default)] bg-[var(--bg-surface-2)] text-[var(--text-primary)]"
         value={chatStore.displayLimit || 'unlimited'}
         onchange={(e) => chatStore.setDisplayLimit(e.currentTarget.value === 'unlimited' ? null : parseInt(e.currentTarget.value))}
       >
@@ -108,21 +108,21 @@
     <button
       onclick={handleClearMessages}
       disabled={chatStore.messages.length === 0}
-      class="flex items-center gap-1.5 px-3 py-1 text-sm rounded border border-red-300 bg-red-50 text-red-700 hover:bg-red-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      class="flex items-center gap-1.5 px-3 py-1 text-sm rounded border border-[var(--border-default)] bg-[var(--error-subtle)] text-[var(--error)] hover:bg-[var(--bg-surface-3)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
     >
-      🗑️ クリア
+      クリア
     </button>
   </div>
 
   <!-- Status bar (1 row) -->
-  <div class="flex items-center gap-6 px-3 py-1.5 bg-[#f8fafc] border-t border-[var(--border-light)] text-xs text-[var(--text-muted)]">
-    <span>📊 フィルタ後: {filteredCount}件 / 表示枠: {displayLimitLabel}</span>
+  <div class="flex items-center gap-6 px-3 py-1.5 bg-[var(--bg-surface-2)] border-t text-xs text-[var(--text-muted)]" style="border-color: var(--border-subtle);">
+    <span>フィルタ後: {filteredCount}件 / 表示枠: {displayLimitLabel}</span>
     <span class="ml-auto">全{chatStore.messages.length}件</span>
   </div>
 
   <!-- Expandable filter panel -->
   {#if showFilterPanel}
-    <div class="px-3 py-3 space-y-3 border-t border-[var(--border-light)] bg-gray-50">
+    <div class="px-3 py-3 space-y-3 border-t border-[var(--border-default)] bg-[var(--bg-surface-2)]">
       <!-- Search -->
       <div>
         <input
@@ -130,40 +130,40 @@
           value={chatStore.filter.searchQuery}
           oninput={(e) => chatStore.setFilter({ searchQuery: e.currentTarget.value })}
           placeholder="メッセージを検索..."
-          class="w-full px-3 py-2 text-sm rounded bg-white text-[var(--text-primary)] placeholder-[var(--text-muted)] border border-[var(--border-light)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-start)]/50"
+          class="w-full px-3 py-2 text-sm rounded bg-[var(--bg-surface-3)] text-[var(--text-primary)] placeholder-[var(--text-muted)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/50"
         />
       </div>
 
       <!-- Message type filters -->
       <div class="flex flex-wrap gap-2">
-        <label class="flex items-center gap-2 px-3 py-1 bg-white border border-[var(--border-light)] rounded cursor-pointer hover:bg-gray-100">
+        <label class="flex items-center gap-2 px-3 py-1 bg-[var(--bg-surface-3)] border border-[var(--border-default)] rounded cursor-pointer hover:bg-[var(--bg-surface-3)]">
           <input
             type="checkbox"
             checked={chatStore.filter.showText}
             onchange={(e) => chatStore.setFilter({ showText: e.currentTarget.checked })}
-            class="w-4 h-4 rounded accent-[var(--primary-start)]"
+            class="w-4 h-4 rounded accent-[var(--accent)]"
           />
           <span class="text-sm text-[var(--text-primary)]">💬 通常</span>
         </label>
 
-        <label class="flex items-center gap-2 px-3 py-1 bg-yellow-50 border border-yellow-200 rounded cursor-pointer hover:bg-yellow-100">
+        <label class="flex items-center gap-2 px-3 py-1 bg-[var(--bg-surface-3)] border border-[var(--border-default)] rounded cursor-pointer hover:bg-[var(--bg-surface-3)]">
           <input
             type="checkbox"
             checked={chatStore.filter.showSuperchat}
             onchange={(e) => chatStore.setFilter({ showSuperchat: e.currentTarget.checked })}
-            class="w-4 h-4 rounded accent-yellow-500"
+            class="w-4 h-4 rounded accent-[var(--accent)]"
           />
-          <span class="text-sm text-yellow-800">💰 SuperChat</span>
+          <span class="text-sm text-[var(--text-primary)]">💰 SuperChat</span>
         </label>
 
-        <label class="flex items-center gap-2 px-3 py-1 bg-green-50 border border-green-200 rounded cursor-pointer hover:bg-green-100">
+        <label class="flex items-center gap-2 px-3 py-1 bg-[var(--bg-surface-3)] border border-[var(--border-default)] rounded cursor-pointer hover:bg-[var(--bg-surface-3)]">
           <input
             type="checkbox"
             checked={chatStore.filter.showMembership}
             onchange={(e) => chatStore.setFilter({ showMembership: e.currentTarget.checked })}
-            class="w-4 h-4 rounded accent-green-500"
+            class="w-4 h-4 rounded accent-[var(--accent)]"
           />
-          <span class="text-sm text-green-800">⭐ メンバー</span>
+          <span class="text-sm text-[var(--text-primary)]">⭐ メンバー</span>
         </label>
       </div>
     </div>
@@ -173,7 +173,7 @@
 <!-- Clear confirmation dialog -->
 {#if showClearConfirm}
   <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-    <div class="bg-white rounded-lg shadow-xl p-6 max-w-sm mx-4">
+    <div class="bg-[var(--bg-elevated)] rounded-lg shadow-xl p-6 max-w-sm mx-4">
       <h3 class="text-lg font-semibold text-[var(--text-primary)] mb-2">メッセージをクリア</h3>
       <p class="text-sm text-[var(--text-secondary)] mb-4">
         {chatStore.messages.length}件のメッセージをすべて削除しますか？<br/>
@@ -182,13 +182,13 @@
       <div class="flex justify-end gap-2">
         <button
           onclick={cancelClear}
-          class="px-4 py-2 text-sm rounded border border-[var(--border-light)] text-[var(--text-secondary)] hover:bg-[var(--bg-light)] transition-colors"
+          class="px-4 py-2 text-sm rounded border border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface-3)] transition-colors"
         >
           キャンセル
         </button>
         <button
           onclick={confirmClear}
-          class="px-4 py-2 text-sm rounded bg-red-500 text-white hover:bg-red-600 transition-colors"
+          class="px-4 py-2 text-sm rounded bg-[var(--error)] text-[var(--text-inverse)] hover:opacity-90 transition-colors"
         >
           クリア
         </button>
