@@ -57,12 +57,12 @@
     switch (message.message_type) {
       case 'superchat':
         if (colors) {
-          return `border-left-color: ${colors.header_background}; background: linear-gradient(135deg, ${colors.body_background} 0%, ${colors.header_background}33 100%);`;
+          return `border-left-color: ${colors.body_background}; background: linear-gradient(135deg, ${colors.header_background}33 0%, ${colors.body_background} 100%);`;
         }
         return 'border-left-color: #f6ad55; background: linear-gradient(135deg, #fff7ed 0%, #fed7aa 100%);';
       case 'supersticker':
         if (colors) {
-          return `border-left-color: ${colors.header_background}; background: ${colors.body_background};`;
+          return `border-left-color: ${colors.body_background}; background: linear-gradient(135deg, ${colors.header_background}33 0%, ${colors.body_background} 100%);`;
         }
         return 'border-left-color: #fc8181; background: #fef2f2;';
       case 'membership':
@@ -171,21 +171,33 @@
 >
   <!-- Type header for special messages -->
   {#if typeHeader()}
-    <div class="mb-1.5">
-      <span
-        class="text-xs font-medium px-2 py-0.5 rounded-full"
-        style={headerColor() ? `background-color: ${headerColor()}; color: white;` : ''}
+    {#if superchatColors()}
+      <div
+        class="-mx-3 -mt-2 mb-1.5 px-3 py-1 flex items-center justify-between rounded-tr"
+        style="background-color: {headerColor()}; color: {superchatColors()!.header_text};"
       >
-        {typeHeader()}
+        <span class="text-xs font-semibold tracking-wide">{typeHeader()}</span>
         {#if message.amount}
-          <span class="ml-1 font-bold">{message.amount}</span>
+          <span class="text-xs font-bold">{message.amount}</span>
         {/if}
-      </span>
-    </div>
+      </div>
+    {:else}
+      <div class="mb-1.5">
+        <span
+          class="text-xs font-medium px-2 py-0.5 rounded-full"
+          style={headerColor() ? `background-color: ${headerColor()}; color: white;` : ''}
+        >
+          {typeHeader()}
+          {#if message.amount}
+            <span class="ml-1 font-bold">{message.amount}</span>
+          {/if}
+        </span>
+      </div>
+    {/if}
   {/if}
 
   <!-- Row 1: Metadata (icon, name, badges, comment count, timestamp) -->
-  <div class="flex items-center gap-2" style="font-size: {fontSize}px;">
+  <div class="flex items-center gap-2 {superchatColors() ? 'bg-white/80 -mx-1 px-1 py-0.5 rounded-md' : ''}" style="font-size: {fontSize}px;">
     <!-- Author icon -->
     {#if message.author_icon_url}
       <img
