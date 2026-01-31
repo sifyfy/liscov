@@ -269,7 +269,7 @@
 
   <!-- Row 2: Message content with runs (text + emoji) -->
   <div class="mt-1 ml-8">
-    <p class="text-[var(--text-secondary)] break-words leading-relaxed" style="font-size: {fontSize}px;">
+    <p class="break-words leading-relaxed" style="font-size: {fontSize}px; color: {superchatColors() && (message.message_type === 'superchat' || message.message_type === 'supersticker') ? superchatColors()!.body_text : 'var(--text-secondary)'};">
       {#if message.runs && message.runs.length > 0}
         {#each message.runs as run, index}
           {#if run.type === 'Text'}
