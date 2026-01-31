@@ -147,12 +147,12 @@
 
 <!-- Slide-in panel (original liscov dark theme style) -->
 <div
-  class="fixed right-0 top-0 h-full w-80 shadow-[-4px_0_12px_rgba(0,0,0,0.3)] z-50 overflow-y-auto animate-slide-in"
+  class="fixed right-0 top-0 h-full w-80 shadow-[-4px_0_12px_rgba(0,0,0,0.3)] z-50 flex flex-col animate-slide-in"
   style="background: #2d2d3d;"
 >
   <!-- Header (dark theme) -->
   <div
-    class="flex items-center justify-between px-5 py-4"
+    class="flex items-center justify-between px-5 py-4 flex-shrink-0"
     style="background: #363648; border-bottom: 1px solid #555;"
   >
     <h2 class="text-lg font-semibold text-white">視聴者情報</h2>
@@ -167,7 +167,7 @@
   </div>
 
   <!-- Content (dark theme) -->
-  <div class="p-5">
+  <div class="p-5 flex-1 flex flex-col overflow-hidden">
     <!-- Viewer info -->
     <div class="flex items-center gap-4 mb-4">
       {#if viewer.iconUrl}
@@ -247,11 +247,11 @@
     <hr class="my-5" style="border-color: #555;" />
 
     <!-- Viewer's messages -->
-    <div>
-      <h3 class="text-sm font-semibold text-white mb-3">
+    <div class="flex-1 flex flex-col min-h-0">
+      <h3 class="text-sm font-semibold text-white mb-3 flex-shrink-0">
         投稿されたコメント ({viewerMessages.length}件)
       </h3>
-      <div class="max-h-72 overflow-y-auto space-y-2">
+      <div class="flex-1 overflow-y-auto space-y-2">
         {#each [...viewerMessages].reverse() as message (message.id)}
           {@const isClicked = message.id === viewer.message.id}
           {@const badge = formatMessageType(message)}
