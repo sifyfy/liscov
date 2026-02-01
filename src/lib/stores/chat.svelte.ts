@@ -4,8 +4,6 @@ import type { ChatMessage, ConnectionResult, ChatMode, ChatFilter } from '$lib/t
 import * as chatApi from '$lib/tauri/chat';
 import { configStore } from './config.svelte';
 
-const MAX_MESSAGES = 500;
-
 // Connection states: 'idle' | 'connecting' | 'connected' | 'paused' | 'error'
 type ConnectionState = 'idle' | 'connecting' | 'connected' | 'paused' | 'error';
 
@@ -215,9 +213,7 @@ const BATCH_DELAY_MS = 50; // Batch messages within 50ms window
 function flushPendingMessages(): void {
   if (pendingMessages.length === 0) return;
 
-  // Combine pending messages with existing, respecting MAX_MESSAGES limit
-  const newMessages = [...messages, ...pendingMessages];
-  messages = newMessages.slice(-MAX_MESSAGES);
+  messages = [...messages, ...pendingMessages];
   pendingMessages = [];
   batchTimeout = null;
 }
