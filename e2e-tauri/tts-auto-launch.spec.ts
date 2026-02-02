@@ -13,6 +13,11 @@ import {
   cleanupTestCredentials,
 } from './utils/test-helpers';
 
+// Helper to wait for SvelteKit app to fully render (not just HTML load)
+async function waitForAppReady(page: Page): Promise<void> {
+  await expect(page.locator('nav button:has-text("Chat")')).toBeVisible({ timeout: 30000 });
+}
+
 /**
  * E2E tests for TTS VOICEVOX auto-launch feature based on 04_tts.md specification.
  *
@@ -167,9 +172,8 @@ test.describe('TTS VOICEVOX Auto-Launch', () => {
     context = connection.context;
     mainPage = connection.page;
 
-    // Wait for page to be fully loaded
-    await mainPage.waitForLoadState('load');
-    await mainPage.waitForTimeout(1000);
+    // Wait for SvelteKit app to fully render
+    await waitForAppReady(mainPage);
     log.info('Connected to Tauri app');
   });
 
@@ -207,7 +211,6 @@ test.describe('TTS VOICEVOX Auto-Launch', () => {
         browser = connection.browser;
         context = connection.context;
         mainPage = connection.page;
-        await mainPage.waitForLoadState('load');
         log.info('Reconnected to Tauri app');
       } catch (e) {
         log.error('Failed to reconnect:', { error: e });
@@ -215,8 +218,8 @@ test.describe('TTS VOICEVOX Auto-Launch', () => {
       }
     }
 
-    // Wait for UI to stabilize - use condition-based wait instead of fixed timeout
-    await expect(mainPage.getByRole('button', { name: 'Settings' })).toBeVisible({ timeout: 5000 });
+    // Wait for SvelteKit app to fully render before interacting
+    await waitForAppReady(mainPage);
 
     // Navigate to TTS settings
     // Note: We don't kill VOICEVOX externally here because it desynchronizes app state
@@ -359,12 +362,14 @@ test.describe('TTS VOICEVOX Auto-Launch', () => {
       await mainPage.evaluate(() => document.readyState);
     } catch {
       log.info('Page connection lost after VOICEVOX check, reconnecting...');
-      const connection = await connectToApp();
-      browser = connection.browser;
-      context = connection.context;
-      mainPage = connection.page;
-      await mainPage.waitForLoadState('load');
+      const reconnection = await connectToApp();
+      browser = reconnection.browser;
+      context = reconnection.context;
+      mainPage = reconnection.page;
     }
+
+    // Wait for SvelteKit app to fully render after restart
+    await waitForAppReady(mainPage);
 
     // Also verify UI shows correct state
     await navigateToTtsSettings(mainPage);
@@ -415,7 +420,7 @@ test.describe('TTS VOICEVOX Auto-Launch', () => {
     browser = connection.browser;
     context = connection.context;
     mainPage = connection.page;
-    await mainPage.waitForLoadState('load');
+    await waitForAppReady(mainPage);
   });
 
   test('should prevent duplicate launch (button state)', async () => {
@@ -509,12 +514,8 @@ test.describe('TTS VOICEVOX Auto-Launch', () => {
       }
     });
 
-    // Verify error message is displayed
-    const errorDisplay = mainPage.locator('div.bg-red-50.rounded-lg.border-red-200 p.text-red-600');
+    // Verify error message is displayed (CSS variable-based theme classes)
+    const errorDisplay = mainPage.locator('div.rounded-lg p.text-sm').filter({ hasText: /not found|見つかりません|失敗|executable/i });
     await expect(errorDisplay).toBeVisible({ timeout: 10000 });
-
-    // Error should mention "not found"
-    const errorText = await errorDisplay.textContent();
-    expect(errorText?.toLowerCase()).toMatch(/not found|見つかりません|失敗|executable/);
   });
 });

@@ -131,15 +131,21 @@
         <h3 class="text-lg font-medium text-[var(--text-primary)] mb-3">Top Contributors</h3>
         <div class="space-y-2">
           {#each analyticsStore.analytics.top_contributors as contributor, index}
-            {@const config = tierConfig[contributor.highest_tier]}
+            {@const config = contributor.highest_tier ? tierConfig[contributor.highest_tier] : null}
             <div class="flex items-center gap-3 py-2 {index !== analyticsStore.analytics.top_contributors.length - 1 ? 'border-b border-[var(--border-default)]' : ''}">
               <span class="w-6 h-6 flex items-center justify-center text-sm font-bold rounded-full {index === 0 ? 'bg-yellow-500 text-black' : index === 1 ? 'bg-gray-400 text-black' : index === 2 ? 'bg-orange-600 text-white' : 'bg-[var(--bg-surface-3)] text-[var(--text-primary)]'}">
                 {index + 1}
               </span>
               <span class="flex-1 text-[var(--text-primary)] font-medium">{contributor.display_name}</span>
-              <span class="px-2 py-0.5 text-xs font-medium rounded {config.bgColor} {config.textColor}">
-                {config.label}
-              </span>
+              {#if config}
+                <span class="px-2 py-0.5 text-xs font-medium rounded {config.bgColor} {config.textColor}">
+                  {config.label}
+                </span>
+              {:else}
+                <span class="px-2 py-0.5 text-xs font-medium rounded bg-[var(--bg-surface-3)] text-[var(--text-secondary)]">
+                  Sticker
+                </span>
+              {/if}
               <span class="text-[var(--text-muted)] text-sm">({contributor.contribution_count}x)</span>
             </div>
           {/each}

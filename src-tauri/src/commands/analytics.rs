@@ -86,7 +86,7 @@ impl Default for RevenueAnalytics {
 pub struct ContributorInfo {
     pub channel_id: String,
     pub display_name: String,
-    pub super_chat_count: usize,
+    pub contribution_count: usize,
     pub highest_tier: Option<SuperChatTier>,
 }
 
@@ -281,11 +281,11 @@ pub async fn get_revenue_analytics(
     // Build top contributors list sorted by count, then by highest tier
     let mut contributors_vec: Vec<ContributorInfo> = contributors
         .into_iter()
-        .map(|(channel_id, (display_name, super_chat_count, highest_tier))| {
+        .map(|(channel_id, (display_name, contribution_count, highest_tier))| {
             ContributorInfo {
                 channel_id,
                 display_name,
-                super_chat_count,
+                contribution_count,
                 highest_tier,
             }
         })
@@ -293,7 +293,7 @@ pub async fn get_revenue_analytics(
 
     // Sort by count descending, then by tier descending
     contributors_vec.sort_by(|a, b| {
-        match b.super_chat_count.cmp(&a.super_chat_count) {
+        match b.contribution_count.cmp(&a.contribution_count) {
             std::cmp::Ordering::Equal => b.highest_tier.cmp(&a.highest_tier),
             other => other,
         }

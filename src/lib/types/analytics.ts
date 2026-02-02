@@ -29,7 +29,7 @@ export interface ContributorInfo {
   channel_id: string;
   display_name: string;
   contribution_count: number;
-  highest_tier: SuperChatTier;
+  highest_tier: SuperChatTier | null;
 }
 
 // 時間帯別統計
