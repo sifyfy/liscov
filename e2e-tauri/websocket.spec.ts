@@ -45,21 +45,29 @@ async function getWebSocketPort(page: Page): Promise<number> {
   throw new Error('Could not find WebSocket port in UI - WebSocket server may not have started');
 }
 
-// Helper to connect WebSocket client and wait for connection
-function connectWebSocket(url: string, timeout = 5000): Promise<WebSocket> {
+// Helper to connect WebSocket client and wait for Connected message
+function connectWebSocket(
+  url: string,
+  timeout = 10000,
+): Promise<{ ws: WebSocket; connectedMsg: unknown }> {
   return new Promise((resolve, reject) => {
     log.debug(`Connecting to WebSocket at ${url}...`);
     const ws = new WebSocket(url);
     const timer = setTimeout(() => {
-      log.debug(`WebSocket connection timeout to ${url}`);
+      log.debug(`WebSocket connection timeout (waiting for Connected message) to ${url}`);
       ws.close();
       reject(new Error(`WebSocket connection timeout after ${timeout}ms`));
     }, timeout);
 
-    ws.on('open', () => {
-      log.debug(`WebSocket connected to ${url}`);
+    ws.once('message', (data) => {
       clearTimeout(timer);
-      resolve(ws);
+      try {
+        const parsed = JSON.parse(data.toString());
+        log.debug(`WebSocket connected to ${url}, received: ${parsed.type || 'unknown'}`);
+        resolve({ ws, connectedMsg: parsed });
+      } catch (e) {
+        reject(e);
+      }
     });
 
     ws.on('error', (err) => {
@@ -69,7 +77,8 @@ function connectWebSocket(url: string, timeout = 5000): Promise<WebSocket> {
     });
 
     ws.on('close', (code, reason) => {
-      log.debug(`WebSocket closed: code=${code}, reason=${reason.toString()}`);
+      clearTimeout(timer);
+      reject(new Error(`WebSocket closed before Connected message: code=${code}, reason=${reason.toString()}`));
     });
   });
 }
@@ -158,10 +167,10 @@ test.describe('WebSocket API (03_websocket.md)', () => {
       expect(port).toBeGreaterThanOrEqual(8765);
       expect(port).toBeLessThanOrEqual(8774);
 
-      const ws = await connectWebSocket(`ws://127.0.0.1:${port}`);
-      const connectedMsg = (await waitForMessage(ws)) as { type: string; data: { client_id: number } };
-      expect(connectedMsg.type).toBe('Connected');
-      expect(connectedMsg.data.client_id).toBeGreaterThan(0);
+      const { ws, connectedMsg } = await connectWebSocket(`ws://127.0.0.1:${port}`);
+      const connected = connectedMsg as { type: string; data: { client_id: number } };
+      expect(connected.type).toBe('Connected');
+      expect(connected.data.client_id).toBeGreaterThan(0);
 
       ws.close();
     });
@@ -190,8 +199,7 @@ test.describe('WebSocket API (03_websocket.md)', () => {
 
       await expect(mainPage.locator(`text=/WS:${port}\\(0\\)/`)).toBeVisible({ timeout: 5000 });
 
-      const ws = await connectWebSocket(`ws://127.0.0.1:${port}`);
-      await waitForMessage(ws);
+      const { ws } = await connectWebSocket(`ws://127.0.0.1:${port}`);
 
       await expect(mainPage.locator(`text=/WS:${port}\\(1\\)/`)).toBeVisible({ timeout: 5000 });
 
@@ -201,8 +209,7 @@ test.describe('WebSocket API (03_websocket.md)', () => {
     test('should update UI when client disconnects (websocket-client-disconnected event)', async () => {
       const port = await getWebSocketPort(mainPage);
 
-      const ws = await connectWebSocket(`ws://127.0.0.1:${port}`);
-      await waitForMessage(ws);
+      const { ws } = await connectWebSocket(`ws://127.0.0.1:${port}`);
 
       await expect(mainPage.locator(`text=/WS:${port}\\(1\\)/`)).toBeVisible({ timeout: 5000 });
 
@@ -218,13 +225,11 @@ test.describe('WebSocket API (03_websocket.md)', () => {
 
       await expect(mainPage.locator(`text=/WS:${port}\\(0\\)/`)).toBeVisible({ timeout: 5000 });
 
-      const ws = await connectWebSocket(`ws://127.0.0.1:${port}`);
-      await waitForMessage(ws);
+      const { ws } = await connectWebSocket(`ws://127.0.0.1:${port}`);
 
       await expect(mainPage.locator(`text=/WS:${port}\\(1\\)/`)).toBeVisible({ timeout: 5000 });
 
-      const ws2 = await connectWebSocket(`ws://127.0.0.1:${port}`);
-      await waitForMessage(ws2);
+      const { ws: ws2 } = await connectWebSocket(`ws://127.0.0.1:${port}`);
 
       await expect(mainPage.locator(`text=/WS:${port}\\(2\\)/`)).toBeVisible({ timeout: 5000 });
 
@@ -240,12 +245,12 @@ test.describe('WebSocket API (03_websocket.md)', () => {
     test('should send Connected message with unique client_id on connection', async () => {
       const port = await getWebSocketPort(mainPage);
 
-      const ws1 = await connectWebSocket(`ws://127.0.0.1:${port}`);
-      const msg1 = (await waitForMessage(ws1)) as { type: string; data: { client_id: number } };
+      const { ws: ws1, connectedMsg: connectedMsg1 } = await connectWebSocket(`ws://127.0.0.1:${port}`);
+      const msg1 = connectedMsg1 as { type: string; data: { client_id: number } };
 
       await mainPage.waitForTimeout(200);
-      const ws2 = await connectWebSocket(`ws://127.0.0.1:${port}`);
-      const msg2 = (await waitForMessage(ws2)) as { type: string; data: { client_id: number } };
+      const { ws: ws2, connectedMsg: connectedMsg2 } = await connectWebSocket(`ws://127.0.0.1:${port}`);
+      const msg2 = connectedMsg2 as { type: string; data: { client_id: number } };
 
       expect(msg1.type).toBe('Connected');
       expect(msg1.data).toHaveProperty('client_id');
@@ -265,8 +270,7 @@ test.describe('WebSocket API (03_websocket.md)', () => {
   test.describe('ServerInfo Message', () => {
     test('should respond to GetInfo with correct format', async () => {
       const port = await getWebSocketPort(mainPage);
-      const ws = await connectWebSocket(`ws://127.0.0.1:${port}`);
-      await waitForMessage(ws);
+      const { ws } = await connectWebSocket(`ws://127.0.0.1:${port}`);
 
       ws.send(JSON.stringify({ type: 'GetInfo' }));
 
@@ -297,11 +301,11 @@ test.describe('WebSocket API (03_websocket.md)', () => {
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       const port = await getWebSocketPort(mainPage);
-      const ws = await connectWebSocket(`ws://127.0.0.1:${port}`);
+      const { ws, connectedMsg } = await connectWebSocket(`ws://127.0.0.1:${port}`);
 
-      const connectedMsg = (await waitForMessage(ws)) as { type: string; data: { client_id: number } };
-      expect(connectedMsg.type).toBe('Connected');
-      expect(connectedMsg.data.client_id).toBeGreaterThan(0);
+      const connected = connectedMsg as { type: string; data: { client_id: number } };
+      expect(connected.type).toBe('Connected');
+      expect(connected.data.client_id).toBeGreaterThan(0);
 
       await addMockMessage({
         message_type: 'text',
@@ -347,8 +351,7 @@ test.describe('WebSocket API (03_websocket.md)', () => {
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       const port = await getWebSocketPort(mainPage);
-      const ws = await connectWebSocket(`ws://127.0.0.1:${port}`);
-      await waitForMessage(ws);
+      const { ws } = await connectWebSocket(`ws://127.0.0.1:${port}`);
 
       await addMockMessage({
         message_type: 'superchat',
@@ -396,8 +399,7 @@ test.describe('WebSocket API (03_websocket.md)', () => {
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       const port = await getWebSocketPort(mainPage);
-      const ws = await connectWebSocket(`ws://127.0.0.1:${port}`);
-      await waitForMessage(ws);
+      const { ws } = await connectWebSocket(`ws://127.0.0.1:${port}`);
 
       await addMockMessage({
         message_type: 'membership_milestone',
@@ -434,8 +436,7 @@ test.describe('WebSocket API (03_websocket.md)', () => {
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       const port = await getWebSocketPort(mainPage);
-      const ws = await connectWebSocket(`ws://127.0.0.1:${port}`);
-      await waitForMessage(ws);
+      const { ws } = await connectWebSocket(`ws://127.0.0.1:${port}`);
 
       await addMockMessage({
         message_type: 'membership_gift',
@@ -473,8 +474,7 @@ test.describe('WebSocket API (03_websocket.md)', () => {
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       const port = await getWebSocketPort(mainPage);
-      const ws = await connectWebSocket(`ws://127.0.0.1:${port}`);
-      await waitForMessage(ws);
+      const { ws } = await connectWebSocket(`ws://127.0.0.1:${port}`);
 
       await addMockMessage({
         message_type: 'text',
@@ -561,7 +561,7 @@ test.describe('WebSocket API (03_websocket.md)', () => {
       const messages2: unknown[] = [];
       const messages3: unknown[] = [];
 
-      const ws1 = await connectWebSocket(`ws://127.0.0.1:${port}`);
+      const { ws: ws1 } = await connectWebSocket(`ws://127.0.0.1:${port}`);
       ws1.on('message', (data) => {
         try {
           messages1.push(JSON.parse(data.toString()));
@@ -569,10 +569,9 @@ test.describe('WebSocket API (03_websocket.md)', () => {
           /* ignore */
         }
       });
-      await waitForMessage(ws1);
 
       await mainPage.waitForTimeout(300);
-      const ws2 = await connectWebSocket(`ws://127.0.0.1:${port}`);
+      const { ws: ws2 } = await connectWebSocket(`ws://127.0.0.1:${port}`);
       ws2.on('message', (data) => {
         try {
           messages2.push(JSON.parse(data.toString()));
@@ -580,10 +579,9 @@ test.describe('WebSocket API (03_websocket.md)', () => {
           /* ignore */
         }
       });
-      await waitForMessage(ws2);
 
       await mainPage.waitForTimeout(300);
-      const ws3 = await connectWebSocket(`ws://127.0.0.1:${port}`);
+      const { ws: ws3 } = await connectWebSocket(`ws://127.0.0.1:${port}`);
       ws3.on('message', (data) => {
         try {
           messages3.push(JSON.parse(data.toString()));
@@ -591,7 +589,6 @@ test.describe('WebSocket API (03_websocket.md)', () => {
           /* ignore */
         }
       });
-      await waitForMessage(ws3);
 
       await addMockMessage({
         message_type: 'text',

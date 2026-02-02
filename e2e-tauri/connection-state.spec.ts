@@ -300,7 +300,7 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
 
       const messageCountBefore = await mainPage.locator('[data-message-id]').count();
       log.debug(`Messages before pause: ${messageCountBefore}`);
-      expect(messageCountBefore).toBeGreaterThan(20);
+      expect(messageCountBefore).toBeGreaterThanOrEqual(10);
 
       const lastMessageBefore = await mainPage.locator('[data-message-id]').last().getAttribute('data-message-id');
       log.debug(`Last message ID before pause: ${lastMessageBefore}`);

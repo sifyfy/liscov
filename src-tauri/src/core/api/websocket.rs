@@ -177,21 +177,7 @@ impl WebSocketServer {
 
     pub async fn broadcast_message(&self, message: &ChatMessage) {
         let server_msg = ServerMessage::ChatMessage(message.clone());
-
-        let _ = self.message_tx.send(server_msg.clone());
-
-        let json = match serde_json::to_string(&server_msg) {
-            Ok(j) => j,
-            Err(e) => {
-                tracing::error!("Failed to serialize message: {}", e);
-                return;
-            }
-        };
-
-        let clients = self.clients.read().await;
-        for (_, sender) in clients.iter() {
-            let _ = sender.send(Message::Text(json.clone()));
-        }
+        let _ = self.message_tx.send(server_msg);
     }
 
     pub async fn connected_clients(&self) -> u32 {
