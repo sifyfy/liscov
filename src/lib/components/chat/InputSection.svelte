@@ -59,7 +59,7 @@
   {#if chatStore.isConnected}
     <!-- Connected state: Show stream info + 停止 button -->
     <div class="flex items-center gap-2">
-      <div class="flex-1 min-w-0 px-3 py-1.5 rounded bg-[var(--bg-surface-2)] border border-[var(--border-default)] truncate text-sm text-[var(--text-secondary)]">
+      <div data-testid="stream-title" class="flex-1 min-w-0 px-3 py-1.5 rounded bg-[var(--bg-surface-2)] border border-[var(--border-default)] truncate text-sm text-[var(--text-secondary)]">
         {chatStore.streamTitle || chatStore.broadcasterName || 'Connected'}
         {#if chatStore.isReplay}
           <span class="ml-1 px-1.5 py-0.5 text-xs bg-[var(--accent-subtle)] text-[var(--accent)] rounded">Replay</span>

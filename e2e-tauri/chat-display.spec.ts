@@ -154,7 +154,7 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
   });
 
   test.describe('Author Name Color Coding', () => {
-    test('should display member names in green (#059669) and non-member names in blue (#2563eb)', async () => {
+    test('should display member names in member-accent color and non-member names in accent color', async () => {
       // Connect to stream
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
@@ -180,13 +180,14 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await mainPage.waitForTimeout(2000);
       await expect(mainPage.getByText(nonMemberName).first()).toBeVisible();
 
-      // Check non-member color - should be blue (#2563eb = rgb(37, 99, 235))
+      // Check non-member color - should use var(--accent) CSS variable
+      // Dark theme: #6fb8d9 = rgb(111, 184, 217)
       const nonMemberMessage = mainPage.locator('[data-message-id]').filter({
         has: mainPage.locator(`text=${nonMemberContent}`)
       }).first();
       const nonMemberAuthor = nonMemberMessage.locator('span').filter({ hasText: nonMemberName }).first();
       const nonMemberColor = await nonMemberAuthor.evaluate(el => getComputedStyle(el).color);
-      expect(nonMemberColor).toMatch(/rgb\(37,\s*99,\s*235\)/);
+      expect(nonMemberColor).toMatch(/rgb\(111,\s*184,\s*217\)/);
 
       // Add member message
       await addMockMessage({
@@ -201,22 +202,15 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await mainPage.waitForTimeout(3000);
       await expect(mainPage.getByText(memberName).first()).toBeVisible();
 
-      // Check member color - should be green (#059669 = rgb(5, 150, 105))
+      // Check member color - should use var(--member-accent) CSS variable
+      // Dark theme: #6ec98a = rgb(110, 201, 138)
       const memberMessage = mainPage.locator('[data-message-id]').filter({
         has: mainPage.locator(`text=${memberContent}`)
       }).first();
       const memberAuthor = memberMessage.locator('span').filter({ hasText: memberName }).first();
       const memberColor = await memberAuthor.evaluate(el => getComputedStyle(el).color);
 
-      // Debug: check is_member value from DOM
-      if (!memberColor.match(/rgb\(5,\s*150,\s*105\)/)) {
-        const hasMemberBadge = await memberMessage.locator('.bg-green-100').count();
-        const allSpans = await memberMessage.locator('span').allTextContents();
-        console.log(`is_member check - badge count: ${hasMemberBadge}, color: ${memberColor}`);
-        console.log(`Spans in message: ${JSON.stringify(allSpans)}`);
-      }
-
-      expect(memberColor).toMatch(/rgb\(5,\s*150,\s*105\)/);
+      expect(memberColor).toMatch(/rgb\(110,\s*201,\s*138\)/);
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
@@ -464,10 +458,10 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
         has: mainPage.locator('text=ScrollMsg1')
       }).first();
 
-      // Wait for the highlight style to be applied (style attribute containing the highlight color)
-      // The highlight is applied via inline style: 'border: 2px solid #5865f2'
+      // Wait for the highlight style to be applied (style attribute containing the highlight border)
+      // The highlight is applied via inline style: 'border: 2px solid var(--accent)'
       try {
-        await expect(highlightedMessage).toHaveAttribute('style', /5865f2/, { timeout: 5000 });
+        await expect(highlightedMessage).toHaveAttribute('style', /border:\s*2px solid var\(--accent\)/, { timeout: 5000 });
       } catch {
         // If the highlight didn't appear, log debug info and skip the assertion
         const styleAttr = await highlightedMessage.getAttribute('style');
@@ -916,7 +910,7 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await expect(mainPage.getByText('【雑談配信】').first()).toBeVisible({ timeout: 10000 });
 
       // Find the title element specifically (in InputSection - the div with truncate class)
-      const titleElement = mainPage.locator('div.truncate.bg-white').first();
+      const titleElement = mainPage.locator('[data-testid="stream-title"]').first();
       await expect(titleElement).toBeVisible();
 
       // Get the full text content of the title element (even if visually truncated)
@@ -950,7 +944,7 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await expect(mainPage.getByText('🎮 Gaming Stream').first()).toBeVisible({ timeout: 10000 });
 
       // Find the title element specifically (in InputSection - the div with truncate class)
-      const titleElement = mainPage.locator('div.truncate.bg-white').first();
+      const titleElement = mainPage.locator('[data-testid="stream-title"]').first();
       await expect(titleElement).toBeVisible();
       const titleTextContent = await titleElement.textContent();
       console.log(`Title text content: "${titleTextContent}"`);
@@ -1808,8 +1802,8 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       const authorSpan = memberMessage.locator('span').filter({ hasText: 'GreenBgMember' }).first();
       const authorColor = await authorSpan.evaluate(el => getComputedStyle(el).color);
 
-      // Should be green (#059669 = rgb(5, 150, 105))
-      expect(authorColor).toMatch(/rgb\(5,\s*150,\s*105\)/);
+      // Should use var(--member-accent): dark theme #6ec98a = rgb(110, 201, 138)
+      expect(authorColor).toMatch(/rgb\(110,\s*201,\s*138\)/);
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
@@ -1865,7 +1859,7 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
 
       // Find the title element (look for <div> containing part of the long title)
       // The title should be in the InputSection component
-      const titleElement = mainPage.locator('div.truncate.bg-white').first();
+      const titleElement = mainPage.locator('[data-testid="stream-title"]').first();
 
       await expect(titleElement).toBeVisible({ timeout: 5000 });
 
@@ -2005,8 +1999,8 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
 
       // Verify the message is highlighted (check for highlight color in any format)
       const style = await firstMsgElement.getAttribute('style');
-      // The highlight color is #5865f2 = rgb(88, 101, 242)
-      expect(style).toMatch(/5865f2|rgb\(88,\s*101,\s*242\)/); // Highlight border color
+      // The highlight is applied via var(--accent) CSS variable
+      expect(style).toMatch(/border:\s*2px solid var\(--accent\)/); // Highlight border color
 
       // Close panel
       await mainPage.locator('button:has-text("✕")').click();

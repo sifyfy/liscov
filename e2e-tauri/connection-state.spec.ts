@@ -64,7 +64,7 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
 
       await mainPage.locator('button:has-text("停止")').click();
 
-      const pausedInfo = mainPage.locator('.bg-yellow-50.border-yellow-300:has-text("一時停止中:")');
+      const pausedInfo = mainPage.locator('div:has-text("⏸ 一時停止中:")').first();
       await expect(pausedInfo).toBeVisible({ timeout: 5000 });
 
       const pausedText = await pausedInfo.textContent();

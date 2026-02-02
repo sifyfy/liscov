@@ -162,7 +162,7 @@
 
 <div
   class="px-3 py-2 cursor-pointer hover:ring-2 hover:ring-[var(--accent)]/30 transition-all {containerStyle()}"
-  style="{dynamicStyle()}{highlighted ? 'border: 2px solid var(--accent); box-shadow: 0 0 8px rgba(56, 189, 248, 0.4);' : ''}"
+  style="{dynamicStyle()}{highlighted ? 'border: 2px solid var(--accent); box-shadow: 0 0 8px var(--accent-subtle);' : ''}"
   data-message-id={message.id}
   onclick={onClick}
   role="button"
