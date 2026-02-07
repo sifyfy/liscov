@@ -44,9 +44,9 @@ pub struct TtsLaunchStatus {
 
 | ファイル | パス | 形式 |
 |---------|------|------|
-| tts_config.toml | `%APPDATA%/liscov/tts_config.toml` | TOML |
+| tts_config.toml | `%APPDATA%/liscov-tauri/tts_config.toml` | TOML |
 
-> **Note**: ディレクトリ名 `liscov` は環境変数 `LISCOV_APP_NAME` で変更可能（E2Eテスト用）。詳細は[認証機能仕様のE2Eテストセクション](01_auth.md#e2eテスト)を参照。
+> **Note**: ディレクトリ名 `liscov-tauri` は環境変数 `LISCOV_APP_NAME` で変更可能（E2Eテスト用）。詳細は[認証機能仕様のE2Eテストセクション](01_auth.md#e2eテスト)を参照。
 
 ## 設定ファイル形式
 

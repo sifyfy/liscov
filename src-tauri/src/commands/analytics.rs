@@ -86,7 +86,7 @@ impl Default for RevenueAnalytics {
 pub struct ContributorInfo {
     pub channel_id: String,
     pub display_name: String,
-    pub contribution_count: usize,
+    pub super_chat_count: usize,
     pub highest_tier: Option<SuperChatTier>,
 }
 
@@ -281,11 +281,11 @@ pub async fn get_revenue_analytics(
     // Build top contributors list sorted by count, then by highest tier
     let mut contributors_vec: Vec<ContributorInfo> = contributors
         .into_iter()
-        .map(|(channel_id, (display_name, contribution_count, highest_tier))| {
+        .map(|(channel_id, (display_name, super_chat_count, highest_tier))| {
             ContributorInfo {
                 channel_id,
                 display_name,
-                contribution_count,
+                super_chat_count,
                 highest_tier,
             }
         })
@@ -293,7 +293,7 @@ pub async fn get_revenue_analytics(
 
     // Sort by count descending, then by tier descending
     contributors_vec.sort_by(|a, b| {
-        match b.contribution_count.cmp(&a.contribution_count) {
+        match b.super_chat_count.cmp(&a.super_chat_count) {
             std::cmp::Ordering::Equal => b.highest_tier.cmp(&a.highest_tier),
             other => other,
         }
@@ -454,44 +454,12 @@ pub async fn export_session_data(
         .filter_map(|r| r.ok())
         .collect();
 
-    // Calculate statistics
-    let mut super_chat_count = 0;
-    let mut super_chat_by_tier = SuperChatTierStats::default();
-    let mut membership_count = 0;
-    let mut unique_viewers: std::collections::HashSet<String> = std::collections::HashSet::new();
-
-    for msg in &messages {
-        unique_viewers.insert(msg.author_id.clone());
-
-        match msg.message_type.as_str() {
-            "superchat" => {
-                super_chat_count += 1;
-                if let Some(tier) = msg.tier {
-                    super_chat_by_tier.increment(tier);
-                }
-            }
-            "supersticker" => {
-                // Counted but not in tier stats
-            }
-            "membership" | "membership_gift" => {
-                membership_count += 1;
-            }
-            _ => {}
-        }
-    }
-
-    let total_messages = messages.len();
+    let statistics = calculate_session_statistics(&messages);
 
     let export_data = SessionExportData {
         metadata: session,
         messages,
-        statistics: SessionStatistics {
-            total_messages,
-            unique_viewers: unique_viewers.len(),
-            super_chat_count,
-            super_chat_by_tier,
-            membership_count,
-        },
+        statistics,
     };
 
     // Export based on format
@@ -571,27 +539,7 @@ pub async fn export_current_messages(
         })
         .collect();
 
-    let mut unique_viewers: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut super_chat_count = 0;
-    let mut super_chat_by_tier = SuperChatTierStats::default();
-    let mut membership_count = 0;
-
-    for msg in &export_messages {
-        unique_viewers.insert(msg.author_id.clone());
-
-        match msg.message_type.as_str() {
-            "superchat" => {
-                super_chat_count += 1;
-                if let Some(tier) = msg.tier {
-                    super_chat_by_tier.increment(tier);
-                }
-            }
-            "membership" | "membership_gift" => {
-                membership_count += 1;
-            }
-            _ => {}
-        }
-    }
+    let statistics = calculate_session_statistics(&export_messages);
 
     let export_data = SessionExportData {
         metadata: SessionMetadata {
@@ -604,13 +552,7 @@ pub async fn export_current_messages(
             end_time: None,
             export_time: Utc::now().to_rfc3339(),
         },
-        statistics: SessionStatistics {
-            total_messages: export_messages.len(),
-            unique_viewers: unique_viewers.len(),
-            super_chat_count,
-            super_chat_by_tier,
-            membership_count,
-        },
+        statistics,
         messages: export_messages,
     };
 
@@ -630,6 +572,39 @@ pub async fn export_current_messages(
 }
 
 // Helper functions
+
+/// Calculate session statistics from export messages (DRY: used by both export functions)
+fn calculate_session_statistics(messages: &[ExportMessage]) -> SessionStatistics {
+    let mut unique_viewers: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut super_chat_count = 0;
+    let mut super_chat_by_tier = SuperChatTierStats::default();
+    let mut membership_count = 0;
+
+    for msg in messages {
+        unique_viewers.insert(msg.author_id.clone());
+
+        match msg.message_type.as_str() {
+            "superchat" => {
+                super_chat_count += 1;
+                if let Some(tier) = msg.tier {
+                    super_chat_by_tier.increment(tier);
+                }
+            }
+            "membership" | "membership_gift" => {
+                membership_count += 1;
+            }
+            _ => {}
+        }
+    }
+
+    SessionStatistics {
+        total_messages: messages.len(),
+        unique_viewers: unique_viewers.len(),
+        super_chat_count,
+        super_chat_by_tier,
+        membership_count,
+    }
+}
 
 fn export_to_json(data: &SessionExportData, config: &ExportConfig) -> Result<String, String> {
     if config.include_metadata {

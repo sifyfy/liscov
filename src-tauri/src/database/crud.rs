@@ -4,7 +4,6 @@ use super::models::*;
 use crate::core::models::ChatMessage;
 use anyhow::Result;
 use rusqlite::{params, Connection, OptionalExtension};
-use std::collections::HashMap;
 
 // ============================================================================
 // Session Operations
@@ -275,77 +274,58 @@ pub fn upsert_viewer_profile(
     Ok(id)
 }
 
+/// Build ViewerProfile from a row with standard column order
+fn row_to_viewer_profile(row: &rusqlite::Row) -> rusqlite::Result<ViewerProfile> {
+    let tags_str: Option<String> = row.get(9)?;
+    let tags = tags_str
+        .map(|s| s.split(',').map(|t| t.trim().to_string()).collect())
+        .unwrap_or_default();
+
+    Ok(ViewerProfile {
+        id: row.get(0)?,
+        broadcaster_channel_id: row.get(1)?,
+        channel_id: row.get(2)?,
+        display_name: row.get(3)?,
+        first_seen: row.get(4)?,
+        last_seen: row.get(5)?,
+        message_count: row.get(6)?,
+        total_contribution: row.get(7)?,
+        membership_level: row.get(8)?,
+        tags,
+        created_at: row.get(10)?,
+        updated_at: row.get(11)?,
+    })
+}
+
+const VIEWER_PROFILE_COLUMNS: &str =
+    "id, broadcaster_channel_id, channel_id, display_name, first_seen, last_seen, \
+     message_count, total_contribution, membership_level, tags, created_at, updated_at";
+
 /// Get viewer profile
 pub fn get_viewer_profile(
     conn: &Connection,
     broadcaster_channel_id: &str,
     channel_id: &str,
 ) -> Result<Option<ViewerProfile>> {
+    let sql = format!(
+        "SELECT {} FROM viewer_profiles WHERE broadcaster_channel_id = ?1 AND channel_id = ?2",
+        VIEWER_PROFILE_COLUMNS
+    );
     let profile = conn
-        .query_row(
-            "SELECT id, broadcaster_channel_id, channel_id, display_name, first_seen, last_seen,
-                    message_count, total_contribution, membership_level, tags, created_at, updated_at
-             FROM viewer_profiles WHERE broadcaster_channel_id = ?1 AND channel_id = ?2",
-            params![broadcaster_channel_id, channel_id],
-            |row| {
-                let tags_str: Option<String> = row.get(9)?;
-                let tags = tags_str
-                    .map(|s| s.split(',').map(|t| t.trim().to_string()).collect())
-                    .unwrap_or_default();
-
-                Ok(ViewerProfile {
-                    id: row.get(0)?,
-                    broadcaster_channel_id: row.get(1)?,
-                    channel_id: row.get(2)?,
-                    display_name: row.get(3)?,
-                    first_seen: row.get(4)?,
-                    last_seen: row.get(5)?,
-                    message_count: row.get(6)?,
-                    total_contribution: row.get(7)?,
-                    membership_level: row.get(8)?,
-                    tags,
-                    created_at: row.get(10)?,
-                    updated_at: row.get(11)?,
-                })
-            },
-        )
+        .query_row(&sql, params![broadcaster_channel_id, channel_id], row_to_viewer_profile)
         .optional()?;
-
     Ok(profile)
 }
 
 /// Get viewer profile by id
 pub fn get_viewer_profile_by_id(conn: &Connection, id: i64) -> Result<Option<ViewerProfile>> {
+    let sql = format!(
+        "SELECT {} FROM viewer_profiles WHERE id = ?1",
+        VIEWER_PROFILE_COLUMNS
+    );
     let profile = conn
-        .query_row(
-            "SELECT id, broadcaster_channel_id, channel_id, display_name, first_seen, last_seen,
-                    message_count, total_contribution, membership_level, tags, created_at, updated_at
-             FROM viewer_profiles WHERE id = ?1",
-            params![id],
-            |row| {
-                let tags_str: Option<String> = row.get(9)?;
-                let tags = tags_str
-                    .map(|s| s.split(',').map(|t| t.trim().to_string()).collect())
-                    .unwrap_or_default();
-
-                Ok(ViewerProfile {
-                    id: row.get(0)?,
-                    broadcaster_channel_id: row.get(1)?,
-                    channel_id: row.get(2)?,
-                    display_name: row.get(3)?,
-                    first_seen: row.get(4)?,
-                    last_seen: row.get(5)?,
-                    message_count: row.get(6)?,
-                    total_contribution: row.get(7)?,
-                    membership_level: row.get(8)?,
-                    tags,
-                    created_at: row.get(10)?,
-                    updated_at: row.get(11)?,
-                })
-            },
-        )
+        .query_row(&sql, params![id], row_to_viewer_profile)
         .optional()?;
-
     Ok(profile)
 }
 
@@ -510,7 +490,7 @@ pub fn get_viewers_for_broadcaster(
          LEFT JOIN viewer_custom_info vci ON vp.id = vci.viewer_profile_id
          WHERE vp.broadcaster_channel_id = ?1
            AND (vp.display_name LIKE ?2 OR vci.reading LIKE ?2 OR vci.notes LIKE ?2)
-         ORDER BY vp.message_count DESC
+         ORDER BY vp.last_seen DESC
          LIMIT ?3 OFFSET ?4"
     } else {
         "SELECT vp.id, vp.broadcaster_channel_id, vp.channel_id, vp.display_name,
@@ -520,7 +500,7 @@ pub fn get_viewers_for_broadcaster(
          FROM viewer_profiles vp
          LEFT JOIN viewer_custom_info vci ON vp.id = vci.viewer_profile_id
          WHERE vp.broadcaster_channel_id = ?1
-         ORDER BY vp.message_count DESC
+         ORDER BY vp.last_seen DESC
          LIMIT ?3 OFFSET ?4"
     };
 

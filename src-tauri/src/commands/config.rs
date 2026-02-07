@@ -69,21 +69,11 @@ impl Default for UiConfig {
 
 /// Chat display configuration section
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ChatDisplayConfig {
-    #[serde(default = "default_font_size")]
     pub message_font_size: u32,
-    #[serde(default = "default_true")]
     pub show_timestamps: bool,
-    #[serde(default = "default_true")]
     pub auto_scroll_enabled: bool,
-}
-
-fn default_font_size() -> u32 {
-    13
-}
-
-fn default_true() -> bool {
-    true
 }
 
 impl Default for ChatDisplayConfig {

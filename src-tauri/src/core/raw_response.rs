@@ -124,17 +124,24 @@ impl RawResponseSaver {
         Ok(())
     }
 
-    /// ファイルをローテーション
-    async fn rotate_file(&self) -> Result<()> {
+    /// ファイルのstemとextensionを取得
+    fn file_parts(&self) -> (&str, &str) {
         let file_path = Path::new(&self.config.file_path);
-        let file_stem = file_path
+        let stem = file_path
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("raw_responses");
-        let file_ext = file_path
+        let ext = file_path
             .extension()
             .and_then(|s| s.to_str())
             .unwrap_or("ndjson");
+        (stem, ext)
+    }
+
+    /// ファイルをローテーション
+    async fn rotate_file(&self) -> Result<()> {
+        let file_path = Path::new(&self.config.file_path);
+        let (file_stem, file_ext) = self.file_parts();
 
         let now = Utc::now();
         let timestamp = now.format("%Y%m%d_%H%M%S");
@@ -166,14 +173,7 @@ impl RawResponseSaver {
     async fn cleanup_old_backups(&self) -> Result<()> {
         let file_path = Path::new(&self.config.file_path);
         let dir = file_path.parent().unwrap_or_else(|| Path::new("."));
-        let file_stem = file_path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("raw_responses");
-        let file_ext = file_path
-            .extension()
-            .and_then(|s| s.to_str())
-            .unwrap_or("ndjson");
+        let (file_stem, file_ext) = self.file_parts();
 
         // ディレクトリ内のバックアップファイルを検索
         let mut backup_files = Vec::new();

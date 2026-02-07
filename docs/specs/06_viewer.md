@@ -24,7 +24,7 @@
 | `viewer_custom_info` | 視聴者のカスタム情報（読み仮名、メモ等） |
 | `broadcaster_profiles` | 配信者情報 |
 
-すべて `%APPDATA%/liscov/liscov.db` (SQLite) に保存。
+すべて `%APPDATA%/liscov-tauri/liscov.db` (SQLite) に保存。
 
 ## データモデル
 

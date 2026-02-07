@@ -28,7 +28,7 @@ export interface RevenueAnalytics {
 export interface ContributorInfo {
   channel_id: string;
   display_name: string;
-  contribution_count: number;
+  super_chat_count: number;
   highest_tier: SuperChatTier | null;
 }
 

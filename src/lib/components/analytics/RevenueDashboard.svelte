@@ -146,7 +146,7 @@
                   Sticker
                 </span>
               {/if}
-              <span class="text-[var(--text-muted)] text-sm">({contributor.contribution_count}x)</span>
+              <span class="text-[var(--text-muted)] text-sm">({contributor.super_chat_count}x)</span>
             </div>
           {/each}
         </div>

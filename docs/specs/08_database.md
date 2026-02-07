@@ -8,9 +8,9 @@
 
 | ファイル | パス |
 |---------|------|
-| liscov.db | `%APPDATA%/liscov/liscov.db` |
+| liscov.db | `%APPDATA%/liscov-tauri/liscov.db` |
 
-> **Note**: ディレクトリ名 `liscov` は環境変数 `LISCOV_APP_NAME` で変更可能（E2Eテスト用）。詳細は[認証機能仕様のE2Eテストセクション](01_auth.md#e2eテスト)を参照。
+> **Note**: ディレクトリ名 `liscov-tauri` は環境変数 `LISCOV_APP_NAME` で変更可能（E2Eテスト用）。詳細は[認証機能仕様のE2Eテストセクション](01_auth.md#e2eテスト)を参照。
 
 ## バックエンドコマンド
 
@@ -195,6 +195,8 @@ CREATE TABLE broadcaster_profiles (
 
 ### hourly_stats テーブル
 
+> **Status**: 未実装。スキーマ定義・CRUD操作ともにデータベースモジュールに未追加。
+
 ```sql
 CREATE TABLE hourly_stats (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -213,6 +215,8 @@ CREATE INDEX idx_hourly_stats_session ON hourly_stats(session_id);
 ```
 
 ### contributor_stats テーブル
+
+> **Status**: 未実装。スキーマ定義・CRUD操作ともにデータベースモジュールに未追加。
 
 ```sql
 CREATE TABLE contributor_stats (

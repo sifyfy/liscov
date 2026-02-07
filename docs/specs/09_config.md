@@ -10,11 +10,11 @@
 
 | OS | パス |
 |----|------|
-| Windows | `%APPDATA%/liscov/config.toml` |
-| macOS | `~/Library/Application Support/liscov/config.toml` |
-| Linux | `~/.config/liscov/config.toml` |
+| Windows | `%APPDATA%/liscov-tauri/config.toml` |
+| macOS | `~/Library/Application Support/liscov-tauri/config.toml` |
+| Linux | `~/.config/liscov-tauri/config.toml` |
 
-> **Note**: ディレクトリ名 `liscov` は環境変数 `LISCOV_APP_NAME` で変更可能（E2Eテスト用）。詳細は[認証機能仕様のE2Eテストセクション](01_auth.md#e2eテスト)を参照。
+> **Note**: ディレクトリ名 `liscov-tauri` は環境変数 `LISCOV_APP_NAME` で変更可能（E2Eテスト用）。詳細は[認証機能仕様のE2Eテストセクション](01_auth.md#e2eテスト)を参照。
 
 ### ファイル形式
 
@@ -28,6 +28,9 @@ mode = "secure"  # "secure" or "fallback"
 message_font_size = 13
 show_timestamps = true
 auto_scroll_enabled = true
+
+[ui]
+theme = "dark"  # "dark" or "light"
 ```
 
 ## 設定項目
@@ -50,6 +53,14 @@ auto_scroll_enabled = true
 | `show_timestamps` | boolean | `true` | - | タイムスタンプ表示 |
 | `auto_scroll_enabled` | boolean | `true` | - | 自動スクロール有効 |
 
+### ui セクション
+
+UIの表示に関する設定。
+
+| キー | 型 | デフォルト | 説明 |
+|-----|-----|----------|------|
+| `theme` | string | `"dark"` | テーマ（`dark` / `light`） |
+
 ## バックエンドコマンド
 
 | コマンド | 入力 | 出力 | 説明 |
@@ -65,6 +76,7 @@ auto_scroll_enabled = true
 pub struct Config {
     pub storage: StorageConfig,
     pub chat_display: ChatDisplayConfig,
+    pub ui: UiConfig,
 }
 
 pub struct StorageConfig {
@@ -75,6 +87,15 @@ pub struct ChatDisplayConfig {
     pub message_font_size: u32,
     pub show_timestamps: bool,
     pub auto_scroll_enabled: bool,
+}
+
+pub enum Theme {
+    Dark,
+    Light,
+}
+
+pub struct UiConfig {
+    pub theme: Theme,
 }
 ```
 

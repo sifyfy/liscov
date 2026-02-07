@@ -130,7 +130,7 @@ Windows資格情報マネージャーにアクセスできません。
 | 状況 | 動作 |
 |-----|------|
 | セキュアストレージが利用可能 | Credential Managerに保存 |
-| セキュアストレージが利用不可 | `%APPDATA%/liscov/credentials.toml`に保存（警告をログ出力） |
+| セキュアストレージが利用不可 | `%APPDATA%/liscov-tauri/credentials.toml`に保存（警告をログ出力） |
 
 ## 認証ウィンドウ仕様
 
