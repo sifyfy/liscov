@@ -325,3 +325,309 @@ impl Default for TtsManager {
         Self::new(config)
     }
 }
+
+// ============================================================================
+// Pure helper functions for TTS text generation (04_tts.md)
+// ============================================================================
+
+/// Process author name: strip @prefix, strip handle suffix, add honorific
+pub(crate) fn process_author_name(
+    name: &str,
+    strip_at: bool,
+    strip_handle: bool,
+    honorific: bool,
+) -> String {
+    let mut result = name.to_string();
+
+    if strip_at && result.starts_with('@') {
+        result = result[1..].to_string();
+    }
+
+    if strip_handle {
+        if let Some(pos) = result.find(" @") {
+            result = result[..pos].to_string();
+        }
+    }
+
+    if honorific {
+        result.push_str("さん");
+    }
+
+    result
+}
+
+/// Truncate text to max_length (by chars), appending "、以下省略" if truncated
+pub(crate) fn truncate_text(text: &str, max_length: usize) -> String {
+    if text.chars().count() > max_length {
+        let mut truncated: String = text.chars().take(max_length).collect();
+        truncated.push_str("、以下省略");
+        truncated
+    } else {
+        text.to_string()
+    }
+}
+
+/// Build complete TTS text from parts
+pub(crate) fn build_tts_text(
+    author_name: Option<&str>,
+    amount: Option<&str>,
+    message: &str,
+    read_author_name: bool,
+    strip_at_prefix: bool,
+    strip_handle_suffix: bool,
+    add_honorific: bool,
+    read_superchat_amount: bool,
+    max_text_length: usize,
+) -> String {
+    let mut parts = Vec::new();
+
+    if read_author_name {
+        if let Some(author) = author_name {
+            parts.push(process_author_name(
+                author,
+                strip_at_prefix,
+                strip_handle_suffix,
+                add_honorific,
+            ));
+        }
+    }
+
+    if read_superchat_amount {
+        if let Some(amt) = amount {
+            parts.push(format!("{}の", amt));
+        }
+    }
+
+    parts.push(truncate_text(message, max_text_length));
+
+    parts.join("、")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ========================================================================
+    // process_author_name (04_tts.md: 投稿者名処理)
+    // ========================================================================
+
+    #[test]
+    fn author_name_all_options_on() {
+        // spec: @田中-abc → 田中-abcさん (strip_at + honorific)
+        assert_eq!(
+            process_author_name("@田中-abc", true, true, true),
+            "田中-abcさん"
+        );
+    }
+
+    #[test]
+    fn author_name_strip_at_only() {
+        assert_eq!(
+            process_author_name("@田中", true, false, false),
+            "田中"
+        );
+    }
+
+    #[test]
+    fn author_name_no_at_prefix() {
+        assert_eq!(
+            process_author_name("田中", true, true, true),
+            "田中さん"
+        );
+    }
+
+    #[test]
+    fn author_name_strip_handle_suffix() {
+        // spec: "名前 @handle" → "名前"
+        assert_eq!(
+            process_author_name("名前 @handle", false, true, false),
+            "名前"
+        );
+    }
+
+    #[test]
+    fn author_name_strip_at_false() {
+        // spec: strip_at_prefix=false → @は残る
+        assert_eq!(
+            process_author_name("@田中", false, false, true),
+            "@田中さん"
+        );
+    }
+
+    #[test]
+    fn author_name_honorific_false() {
+        assert_eq!(
+            process_author_name("田中", true, true, false),
+            "田中"
+        );
+    }
+
+    #[test]
+    fn author_name_all_options_off() {
+        assert_eq!(
+            process_author_name("@user @handle", false, false, false),
+            "@user @handle"
+        );
+    }
+
+    #[test]
+    fn author_name_yamada_with_honorific() {
+        // spec: "山田みな子" → "山田みな子さん"
+        assert_eq!(
+            process_author_name("山田みな子", true, true, true),
+            "山田みな子さん"
+        );
+    }
+
+    // ========================================================================
+    // truncate_text (04_tts.md: テキスト切り詰め)
+    // ========================================================================
+
+    #[test]
+    fn truncate_within_limit() {
+        assert_eq!(truncate_text("こんにちは", 200), "こんにちは");
+    }
+
+    #[test]
+    fn truncate_at_exact_limit() {
+        let text: String = "あ".repeat(200);
+        assert_eq!(truncate_text(&text, 200), text);
+    }
+
+    #[test]
+    fn truncate_exceeding_limit() {
+        let text: String = "あ".repeat(201);
+        let expected: String = "あ".repeat(200) + "、以下省略";
+        assert_eq!(truncate_text(&text, 200), expected);
+    }
+
+    #[test]
+    fn truncate_empty() {
+        assert_eq!(truncate_text("", 200), "");
+    }
+
+    // ========================================================================
+    // build_tts_text (04_tts.md: 完全なTTSテキスト生成)
+    // ========================================================================
+
+    #[test]
+    fn build_text_full_superchat() {
+        // spec: "田中さん、¥500の、こんにちは"
+        let result = build_tts_text(
+            Some("田中"),
+            Some("¥500"),
+            "こんにちは",
+            true,  // read_author_name
+            true,  // strip_at
+            true,  // strip_handle
+            true,  // add_honorific
+            true,  // read_superchat_amount
+            200,   // max_text_length
+        );
+        assert_eq!(result, "田中さん、¥500の、こんにちは");
+    }
+
+    #[test]
+    fn build_text_no_author() {
+        let result = build_tts_text(
+            None,
+            None,
+            "こんにちは",
+            true, true, true, true, true, 200,
+        );
+        assert_eq!(result, "こんにちは");
+    }
+
+    #[test]
+    fn build_text_author_name_disabled() {
+        let result = build_tts_text(
+            Some("田中"),
+            None,
+            "こんにちは",
+            false, // read_author_name disabled
+            true, true, true, true, 200,
+        );
+        assert_eq!(result, "こんにちは");
+    }
+
+    #[test]
+    fn build_text_amount_disabled() {
+        let result = build_tts_text(
+            Some("田中"),
+            Some("¥500"),
+            "テスト",
+            true, true, true, true,
+            false, // read_superchat_amount disabled
+            200,
+        );
+        assert_eq!(result, "田中さん、テスト");
+    }
+
+    #[test]
+    fn build_text_with_at_prefix_author() {
+        let result = build_tts_text(
+            Some("@user123"),
+            None,
+            "hello",
+            true, true, true, true, true, 200,
+        );
+        assert_eq!(result, "user123さん、hello");
+    }
+
+    // ========================================================================
+    // TtsConfig defaults (04_tts.md: 設定デフォルト値)
+    // ========================================================================
+
+    #[test]
+    fn tts_config_defaults() {
+        let config = TtsConfig::default();
+        assert!(!config.enabled);
+        assert_eq!(config.backend, TtsBackendType::None);
+        assert!(config.read_author_name);
+        assert!(config.add_honorific);
+        assert!(config.strip_at_prefix);
+        assert!(config.strip_handle_suffix);
+        assert!(config.read_superchat_amount);
+        assert_eq!(config.max_text_length, 200);
+        assert_eq!(config.queue_size_limit, 50);
+    }
+
+    #[test]
+    fn bouyomichan_config_defaults() {
+        let config = BouyomichanConfig::default();
+        assert_eq!(config.host, "localhost");
+        assert_eq!(config.port, 50080);
+        assert_eq!(config.voice, 0);
+        assert_eq!(config.volume, -1);
+        assert_eq!(config.speed, -1);
+        assert_eq!(config.tone, -1);
+        assert!(!config.auto_launch);
+        assert!(config.exe_path.is_none());
+        assert!(config.auto_close);
+    }
+
+    #[test]
+    fn voicevox_config_defaults() {
+        let config = VoicevoxConfig::default();
+        assert_eq!(config.host, "localhost");
+        assert_eq!(config.port, 50021);
+        assert_eq!(config.speaker_id, 1);
+        assert_eq!(config.volume_scale, 1.0);
+        assert_eq!(config.speed_scale, 1.0);
+        assert_eq!(config.pitch_scale, 0.0);
+        assert_eq!(config.intonation_scale, 1.0);
+        assert!(!config.auto_launch);
+        assert!(config.exe_path.is_none());
+        assert!(config.auto_close);
+    }
+
+    // ========================================================================
+    // TtsPriority ordering (04_tts.md: 優先度)
+    // ========================================================================
+
+    #[test]
+    fn priority_ordering() {
+        assert!(TtsPriority::Normal < TtsPriority::Membership);
+        assert!(TtsPriority::Membership < TtsPriority::SuperChat);
+    }
+}

@@ -244,3 +244,226 @@ impl RawResponseSaver {
         self.config.enabled
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+
+    fn temp_dir_for_test(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join("liscov_test_raw_response").join(name);
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    // ========================================================================
+    // SaveConfig defaults (05_raw_response.md: デフォルト値)
+    // ========================================================================
+
+    #[test]
+    fn save_config_default_values() {
+        let config = SaveConfig::default();
+        assert!(!config.enabled);
+        assert_eq!(config.file_path, "raw_responses.ndjson");
+        assert_eq!(config.max_file_size_mb, 100);
+        assert!(config.enable_rotation);
+        assert_eq!(config.max_backup_files, 5);
+    }
+
+    // ========================================================================
+    // RawResponseSaver basics (05_raw_response.md)
+    // ========================================================================
+
+    #[test]
+    fn saver_new_and_is_enabled() {
+        let saver = RawResponseSaver::new(SaveConfig::default());
+        assert!(!saver.is_enabled());
+
+        let saver = RawResponseSaver::new(SaveConfig {
+            enabled: true,
+            ..SaveConfig::default()
+        });
+        assert!(saver.is_enabled());
+    }
+
+    #[test]
+    fn saver_update_config() {
+        let mut saver = RawResponseSaver::new(SaveConfig::default());
+        assert!(!saver.is_enabled());
+
+        saver.update_config(SaveConfig {
+            enabled: true,
+            ..SaveConfig::default()
+        });
+        assert!(saver.is_enabled());
+    }
+
+    // ========================================================================
+    // save_response (05_raw_response.md: レスポンス保存)
+    // ========================================================================
+
+    #[tokio::test]
+    async fn save_response_disabled_does_nothing() {
+        let dir = temp_dir_for_test("disabled");
+        let file_path = dir.join("test.ndjson");
+
+        let saver = RawResponseSaver::new(SaveConfig {
+            enabled: false,
+            file_path: file_path.to_string_lossy().to_string(),
+            ..SaveConfig::default()
+        });
+
+        saver.save_response(r#"{"test": true}"#).await.unwrap();
+        assert!(!file_path.exists());
+    }
+
+    #[tokio::test]
+    async fn save_response_enabled_creates_ndjson() {
+        let dir = temp_dir_for_test("enabled");
+        let file_path = dir.join("test.ndjson");
+
+        let saver = RawResponseSaver::new(SaveConfig {
+            enabled: true,
+            file_path: file_path.to_string_lossy().to_string(),
+            enable_rotation: false,
+            ..SaveConfig::default()
+        });
+
+        saver.save_response(r#"{"actions": []}"#).await.unwrap();
+
+        assert!(file_path.exists());
+        let content = fs::read_to_string(&file_path).unwrap();
+        let line: serde_json::Value = serde_json::from_str(content.trim()).unwrap();
+        assert!(line.get("timestamp").is_some());
+        assert!(line.get("response").is_some());
+    }
+
+    #[tokio::test]
+    async fn save_response_appends_multiple_lines() {
+        let dir = temp_dir_for_test("append");
+        let file_path = dir.join("test.ndjson");
+
+        let saver = RawResponseSaver::new(SaveConfig {
+            enabled: true,
+            file_path: file_path.to_string_lossy().to_string(),
+            enable_rotation: false,
+            ..SaveConfig::default()
+        });
+
+        saver.save_response(r#"{"msg": 1}"#).await.unwrap();
+        saver.save_response(r#"{"msg": 2}"#).await.unwrap();
+        saver.save_response(r#"{"msg": 3}"#).await.unwrap();
+
+        assert_eq!(saver.get_saved_response_count().unwrap(), 3);
+    }
+
+    // ========================================================================
+    // get_saved_response_count (05_raw_response.md)
+    // ========================================================================
+
+    #[test]
+    fn count_nonexistent_file_returns_zero() {
+        let saver = RawResponseSaver::new(SaveConfig {
+            file_path: "/nonexistent/path/test.ndjson".to_string(),
+            ..SaveConfig::default()
+        });
+        assert_eq!(saver.get_saved_response_count().unwrap(), 0);
+    }
+
+    // ========================================================================
+    // File rotation (05_raw_response.md: ファイルローテーション)
+    // ========================================================================
+
+    #[tokio::test]
+    async fn rotation_renames_file_when_size_exceeded() {
+        let dir = temp_dir_for_test("rotation");
+        let file_path = dir.join("responses.ndjson");
+
+        // Create a file that exceeds the size limit (1 MB)
+        {
+            let mut file = fs::File::create(&file_path).unwrap();
+            // Write > 1 MB of data
+            let line = "x".repeat(1024);
+            for _ in 0..1100 {
+                writeln!(file, "{}", line).unwrap();
+            }
+        }
+
+        let saver = RawResponseSaver::new(SaveConfig {
+            enabled: true,
+            file_path: file_path.to_string_lossy().to_string(),
+            max_file_size_mb: 1, // 1 MB limit
+            enable_rotation: true,
+            max_backup_files: 5,
+        });
+
+        saver.save_response(r#"{"new": true}"#).await.unwrap();
+
+        // Original file should be recreated (small size now)
+        assert!(file_path.exists());
+        let new_content = fs::read_to_string(&file_path).unwrap();
+        assert!(new_content.contains("\"new\""));
+
+        // A backup file should exist
+        let backup_files: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                name.starts_with("responses_") && name.ends_with(".ndjson")
+            })
+            .collect();
+        assert_eq!(backup_files.len(), 1);
+    }
+
+    // ========================================================================
+    // Backup cleanup (05_raw_response.md: 古いバックアップ削除)
+    // ========================================================================
+
+    #[tokio::test]
+    async fn cleanup_removes_old_backups() {
+        let dir = temp_dir_for_test("cleanup");
+        let file_path = dir.join("responses.ndjson");
+
+        // Create old backup files
+        for i in 0..5 {
+            let backup_name = format!("responses_20250101_{:06}.ndjson", i);
+            fs::write(dir.join(&backup_name), "old data").unwrap();
+            // Small delay to ensure different creation times
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+
+        // Create a large file to trigger rotation
+        {
+            let mut file = fs::File::create(&file_path).unwrap();
+            let line = "x".repeat(1024);
+            for _ in 0..1100 {
+                writeln!(file, "{}", line).unwrap();
+            }
+        }
+
+        let saver = RawResponseSaver::new(SaveConfig {
+            enabled: true,
+            file_path: file_path.to_string_lossy().to_string(),
+            max_file_size_mb: 1,
+            enable_rotation: true,
+            max_backup_files: 3, // Only keep 3 backups
+        });
+
+        saver.save_response(r#"{"test": true}"#).await.unwrap();
+
+        // Count backup files (should be max 3)
+        let backup_count = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                name.starts_with("responses_") && name.ends_with(".ndjson")
+            })
+            .count();
+
+        assert!(backup_count <= 3, "Expected at most 3 backups, got {}", backup_count);
+    }
+}

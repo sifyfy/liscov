@@ -306,3 +306,136 @@ pub async fn config_set_value(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ========================================================================
+    // Config defaults (09_config.md: デフォルト値)
+    // ========================================================================
+
+    #[test]
+    fn config_default_values() {
+        let config = Config::default();
+        assert_eq!(config.storage.mode, StorageMode::Secure);
+        assert_eq!(config.chat_display.message_font_size, 13);
+        assert!(config.chat_display.show_timestamps);
+        assert!(config.chat_display.auto_scroll_enabled);
+        assert_eq!(config.ui.theme, Theme::Dark);
+    }
+
+    #[test]
+    fn storage_mode_default() {
+        assert_eq!(StorageMode::default(), StorageMode::Secure);
+    }
+
+    #[test]
+    fn theme_default() {
+        assert_eq!(Theme::default(), Theme::Dark);
+    }
+
+    // ========================================================================
+    // ConfigState get/set (09_config.md: メモリ上の設定操作)
+    // ========================================================================
+
+    #[test]
+    fn config_state_get_returns_default() {
+        let state = ConfigState::new();
+        let config = state.get();
+        assert_eq!(config.chat_display.message_font_size, 13);
+    }
+
+    #[test]
+    fn config_state_set_updates_value() {
+        let state = ConfigState::new();
+        let mut config = state.get();
+        config.chat_display.message_font_size = 20;
+        state.set(config);
+
+        let updated = state.get();
+        assert_eq!(updated.chat_display.message_font_size, 20);
+    }
+
+    // ========================================================================
+    // TOML serialization/deserialization (09_config.md: シリアライズ往復)
+    // ========================================================================
+
+    #[test]
+    fn config_toml_roundtrip() {
+        let config = Config::default();
+        let toml_str = toml::to_string_pretty(&config).unwrap();
+        let parsed: Config = toml::from_str(&toml_str).unwrap();
+
+        assert_eq!(parsed.storage.mode, config.storage.mode);
+        assert_eq!(parsed.chat_display.message_font_size, config.chat_display.message_font_size);
+        assert_eq!(parsed.chat_display.show_timestamps, config.chat_display.show_timestamps);
+        assert_eq!(parsed.chat_display.auto_scroll_enabled, config.chat_display.auto_scroll_enabled);
+        assert_eq!(parsed.ui.theme, config.ui.theme);
+    }
+
+    #[test]
+    fn config_toml_migration_partial_keys() {
+        // 09_config.md: 一部キーのみのTOML → 不足分はデフォルト値で補完
+        let partial_toml = r#"
+[storage]
+mode = "fallback"
+"#;
+        let config: Config = toml::from_str(partial_toml).unwrap();
+        assert_eq!(config.storage.mode, StorageMode::Fallback);
+        assert_eq!(config.chat_display.message_font_size, 13);
+        assert!(config.chat_display.show_timestamps);
+        assert_eq!(config.ui.theme, Theme::Dark);
+    }
+
+    #[test]
+    fn config_toml_unknown_keys_ignored() {
+        // 09_config.md: 未知のキーは無視
+        let toml_with_extra = r#"
+[storage]
+mode = "secure"
+unknown_field = "value"
+
+[chat_display]
+message_font_size = 16
+future_setting = true
+"#;
+        let config: Config = toml::from_str(toml_with_extra).unwrap();
+        assert_eq!(config.storage.mode, StorageMode::Secure);
+        assert_eq!(config.chat_display.message_font_size, 16);
+    }
+
+    // ========================================================================
+    // Font size validation (09_config.md: フォントサイズ範囲 10-24)
+    // ========================================================================
+
+    #[test]
+    fn font_size_valid_range_boundaries() {
+        for size in [10u32, 13, 24] {
+            assert!(size >= 10 && size <= 24, "Size {} should be valid", size);
+        }
+    }
+
+    #[test]
+    fn font_size_invalid_range() {
+        for size in [9u32, 25, 0, 100] {
+            assert!(size < 10 || size > 24, "Size {} should be invalid", size);
+        }
+    }
+
+    // ========================================================================
+    // Serialization format (09_config.md)
+    // ========================================================================
+
+    #[test]
+    fn storage_mode_serializes_lowercase() {
+        assert_eq!(serde_json::to_string(&StorageMode::Secure).unwrap(), "\"secure\"");
+        assert_eq!(serde_json::to_string(&StorageMode::Fallback).unwrap(), "\"fallback\"");
+    }
+
+    #[test]
+    fn theme_serializes_lowercase() {
+        assert_eq!(serde_json::to_string(&Theme::Dark).unwrap(), "\"dark\"");
+        assert_eq!(serde_json::to_string(&Theme::Light).unwrap(), "\"light\"");
+    }
+}

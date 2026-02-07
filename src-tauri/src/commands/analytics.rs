@@ -168,12 +168,12 @@ fn determine_tier_from_color(header_color: &str) -> SuperChatTier {
     // Try to parse as hex color and determine tier
     // YouTube uses specific color ranges for tiers
     match color.as_str() {
+        // Orange tier (check before Red to avoid starts_with("e6") false positive on e65100)
+        c if c.contains("ff5722") || c.contains("e65100") || c.contains("f57c00") => SuperChatTier::Orange,
         // Red tier (highest)
         c if c.contains("e62117") || c.contains("ff0000") || c.starts_with("e6") => SuperChatTier::Red,
         // Magenta tier
         c if c.contains("e91e63") || c.contains("c2185b") => SuperChatTier::Magenta,
-        // Orange tier
-        c if c.contains("ff5722") || c.contains("e65100") || c.contains("f57c00") => SuperChatTier::Orange,
         // Yellow tier
         c if c.contains("ffb300") || c.contains("ffca28") || c.contains("ffc107") => SuperChatTier::Yellow,
         // Green tier
@@ -696,4 +696,387 @@ fn export_to_csv(data: &SessionExportData, config: &ExportConfig) -> Result<Stri
     }
 
     Ok(csv)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ========================================================================
+    // determine_tier_from_color (07_revenue.md: Tier判定 - 色ベース)
+    // ========================================================================
+
+    #[test]
+    fn tier_from_color_red() {
+        assert_eq!(determine_tier_from_color("#e62117"), SuperChatTier::Red);
+        assert_eq!(determine_tier_from_color("ff0000"), SuperChatTier::Red);
+        assert_eq!(determine_tier_from_color("e6abcd"), SuperChatTier::Red); // starts_with("e6")
+    }
+
+    #[test]
+    fn tier_from_color_magenta() {
+        assert_eq!(determine_tier_from_color("e91e63"), SuperChatTier::Magenta);
+        assert_eq!(determine_tier_from_color("#c2185b"), SuperChatTier::Magenta);
+    }
+
+    #[test]
+    fn tier_from_color_orange() {
+        assert_eq!(determine_tier_from_color("ff5722"), SuperChatTier::Orange);
+        assert_eq!(determine_tier_from_color("e65100"), SuperChatTier::Orange);
+        assert_eq!(determine_tier_from_color("f57c00"), SuperChatTier::Orange);
+    }
+
+    #[test]
+    fn tier_from_color_yellow() {
+        assert_eq!(determine_tier_from_color("ffb300"), SuperChatTier::Yellow);
+        assert_eq!(determine_tier_from_color("ffca28"), SuperChatTier::Yellow);
+        assert_eq!(determine_tier_from_color("ffc107"), SuperChatTier::Yellow);
+    }
+
+    #[test]
+    fn tier_from_color_green() {
+        assert_eq!(determine_tier_from_color("00e676"), SuperChatTier::Green);
+        assert_eq!(determine_tier_from_color("1de9b6"), SuperChatTier::Green);
+        assert_eq!(determine_tier_from_color("00c853"), SuperChatTier::Green);
+    }
+
+    #[test]
+    fn tier_from_color_cyan() {
+        assert_eq!(determine_tier_from_color("00bcd4"), SuperChatTier::Cyan);
+        assert_eq!(determine_tier_from_color("00b8d4"), SuperChatTier::Cyan);
+        assert_eq!(determine_tier_from_color("00acc1"), SuperChatTier::Cyan);
+    }
+
+    #[test]
+    fn tier_from_color_blue_default() {
+        assert_eq!(determine_tier_from_color("1565c0"), SuperChatTier::Blue);
+        assert_eq!(determine_tier_from_color("unknown"), SuperChatTier::Blue);
+        assert_eq!(determine_tier_from_color(""), SuperChatTier::Blue);
+    }
+
+    #[test]
+    fn tier_from_color_case_insensitive() {
+        assert_eq!(determine_tier_from_color("E62117"), SuperChatTier::Red);
+        assert_eq!(determine_tier_from_color("#E91E63"), SuperChatTier::Magenta);
+    }
+
+    // ========================================================================
+    // determine_tier_from_amount (07_revenue.md: Tier判定 - 金額ベース)
+    // ========================================================================
+
+    #[test]
+    fn tier_from_amount_red() {
+        assert_eq!(determine_tier_from_amount("$200.00"), SuperChatTier::Red);
+        assert_eq!(determine_tier_from_amount("¥10000"), SuperChatTier::Red); // 10000 >= 100
+    }
+
+    #[test]
+    fn tier_from_amount_magenta() {
+        assert_eq!(determine_tier_from_amount("$75.00"), SuperChatTier::Magenta);
+        assert_eq!(determine_tier_from_amount("$50.00"), SuperChatTier::Magenta);
+    }
+
+    #[test]
+    fn tier_from_amount_orange() {
+        assert_eq!(determine_tier_from_amount("$30.00"), SuperChatTier::Orange);
+        assert_eq!(determine_tier_from_amount("$20.00"), SuperChatTier::Orange);
+    }
+
+    #[test]
+    fn tier_from_amount_yellow() {
+        assert_eq!(determine_tier_from_amount("$15.00"), SuperChatTier::Yellow);
+        assert_eq!(determine_tier_from_amount("$10.00"), SuperChatTier::Yellow);
+    }
+
+    #[test]
+    fn tier_from_amount_green() {
+        assert_eq!(determine_tier_from_amount("$7.00"), SuperChatTier::Green);
+        assert_eq!(determine_tier_from_amount("$5.00"), SuperChatTier::Green);
+    }
+
+    #[test]
+    fn tier_from_amount_cyan() {
+        assert_eq!(determine_tier_from_amount("$3.00"), SuperChatTier::Cyan);
+        assert_eq!(determine_tier_from_amount("$2.00"), SuperChatTier::Cyan);
+    }
+
+    #[test]
+    fn tier_from_amount_blue() {
+        assert_eq!(determine_tier_from_amount("$1.00"), SuperChatTier::Blue);
+        assert_eq!(determine_tier_from_amount("$0.50"), SuperChatTier::Blue);
+    }
+
+    #[test]
+    fn tier_from_amount_unparseable() {
+        assert_eq!(determine_tier_from_amount(""), SuperChatTier::Blue);
+        assert_eq!(determine_tier_from_amount("free"), SuperChatTier::Blue);
+    }
+
+    // ========================================================================
+    // parse_amount_value (07_revenue.md: 金額パース)
+    // ========================================================================
+
+    #[test]
+    fn parse_amount_value_usd() {
+        assert_eq!(parse_amount_value("$10.00"), Some(10.0));
+    }
+
+    #[test]
+    fn parse_amount_value_yen() {
+        assert_eq!(parse_amount_value("¥1000"), Some(1000.0));
+    }
+
+    #[test]
+    fn parse_amount_value_euro() {
+        // ',' is filtered out by parse_amount_value since it only keeps digits and '.'
+        assert_eq!(parse_amount_value("€5.50"), Some(5.5));
+    }
+
+    #[test]
+    fn parse_amount_value_empty() {
+        assert_eq!(parse_amount_value(""), None);
+    }
+
+    #[test]
+    fn parse_amount_value_no_digits() {
+        assert_eq!(parse_amount_value("$"), None);
+    }
+
+    // ========================================================================
+    // SuperChatTierStats (07_revenue.md: Tier統計)
+    // ========================================================================
+
+    #[test]
+    fn tier_stats_increment_and_total() {
+        let mut stats = SuperChatTierStats::default();
+        assert_eq!(stats.total(), 0);
+
+        stats.increment(SuperChatTier::Red);
+        stats.increment(SuperChatTier::Red);
+        stats.increment(SuperChatTier::Blue);
+        stats.increment(SuperChatTier::Yellow);
+
+        assert_eq!(stats.tier_red, 2);
+        assert_eq!(stats.tier_blue, 1);
+        assert_eq!(stats.tier_yellow, 1);
+        assert_eq!(stats.total(), 4);
+    }
+
+    #[test]
+    fn tier_stats_default_all_zero() {
+        let stats = SuperChatTierStats::default();
+        assert_eq!(stats.tier_red, 0);
+        assert_eq!(stats.tier_magenta, 0);
+        assert_eq!(stats.tier_orange, 0);
+        assert_eq!(stats.tier_yellow, 0);
+        assert_eq!(stats.tier_green, 0);
+        assert_eq!(stats.tier_cyan, 0);
+        assert_eq!(stats.tier_blue, 0);
+        assert_eq!(stats.total(), 0);
+    }
+
+    // ========================================================================
+    // export_to_csv (07_revenue.md: CSVエクスポート)
+    // ========================================================================
+
+    fn make_test_export_data() -> SessionExportData {
+        SessionExportData {
+            metadata: SessionMetadata {
+                session_id: "test-session-1".to_string(),
+                stream_title: Some("Test Stream".to_string()),
+                stream_url: Some("https://youtube.com/watch?v=test".to_string()),
+                broadcaster_name: Some("TestChannel".to_string()),
+                broadcaster_channel_id: Some("UC_test".to_string()),
+                start_time: "2025-01-14T14:00:00Z".to_string(),
+                end_time: Some("2025-01-14T16:00:00Z".to_string()),
+                export_time: "2025-01-14T17:00:00Z".to_string(),
+            },
+            messages: vec![
+                ExportMessage {
+                    id: "msg1".to_string(),
+                    timestamp: "14:00:01".to_string(),
+                    author: "User1".to_string(),
+                    author_id: "UC_user1".to_string(),
+                    content: "Hello".to_string(),
+                    message_type: "text".to_string(),
+                    amount_display: None,
+                    tier: None,
+                    is_moderator: false,
+                    is_member: false,
+                    is_verified: false,
+                    badges: vec![],
+                },
+                ExportMessage {
+                    id: "msg2".to_string(),
+                    timestamp: "14:00:05".to_string(),
+                    author: "User2".to_string(),
+                    author_id: "UC_user2".to_string(),
+                    content: "Super Chat!".to_string(),
+                    message_type: "superchat".to_string(),
+                    amount_display: Some("$10.00".to_string()),
+                    tier: Some(SuperChatTier::Yellow),
+                    is_moderator: false,
+                    is_member: true,
+                    is_verified: false,
+                    badges: vec!["member".to_string()],
+                },
+            ],
+            statistics: SessionStatistics {
+                total_messages: 2,
+                unique_viewers: 2,
+                super_chat_count: 1,
+                super_chat_by_tier: SuperChatTierStats::default(),
+                membership_count: 0,
+            },
+        }
+    }
+
+    #[test]
+    fn csv_export_with_metadata() {
+        let data = make_test_export_data();
+        let config = ExportConfig {
+            format: "csv".to_string(),
+            include_metadata: true,
+            include_system_messages: false,
+            max_records: None,
+            sort_order: None,
+        };
+
+        let csv = export_to_csv(&data, &config).unwrap();
+
+        assert!(csv.starts_with("# Metadata\n"));
+        assert!(csv.contains("# Session ID,test-session-1"));
+        assert!(csv.contains("# Stream Title,Test Stream"));
+        assert!(csv.contains("# Channel,TestChannel"));
+        assert!(csv.contains("# Total Messages,2"));
+        assert!(csv.contains("# Unique Viewers,2"));
+        assert!(csv.contains("# SuperChat Count,1"));
+        assert!(csv.contains("id,timestamp,author,author_id,content,message_type,amount_display,tier,is_moderator,is_member,is_verified,badges\n"));
+        assert!(csv.contains("\"msg1\""));
+        assert!(csv.contains("\"msg2\""));
+    }
+
+    #[test]
+    fn csv_export_without_metadata() {
+        let data = make_test_export_data();
+        let config = ExportConfig {
+            format: "csv".to_string(),
+            include_metadata: false,
+            include_system_messages: false,
+            max_records: None,
+            sort_order: None,
+        };
+
+        let csv = export_to_csv(&data, &config).unwrap();
+
+        assert!(!csv.contains("# Metadata"));
+        assert!(csv.starts_with("id,timestamp,"));
+    }
+
+    #[test]
+    fn csv_export_header_matches_spec() {
+        let data = make_test_export_data();
+        let config = ExportConfig {
+            format: "csv".to_string(),
+            include_metadata: false,
+            include_system_messages: false,
+            max_records: None,
+            sort_order: None,
+        };
+
+        let csv = export_to_csv(&data, &config).unwrap();
+        let header_line = csv.lines().next().unwrap();
+        assert_eq!(
+            header_line,
+            "id,timestamp,author,author_id,content,message_type,amount_display,tier,is_moderator,is_member,is_verified,badges"
+        );
+    }
+
+    #[test]
+    fn csv_export_superchat_row_has_tier() {
+        let data = make_test_export_data();
+        let config = ExportConfig {
+            format: "csv".to_string(),
+            include_metadata: false,
+            include_system_messages: false,
+            max_records: None,
+            sort_order: None,
+        };
+
+        let csv = export_to_csv(&data, &config).unwrap();
+        let superchat_line = csv.lines().find(|l| l.contains("msg2")).unwrap();
+        assert!(superchat_line.contains("yellow"));
+        assert!(superchat_line.contains("$10.00"));
+    }
+
+    // ========================================================================
+    // export_to_json (07_revenue.md: JSONエクスポート)
+    // ========================================================================
+
+    #[test]
+    fn json_export_with_metadata() {
+        let data = make_test_export_data();
+        let config = ExportConfig {
+            format: "json".to_string(),
+            include_metadata: true,
+            include_system_messages: false,
+            max_records: None,
+            sort_order: None,
+        };
+
+        let json = export_to_json(&data, &config).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert!(parsed.get("metadata").is_some());
+        assert!(parsed.get("messages").is_some());
+        assert!(parsed.get("statistics").is_some());
+        assert_eq!(parsed["metadata"]["session_id"], "test-session-1");
+    }
+
+    #[test]
+    fn json_export_without_metadata_returns_messages_only() {
+        let data = make_test_export_data();
+        let config = ExportConfig {
+            format: "json".to_string(),
+            include_metadata: false,
+            include_system_messages: false,
+            max_records: None,
+            sort_order: None,
+        };
+
+        let json = export_to_json(&data, &config).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert!(parsed.is_array());
+        assert_eq!(parsed.as_array().unwrap().len(), 2);
+    }
+
+    // ========================================================================
+    // RevenueAnalytics default (07_revenue.md)
+    // ========================================================================
+
+    #[test]
+    fn revenue_analytics_default() {
+        let analytics = RevenueAnalytics::default();
+        assert_eq!(analytics.super_chat_count, 0);
+        assert_eq!(analytics.super_sticker_count, 0);
+        assert_eq!(analytics.membership_gains, 0);
+        assert!(analytics.hourly_stats.is_empty());
+        assert!(analytics.top_contributors.is_empty());
+        assert_eq!(analytics.super_chat_by_tier.total(), 0);
+    }
+
+    // ========================================================================
+    // SuperChatTier ordering (07_revenue.md: Blue < ... < Red)
+    // ========================================================================
+
+    #[test]
+    fn tier_ordering() {
+        assert!(SuperChatTier::Blue < SuperChatTier::Cyan);
+        assert!(SuperChatTier::Cyan < SuperChatTier::Green);
+        assert!(SuperChatTier::Green < SuperChatTier::Yellow);
+        assert!(SuperChatTier::Yellow < SuperChatTier::Orange);
+        assert!(SuperChatTier::Orange < SuperChatTier::Magenta);
+        assert!(SuperChatTier::Magenta < SuperChatTier::Red);
+    }
 }

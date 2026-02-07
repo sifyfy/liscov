@@ -684,6 +684,50 @@ fn parse_amount(amount: Option<&str>) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::models::{ChatMessage, MessageType};
+    use crate::database::Database;
+
+    fn setup_db() -> Database {
+        Database::new_in_memory().expect("Failed to create in-memory database")
+    }
+
+    fn make_text_message(id: &str, author: &str, channel_id: &str, content: &str) -> ChatMessage {
+        ChatMessage {
+            id: id.to_string(),
+            timestamp: "12:00:00".to_string(),
+            timestamp_usec: "1000000".to_string(),
+            message_type: MessageType::Text,
+            author: author.to_string(),
+            author_icon_url: None,
+            channel_id: channel_id.to_string(),
+            content: content.to_string(),
+            runs: vec![],
+            metadata: None,
+            is_member: false,
+            comment_count: None,
+        }
+    }
+
+    fn make_superchat_message(id: &str, author: &str, channel_id: &str, amount: &str) -> ChatMessage {
+        ChatMessage {
+            id: id.to_string(),
+            timestamp: "12:00:00".to_string(),
+            timestamp_usec: "1000000".to_string(),
+            message_type: MessageType::SuperChat { amount: amount.to_string() },
+            author: author.to_string(),
+            author_icon_url: None,
+            channel_id: channel_id.to_string(),
+            content: "スパチャ".to_string(),
+            runs: vec![],
+            metadata: None,
+            is_member: false,
+            comment_count: None,
+        }
+    }
+
+    // ========================================================================
+    // parse_amount (08_database.md: 金額パース)
+    // ========================================================================
 
     #[test]
     fn test_parse_amount() {
@@ -692,5 +736,294 @@ mod tests {
         assert_eq!(parse_amount(Some("€5,50")), Some(5.5));
         assert_eq!(parse_amount(Some("R$ 1.234,56")), Some(1234.56));
         assert_eq!(parse_amount(None), None);
+    }
+
+    // ========================================================================
+    // Session CRUD (08_database.md: セッション管理)
+    // ========================================================================
+
+    #[tokio::test]
+    async fn session_create_returns_uuid() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let id = create_session(&conn, Some("https://youtube.com/watch?v=test"), Some("Test Stream"), Some("UC_broadcaster"), Some("Broadcaster")).unwrap();
+
+        // UUID v4 format: 8-4-4-4-12
+        assert_eq!(id.len(), 36);
+        assert_eq!(id.chars().filter(|c| *c == '-').count(), 4);
+    }
+
+    #[tokio::test]
+    async fn session_create_sets_start_time() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let id = create_session(&conn, Some("https://youtube.com"), Some("Title"), None, None).unwrap();
+
+        let session = get_session(&conn, &id).unwrap().unwrap();
+        assert!(!session.start_time.is_empty());
+        assert!(session.end_time.is_none());
+    }
+
+    #[tokio::test]
+    async fn session_end_sets_end_time() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let id = create_session(&conn, None, None, None, None).unwrap();
+
+        end_session(&conn, &id).unwrap();
+
+        let session = get_session(&conn, &id).unwrap().unwrap();
+        assert!(session.end_time.is_some());
+    }
+
+    #[tokio::test]
+    async fn sessions_list_sorted_desc_with_limit() {
+        let db = setup_db();
+        let conn = db.connection().await;
+
+        let _id1 = create_session(&conn, None, Some("First"), None, None).unwrap();
+        let _id2 = create_session(&conn, None, Some("Second"), None, None).unwrap();
+        let id3 = create_session(&conn, None, Some("Third"), None, None).unwrap();
+
+        // limit=2 should return only 2 most recent
+        let sessions = get_sessions(&conn, 2).unwrap();
+        assert_eq!(sessions.len(), 2);
+        assert_eq!(sessions[0].id, id3); // most recent first
+    }
+
+    // ========================================================================
+    // Message Operations (08_database.md: メッセージ保存)
+    // ========================================================================
+
+    #[tokio::test]
+    async fn message_save_and_retrieve() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+
+        let msg = make_text_message("msg1", "User1", "UC_user1", "Hello");
+        save_message(&conn, &session_id, Some("UC_bc"), &msg).unwrap();
+
+        let messages = get_session_messages(&conn, &session_id, 100).unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].message_id, "msg1");
+        assert_eq!(messages[0].author, "User1");
+        assert_eq!(messages[0].content, "Hello");
+        assert_eq!(messages[0].message_type, "text");
+    }
+
+    #[tokio::test]
+    async fn message_deduplication() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let session_id = create_session(&conn, None, None, None, None).unwrap();
+
+        let msg = make_text_message("dup_msg", "User", "UC_user", "Content");
+        save_message(&conn, &session_id, None, &msg).unwrap();
+        // INSERT OR IGNORE should not fail on duplicate
+        save_message(&conn, &session_id, None, &msg).unwrap();
+
+        let messages = get_session_messages(&conn, &session_id, 100).unwrap();
+        assert_eq!(messages.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn messages_filtered_by_session() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let session1 = create_session(&conn, None, None, None, None).unwrap();
+        let session2 = create_session(&conn, None, None, None, None).unwrap();
+
+        save_message(&conn, &session1, None, &make_text_message("m1", "A", "UC_a", "msg1")).unwrap();
+        save_message(&conn, &session2, None, &make_text_message("m2", "B", "UC_b", "msg2")).unwrap();
+
+        let msgs1 = get_session_messages(&conn, &session1, 100).unwrap();
+        let msgs2 = get_session_messages(&conn, &session2, 100).unwrap();
+
+        assert_eq!(msgs1.len(), 1);
+        assert_eq!(msgs1[0].message_id, "m1");
+        assert_eq!(msgs2.len(), 1);
+        assert_eq!(msgs2[0].message_id, "m2");
+    }
+
+    #[tokio::test]
+    async fn messages_limit() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let session_id = create_session(&conn, None, None, None, None).unwrap();
+
+        for i in 0..5 {
+            let msg = make_text_message(&format!("m{}", i), "User", "UC_u", &format!("msg{}", i));
+            save_message(&conn, &session_id, None, &msg).unwrap();
+        }
+
+        let messages = get_session_messages(&conn, &session_id, 3).unwrap();
+        assert_eq!(messages.len(), 3);
+    }
+
+    // ========================================================================
+    // Viewer Profile (06_viewer.md + 08_database.md: 視聴者プロフィール)
+    // ========================================================================
+
+    #[tokio::test]
+    async fn viewer_profile_created_on_first_message() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+
+        let msg = make_text_message("m1", "Viewer1", "UC_viewer1", "hi");
+        save_message(&conn, &session_id, Some("UC_bc"), &msg).unwrap();
+
+        let profile = get_viewer_profile(&conn, "UC_bc", "UC_viewer1").unwrap().unwrap();
+        assert_eq!(profile.display_name, "Viewer1");
+        assert_eq!(profile.message_count, 1);
+        assert_eq!(profile.total_contribution, 0.0);
+    }
+
+    #[tokio::test]
+    async fn viewer_profile_updated_on_subsequent_messages() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+
+        let msg1 = make_text_message("m1", "Viewer1", "UC_v1", "first");
+        save_message(&conn, &session_id, Some("UC_bc"), &msg1).unwrap();
+
+        let msg2 = make_text_message("m2", "Viewer1", "UC_v1", "second");
+        save_message(&conn, &session_id, Some("UC_bc"), &msg2).unwrap();
+
+        let profile = get_viewer_profile(&conn, "UC_bc", "UC_v1").unwrap().unwrap();
+        assert_eq!(profile.message_count, 2);
+    }
+
+    #[tokio::test]
+    async fn viewer_contribution_incremented_on_superchat() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+
+        let sc = make_superchat_message("sc1", "BigFan", "UC_fan", "$50.00");
+        save_message(&conn, &session_id, Some("UC_bc"), &sc).unwrap();
+
+        let profile = get_viewer_profile(&conn, "UC_bc", "UC_fan").unwrap().unwrap();
+        assert_eq!(profile.message_count, 1);
+        assert!(profile.total_contribution > 0.0);
+    }
+
+    // ========================================================================
+    // Broadcaster Scoping (06_viewer.md: 配信者別スコープ)
+    // ========================================================================
+
+    #[tokio::test]
+    async fn viewer_scoped_per_broadcaster() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let s1 = create_session(&conn, None, None, Some("UC_bcA"), Some("BroadcasterA")).unwrap();
+        let s2 = create_session(&conn, None, None, Some("UC_bcB"), Some("BroadcasterB")).unwrap();
+
+        // Same viewer on different broadcasters
+        save_message(&conn, &s1, Some("UC_bcA"), &make_text_message("m1", "CommonViewer", "UC_common", "hi")).unwrap();
+        save_message(&conn, &s1, Some("UC_bcA"), &make_text_message("m2", "CommonViewer", "UC_common", "hello")).unwrap();
+        save_message(&conn, &s2, Some("UC_bcB"), &make_text_message("m3", "CommonViewer", "UC_common", "hey")).unwrap();
+
+        let profile_a = get_viewer_profile(&conn, "UC_bcA", "UC_common").unwrap().unwrap();
+        let profile_b = get_viewer_profile(&conn, "UC_bcB", "UC_common").unwrap().unwrap();
+
+        assert_eq!(profile_a.message_count, 2);
+        assert_eq!(profile_b.message_count, 1);
+    }
+
+    // ========================================================================
+    // Viewer Custom Info (06_viewer.md: カスタム情報)
+    // ========================================================================
+
+    #[tokio::test]
+    async fn viewer_custom_info_upsert_and_retrieve() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "User", "UC_u", "hi")).unwrap();
+        let profile = get_viewer_profile(&conn, "UC_bc", "UC_u").unwrap().unwrap();
+
+        let info = ViewerCustomInfo::new(profile.id)
+            .with_reading("やまだ たろう")
+            .with_notes("常連さん");
+        upsert_viewer_custom_info(&conn, &info).unwrap();
+
+        let loaded = get_viewer_custom_info(&conn, profile.id).unwrap().unwrap();
+        assert_eq!(loaded.reading.as_deref(), Some("やまだ たろう"));
+        assert_eq!(loaded.notes.as_deref(), Some("常連さん"));
+    }
+
+    #[tokio::test]
+    async fn viewer_custom_info_cascade_delete() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "User", "UC_u", "hi")).unwrap();
+        let profile = get_viewer_profile(&conn, "UC_bc", "UC_u").unwrap().unwrap();
+
+        let info = ViewerCustomInfo::new(profile.id).with_reading("test");
+        upsert_viewer_custom_info(&conn, &info).unwrap();
+
+        // Delete viewer profile → custom info should be cascade deleted
+        delete_viewer_profile(&conn, profile.id).unwrap();
+
+        let loaded = get_viewer_custom_info(&conn, profile.id).unwrap();
+        assert!(loaded.is_none());
+    }
+
+    // ========================================================================
+    // Broadcaster Operations (06_viewer.md: 配信者管理)
+    // ========================================================================
+
+    #[tokio::test]
+    async fn broadcaster_profile_created_with_session() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        create_session(&conn, None, None, Some("UC_test_bc"), Some("TestBroadcaster")).unwrap();
+
+        let profile = get_broadcaster_profile(&conn, "UC_test_bc").unwrap().unwrap();
+        assert_eq!(profile.channel_name.as_deref(), Some("TestBroadcaster"));
+    }
+
+    #[tokio::test]
+    async fn delete_broadcaster_cascades() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "V1", "UC_v1", "hi")).unwrap();
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m2", "V2", "UC_v2", "hello")).unwrap();
+
+        let (deleted, viewer_count) = delete_broadcaster(&conn, "UC_bc").unwrap();
+        assert!(deleted);
+        assert_eq!(viewer_count, 2);
+
+        // Viewers should be gone
+        let profile = get_viewer_profile(&conn, "UC_bc", "UC_v1").unwrap();
+        assert!(profile.is_none());
+    }
+
+    // ========================================================================
+    // Session Stats Update (08_database.md: 統計更新)
+    // ========================================================================
+
+    #[tokio::test]
+    async fn session_stats_updated() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let session_id = create_session(&conn, None, None, None, None).unwrap();
+
+        save_message(&conn, &session_id, None, &make_text_message("m1", "U", "UC_u", "hi")).unwrap();
+        save_message(&conn, &session_id, None, &make_superchat_message("sc1", "U", "UC_u", "$10.00")).unwrap();
+
+        update_session_stats(&conn, &session_id).unwrap();
+
+        let session = get_session(&conn, &session_id).unwrap().unwrap();
+        assert_eq!(session.total_messages, 2);
+        assert!(session.total_revenue > 0.0);
     }
 }
