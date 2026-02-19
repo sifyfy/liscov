@@ -26,6 +26,9 @@ importers:
       '@tauri-apps/plugin-shell':
         specifier: ^2.3.4
         version: 2.3.4
+      virtua:
+        specifier: ^0.48.6
+        version: 0.48.6(svelte@5.46.3)
     devDependencies:
       '@playwright/test':
         specifier: ^1.57.0
@@ -1186,6 +1189,26 @@ packages:
   undici-types@7.16.0:
     resolution: {integrity: sha512-Zz+aZWSj8LE6zoxD+xrjh4VfkIG8Ya6LvYkZqtUQGJPZjYl53ypCaUwWqo7eI0x66KBGeRo+mlBEkMSeSZ38Nw==}
 
+  virtua@0.48.6:
+    resolution: {integrity: sha512-Cl4uMvMV5c9RuOy9zhkFMYwx/V4YLBMYLRSWkO8J46opQZ3P7KMq0CqCVOOAKUckjl/r//D2jWTBGYWzmgtzrQ==}
+    peerDependencies:
+      react: '>=16.14.0'
+      react-dom: '>=16.14.0'
+      solid-js: '>=1.0'
+      svelte: '>=5.0'
+      vue: '>=3.2'
+    peerDependenciesMeta:
+      react:
+        optional: true
+      react-dom:
+        optional: true
+      solid-js:
+        optional: true
+      svelte:
+        optional: true
+      vue:
+        optional: true
+
   vite@7.3.1:
     resolution: {integrity: sha512-w+N7Hifpc3gRjZ63vYBXA56dvvRlNWRczTdmCBBa+CotUzAPf5b7YMdMR/8CQoeYE5LX3W4wj6RYTgonm1b9DA==}
     engines: {node: ^20.19.0 || >=22.12.0}
@@ -2229,6 +2252,10 @@ snapshots:
   typescript@5.9.3: {}
 
   undici-types@7.16.0: {}
+
+  virtua@0.48.6(svelte@5.46.3):
+    optionalDependencies:
+      svelte: 5.46.3
 
   vite@7.3.1(@types/node@25.0.7)(jiti@2.6.1)(lightningcss@1.30.2):
     dependencies:

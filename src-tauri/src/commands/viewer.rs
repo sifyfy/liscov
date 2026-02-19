@@ -176,6 +176,22 @@ pub async fn viewer_search(
     Ok(viewers.into_iter().map(GuiViewerWithInfo::from).collect())
 }
 
+/// Get viewer custom info by viewer_profile_id (direct DB lookup, no list scan)
+#[tauri::command]
+pub async fn viewer_get_custom_info(
+    state: State<'_, AppState>,
+    viewer_profile_id: i64,
+) -> Result<Option<ViewerCustomInfo>, String> {
+    let db_guard = state.database.read().await;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| "Database not initialized".to_string())?;
+
+    let conn = db.connection().await;
+    database::get_viewer_custom_info(&conn, viewer_profile_id)
+        .map_err(|e| format!("Failed to get viewer custom info: {}", e))
+}
+
 /// Upsert viewer custom info
 #[tauri::command]
 pub async fn viewer_upsert_custom_info(

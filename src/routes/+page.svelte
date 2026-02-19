@@ -102,7 +102,8 @@
 
   <!-- Main content area -->
   <main class="flex-1 flex flex-col overflow-hidden">
-    {#if activeTab === 'chat'}
+    <!-- Chat tab: CSS display:none to preserve VList (avoid remount cost) -->
+    <div style:display={activeTab === 'chat' ? 'flex' : 'none'} class="flex-1 flex flex-col overflow-hidden">
       <div class="bg-[var(--bg-surface-1)] border-b" style="border-color: var(--border-subtle);">
         <InputSection />
       </div>
@@ -110,7 +111,8 @@
       <div class="flex-1 overflow-hidden">
         <ChatDisplay />
       </div>
-    {:else if activeTab === 'viewers'}
+    </div>
+    {#if activeTab === 'viewers'}
       <div class="flex-1 p-4 bg-[var(--bg-base)] overflow-y-auto">
         <ViewerManagement broadcasterId={broadcasterId || undefined} />
       </div>

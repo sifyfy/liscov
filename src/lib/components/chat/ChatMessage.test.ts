@@ -1,15 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { render } from '@testing-library/svelte';
 import ChatMessage from './ChatMessage.svelte';
 import type { ChatMessage as ChatMessageType } from '$lib/types';
-
-// Mock chatStore
-vi.mock('$lib/stores', () => ({
-	chatStore: {
-		messageFontSize: 13,
-		showTimestamps: false,
-	},
-}));
 
 function createMessage(overrides: Partial<ChatMessageType> = {}): ChatMessageType {
 	return {
@@ -53,7 +45,7 @@ describe('ChatMessage', () => {
 				},
 			});
 
-			const { container } = render(ChatMessage, { props: { message } });
+			const { container } = render(ChatMessage, { props: { message, fontSize: 13, showTimestamps: false } });
 			const textElement = container.querySelector('.mt-1.ml-8 p') as HTMLElement;
 
 			// jsdom converts hex to rgb
@@ -81,7 +73,7 @@ describe('ChatMessage', () => {
 				},
 			});
 
-			const { container } = render(ChatMessage, { props: { message } });
+			const { container } = render(ChatMessage, { props: { message, fontSize: 13, showTimestamps: false } });
 			const textElement = container.querySelector('.mt-1.ml-8 p') as HTMLElement;
 
 			// jsdom converts hex to rgb
@@ -91,7 +83,7 @@ describe('ChatMessage', () => {
 		it('通常メッセージはデフォルトのCSS変数テキスト色を使用する', () => {
 			const message = createMessage({ message_type: 'text' });
 
-			const { container } = render(ChatMessage, { props: { message } });
+			const { container } = render(ChatMessage, { props: { message, fontSize: 13, showTimestamps: false } });
 			const textElement = container.querySelector('.mt-1.ml-8 p') as HTMLElement;
 
 			expect(textElement.style.color).toBe('var(--text-secondary)');
@@ -118,7 +110,7 @@ describe('ChatMessage', () => {
 				},
 			});
 
-			const { container } = render(ChatMessage, { props: { message } });
+			const { container } = render(ChatMessage, { props: { message, fontSize: 13, showTimestamps: false } });
 			const metadataRow = container.querySelector('.flex.items-center.gap-2') as HTMLElement;
 
 			expect(metadataRow.classList.contains('bg-[var(--bg-surface-2)]/80')).toBe(true);
@@ -127,7 +119,7 @@ describe('ChatMessage', () => {
 		it('通常メッセージのメタデータ行には白背景を適用しない', () => {
 			const message = createMessage({ message_type: 'text' });
 
-			const { container } = render(ChatMessage, { props: { message } });
+			const { container } = render(ChatMessage, { props: { message, fontSize: 13, showTimestamps: false } });
 			const metadataRow = container.querySelector('.flex.items-center.gap-2') as HTMLElement;
 
 			expect(metadataRow.classList.contains('bg-[var(--bg-surface-2)]/80')).toBe(false);
@@ -149,7 +141,7 @@ describe('ChatMessage', () => {
 				},
 			});
 
-			const { container } = render(ChatMessage, { props: { message } });
+			const { container } = render(ChatMessage, { props: { message, fontSize: 13, showTimestamps: false } });
 			const textElement = container.querySelector('.mt-1.ml-8 p') as HTMLElement;
 
 			expect(textElement.style.color).toBe('var(--text-secondary)');

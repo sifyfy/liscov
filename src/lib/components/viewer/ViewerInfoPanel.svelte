@@ -41,36 +41,27 @@
 
   async function loadCustomInfo(bc: string, vc: string) {
     try {
-      // Use viewer_get_profile to get viewer profile including id
       const profile = await invoke<{
         id: number;
-        reading?: string | null;
-        notes?: string | null;
       } | null>('viewer_get_profile', {
         broadcasterId: bc,
         channelId: vc
       });
       if (profile) {
         viewerProfileId = profile.id;
-        // viewer_get_profile doesn't include reading/notes, need to get from viewer_get_list
-        // For now, try to load from the full list
-        const viewers = await invoke<Array<{
-          id: number;
+        // Direct DB lookup by viewer_profile_id (O(1) instead of scanning 1000 viewers)
+        const customInfo = await invoke<{
           reading: string | null;
           notes: string | null;
-        }>>('viewer_get_list', {
-          broadcasterId: bc,
-          searchQuery: null,
-          limit: 1000,
-          offset: 0
+        } | null>('viewer_get_custom_info', {
+          viewerProfileId: profile.id
         });
-        const viewerInfo = viewers.find(v => v.id === profile.id);
-        if (viewerInfo) {
-          if (viewerInfo.reading !== null) {
-            reading = viewerInfo.reading;
+        if (customInfo) {
+          if (customInfo.reading !== null) {
+            reading = customInfo.reading;
           }
-          if (viewerInfo.notes !== null) {
-            notes = viewerInfo.notes;
+          if (customInfo.notes !== null) {
+            notes = customInfo.notes;
           }
         }
       }
@@ -104,9 +95,9 @@
     }
   }
 
-  // Get viewer's messages
+  // Get viewer's messages (O(1) lookup via channel index)
   let viewerMessages = $derived(
-    chatStore.messages.filter(m => m.channel_id === viewer.channelId)
+    chatStore.getMessagesForChannel(viewer.channelId)
   );
 
   function formatMessageType(msg: ChatMessage): { text: string; style: string } | null {

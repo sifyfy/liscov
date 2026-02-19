@@ -29,6 +29,8 @@ let filter = $state<ChatFilter>({
   searchQuery: ''
 });
 
+// Performance constants
+
 // Chat display settings
 const MIN_FONT_SIZE = 10;
 const MAX_FONT_SIZE = 24;
@@ -39,8 +41,22 @@ let autoScroll = $state(true);
 let displayLimit = $state<number | null>(null);
 let scrollToLatestTrigger = $state(0); // Increment to trigger scroll
 
-// Derived state: filtered messages
+// Duplicate check set for O(1) lookup
+let messageIds = new Set<string>();
+
+// Channel ID index for O(1) viewer message lookup
+let messagesByChannel = new Map<string, ChatMessage[]>();
+
+// Fast-path: skip O(n) filter when all types shown and no search query
+let isDefaultFilter = $derived(
+  filter.showText && filter.showSuperchat && filter.showMembership && !filter.searchQuery
+);
+
+// Derived state: filtered messages (all matching messages, used for count display)
 let filteredMessages = $derived.by(() => {
+  if (isDefaultFilter) {
+    return messages; // O(1): return reference directly
+  }
   return messages.filter((msg) => {
     // Filter by message type
     if (!filter.showText && msg.message_type === 'text') return false;
@@ -67,6 +83,14 @@ let filteredMessages = $derived.by(() => {
   });
 });
 
+// Derived state: displayed messages (displayLimit applied, used for rendering)
+let displayedMessages = $derived.by(() => {
+  if (displayLimit !== null) {
+    return filteredMessages.slice(-displayLimit);
+  }
+  return filteredMessages;
+});
+
 // Actions
 async function connect(url: string, mode?: ChatMode): Promise<ConnectionResult> {
   connectionState = 'connecting';
@@ -83,6 +107,8 @@ async function connect(url: string, mode?: ChatMode): Promise<ConnectionResult> 
       streamUrl = url;
       isReplay = result.is_replay;
       messages = [];
+      messageIds.clear();
+      messagesByChannel.clear();
     } else {
       connectionState = 'error';
       error = result.error;
@@ -183,6 +209,8 @@ async function initialize(): Promise<void> {
     streamUrl = null;
     isReplay = false;
     messages = [];
+    messageIds.clear();
+    messagesByChannel.clear();
     error = null;
   }
 }
@@ -203,6 +231,9 @@ function setFilter(newFilter: Partial<ChatFilter>): void {
 
 function clearMessages(): void {
   messages = [];
+  messageIds.clear();
+  messagesByChannel.clear();
+  pendingMessages = [];
 }
 
 // Message batching for high-volume streams
@@ -213,17 +244,22 @@ const BATCH_DELAY_MS = 50; // Batch messages within 50ms window
 function flushPendingMessages(): void {
   if (pendingMessages.length === 0) return;
 
-  messages = [...messages, ...pendingMessages];
+  for (const msg of pendingMessages) {
+    messageIds.add(msg.id);
+    // Update channel index
+    const arr = messagesByChannel.get(msg.channel_id);
+    if (arr) arr.push(msg);
+    else messagesByChannel.set(msg.channel_id, [msg]);
+  }
+  messages.push(...pendingMessages);
   pendingMessages = [];
   batchTimeout = null;
+
 }
 
 function addMessage(message: ChatMessage): void {
-  // Skip duplicate IDs (can happen when reconnecting to YouTube)
-  const isDuplicate =
-    messages.some((m) => m.id === message.id) ||
-    pendingMessages.some((m) => m.id === message.id);
-  if (isDuplicate) {
+  // O(1) duplicate check using Set
+  if (messageIds.has(message.id) || pendingMessages.some((m) => m.id === message.id)) {
     return;
   }
 
@@ -264,6 +300,10 @@ function scrollToLatest(): void {
 
 function setDisplayLimit(limit: number | null): void {
   displayLimit = limit;
+}
+
+function getMessagesForChannel(channelId: string): ChatMessage[] {
+  return messagesByChannel.get(channelId) || [];
 }
 
 // Event listener setup
@@ -343,6 +383,9 @@ export const chatStore = {
   get filteredMessages() {
     return filteredMessages;
   },
+  get displayedMessages() {
+    return displayedMessages;
+  },
   get isConnected() {
     return isConnected;
   },
@@ -408,6 +451,7 @@ export const chatStore = {
   setAutoScroll,
   scrollToLatest,
   setDisplayLimit,
+  getMessagesForChannel,
   setupEventListeners,
   cleanup,
   initDisplaySettings

@@ -1,10 +1,11 @@
 <script lang="ts">
   import { chatStore } from '$lib/stores';
+  import { VList, type VListHandle } from 'virtua/svelte';
   import ChatMessageComponent from './ChatMessage.svelte';
   import { ViewerInfoPanel } from '$lib/components/viewer';
   import type { ChatMessage } from '$lib/types';
 
-  let chatContainer: HTMLDivElement;
+  let vlist = $state<VListHandle | undefined>();
 
   // Auto-scroll is now controlled by chatStore (synced with FilterPanel)
   let autoScrollEnabled = $derived(chatStore.autoScroll);
@@ -23,56 +24,30 @@
   // Highlighted message ID (for scroll-to feature)
   let highlightedMessageId = $state<string | null>(null);
 
-  // Debounce timer for auto-scroll
-  let scrollDebounceTimeout: ReturnType<typeof setTimeout> | null = null;
+  // Props passed to ChatMessage (avoid per-component $derived)
+  let fontSize = $derived(chatStore.messageFontSize);
+  let showTimestamps = $derived(chatStore.showTimestamps);
 
-  // Reliable scroll to bottom with retry
-  function scrollToBottom() {
-    if (!chatContainer) return;
-
-    // Use multiple attempts to ensure scroll completes after DOM update
-    const doScroll = () => {
-      if (chatContainer) {
-        chatContainer.scrollTop = chatContainer.scrollHeight;
-      }
-    };
-
-    // First attempt: immediate
-    doScroll();
-
-    // Second attempt: after next frame (DOM update)
-    requestAnimationFrame(() => {
-      doScroll();
-      // Third attempt: after a short delay for images/dynamic content
-      setTimeout(doScroll, 50);
-    });
-  }
-
-  // Auto-scroll when new messages arrive (controlled by checkbox only)
-  // Debounced to prevent UI freeze from rapid message arrivals
+  // Auto-scroll when new messages arrive
   $effect(() => {
-    const messages = chatStore.filteredMessages;
-    // Skip auto-scroll if suppressed or disabled by checkbox
-    if (suppressAutoScroll || !autoScrollEnabled || !chatContainer || messages.length === 0) {
+    const msgs = chatStore.displayedMessages;
+    if (suppressAutoScroll || !autoScrollEnabled || !vlist || msgs.length === 0) {
       return;
     }
-
-    // Debounce: only scroll 50ms after the last message arrives
-    // The clearTimeout ensures only the last scheduled scroll executes
-    if (scrollDebounceTimeout) {
-      clearTimeout(scrollDebounceTimeout);
-    }
-    scrollDebounceTimeout = setTimeout(() => {
-      scrollToBottom();
-      scrollDebounceTimeout = null;
-    }, 50);
+    // Use queueMicrotask to scroll after virtua processes the new data
+    queueMicrotask(() => {
+      vlist?.scrollToIndex(msgs.length - 1, { align: 'end' });
+    });
   });
 
   // Respond to scrollToLatest trigger from FilterPanel
   $effect(() => {
     const trigger = chatStore.scrollToLatestTrigger;
-    if (trigger > 0) {
-      scrollToBottom();
+    if (trigger > 0 && vlist) {
+      const msgs = chatStore.displayedMessages;
+      if (msgs.length > 0) {
+        vlist.scrollToIndex(msgs.length - 1, { align: 'end' });
+      }
     }
   });
 
@@ -102,57 +77,60 @@
     chatStore.setAutoScroll(false);
     suppressAutoScroll = true;
 
-    // Highlight the message first (so it's visible when scrolled to)
+    // Highlight the message
     highlightedMessageId = message.id;
 
-    // Use requestAnimationFrame to ensure DOM is updated before scrolling
-    requestAnimationFrame(() => {
-      // Scroll to the message in main chat
-      const targetElement = chatContainer?.querySelector(`[data-message-id="${message.id}"]`);
-      if (targetElement) {
-        targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
+    // Find index in displayedMessages and scroll to it
+    const msgs = chatStore.displayedMessages;
+    const targetIndex = msgs.findIndex((m) => m.id === message.id);
+    if (targetIndex !== -1 && vlist) {
+      vlist.scrollToIndex(targetIndex, { align: 'center' });
+    }
 
-      // Re-enable auto-scroll suppression check after scroll animation completes
-      setTimeout(() => {
-        suppressAutoScroll = false;
-      }, 500);
+    // Re-enable auto-scroll suppression check after scroll animation completes
+    setTimeout(() => {
+      suppressAutoScroll = false;
+    }, 500);
 
-      // Clear highlight after 3 seconds
-      setTimeout(() => {
-        highlightedMessageId = null;
-      }, 3000);
-    });
+    // Clear highlight after 3 seconds
+    setTimeout(() => {
+      highlightedMessageId = null;
+    }, 3000);
   }
 </script>
 
 <div class="flex flex-col h-full bg-[var(--bg-surface-1)] relative">
   <!-- Messages -->
-  <div
-    bind:this={chatContainer}
-    class="flex-1 overflow-y-auto p-3 space-y-1"
-    style="font-size: {chatStore.messageFontSize}px;"
-  >
-    {#if chatStore.filteredMessages.length === 0}
-      <div class="flex items-center justify-center h-full">
-        <p class="text-[var(--text-muted)] text-center">
-          {#if chatStore.isConnected}
-            Waiting for messages...
-          {:else}
-            Connect to a stream to see chat messages
-          {/if}
-        </p>
-      </div>
-    {:else}
-      {#each chatStore.filteredMessages as message (message.id)}
-        <ChatMessageComponent
-          {message}
-          highlighted={highlightedMessageId === message.id}
-          onClick={() => handleMessageClick(message)}
-        />
-      {/each}
-    {/if}
-  </div>
+  {#if chatStore.displayedMessages.length === 0}
+    <div class="flex-1 flex items-center justify-center p-3">
+      <p class="text-[var(--text-muted)] text-center">
+        {#if chatStore.isConnected}
+          Waiting for messages...
+        {:else}
+          Connect to a stream to see chat messages
+        {/if}
+      </p>
+    </div>
+  {:else}
+    <VList
+      bind:this={vlist}
+      data={chatStore.displayedMessages}
+      getKey={(item) => item.id}
+      style="flex: 1; overflow-y: auto; padding: 12px; font-size: {fontSize}px;"
+    >
+      {#snippet children(message)}
+        <div class="mb-1">
+          <ChatMessageComponent
+            {message}
+            {fontSize}
+            {showTimestamps}
+            highlighted={highlightedMessageId === message.id}
+            onClick={() => handleMessageClick(message)}
+          />
+        </div>
+      {/snippet}
+    </VList>
+  {/if}
 
   <!-- Viewer Info Panel -->
   {#if selectedViewer && chatStore.broadcasterChannelId}

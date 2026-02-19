@@ -9,6 +9,7 @@
 | コマンド | 入力 | 出力 | 説明 |
 |---------|------|------|------|
 | `viewer_get_list` | `broadcaster_id, search_query?, limit?, offset?` | `Vec<ViewerWithCustomInfo>` | 視聴者リスト取得 |
+| `viewer_get_custom_info` | `viewer_profile_id` | `Option<ViewerCustomInfo>` | カスタム情報取得（単一） |
 | `viewer_upsert_custom_info` | `viewer_profile_id, reading?, notes?, custom_data?` | `()` | カスタム情報保存 |
 | `viewer_get_profile` | `broadcaster_id, channel_id` | `Option<ViewerProfile>` | プロフィール取得 |
 | `viewer_search` | `broadcaster_id, query, limit?` | `Vec<ViewerWithCustomInfo>` | 検索 |

@@ -1,16 +1,15 @@
 <script lang="ts">
-  import type { ChatMessage, MessageRun } from '$lib/types';
-  import { chatStore } from '$lib/stores';
+  import type { ChatMessage } from '$lib/types';
 
   interface Props {
     message: ChatMessage;
+    fontSize: number;
+    showTimestamps: boolean;
     highlighted?: boolean;
     onClick?: () => void;
   }
 
-  let { message, highlighted = false, onClick }: Props = $props();
-  let fontSize = $derived(chatStore.messageFontSize);
-  let showTimestamps = $derived(chatStore.showTimestamps);
+  let { message, fontSize, showTimestamps, highlighted = false, onClick }: Props = $props();
 
   // Get SuperChat colors from metadata or use defaults
   let superchatColors = $derived(() => {
@@ -84,24 +83,20 @@
     }
   });
 
-  // Format timestamp to HH:MM:SS in local timezone
+  // Format timestamp to HH:MM:SS in local timezone (manual format for performance)
   let formattedTime = $derived(() => {
     if (!message.timestamp) {
       return '';
     }
     try {
-      // Parse timestamp (RFC3339/ISO8601 format from backend)
       const date = new Date(message.timestamp);
       if (isNaN(date.getTime())) {
-        // Fallback: return as-is if not parseable
         return message.timestamp;
       }
-      // Convert to local timezone and format as HH:MM:SS
-      return date.toLocaleTimeString('ja-JP', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit'
-      });
+      const h = String(date.getHours()).padStart(2, '0');
+      const m = String(date.getMinutes()).padStart(2, '0');
+      const s = String(date.getSeconds()).padStart(2, '0');
+      return `${h}:${m}:${s}`;
     } catch {
       return message.timestamp;
     }
@@ -154,10 +149,6 @@
     return `#${message.comment_count}`;
   });
 
-  // Check if message has emoji runs
-  function hasEmoji(runs: MessageRun[]): boolean {
-    return runs.some(run => run.type === 'Emoji');
-  }
 </script>
 
 <div

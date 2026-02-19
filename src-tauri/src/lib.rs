@@ -35,7 +35,8 @@ use commands::{
     tts_start, tts_stop, tts_clear_queue, tts_get_status,
     tts_discover_exe, tts_select_exe, tts_launch_backend, tts_kill_backend, tts_get_launch_status,
     // Viewer (spec: 06_viewer.md)
-    viewer_get_profile, viewer_get_list, viewer_search, viewer_upsert_custom_info,
+    viewer_get_profile, viewer_get_list, viewer_search, viewer_get_custom_info,
+    viewer_upsert_custom_info,
     viewer_delete, broadcaster_get_list, broadcaster_delete, get_top_contributors,
     get_viewer_profile, search_viewers, // Backward compatibility aliases
     // Raw Response (spec: 05_raw_response.md)
@@ -168,6 +169,7 @@ pub fn run() {
             viewer_get_profile,
             viewer_get_list,
             viewer_search,
+            viewer_get_custom_info,
             viewer_upsert_custom_info,
             viewer_delete,
             broadcaster_get_list,
