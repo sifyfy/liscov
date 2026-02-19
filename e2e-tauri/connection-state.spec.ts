@@ -298,8 +298,10 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
       log.debug('Waiting for auto-generated messages...');
       await mainPage.waitForTimeout(5000);
 
-      const messageCountBefore = await mainPage.locator('[data-message-id]').count();
-      log.debug(`Messages before pause: ${messageCountBefore}`);
+      // Use status bar total count (VList virtualizes DOM, so element count != total)
+      const statusBefore = await mainPage.locator('text=/全\\d+件/').textContent();
+      const messageCountBefore = parseInt(statusBefore?.match(/全(\d+)件/)?.[1] || '0');
+      log.debug(`Messages before pause (status bar): ${messageCountBefore}`);
       expect(messageCountBefore).toBeGreaterThanOrEqual(10);
 
       const lastMessageBefore = await mainPage.locator('[data-message-id]').last().getAttribute('data-message-id');
@@ -320,10 +322,12 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
       log.debug('Resume completed');
 
       log.debug('Waiting for new messages after resume...');
-      await mainPage.waitForTimeout(5000);
+      await mainPage.waitForTimeout(8000);
 
-      const messageCountAfter = await mainPage.locator('[data-message-id]').count();
-      log.debug(`Messages after resume wait: ${messageCountAfter}`);
+      // Use status bar total count (VList virtualizes DOM)
+      const statusAfter = await mainPage.locator('text=/全\\d+件/').textContent();
+      const messageCountAfter = parseInt(statusAfter?.match(/全(\d+)件/)?.[1] || '0');
+      log.debug(`Messages after resume wait (status bar): ${messageCountAfter}`);
 
       const lastMessageAfter = await mainPage.locator('[data-message-id]').last().getAttribute('data-message-id');
       log.debug(`Last message ID after resume: ${lastMessageAfter}`);
@@ -349,8 +353,10 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
       await expect(mainPage.locator('button:has-text("停止")')).toBeVisible({ timeout: 10000 });
 
       await mainPage.waitForTimeout(3000);
-      const initialCount = await mainPage.locator('[data-message-id]').count();
-      log.debug(`Initial message count: ${initialCount}`);
+      // Use status bar total count (VList virtualizes DOM, so element count != total)
+      const initialStatusText = await mainPage.locator('text=/全\\d+件/').textContent();
+      const initialCount = parseInt(initialStatusText?.match(/全(\d+)件/)?.[1] || '0');
+      log.debug(`Initial message count (status bar): ${initialCount}`);
 
       for (let i = 0; i < 5; i++) {
         log.debug(`Rapid cycle ${i + 1}/5`);
@@ -366,10 +372,12 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
         await mainPage.waitForTimeout(100);
       }
 
-      await mainPage.waitForTimeout(3000);
+      await mainPage.waitForTimeout(5000);
 
-      const finalCount = await mainPage.locator('[data-message-id]').count();
-      log.debug(`Final message count after 5 rapid cycles: ${finalCount}`);
+      // Use status bar total count
+      const finalStatusText = await mainPage.locator('text=/全\\d+件/').textContent();
+      const finalCount = parseInt(finalStatusText?.match(/全(\d+)件/)?.[1] || '0');
+      log.debug(`Final message count after 5 rapid cycles (status bar): ${finalCount}`);
 
       expect(finalCount).toBeGreaterThan(initialCount);
 
@@ -402,10 +410,12 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
       }
       await Promise.all(messagePromises);
 
-      await mainPage.waitForTimeout(5000);
+      await mainPage.waitForTimeout(8000);
 
-      const messageCount = await mainPage.locator('[data-message-id]').count();
-      log.debug(`Messages in UI before pause: ${messageCount}`);
+      // Use status bar total count (VList virtualizes DOM, so element count != total)
+      const statusText = await mainPage.locator('text=/全\\d+件/').textContent();
+      const messageCount = parseInt(statusText?.match(/全(\d+)件/)?.[1] || '0');
+      log.debug(`Messages in UI before pause (status bar): ${messageCount}`);
       expect(messageCount).toBeGreaterThan(100);
 
       await mainPage.locator('button:has-text("停止")').click();

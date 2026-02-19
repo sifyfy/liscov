@@ -217,12 +217,16 @@ test.describe('Analytics Tab Freeze Bug', () => {
     // 3. Wait for data to load
     await expect(mainPage.locator('button:has-text("Refresh")')).toBeVisible({ timeout: 15000 });
 
-    // 4. Verify Top Contributors section renders
-    //    StickerKing (3 contributions) should be listed
+    // 4. Verify Top Contributors section renders without crashing
+    //    StickerKing (3 contributions) and MixedUser should be in the DOM
     //    Even with highest_tier=null, this should render without crashing
-    await expect(mainPage.locator('text=Top Contributors')).toBeVisible({ timeout: 5000 });
-    await expect(mainPage.locator('text=StickerKing')).toBeVisible();
-    await expect(mainPage.locator('text=MixedUser')).toBeVisible();
+    //    Note: Use textContent check instead of toBeVisible because the Analytics tab
+    //    has an overflow-y-auto scroll container and Playwright considers items below
+    //    the scroll viewport as "hidden" even though they are rendered in the DOM
+    const analyticsContainer = mainPage.locator('.overflow-y-auto').filter({ has: mainPage.locator('text=Revenue Analytics') });
+    await expect(analyticsContainer).toContainText('Top Contributors', { timeout: 5000 });
+    await expect(analyticsContainer).toContainText('StickerKing', { timeout: 5000 });
+    await expect(analyticsContainer).toContainText('MixedUser', { timeout: 5000 });
 
     // 5. Cleanup
     await navigateToTab(mainPage, 'Chat');
