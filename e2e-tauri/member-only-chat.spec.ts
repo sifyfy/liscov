@@ -26,20 +26,26 @@ async function setStreamState(state: {
   require_auth?: boolean;
   title?: string;
 }): Promise<void> {
-  await fetch(`${MOCK_SERVER_URL}/set_stream_state`, {
+  const response = await fetch(`${MOCK_SERVER_URL}/set_stream_state`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(state),
   });
+  if (!response.ok) {
+    throw new Error(`Failed to set stream state: ${response.status}`);
+  }
 }
 
 // Helper to set auth state on mock server
 async function setAuthState(state: { session_valid?: boolean }): Promise<void> {
-  await fetch(`${MOCK_SERVER_URL}/set_auth_state`, {
+  const response = await fetch(`${MOCK_SERVER_URL}/set_auth_state`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(state),
   });
+  if (!response.ok) {
+    throw new Error(`Failed to set auth state: ${response.status}`);
+  }
 }
 
 // Helper to fully disconnect and return to idle state
@@ -141,6 +147,44 @@ test.describe('Member-Only Stream Chat Access', () => {
     await expect(
       mainPage.locator('text=メンバー限定コメント'),
     ).toBeVisible();
+
+    await disconnectAndInitialize(mainPage);
+  });
+
+  test('should still connect to normal (non-member-only) stream when authenticated', async () => {
+    // 通常配信（require_auth=false）が認証済みセッションでも正常動作することを確認
+    await setStreamState({
+      member_only: false,
+      require_auth: false,
+      title: '通常配信テスト',
+    });
+
+    // Chat タブへ移動
+    await mainPage.getByRole('button', { name: 'Chat' }).click();
+
+    // ストリームURLを入力して接続
+    const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+    await expect(urlInput).toBeVisible();
+    await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=normal_stream`);
+    await mainPage.locator('button:has-text("開始")').click();
+
+    // 接続成功
+    await expect(
+      mainPage.getByText('通常配信テスト').first(),
+    ).toBeVisible({ timeout: 10000 });
+
+    // メッセージが受信できることを確認
+    await addMockMessage({
+      message_type: 'text',
+      author: 'NormalViewer',
+      content: '通常コメント',
+      channel_id: 'UC_normal_viewer',
+      is_member: false,
+    });
+
+    await expect(mainPage.locator('text=NormalViewer')).toBeVisible({
+      timeout: 5000,
+    });
 
     await disconnectAndInitialize(mainPage);
   });
