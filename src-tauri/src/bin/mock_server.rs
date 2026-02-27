@@ -372,7 +372,10 @@ fn build_routes(state: Arc<ServerState>) -> impl Filter<Extract = impl warp::Rep
     });
 
     let sw = Arc::clone(&state);
-    let watch = warp::path("watch").and(warp::query::<WQ>()).and_then(move |q: WQ| {
+    let watch = warp::path("watch")
+        .and(warp::query::<WQ>())
+        .and(warp::header::optional::<String>("cookie"))
+        .and_then(move |q: WQ, cookie_header: Option<String>| {
         let sw = Arc::clone(&sw);
         async move {
             let delay = {
@@ -384,10 +387,20 @@ fn build_routes(state: Arc<ServerState>) -> impl Filter<Extract = impl warp::Rep
             }
             let vid = q.v.as_deref().unwrap_or(&sw.config.video_id);
             let stream_state = sw.stream_state.lock().unwrap();
+            let require_auth = stream_state.require_auth;
             let title = stream_state.title_override.as_ref().unwrap_or(&sw.config.stream_title);
             let channel_id = stream_state.channel_id_override.as_ref().unwrap_or(&sw.config.channel_id);
             let channel_name = stream_state.channel_name_override.as_ref().unwrap_or(&sw.config.channel_name);
-            Ok::<_, warp::Rejection>(warp::reply::html(gen_html(vid, channel_id, channel_name, title)))
+            let has_auth_cookie = cookie_header
+                .as_deref()
+                .map(|c| c.contains("SAPISID="))
+                .unwrap_or(false);
+            let html = if require_auth && !has_auth_cookie {
+                gen_html_no_chat(vid, channel_id, channel_name, title)
+            } else {
+                gen_html(vid, channel_id, channel_name, title)
+            };
+            Ok::<_, warp::Rejection>(warp::reply::html(html))
         }
     });
     let sa = Arc::clone(&state);
@@ -710,6 +723,13 @@ fn gen_html(_vid: &str, cid: &str, cn: &str, t: &str) -> String {
     let ct = generate_mock_continuation_token(4);
     let title_runs = split_title_into_runs(t);
     let d = json!({"contents":{"twoColumnWatchNextResults":{"results":{"results":{"contents":[{"videoPrimaryInfoRenderer":{"title":{"runs":title_runs}}},{"videoSecondaryInfoRenderer":{"owner":{"videoOwnerRenderer":{"title":{"runs":[{"text":cn}]},"navigationEndpoint":{"browseEndpoint":{"browseId":cid}}}}}}]}},"conversationBar":{"liveChatRenderer":{"continuations":[{"reloadContinuationData":{"continuation":ct}}],"isReplay":false}}}}});
+    format!("<!DOCTYPE html><html><head><title>{}</title></head><body><script>var ytInitialData = {};</script></body></html>", t, serde_json::to_string(&d).unwrap())
+}
+
+/// 認証なし（メンバー限定ストリーム未認証）時のHTML生成 - liveChatRenderer なし
+fn gen_html_no_chat(_vid: &str, cid: &str, cn: &str, t: &str) -> String {
+    let title_runs = split_title_into_runs(t);
+    let d = json!({"contents":{"twoColumnWatchNextResults":{"results":{"results":{"contents":[{"videoPrimaryInfoRenderer":{"title":{"runs":title_runs}}},{"videoSecondaryInfoRenderer":{"owner":{"videoOwnerRenderer":{"title":{"runs":[{"text":cn}]},"navigationEndpoint":{"browseEndpoint":{"browseId":cid}}}}}}]}}}}});
     format!("<!DOCTYPE html><html><head><title>{}</title></head><body><script>var ytInitialData = {};</script></body></html>", t, serde_json::to_string(&d).unwrap())
 }
 
