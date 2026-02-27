@@ -108,11 +108,18 @@ impl InnerTubeClient {
     pub async fn initialize(&mut self) -> Result<ConnectionStatus> {
         let page_url = format!("{}/watch?v={}", get_youtube_base_url(), self.video_id);
 
-        let response = self.http_client
+        let mut request = self.http_client
             .get(&page_url)
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-            .send()
-            .await?;
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
+
+        if let Some(cookies) = &self.auth_cookies {
+            let headers = super::auth::build_auth_headers(cookies);
+            for (key, value) in headers {
+                request = request.header(&key, &value);
+            }
+        }
+
+        let response = request.send().await?;
 
         let html = response.text().await?;
 
