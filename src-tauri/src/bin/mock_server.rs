@@ -529,6 +529,45 @@ fn build_routes(state: Arc<ServerState>) -> impl Filter<Extract = impl warp::Rep
         srs.login_page_visits.store(0, Ordering::SeqCst);
         warp::reply::json(&json!({"status":"ok"}))
     });
+    // InnerTube `next` API endpoint - fallback for member-only streams
+    let snx = Arc::clone(&state);
+    let next_api = warp::path!("youtubei" / "v1" / "next")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::header::optional::<String>("cookie"))
+        .and(warp::body::json())
+        .map(move |auth_header: Option<String>, cookie_header: Option<String>, _body: Value| {
+            let stream_state = snx.stream_state.lock().unwrap();
+            let require_auth = stream_state.require_auth;
+            let title = stream_state.title_override.as_ref().unwrap_or(&snx.config.stream_title).clone();
+            let channel_id = stream_state.channel_id_override.as_ref().unwrap_or(&snx.config.channel_id).clone();
+            let channel_name = stream_state.channel_name_override.as_ref().unwrap_or(&snx.config.channel_name).clone();
+            drop(stream_state);
+
+            // Check SAPISIDHASH authentication
+            let has_sapisidhash = auth_header
+                .as_ref()
+                .map(|h| h.starts_with("SAPISIDHASH "))
+                .unwrap_or(false);
+            let has_cookie = cookie_header
+                .as_ref()
+                .map(|c| c.contains("SAPISID="))
+                .unwrap_or(false);
+
+            if require_auth && (!has_sapisidhash || !has_cookie) {
+                // No auth → return data without liveChatRenderer
+                let title_runs = split_title_into_runs(&title);
+                let data = json!({"contents":{"twoColumnWatchNextResults":{"results":{"results":{"contents":[{"videoPrimaryInfoRenderer":{"title":{"runs":title_runs}}},{"videoSecondaryInfoRenderer":{"owner":{"videoOwnerRenderer":{"title":{"runs":[{"text":&channel_name}]},"navigationEndpoint":{"browseEndpoint":{"browseId":&channel_id}}}}}}]}}}}});
+                warp::reply::json(&data)
+            } else {
+                // Authenticated → return full data with liveChatRenderer
+                let ct = generate_mock_continuation_token(4);
+                let title_runs = split_title_into_runs(&title);
+                let data = json!({"contents":{"twoColumnWatchNextResults":{"results":{"results":{"contents":[{"videoPrimaryInfoRenderer":{"title":{"runs":title_runs}}},{"videoSecondaryInfoRenderer":{"owner":{"videoOwnerRenderer":{"title":{"runs":[{"text":&channel_name}]},"navigationEndpoint":{"browseEndpoint":{"browseId":&channel_id}}}}}}]}},"conversationBar":{"liveChatRenderer":{"continuations":[{"reloadContinuationData":{"continuation":ct}}],"isReplay":false}}}}});
+                warp::reply::json(&data)
+            }
+        });
+
     // Set auto-message generation settings
     let sam = Arc::clone(&state);
     let set_auto_message = warp::path("set_auto_message").and(warp::post()).and(warp::body::json())
@@ -544,7 +583,7 @@ fn build_routes(state: Arc<ServerState>) -> impl Filter<Extract = impl warp::Rep
         let auto_msg = gam.auto_message.lock().unwrap();
         warp::reply::json(&*auto_msg)
     });
-    login_page.or(do_login).or(logged_in).or(watch).or(chat).or(acct).or(setauth).or(authst).or(status).or(add).or(setstream).or(chat_mode_status).or(token_validation).or(reset).or(set_auto_message).or(auto_message_status)
+    login_page.or(do_login).or(logged_in).or(watch).or(chat).or(next_api).or(acct).or(setauth).or(authst).or(status).or(add).or(setstream).or(chat_mode_status).or(token_validation).or(reset).or(set_auto_message).or(auto_message_status)
 }
 
 #[derive(Debug, Deserialize)] struct WQ { v: Option<String> }

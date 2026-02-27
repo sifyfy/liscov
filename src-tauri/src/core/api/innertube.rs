@@ -106,25 +106,40 @@ impl InnerTubeClient {
 
     /// Initialize connection and get initial data
     pub async fn initialize(&mut self) -> Result<ConnectionStatus> {
+        // Step 1: Try fetching the watch page (works for public streams)
         let page_url = format!("{}/watch?v={}", get_youtube_base_url(), self.video_id);
 
         let mut request = self.http_client
             .get(&page_url)
             .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
 
+        // For page loads, only send Cookie header (not SAPISIDHASH Authorization)
         if let Some(cookies) = &self.auth_cookies {
-            let headers = super::auth::build_auth_headers(cookies);
-            for (key, value) in headers {
-                request = request.header(&key, &value);
-            }
+            request = request.header("Cookie", cookies.to_cookie_string());
         }
 
         let response = request.send().await?;
+        let status = response.status();
+        tracing::debug!("Watch page response status: {}", status);
 
         let html = response.text().await?;
 
         if let Some(data) = extract_yt_initial_data(&html) {
             self.parse_initial_data(&data)?;
+        }
+
+        // Step 2: If page approach didn't yield continuation token and we have auth,
+        // try InnerTube API (required for member-only streams where page cookies are insufficient)
+        if self.continuation.is_none() && self.auth_cookies.is_some() {
+            tracing::info!("Watch page did not return continuation token, trying InnerTube API fallback...");
+            match self.fetch_initial_data_via_api().await {
+                Ok(()) => {
+                    tracing::info!("InnerTube API fallback succeeded, continuation token obtained");
+                }
+                Err(e) => {
+                    tracing::warn!("InnerTube API fallback failed: {}", e);
+                }
+            }
         }
 
         Ok(ConnectionStatus {
@@ -140,6 +155,61 @@ impl InnerTubeClient {
                 None
             },
         })
+    }
+
+    /// Fetch initial data via InnerTube `next` API endpoint.
+    /// Uses SAPISIDHASH authentication, which works with the 5 stored cookies.
+    /// This is the fallback for member-only streams where the watch page
+    /// doesn't return chat data without full browser cookies.
+    async fn fetch_initial_data_via_api(&mut self) -> Result<()> {
+        let url = format!(
+            "{}/youtubei/v1/next?key={}&prettyPrint=false",
+            get_youtube_base_url(),
+            self.api_key
+        );
+
+        let request_body = serde_json::json!({
+            "context": {
+                "client": {
+                    "clientName": "WEB",
+                    "clientVersion": &self.client_version,
+                    "gl": "US",
+                    "hl": "en"
+                }
+            },
+            "videoId": &self.video_id
+        });
+
+        let mut request = self.http_client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
+
+        if let Some(cookies) = &self.auth_cookies {
+            let headers = super::auth::build_auth_headers(cookies);
+            for (key, value) in headers {
+                request = request.header(&key, &value);
+            }
+        }
+
+        let response = request.json(&request_body).send().await?;
+        let status = response.status();
+        tracing::debug!("InnerTube next API response status: {}", status);
+
+        if !status.is_success() {
+            return Err(anyhow!("InnerTube next API returned {}", status));
+        }
+
+        let raw_json = response.text().await?;
+        let data: Value = serde_json::from_str(&raw_json)?;
+
+        self.parse_initial_data(&data)?;
+
+        if self.continuation.is_none() {
+            return Err(anyhow!("InnerTube next API response did not contain continuation token"));
+        }
+
+        Ok(())
     }
 
     fn parse_initial_data(&mut self, data: &Value) -> Result<()> {
