@@ -796,4 +796,101 @@ pub async fn auth_open_window(
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_raw_cookies_preserves_raw_string() {
+        let raw = "SID=s; HSID=h; SSID=ss; APISID=a; SAPISID=sa; __Secure-1PSID=sec1; YSC=ysc";
+        let cookies = parse_raw_cookies(raw);
+        assert_eq!(cookies.raw_cookie_string.as_deref(), Some(raw));
+    }
+
+    #[test]
+    fn parse_raw_cookies_extracts_five_fields() {
+        let raw = "SID=sid_val; HSID=hsid_val; SSID=ssid_val; APISID=apisid_val; SAPISID=sapisid_val; OTHER=x";
+        let cookies = parse_raw_cookies(raw);
+        assert_eq!(cookies.sid, "sid_val");
+        assert_eq!(cookies.hsid, "hsid_val");
+        assert_eq!(cookies.ssid, "ssid_val");
+        assert_eq!(cookies.apisid, "apisid_val");
+        assert_eq!(cookies.sapisid, "sapisid_val");
+    }
+
+    #[test]
+    fn parse_raw_cookies_missing_field_returns_empty_string() {
+        let raw = "SID=s; SAPISID=sa";
+        let cookies = parse_raw_cookies(raw);
+        assert_eq!(cookies.hsid, "");
+        assert_eq!(cookies.ssid, "");
+        assert_eq!(cookies.apisid, "");
+    }
+
+    #[test]
+    fn credentials_json_roundtrip_with_raw_cookie_string() {
+        let cookies = YouTubeCookies {
+            sid: "s".to_string(),
+            hsid: "h".to_string(),
+            ssid: "ss".to_string(),
+            apisid: "a".to_string(),
+            sapisid: "sa".to_string(),
+            raw_cookie_string: Some("SID=s; __Secure-1PSID=sec1".to_string()),
+        };
+        let json: CredentialsJson = (&cookies).into();
+        let serialized = serde_json::to_string(&json).unwrap();
+        let deserialized: CredentialsJson = serde_json::from_str(&serialized).unwrap();
+        let restored: YouTubeCookies = deserialized.into();
+        assert_eq!(restored.raw_cookie_string, cookies.raw_cookie_string);
+        assert_eq!(restored.sapisid, cookies.sapisid);
+    }
+
+    #[test]
+    fn credentials_json_backwards_compatible_without_raw() {
+        // raw_cookie_string が無い古い形式のJSONからもデシリアライズできる
+        let json_str = r#"{"sid":"s","hsid":"h","ssid":"ss","apisid":"a","sapisid":"sa"}"#;
+        let cred: CredentialsJson = serde_json::from_str(json_str).unwrap();
+        let cookies: YouTubeCookies = cred.into();
+        assert!(cookies.raw_cookie_string.is_none());
+        assert_eq!(cookies.sapisid, "sa");
+    }
+
+    #[test]
+    fn youtube_cookies_config_roundtrip_with_raw_cookies() {
+        let cookies = YouTubeCookies {
+            sid: "s".to_string(),
+            hsid: "h".to_string(),
+            ssid: "ss".to_string(),
+            apisid: "a".to_string(),
+            sapisid: "sa".to_string(),
+            raw_cookie_string: Some("SID=s; YSC=ysc; __Secure-1PSID=sec1".to_string()),
+        };
+        let config: YouTubeCookiesConfig = (&cookies).into();
+        assert_eq!(config.raw_cookies, cookies.raw_cookie_string);
+
+        let restored: YouTubeCookies = config.into();
+        assert_eq!(restored.raw_cookie_string, cookies.raw_cookie_string);
+        assert_eq!(restored.to_cookie_string(), cookies.to_cookie_string());
+    }
+
+    #[test]
+    fn credentials_config_toml_roundtrip_with_raw_cookies() {
+        let cookies = YouTubeCookies {
+            sid: "s".to_string(),
+            hsid: "h".to_string(),
+            ssid: "ss".to_string(),
+            apisid: "a".to_string(),
+            sapisid: "sa".to_string(),
+            raw_cookie_string: Some("SID=s; SAPISID=sa; __Secure-1PSID=sec1".to_string()),
+        };
+        let config = CredentialsConfig {
+            youtube: (&cookies).into(),
+        };
+        let toml_str = toml::to_string_pretty(&config).unwrap();
+        let restored: CredentialsConfig = toml::from_str(&toml_str).unwrap();
+        let restored_cookies: YouTubeCookies = restored.youtube.into();
+        assert_eq!(restored_cookies.raw_cookie_string, cookies.raw_cookie_string);
+    }
+}
+
 // =============================================================================

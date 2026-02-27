@@ -212,6 +212,9 @@ struct ServerState {
 struct StreamState {
     member_only: bool,           // Member-only stream
     require_auth: bool,          // Require authentication for chat
+    /// Force /watch to return HTML without liveChatRenderer (regardless of auth).
+    /// Used to test /next API fallback path.
+    watch_force_no_chat: bool,
     title_override: Option<String>, // Override stream title for testing
     channel_id_override: Option<String>, // Override broadcaster channel ID for testing
     channel_name_override: Option<String>, // Override broadcaster channel name for testing
@@ -247,6 +250,7 @@ impl Default for StreamState {
         Self {
             member_only: false,
             require_auth: false,
+            watch_force_no_chat: false,
             title_override: None,
             channel_id_override: None,
             channel_name_override: None,
@@ -395,7 +399,8 @@ fn build_routes(state: Arc<ServerState>) -> impl Filter<Extract = impl warp::Rep
                 .as_deref()
                 .map(|c| c.contains("SAPISID="))
                 .unwrap_or(false);
-            let html = if require_auth && !has_auth_cookie {
+            let force_no_chat = stream_state.watch_force_no_chat;
+            let html = if force_no_chat || (require_auth && !has_auth_cookie) {
                 gen_html_no_chat(vid, channel_id, channel_name, title)
             } else {
                 gen_html(vid, channel_id, channel_name, title)
@@ -501,6 +506,7 @@ fn build_routes(state: Arc<ServerState>) -> impl Filter<Extract = impl warp::Rep
             let mut ss = sss.stream_state.lock().unwrap();
             if let Some(v) = b.member_only { ss.member_only = v; }
             if let Some(v) = b.require_auth { ss.require_auth = v; }
+            if let Some(v) = b.watch_force_no_chat { ss.watch_force_no_chat = v; }
             if let Some(t) = b.title { ss.title_override = if t.is_empty() { None } else { Some(t) }; }
             if let Some(c) = b.channel_id { ss.channel_id_override = if c.is_empty() { None } else { Some(c) }; }
             if let Some(n) = b.channel_name { ss.channel_name_override = if n.is_empty() { None } else { Some(n) }; }
@@ -589,7 +595,7 @@ fn build_routes(state: Arc<ServerState>) -> impl Filter<Extract = impl warp::Rep
 #[derive(Debug, Deserialize)] struct WQ { v: Option<String> }
 #[derive(Debug, Deserialize)] struct AMR { message_type: String, author: String, #[serde(default = "dcid")] channel_id: String, #[serde(default)] content: String, amount: Option<String>, tier: Option<String>, #[serde(default)] is_member: bool, milestone_months: Option<u32>, gift_count: Option<u32> }
 #[derive(Debug, Deserialize)] struct SAR { session_valid: Option<bool>, expected_sapisid: Option<String>, simulate_error: Option<bool>, auth_channel_name: Option<String>, auth_channel_id: Option<String> }
-#[derive(Debug, Deserialize)] struct SSR { member_only: Option<bool>, require_auth: Option<bool>, title: Option<String>, channel_id: Option<String>, channel_name: Option<String>, watch_delay_ms: Option<u64>, chat_delay_ms: Option<u64> }
+#[derive(Debug, Deserialize)] struct SSR { member_only: Option<bool>, require_auth: Option<bool>, watch_force_no_chat: Option<bool>, title: Option<String>, channel_id: Option<String>, channel_name: Option<String>, watch_delay_ms: Option<u64>, chat_delay_ms: Option<u64> }
 #[derive(Debug, Deserialize)] struct AutoMsgReq { enabled: Option<bool>, messages_per_poll: Option<usize> }
 fn dcid() -> String { format!("UC_user_{}", rand::random::<u32>() % 1000) }
 

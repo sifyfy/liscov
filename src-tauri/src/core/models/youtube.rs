@@ -150,6 +150,67 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_to_cookie_string_returns_raw_when_present() {
+        let cookies = YouTubeCookies {
+            sid: "s".to_string(),
+            hsid: "h".to_string(),
+            ssid: "ss".to_string(),
+            apisid: "a".to_string(),
+            sapisid: "sa".to_string(),
+            raw_cookie_string: Some("SID=s; HSID=h; __Secure-1PSID=sec1; YSC=ysc".to_string()),
+        };
+        assert_eq!(
+            cookies.to_cookie_string(),
+            "SID=s; HSID=h; __Secure-1PSID=sec1; YSC=ysc"
+        );
+    }
+
+    #[test]
+    fn test_to_cookie_string_falls_back_to_five_cookies() {
+        let cookies = YouTubeCookies {
+            sid: "sid_val".to_string(),
+            hsid: "hsid_val".to_string(),
+            ssid: "ssid_val".to_string(),
+            apisid: "apisid_val".to_string(),
+            sapisid: "sapisid_val".to_string(),
+            raw_cookie_string: None,
+        };
+        let result = cookies.to_cookie_string();
+        assert!(result.contains("SID=sid_val"));
+        assert!(result.contains("HSID=hsid_val"));
+        assert!(result.contains("SSID=ssid_val"));
+        assert!(result.contains("APISID=apisid_val"));
+        assert!(result.contains("SAPISID=sapisid_val"));
+        // __Secure-* cookies are NOT included in fallback
+        assert!(!result.contains("__Secure"));
+    }
+
+    #[test]
+    fn test_youtube_cookies_serde_roundtrip_with_raw() {
+        let cookies = YouTubeCookies {
+            sid: "s".to_string(),
+            hsid: "h".to_string(),
+            ssid: "ss".to_string(),
+            apisid: "a".to_string(),
+            sapisid: "sa".to_string(),
+            raw_cookie_string: Some("SID=s; __Secure-1PSID=sec1".to_string()),
+        };
+        let json = serde_json::to_string(&cookies).unwrap();
+        let deserialized: YouTubeCookies = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.raw_cookie_string, cookies.raw_cookie_string);
+        assert_eq!(deserialized.to_cookie_string(), cookies.to_cookie_string());
+    }
+
+    #[test]
+    fn test_youtube_cookies_serde_backwards_compatible() {
+        // raw_cookie_string が無い古い形式のJSONからもデシリアライズできる
+        let json = r#"{"sid":"s","hsid":"h","ssid":"ss","apisid":"a","sapisid":"sa"}"#;
+        let cookies: YouTubeCookies = serde_json::from_str(json).unwrap();
+        assert!(cookies.raw_cookie_string.is_none());
+        assert!(cookies.to_cookie_string().contains("SID=s"));
+    }
+
+    #[test]
     fn test_extract_video_id() {
         assert_eq!(
             extract_video_id("https://www.youtube.com/watch?v=dQw4w9WgXcQ"),

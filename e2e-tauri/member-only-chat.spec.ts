@@ -11,10 +11,11 @@ import {
 /**
  * E2E tests for member-only stream chat access.
  *
- * Verifies that authenticated users can connect to member-only streams
- * and receive chat messages. This is a regression test for the bug where
- * connect_to_stream() did not pass auth cookies to initialize(),
- * causing connection failure on member-only streams.
+ * Regression tests for:
+ * 1. connect_to_stream() not passing auth cookies to initialize()
+ * 2. Cookie domain scoping (YouTube vs Google domain cookies)
+ * 3. raw_cookie_string storage and usage for full cookie auth
+ * 4. /next API fallback when watch page doesn't return chat data
  *
  * Run:
  *   pnpm exec playwright test --config e2e-tauri/playwright.config.ts e2e-tauri/member-only-chat.spec.ts
@@ -24,6 +25,7 @@ import {
 async function setStreamState(state: {
   member_only?: boolean;
   require_auth?: boolean;
+  watch_force_no_chat?: boolean;
   title?: string;
 }): Promise<void> {
   const response = await fetch(`${MOCK_SERVER_URL}/set_stream_state`, {
@@ -185,6 +187,85 @@ test.describe('Member-Only Stream Chat Access', () => {
     await expect(mainPage.locator('text=NormalViewer')).toBeVisible({
       timeout: 5000,
     });
+
+    await disconnectAndInitialize(mainPage);
+  });
+
+  test('should connect via /next API fallback when watch page returns no chat', async () => {
+    // watch_force_no_chat: watchページがliveChatRendererを返さないケースをシミュレート
+    // このとき /youtubei/v1/next APIフォールバックで接続が成功すべき
+    await setStreamState({
+      member_only: true,
+      require_auth: true,
+      watch_force_no_chat: true,
+      title: 'APIフォールバックテスト',
+    });
+
+    // Chat タブへ移動
+    await mainPage.getByRole('button', { name: 'Chat' }).click();
+
+    // ストリームURLを入力して接続
+    const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+    await expect(urlInput).toBeVisible();
+    await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=fallback_stream`);
+    await mainPage.locator('button:has-text("開始")').click();
+
+    // 接続成功: /next APIフォールバック経由でストリームタイトルが表示される
+    await expect(
+      mainPage.getByText('APIフォールバックテスト').first(),
+    ).toBeVisible({ timeout: 15000 });
+
+    // メッセージが受信できることを確認
+    await addMockMessage({
+      message_type: 'text',
+      author: 'FallbackViewer',
+      content: 'フォールバック経由コメント',
+      channel_id: 'UC_fallback_viewer',
+      is_member: true,
+    });
+
+    await expect(mainPage.locator('text=FallbackViewer')).toBeVisible({
+      timeout: 5000,
+    });
+    await expect(
+      mainPage.locator('text=フォールバック経由コメント'),
+    ).toBeVisible();
+
+    await disconnectAndInitialize(mainPage);
+  });
+
+  test('should fail to connect to member-only stream without authentication', async () => {
+    // ログアウトしてから接続試行
+    await mainPage.getByRole('button', { name: 'Settings' }).click();
+    const logoutButton = mainPage.getByRole('button', { name: 'ログアウト' });
+    await expect(logoutButton).toBeVisible({ timeout: 5000 });
+    await logoutButton.click();
+
+    // ログアウト完了を待つ
+    const loginButton = mainPage.getByRole('button', {
+      name: 'YouTubeにログイン',
+    });
+    await expect(loginButton).toBeVisible({ timeout: 10000 });
+
+    // メンバー限定配信に設定
+    await setStreamState({
+      member_only: true,
+      require_auth: true,
+      title: '未認証テスト配信',
+    });
+
+    // Chat タブへ移動して接続試行
+    await mainPage.getByRole('button', { name: 'Chat' }).click();
+    const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+    await expect(urlInput).toBeVisible();
+    await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=no_auth_stream`);
+    await mainPage.locator('button:has-text("開始")').click();
+
+    // 接続失敗: エラー表示を確認
+    // continuation tokenが取得できないためエラーになる
+    await expect(
+      mainPage.locator('text=Failed to get continuation token'),
+    ).toBeVisible({ timeout: 15000 });
 
     await disconnectAndInitialize(mainPage);
   });
