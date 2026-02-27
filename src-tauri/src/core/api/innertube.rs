@@ -106,6 +106,12 @@ impl InnerTubeClient {
 
     /// Initialize connection and get initial data
     pub async fn initialize(&mut self) -> Result<ConnectionStatus> {
+        tracing::info!(
+            "initialize: video_id={}, has_auth={}",
+            self.video_id,
+            self.auth_cookies.is_some()
+        );
+
         // Step 1: Try fetching the watch page (works for public streams)
         let page_url = format!("{}/watch?v={}", get_youtube_base_url(), self.video_id);
 
@@ -119,14 +125,21 @@ impl InnerTubeClient {
         }
 
         let response = request.send().await?;
-        let status = response.status();
-        tracing::debug!("Watch page response status: {}", status);
-
         let html = response.text().await?;
 
         if let Some(data) = extract_yt_initial_data(&html) {
+            let has_chat = data.pointer("/contents/twoColumnWatchNextResults/conversationBar/liveChatRenderer").is_some();
+            tracing::info!("Watch page: ytInitialData found, liveChatRenderer={}", has_chat);
             self.parse_initial_data(&data)?;
+        } else {
+            tracing::warn!("Watch page: ytInitialData NOT found in HTML");
         }
+
+        tracing::info!(
+            "After watch page: continuation={}, title={:?}",
+            self.continuation.is_some(),
+            self.stream_title
+        );
 
         // Step 2: If page approach didn't yield continuation token and we have auth,
         // try InnerTube API (required for member-only streams where page cookies are insufficient)
@@ -194,7 +207,7 @@ impl InnerTubeClient {
 
         let response = request.json(&request_body).send().await?;
         let status = response.status();
-        tracing::debug!("InnerTube next API response status: {}", status);
+        tracing::info!("InnerTube next API response status: {}", status);
 
         if !status.is_success() {
             return Err(anyhow!("InnerTube next API returned {}", status));
@@ -202,6 +215,9 @@ impl InnerTubeClient {
 
         let raw_json = response.text().await?;
         let data: Value = serde_json::from_str(&raw_json)?;
+
+        let has_live_chat = data.pointer("/contents/twoColumnWatchNextResults/conversationBar/liveChatRenderer").is_some();
+        tracing::info!("InnerTube next API: liveChatRenderer={}", has_live_chat);
 
         self.parse_initial_data(&data)?;
 

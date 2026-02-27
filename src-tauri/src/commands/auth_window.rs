@@ -12,14 +12,6 @@ use tokio::sync::Mutex;
 /// YouTube認証用URL (デフォルト)
 pub const DEFAULT_YOUTUBE_AUTH_URL: &str = "https://www.youtube.com/";
 
-/// Cookie取得対象のURL一覧
-/// YouTubeとGoogleのCookieは異なるドメインで設定される可能性があるため、複数のドメインをチェックする
-const COOKIE_URLS: &[&str] = &[
-    "https://www.youtube.com/",
-    "https://youtube.com/",
-    "https://accounts.google.com/",
-    "https://www.google.com/",
-];
 
 /// 認証URLを取得する（テスト用に環境変数で上書き可能）
 /// LISCOV_AUTH_URL 環境変数が設定されている場合はそれを使用
@@ -154,43 +146,60 @@ pub async fn open_auth_window(app: AppHandle) -> AuthResult {
 
             // Cookieをチェック
             {
-                // 複数のドメインからCookieを取得して統合
-                // YouTubeとGoogleのCookieは異なるドメインで設定される可能性がある
-                let mut all_cookies = Vec::new();
-
-                for url in COOKIE_URLS {
-                    match auth_window.cookies_for_url(url.parse().unwrap()) {
-                        Ok(cookies) => {
-                            if !cookies.is_empty() {
-                                tracing::debug!(
-                                    "🍪 Retrieved {} cookies from {}",
-                                    cookies.len(),
-                                    url
-                                );
-                                all_cookies.extend(cookies);
+                // YouTube domainのCookieのみを使用
+                // ブラウザがyoutube.comにリクエストする際はyoutube.comスコープのCookieのみ送信される
+                // accounts.google.comやwww.google.comのCookieは同名でも値が異なる場合があり、
+                // 混在させるとYouTubeが認証を認識しない（logged_in=0になる）
+                let youtube_cookies = {
+                    let mut cookies = Vec::new();
+                    // YouTube domainのCookieのみ取得（認証に必要な全Cookieがここに含まれる）
+                    for yt_url in &["https://www.youtube.com/", "https://youtube.com/"] {
+                        match auth_window.cookies_for_url(yt_url.parse().unwrap()) {
+                            Ok(c) => {
+                                tracing::debug!("🍪 Retrieved {} cookies from {}", c.len(), yt_url);
+                                cookies.extend(c);
+                            }
+                            Err(e) => {
+                                tracing::debug!("🍪 Failed to get cookies from {}: {}", yt_url, e);
                             }
                         }
-                        Err(e) => {
-                            tracing::debug!("🍪 Failed to get cookies from {}: {}", url, e);
+                    }
+                    cookies
+                };
+
+                // SAPISIDがない場合、Google domainも含めて全ドメインからチェック
+                // （モックサーバーやフォールバック用）
+                let all_cookies = if youtube_cookies.iter().any(|c| c.name() == "SAPISID") {
+                    youtube_cookies
+                } else {
+                    let mut all = youtube_cookies;
+                    for google_url in &["https://accounts.google.com/", "https://www.google.com/"] {
+                        match auth_window.cookies_for_url(google_url.parse().unwrap()) {
+                            Ok(c) => {
+                                tracing::debug!("🍪 Fallback: {} cookies from {}", c.len(), google_url);
+                                all.extend(c);
+                            }
+                            Err(e) => {
+                                tracing::debug!("🍪 Failed to get cookies from {}: {}", google_url, e);
+                            }
                         }
                     }
-                }
+                    all
+                };
 
                 tracing::debug!(
-                    "🍪 Total retrieved {} cookies from all domains",
+                    "🍪 Total cookies for extraction: {}",
                     all_cookies.len()
                 );
 
                 if !all_cookies.is_empty() {
-                    // Cookieをログ出力（デバッグ用）
                     let cookie_names: Vec<&str> = all_cookies.iter().map(|c| c.name()).collect();
                     tracing::debug!("🍪 Cookie names: {:?}", cookie_names);
 
-                    // SAPISIDがあるかチェック
                     if all_cookies.iter().any(|c| c.name() == "SAPISID") {
                         tracing::info!("🔓 SAPISID detected in cookies");
 
-                        // CookieをHashMapに変換
+                        // CookieをHashMapに変換（YouTube domainのCookieが優先される）
                         let mut cookies_map = std::collections::HashMap::new();
                         for cookie in all_cookies {
                             cookies_map.insert(cookie.name().to_string(), cookie.value().to_string());
@@ -249,6 +258,8 @@ fn parse_cookie_string(cookie_str: &str) -> std::collections::HashMap<String, St
 }
 
 /// HashMapからYouTubeCookiesへ変換
+/// 5つの必須Cookieに加え、全Cookieの文字列も保存する（member-only配信のアクセスに必要）
+/// 保存先はファイルストレージへ自動フォールバックされるため、サイズ制限は問題にならない
 fn extract_youtube_cookies_from_map(
     cookies: &std::collections::HashMap<String, String>,
 ) -> Option<YouTubeCookies> {
@@ -258,12 +269,20 @@ fn extract_youtube_cookies_from_map(
     let apisid = cookies.get("APISID")?;
     let sapisid = cookies.get("SAPISID")?;
 
+    // 全Cookieをraw_cookie_stringとして保存
+    let raw_cookie_string: String = cookies
+        .iter()
+        .map(|(k, v)| format!("{}={}", k, v))
+        .collect::<Vec<_>>()
+        .join("; ");
+
     Some(YouTubeCookies {
         sid: sid.clone(),
         hsid: hsid.clone(),
         ssid: ssid.clone(),
         apisid: apisid.clone(),
         sapisid: sapisid.clone(),
+        raw_cookie_string: Some(raw_cookie_string),
     })
 }
 
@@ -357,6 +376,30 @@ mod tests {
         assert!(result.is_some());
         let yt_cookies = result.unwrap();
         assert_eq!(yt_cookies.sapisid, "sapisid_value");
+    }
+
+    #[test]
+    fn test_raw_cookie_string_includes_all_cookies() {
+        let mut cookies = std::collections::HashMap::new();
+        cookies.insert("SID".to_string(), "s".to_string());
+        cookies.insert("HSID".to_string(), "h".to_string());
+        cookies.insert("SSID".to_string(), "ss".to_string());
+        cookies.insert("APISID".to_string(), "a".to_string());
+        cookies.insert("SAPISID".to_string(), "sa".to_string());
+        cookies.insert("__Secure-1PSID".to_string(), "sec1".to_string());
+        cookies.insert("VISITOR_INFO1_LIVE".to_string(), "visitor".to_string());
+        cookies.insert("YSC".to_string(), "ysc_val".to_string());
+
+        let result = extract_youtube_cookies_from_map(&cookies);
+        assert!(result.is_some());
+
+        let raw = result.unwrap().raw_cookie_string.unwrap();
+        // 全Cookieが含まれる
+        assert!(raw.contains("SID=s"));
+        assert!(raw.contains("SAPISID=sa"));
+        assert!(raw.contains("__Secure-1PSID=sec1"));
+        assert!(raw.contains("VISITOR_INFO1_LIVE=visitor"));
+        assert!(raw.contains("YSC=ysc_val"));
     }
 
     #[test]

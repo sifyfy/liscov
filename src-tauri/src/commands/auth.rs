@@ -60,6 +60,8 @@ struct CredentialsJson {
     ssid: String,
     apisid: String,
     sapisid: String,
+    #[serde(default)]
+    raw_cookie_string: Option<String>,
 }
 
 impl From<&YouTubeCookies> for CredentialsJson {
@@ -70,6 +72,7 @@ impl From<&YouTubeCookies> for CredentialsJson {
             ssid: cookies.ssid.clone(),
             apisid: cookies.apisid.clone(),
             sapisid: cookies.sapisid.clone(),
+            raw_cookie_string: cookies.raw_cookie_string.clone(),
         }
     }
 }
@@ -82,6 +85,7 @@ impl From<CredentialsJson> for YouTubeCookies {
             ssid: json.ssid,
             apisid: json.apisid,
             sapisid: json.sapisid,
+            raw_cookie_string: json.raw_cookie_string,
         }
     }
 }
@@ -116,6 +120,7 @@ impl From<YouTubeCookiesConfig> for YouTubeCookies {
             ssid: config.ssid,
             apisid: config.apisid,
             sapisid: config.sapisid,
+            raw_cookie_string: config.raw_cookies,
         }
     }
 }
@@ -128,7 +133,7 @@ impl From<&YouTubeCookies> for YouTubeCookiesConfig {
             ssid: cookies.ssid.clone(),
             apisid: cookies.apisid.clone(),
             sapisid: cookies.sapisid.clone(),
-            raw_cookies: None,
+            raw_cookies: cookies.raw_cookie_string.clone(),
         }
     }
 }
@@ -194,6 +199,8 @@ fn save_cookies_to_secure_storage(cookies: &YouTubeCookies) -> Result<(), String
     let json: CredentialsJson = cookies.into();
     let secret = serde_json::to_string(&json)
         .map_err(|e| format!("Failed to serialize credentials: {}", e))?;
+
+    log::debug!("Credential JSON length: {} chars", secret.len());
 
     entry.set_password(&secret)
         .map_err(|e| format!("Failed to save to secure storage: {}", e))?;
@@ -306,6 +313,7 @@ fn parse_raw_cookies(raw: &str) -> YouTubeCookies {
         ssid: extract("SSID"),
         apisid: extract("APISID"),
         sapisid: extract("SAPISID"),
+        raw_cookie_string: Some(raw.to_string()),
     }
 }
 
@@ -405,6 +413,7 @@ pub(crate) fn load_cookies(storage_mode: &StorageMode) -> Result<YouTubeCookies,
 }
 
 /// Save cookies based on storage mode
+/// Secure modeでkeyringの容量制限に引っかかった場合、自動的にfile storageにフォールバックする
 fn save_cookies(cookies: &YouTubeCookies, storage_mode: &StorageMode) -> Result<(), String> {
     // Always update in-memory cache first (workaround for keyring Windows issues)
     if let Ok(mut cache) = CREDENTIALS_CACHE.write() {
@@ -414,7 +423,16 @@ fn save_cookies(cookies: &YouTubeCookies, storage_mode: &StorageMode) -> Result<
 
     match storage_mode {
         StorageMode::Fallback => save_cookies_to_file(cookies),
-        StorageMode::Secure => save_cookies_to_secure_storage(cookies),
+        StorageMode::Secure => {
+            match save_cookies_to_secure_storage(cookies) {
+                Ok(()) => Ok(()),
+                Err(e) if e.contains("platform limit") || e.contains("2560") => {
+                    log::warn!("⚠️ Secure storage size limit exceeded, falling back to file storage: {}", e);
+                    save_cookies_to_file(cookies)
+                }
+                Err(e) => Err(e),
+            }
+        }
     }
 }
 
@@ -638,6 +656,7 @@ pub async fn auth_save_credentials(
         ssid,
         apisid,
         sapisid,
+        raw_cookie_string: None,
     };
 
     let config = config_state.get();

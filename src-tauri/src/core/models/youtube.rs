@@ -59,15 +59,23 @@ pub struct YouTubeCookies {
     pub ssid: String,
     pub apisid: String,
     pub sapisid: String,
+    /// Full cookie string from browser (includes __Secure-* cookies needed for member-only streams)
+    #[serde(default)]
+    pub raw_cookie_string: Option<String>,
 }
 
 impl YouTubeCookies {
     /// Build cookie header string
+    /// Returns full browser cookies if available, otherwise the 5 API cookies
     pub fn to_cookie_string(&self) -> String {
-        format!(
-            "SID={}; HSID={}; SSID={}; APISID={}; SAPISID={}",
-            self.sid, self.hsid, self.ssid, self.apisid, self.sapisid
-        )
+        if let Some(ref raw) = self.raw_cookie_string {
+            raw.clone()
+        } else {
+            format!(
+                "SID={}; HSID={}; SSID={}; APISID={}; SAPISID={}",
+                self.sid, self.hsid, self.ssid, self.apisid, self.sapisid
+            )
+        }
     }
 }
 
