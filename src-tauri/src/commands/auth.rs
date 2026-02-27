@@ -350,7 +350,7 @@ fn delete_credentials_file() -> Result<(), String> {
 // =============================================================================
 
 /// Load cookies based on storage mode
-fn load_cookies(storage_mode: &StorageMode) -> Result<YouTubeCookies, String> {
+pub(crate) fn load_cookies(storage_mode: &StorageMode) -> Result<YouTubeCookies, String> {
     // First, check in-memory cache (workaround for keyring Windows issues)
     if let Ok(cache) = CREDENTIALS_CACHE.read() {
         if let Some(ref cached_cookies) = *cache {

@@ -6,6 +6,8 @@ use crate::core::raw_response::{RawResponseSaver, SaveConfig};
 use crate::database::{self, Database};
 use crate::AppState;
 use crate::commands::SaveConfigState;
+use crate::commands::config::ConfigState;
+use crate::commands::auth;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
@@ -175,6 +177,7 @@ pub async fn connect_to_stream(
     app: AppHandle,
     state: State<'_, AppState>,
     save_config_state: State<'_, SaveConfigState>,
+    config_state: State<'_, ConfigState>,
     url: String,
     chat_mode: Option<String>,
 ) -> Result<ConnectionResult, String> {
@@ -213,6 +216,15 @@ pub async fn connect_to_stream(
 
     // Create and initialize InnerTube client
     let mut client = InnerTubeClient::new(&video_id);
+
+    // Load auth cookies from storage and set on client (required for member-only streams)
+    let config = config_state.get();
+    if let Ok(cookies) = auth::load_cookies(&config.storage.mode) {
+        tracing::info!("Auth cookies loaded, setting on InnerTube client");
+        client.set_auth(cookies);
+    } else {
+        tracing::debug!("No auth cookies available, connecting without authentication");
+    }
 
     let status = client
         .initialize()
