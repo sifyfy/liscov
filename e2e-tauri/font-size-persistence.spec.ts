@@ -96,9 +96,9 @@ test.describe('Font Size Persistence', () => {
     await startTauriApp();
     const { browser, page } = await connectToApp();
 
-    // ページが読み込まれるのを待つ
+    // Svelteアプリのマウント完了を待つ
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(2000); // UI安定化待機
+    await page.getByRole('heading', { name: 'Chat Monitor' }).waitFor({ state: 'visible', timeout: 30000 });
 
     // 初期フォントサイズを確認 (13px)
     const fontSizeDisplay = page.locator('.text-xs.text-center').filter({ hasText: /\d+px/ });
@@ -131,9 +131,9 @@ test.describe('Font Size Persistence', () => {
     await startTauriApp();
     const { browser: browser2, page: page2 } = await connectToApp();
 
-    // ページが読み込まれるのを待つ
+    // Svelteアプリのマウント完了を待つ
     await page2.waitForLoadState('networkidle');
-    await page2.waitForTimeout(2000); // UI安定化待機
+    await page2.getByRole('heading', { name: 'Chat Monitor' }).waitFor({ state: 'visible', timeout: 30000 });
 
     // フォントサイズが維持されていることを確認
     const fontSizeDisplay2 = page2.locator('.text-xs.text-center').filter({ hasText: /\d+px/ });
@@ -151,7 +151,7 @@ test.describe('Font Size Persistence', () => {
     const { browser, page } = await connectToApp();
 
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(2000);
+    await page.getByRole('heading', { name: 'Chat Monitor' }).waitFor({ state: 'visible', timeout: 30000 });
 
     const fontSizeDisplay = page.locator('.text-xs.text-center').filter({ hasText: /\d+px/ });
     const increaseButton = page.getByTitle('文字を大きく');

@@ -291,9 +291,10 @@ export async function setupTestEnvironment(): Promise<{ browser: Browser; contex
   // Step 6: Connect to the running Tauri app
   const connection = await connectToApp();
 
-  // Wait for page to be fully loaded and stable
+  // Wait for Svelte app to fully mount (not just HTML load)
   await connection.page.waitForLoadState('load');
-  await connection.page.waitForTimeout(1000);
+  // Wait for a known UI element that only exists after Svelte renders
+  await connection.page.getByRole('heading', { name: 'Chat Monitor' }).waitFor({ state: 'visible', timeout: 30000 });
 
   return connection;
 }
