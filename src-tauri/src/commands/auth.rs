@@ -459,23 +459,9 @@ fn delete_credentials(storage_mode: &StorageMode) -> Result<(), String> {
 // Session validity check
 // =============================================================================
 
-/// Generate SAPISIDHASH for authentication
-fn generate_sapisidhash(sapisid: &str) -> String {
-    use sha1::{Sha1, Digest};
-
-    let timestamp = Utc::now().timestamp();
-    let origin = "https://www.youtube.com";
-    let input = format!("{} {} {}", timestamp, sapisid, origin);
-
-    let mut hasher = Sha1::new();
-    hasher.update(input.as_bytes());
-    let hash = hex::encode(hasher.finalize());
-
-    format!("{}_{}", timestamp, hash)
-}
-
 /// Check session validity by making a test request to YouTube API
 async fn check_session_validity_internal(cookies: &YouTubeCookies) -> SessionValidity {
+    use crate::core::api::build_auth_headers;
     use std::time::Duration;
 
     let checked_at = Utc::now().to_rfc3339();
@@ -486,14 +472,8 @@ async fn check_session_validity_internal(cookies: &YouTubeCookies) -> SessionVal
 
     log::info!("🌐 Making session validity check request to: {}", session_check_url);
 
-    // Generate authentication header
-    let sapisidhash = generate_sapisidhash(&cookies.sapisid);
-
-    // Build cookie string
-    let cookie_string = format!(
-        "SID={}; HSID={}; SSID={}; APISID={}; SAPISID={}",
-        cookies.sid, cookies.hsid, cookies.ssid, cookies.apisid, cookies.sapisid
-    );
+    // G4: API接続と同じCookie・認証ヘッダーを使用（build_auth_headersで統一）
+    let auth_headers = build_auth_headers(cookies);
 
     // Make request to YouTube InnerTube API with timeout
     let client = reqwest::Client::builder()
@@ -501,16 +481,16 @@ async fn check_session_validity_internal(cookies: &YouTubeCookies) -> SessionVal
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
 
-    let result = client
+    let mut request = client
         .post(&session_check_url)
-        .header("Authorization", format!("SAPISIDHASH {}", sapisidhash))
-        .header("Cookie", cookie_string)
-        .header("X-Origin", "https://www.youtube.com")
-        .header("Origin", "https://www.youtube.com")
         .header("Content-Type", "application/json")
-        .body(r#"{"context":{"client":{"clientName":"WEB","clientVersion":"2.20231219.04.00"}}}"#)
-        .send()
-        .await;
+        .body(r#"{"context":{"client":{"clientName":"WEB","clientVersion":"2.20231219.04.00"}}}"#);
+
+    for (name, value) in &auth_headers {
+        request = request.header(name.as_str(), value.as_str());
+    }
+
+    let result = request.send().await;
 
     match result {
         Ok(response) => {

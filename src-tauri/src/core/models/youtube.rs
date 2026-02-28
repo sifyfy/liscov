@@ -210,6 +210,36 @@ mod tests {
         assert!(cookies.to_cookie_string().contains("SID=s"));
     }
 
+    // G4: Cookie Usage Consistency — raw_cookie_stringが5基本Cookieより優先されることを保証
+    #[test]
+    fn to_cookie_string_returns_raw_not_five_basic() {
+        // raw_cookie_stringがある場合、to_cookie_string()はraw（追加Cookie含む）を返す。
+        // 5基本Cookieのみの文字列とは異なる出力であることを値の差異で検証。
+        let cookies = YouTubeCookies {
+            sid: "s".to_string(),
+            hsid: "h".to_string(),
+            ssid: "ss".to_string(),
+            apisid: "a".to_string(),
+            sapisid: "sa".to_string(),
+            raw_cookie_string: Some(
+                "SID=s; HSID=h; SSID=ss; APISID=a; SAPISID=sa; __Secure-1PSID=sec1; YSC=ysc".to_string()
+            ),
+        };
+
+        let result = cookies.to_cookie_string();
+
+        // raw_cookie_stringを返す（5基本のみではない）
+        assert!(result.contains("__Secure-1PSID=sec1"), "raw should include __Secure-1PSID");
+        assert!(result.contains("YSC=ysc"), "raw should include YSC");
+
+        // 5基本のみの文字列とは異なることを確認
+        let five_basic_only = format!(
+            "SID={}; HSID={}; SSID={}; APISID={}; SAPISID={}",
+            cookies.sid, cookies.hsid, cookies.ssid, cookies.apisid, cookies.sapisid
+        );
+        assert_ne!(result, five_basic_only, "should return raw, not 5-basic fallback");
+    }
+
     #[test]
     fn test_extract_video_id() {
         assert_eq!(

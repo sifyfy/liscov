@@ -234,6 +234,58 @@ test.describe('Member-Only Stream Chat Access', () => {
     await disconnectAndInitialize(mainPage);
   });
 
+  test('should preserve all cookies through full pipeline (G1: completeness)', async () => {
+    // G1: Cookie Pipeline Completeness — ブラウザが持つ全CookieがAPIリクエストに到達する
+    // YouTubeが新Cookieを追加しても、パイプラインが全Cookieを保持すれば自動的に含まれる
+
+    // メンバー限定配信に設定（認証Cookie必須）
+    await setStreamState({
+      member_only: true,
+      require_auth: true,
+      title: 'Cookie完全性テスト',
+    });
+
+    // Chat タブへ移動
+    await mainPage.getByRole('button', { name: 'Chat' }).click();
+
+    // ストリームURLを入力して接続
+    const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+    await expect(urlInput).toBeVisible();
+    await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=cookie_pipeline_test`);
+    await mainPage.locator('button:has-text("開始")').click();
+
+    // 接続成功を待つ
+    await expect(
+      mainPage.getByText('Cookie完全性テスト').first(),
+    ).toBeVisible({ timeout: 10000 });
+
+    // モックサーバーから実際に受信したCookieヘッダーを取得
+    const cookieResponse = await fetch(`${MOCK_SERVER_URL}/last_request_cookies`);
+    const lastCookies: { watch: string | null; next: string | null } = await cookieResponse.json();
+
+    // /watch リクエストでCookieが送信されていることを確認
+    expect(lastCookies.watch).not.toBeNull();
+    const watchCookies = lastCookies.watch!;
+
+    // 全8Cookieがパイプラインを通過していることを検証
+    // 5基本Cookie
+    expect(watchCookies).toContain('SID=');
+    expect(watchCookies).toContain('HSID=');
+    expect(watchCookies).toContain('SSID=');
+    expect(watchCookies).toContain('APISID=');
+    expect(watchCookies).toContain('SAPISID=');
+    // 追加Cookie（member-only配信で必須）
+    // NOTE: 本番では __Secure-1PSID だが、__Secure-* プレフィックスはHTTPS必須のため
+    // HTTPモックでは SecurePSID で同等のパイプライン完全性を検証する
+    expect(watchCookies).toContain('SecurePSID=');
+    expect(watchCookies).toContain('YSC=');
+    expect(watchCookies).toContain('VISITOR_INFO1_LIVE=');
+
+    log.info(`Cookie pipeline verified: ${watchCookies.split(';').length} cookies received`);
+
+    await disconnectAndInitialize(mainPage);
+  });
+
   test('should fail to connect to member-only stream without authentication', async () => {
     // ログアウトしてから接続試行
     await mainPage.getByRole('button', { name: 'Settings' }).click();

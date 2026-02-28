@@ -18,6 +18,10 @@ use std::sync::{Arc, Mutex};
 use tokio::time::Instant;
 use warp::Filter;
 
+/// 本番では `__Secure-1PSID` だが、`__Secure-` プレフィックスはHTTPS必須のため
+/// HTTPモックでは代替名を使用してCookieパイプライン完全性を検証する。
+const MOCK_SECURE_COOKIE: &str = "SecurePSID";
+
 /// Detect chat mode from continuation token by parsing Protocol Buffer binary data
 fn detect_chat_mode_from_token(token: &str) -> Option<String> {
     let decoded = general_purpose::URL_SAFE_NO_PAD
@@ -194,6 +198,13 @@ impl Default for AutoMessageState {
     }
 }
 
+/// Last request cookies received by /watch and /next endpoints (for E2E cookie pipeline verification)
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct LastRequestCookies {
+    watch: Option<String>,
+    next: Option<String>,
+}
+
 struct ServerState {
     config: ServerConfig,
     message_queue: Mutex<VecDeque<Value>>,
@@ -206,6 +217,7 @@ struct ServerState {
     last_chat_mode: Mutex<Option<String>>,  // Track chat mode from continuation token
     token_validation: Mutex<TokenValidation>,  // Detailed token validation results
     auto_message: Mutex<AutoMessageState>,  // Auto-generate messages for stress testing
+    last_request_cookies: Mutex<LastRequestCookies>,  // Track cookies received in API requests
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -306,6 +318,7 @@ async fn main() {
         last_chat_mode: Mutex::new(None),
         token_validation: Mutex::new(TokenValidation::default()),
         auto_message: Mutex::new(AutoMessageState::default()),
+        last_request_cookies: Mutex::new(LastRequestCookies::default()),
     });
     let routes = build_routes(state);
     let addr: SocketAddr = ([127, 0, 0, 1], args.port).into();
@@ -322,44 +335,32 @@ fn build_routes(state: Arc<ServerState>) -> impl Filter<Extract = impl warp::Rep
         warp::reply::html(gen_login_html())
     });
 
-    // ログイン処理（Cookieを設定してリダイレクト）
-    // POST /do_login でCookieを設定してURLフラグメントにも含める
+    // ログイン処理（Set-Cookieでブラウザにcookieを設定してリダイレクト）
     let sdl = Arc::clone(&state);
     let do_login = warp::path("do_login").and(warp::post()).map(move || {
-        // Set session_valid to true on login
         sdl.auth_state.lock().unwrap().session_valid = true;
 
+        // 5基本Cookie + 追加Cookie（member-only配信に必要なCookieをシミュレート）
+        // __Secure-* → MOCK_SECURE_COOKIE で代替（理由は定数のdocコメント参照）
         let cookies = [
             ("SID", "mock_sid_12345"),
             ("HSID", "mock_hsid_12345"),
             ("SSID", "mock_ssid_12345"),
             ("APISID", "mock_apisid_12345"),
             ("SAPISID", "mock_sapisid_12345"),
+            (MOCK_SECURE_COOKIE, "mock_secure_1psid_12345"),
+            ("YSC", "mock_ysc_12345"),
+            ("VISITOR_INFO1_LIVE", "mock_visitor_12345"),
         ];
-
-        // Cookieを文字列に変換してURLフラグメントに含める
-        // URLフラグメントでスペースやセミコロンを含む場合はエンコードが必要
-        let cookie_str = cookies.iter()
-            .map(|(k, v)| format!("{}={}", k, v))
-            .collect::<Vec<_>>()
-            .join("; ");
-
-        // URLエンコード: スペースを%20に、セミコロンを%3Bに変換
-        let encoded_cookie_str = cookie_str
-            .replace(' ', "%20")
-            .replace(';', "%3B");
-
-        // リダイレクトでCookieをフラグメントに含める
-        let redirect_url = format!("/logged_in#LISCOV_AUTH:{}", encoded_cookie_str);
 
         let mut resp = warp::reply::Response::new(warp::hyper::Body::empty());
         *resp.status_mut() = warp::http::StatusCode::SEE_OTHER;
         resp.headers_mut().insert(
             "Location",
-            redirect_url.parse().unwrap(),
+            "/logged_in".parse().unwrap(),
         );
 
-        // Set-Cookie ヘッダーを追加
+        // Set-Cookie ヘッダーでブラウザのCookieストアに保存
         for (name, value) in cookies {
             resp.headers_mut().append(
                 "Set-Cookie",
@@ -395,9 +396,15 @@ fn build_routes(state: Arc<ServerState>) -> impl Filter<Extract = impl warp::Rep
             let title = stream_state.title_override.as_ref().unwrap_or(&sw.config.stream_title);
             let channel_id = stream_state.channel_id_override.as_ref().unwrap_or(&sw.config.channel_id);
             let channel_name = stream_state.channel_name_override.as_ref().unwrap_or(&sw.config.channel_name);
+            // Cookie記録（E2E cookie pipeline検証用）
+            if let Some(ref cookies) = cookie_header {
+                sw.last_request_cookies.lock().unwrap().watch = Some(cookies.clone());
+            }
+            // 認証チェック: SAPISIDとSecurePSID(=__Secure-1PSID代替)の両方が必要
+            let secure_check = format!("{}=", MOCK_SECURE_COOKIE);
             let has_auth_cookie = cookie_header
                 .as_deref()
-                .map(|c| c.contains("SAPISID="))
+                .map(|c| c.contains("SAPISID=") && c.contains(&secure_check))
                 .unwrap_or(false);
             let force_no_chat = stream_state.watch_force_no_chat;
             let html = if force_no_chat || (require_auth && !has_auth_cookie) {
@@ -532,6 +539,7 @@ fn build_routes(state: Arc<ServerState>) -> impl Filter<Extract = impl warp::Rep
         *srs.last_chat_mode.lock().unwrap() = None;
         *srs.token_validation.lock().unwrap() = TokenValidation::default();
         *srs.auto_message.lock().unwrap() = AutoMessageState::default();
+        *srs.last_request_cookies.lock().unwrap() = LastRequestCookies::default();
         srs.login_page_visits.store(0, Ordering::SeqCst);
         warp::reply::json(&json!({"status":"ok"}))
     });
@@ -543,6 +551,10 @@ fn build_routes(state: Arc<ServerState>) -> impl Filter<Extract = impl warp::Rep
         .and(warp::header::optional::<String>("cookie"))
         .and(warp::body::json())
         .map(move |auth_header: Option<String>, cookie_header: Option<String>, _body: Value| {
+            // Cookie記録（E2E cookie pipeline検証用）
+            if let Some(ref cookies) = cookie_header {
+                snx.last_request_cookies.lock().unwrap().next = Some(cookies.clone());
+            }
             let stream_state = snx.stream_state.lock().unwrap();
             let require_auth = stream_state.require_auth;
             let title = stream_state.title_override.as_ref().unwrap_or(&snx.config.stream_title).clone();
@@ -589,7 +601,13 @@ fn build_routes(state: Arc<ServerState>) -> impl Filter<Extract = impl warp::Rep
         let auto_msg = gam.auto_message.lock().unwrap();
         warp::reply::json(&*auto_msg)
     });
-    login_page.or(do_login).or(logged_in).or(watch).or(chat).or(next_api).or(acct).or(setauth).or(authst).or(status).or(add).or(setstream).or(chat_mode_status).or(token_validation).or(reset).or(set_auto_message).or(auto_message_status)
+    // Cookie echo endpoint — returns the last Cookie headers received by /watch and /next
+    let slrc = Arc::clone(&state);
+    let last_request_cookies = warp::path("last_request_cookies").and(warp::get()).map(move || {
+        let lrc = slrc.last_request_cookies.lock().unwrap();
+        warp::reply::json(&*lrc)
+    });
+    login_page.or(do_login).or(logged_in).or(watch).or(chat).or(next_api).or(acct).or(setauth).or(authst).or(status).or(add).or(setstream).or(chat_mode_status).or(token_validation).or(reset).or(set_auto_message).or(auto_message_status).or(last_request_cookies)
 }
 
 #[derive(Debug, Deserialize)] struct WQ { v: Option<String> }
@@ -823,30 +841,13 @@ fn gen_logged_in_html() -> String {
         body { font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f1f1f1; }
         .success-box { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); text-align: center; }
         h1 { color: #4CAF50; margin-bottom: 20px; }
-        .cookies { background: #f5f5f5; padding: 10px; border-radius: 4px; font-family: monospace; font-size: 12px; text-align: left; margin-top: 20px; }
     </style>
 </head>
 <body>
     <div class="success-box">
         <h1>✓ ログイン完了</h1>
-        <p>認証情報が設定されました</p>
-        <div class="cookies">
-            <strong>設定されたCookie:</strong><br>
-            SID=mock_sid_12345<br>
-            HSID=mock_hsid_12345<br>
-            SSID=mock_ssid_12345<br>
-            APISID=mock_apisid_12345<br>
-            SAPISID=mock_sapisid_12345
-        </div>
+        <p>認証情報が設定されました（Cookieはブラウザに保存済み）</p>
     </div>
-    <script>
-        // 認証情報検出用: CookieをページのtitleにLISCOV_AUTH:プレフィックス付きで設定
-        // これによりTauriのauth_windowがCookieを検出できる
-        const cookies = document.cookie;
-        if (cookies && cookies.includes('SAPISID=')) {
-            document.title = 'LISCOV_AUTH:' + cookies;
-        }
-    </script>
 </body>
 </html>"#.to_string()
 }
