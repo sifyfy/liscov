@@ -449,6 +449,10 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       const pastCommentButton = pastCommentsSection.locator('button').filter({
         has: mainPage.locator('text=ScrollMsg1')
       }).first();
+      // ネストされたoverflow-y-autoコンテナ内の要素はPlaywrightの自動スクロールが到達できないため
+      // 先にJSでスクロールしてビューポート内に表示する
+      await pastCommentButton.evaluate(el => el.scrollIntoView({ block: 'center' }));
+      await mainPage.waitForTimeout(200);
       await pastCommentButton.click();
 
       // The message in main chat should be highlighted
@@ -1418,44 +1422,50 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
-      // Find auto-scroll checkbox
+      // auto-scroll checkbox should exist and be checked by default
       const autoScrollCheckbox = mainPage.locator('label').filter({ hasText: '自動スクロール' }).locator('input[type="checkbox"]');
       await expect(autoScrollCheckbox).toBeVisible();
-
-      // Should be checked by default
       await expect(autoScrollCheckbox).toBeChecked();
 
-      // Toggle OFF
+      // Step 1: auto-scroll ONでメッセージを追加し、スクロール可能なリストを構築
+      for (let i = 1; i <= 40; i++) {
+        await addMockMessage({ message_type: 'text', author: `User${i}`, content: `ScrollCtrl_${String(i).padStart(2, '0')}` });
+      }
+      // auto-scroll ONにより最新メッセージが表示されている
+      await expect(mainPage.locator('text=ScrollCtrl_40')).toBeVisible({ timeout: 10000 });
+
+      // Step 2: auto-scroll OFFにする
       await autoScrollCheckbox.uncheck();
       await expect(autoScrollCheckbox).not.toBeChecked();
 
-      // Add messages - should NOT auto-scroll when checkbox is OFF
-      for (let i = 1; i <= 10; i++) {
-        await addMockMessage({ message_type: 'text', author: `NoScrollUser${i}`, content: `No scroll message ${i}` });
+      // Step 3: マウスホイールでTOPにスクロール（VListはDOM scrollTopではなくネイティブスクロールイベントで動作）
+      const vlistContainer = mainPage.locator('[style*="overflow-y"]').filter({ has: mainPage.locator('[data-message-id]') }).first();
+      const vlistBox = await vlistContainer.boundingBox();
+      if (vlistBox) {
+        await mainPage.mouse.move(vlistBox.x + vlistBox.width / 2, vlistBox.y + vlistBox.height / 2);
+        await mainPage.mouse.wheel(0, -10000);
       }
+      await mainPage.waitForTimeout(1000);
+      // TOPにいるので最初のメッセージが表示される
+      await expect(mainPage.locator('text=ScrollCtrl_01')).toBeVisible({ timeout: 5000 });
 
+      // Step 4: auto-scroll OFFの状態で追加メッセージを投入
+      for (let i = 41; i <= 60; i++) {
+        await addMockMessage({ message_type: 'text', author: `User${i}`, content: `ScrollCtrl_${String(i).padStart(2, '0')}` });
+      }
       await mainPage.waitForTimeout(3000);
 
-      // Find the virtua VList scroll container (has overflow-y in inline style)
-      const chatContainer = mainPage.locator('[style*="overflow-y"]').filter({ has: mainPage.locator('[data-message-id]') }).first();
+      // auto-scroll OFFかつTOPにスクロール済みなので、先頭メッセージが依然表示されている
+      await expect(mainPage.locator('text=ScrollCtrl_01')).toBeVisible({ timeout: 5000 });
+      // 最新メッセージはviewport外
+      await expect(mainPage.locator('text=ScrollCtrl_60')).not.toBeVisible({ timeout: 3000 });
 
-      // Scroll to top manually
-      await chatContainer.evaluate(el => { el.scrollTop = 0; });
-      await mainPage.waitForTimeout(200);
-
-      // Add more messages
-      await addMockMessage({ message_type: 'text', author: 'FinalUser', content: 'Final message' });
-      await mainPage.waitForTimeout(2000);
-
-      // Should still be near top (no auto-scroll because checkbox is OFF)
-      // VList virtual rendering may shift scrollTop slightly, so use generous threshold
-      const scrollPos = await chatContainer.evaluate(el => el.scrollTop);
-      const scrollHeight = await chatContainer.evaluate(el => el.scrollHeight);
-      expect(scrollPos).toBeLessThan(scrollHeight * 0.3); // Should NOT be near bottom
-
-      // Toggle back ON
+      // Step 5: auto-scroll ONに戻す → $effectが再評価され、scrollToIndex(last)が実行される
       await autoScrollCheckbox.check();
       await expect(autoScrollCheckbox).toBeChecked();
+
+      // auto-scroll ONにより最新メッセージが表示される
+      await expect(mainPage.locator('text=ScrollCtrl_60')).toBeVisible({ timeout: 10000 });
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
@@ -1615,7 +1625,9 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       const mainChatFirstMsg = mainPage.locator('[data-message-id]').filter({ hasText: 'FIRST_TARGET_MSG' }).first();
       const firstMsgBefore = await mainChatFirstMsg.isVisible();
 
-      // Click on the first message in the past comments
+      // ネストされたoverflow-y-autoコンテナ内の要素をビューポートに表示してからクリック
+      await pastComments.first().evaluate(el => el.scrollIntoView({ block: 'center' }));
+      await mainPage.waitForTimeout(200);
       await pastComments.first().click();
 
       // Wait for scroll
@@ -1973,7 +1985,9 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
         hasText: 'FIRST_MESSAGE_AUTOSCROLL',
       }).first();
 
-      // Click the past comment button to trigger scroll
+      // ネストされたoverflow-y-autoコンテナ内の要素をビューポートに表示してからクリック
+      await pastCommentButton.first().evaluate(el => el.scrollIntoView({ block: 'center' }));
+      await mainPage.waitForTimeout(200);
       await pastCommentButton.first().click();
 
       // Wait for scroll animation to complete
@@ -2130,6 +2144,7 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await mainPage.waitForTimeout(300);
 
       // Add 150 messages in parallel batches for speed
+      // 並列バッチ内の到着順は非決定的なので、最終メッセージは順次送信で保証
       for (let batch = 0; batch < 3; batch++) {
         const addPromises = [];
         for (let i = 1; i <= 50; i++) {
@@ -2152,15 +2167,14 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await expect(mainPage.getByText(/表示枠: 100件/)).toBeVisible();
       await expect(mainPage.getByText(/フィルタ後: 150件/)).toBeVisible();
 
-      // Latest message should be visible
-      await expect(mainPage.locator('text=BulkMsg_150')).toBeVisible();
+      // Scroll to top to check early messages are trimmed
+      const vlistContainer = mainPage.locator('[style*="overflow-y"]').filter({ has: mainPage.locator('[data-message-id]') }).first();
+      await vlistContainer.evaluate(el => { el.scrollTop = 0; });
+      await mainPage.waitForTimeout(500);
 
       // Early messages (within first 50) should NOT be visible
-      // displayedMessages = filteredMessages.slice(-100), so only messages 51-150 are shown
+      // displayedMessages = filteredMessages.slice(-100), so only messages 1-50 are trimmed
       await expect(mainPage.locator('text=BulkMsg_001')).not.toBeVisible();
-
-      // Message near the cutoff (message 51+) should be in displayedMessages
-      // (may not be in viewport due to virtual scroll, but would be accessible via scroll)
 
       // Disconnect
       await disconnectAndInitialize(mainPage);

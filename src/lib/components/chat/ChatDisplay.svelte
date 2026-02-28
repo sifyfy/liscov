@@ -40,15 +40,18 @@
     });
   });
 
-  // Respond to scrollToLatest trigger from FilterPanel
+  // Respond to scrollToLatest trigger from FilterPanel (fire only on trigger change)
+  let prevScrollTrigger = 0;
   $effect(() => {
     const trigger = chatStore.scrollToLatestTrigger;
-    if (trigger > 0 && vlist) {
+    if (trigger === prevScrollTrigger || !vlist) return;
+    prevScrollTrigger = trigger;
+    queueMicrotask(() => {
       const msgs = chatStore.displayedMessages;
       if (msgs.length > 0) {
-        vlist.scrollToIndex(msgs.length - 1, { align: 'end' });
+        vlist?.scrollToIndex(msgs.length - 1, { align: 'end' });
       }
-    }
+    });
   });
 
   function handleMessageClick(message: ChatMessage) {
