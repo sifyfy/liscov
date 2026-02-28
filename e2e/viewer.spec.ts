@@ -285,7 +285,8 @@ test.describe('Viewer Info Panel (02_chat.md)', () => {
           message_type: 'text',
           amount: null,
           is_member: false,
-          comment_count: 1,
+          is_first_time_viewer: false,
+          in_stream_comment_count: 1,
           metadata: null,
         },
       ];

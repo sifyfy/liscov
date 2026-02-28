@@ -70,7 +70,8 @@ pub struct ChatMessage {
     pub runs: Vec<MessageRun>,
     pub metadata: Option<MessageMetadata>,
     pub is_member: bool,
-    pub comment_count: Option<u32>,
+    pub is_first_time_viewer: bool,
+    pub in_stream_comment_count: Option<u32>,
 }
 
 impl Default for ChatMessage {
@@ -87,7 +88,8 @@ impl Default for ChatMessage {
             runs: vec![],
             metadata: None,
             is_member: false,
-            comment_count: None,
+            is_first_time_viewer: false,
+            in_stream_comment_count: None,
         }
     }
 }

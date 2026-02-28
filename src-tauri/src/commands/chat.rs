@@ -92,7 +92,8 @@ pub struct GuiChatMessage {
     pub message_type: String,
     pub amount: Option<String>,
     pub is_member: bool,
-    pub comment_count: Option<u32>,
+    pub is_first_time_viewer: bool,
+    pub in_stream_comment_count: Option<u32>,
     pub metadata: Option<GuiMessageMetadata>,
 }
 
@@ -165,7 +166,8 @@ impl From<ChatMessage> for GuiChatMessage {
             message_type,
             amount,
             is_member: msg.is_member,
-            comment_count: msg.comment_count,
+            is_first_time_viewer: msg.is_first_time_viewer,
+            in_stream_comment_count: msg.in_stream_comment_count,
             metadata,
         }
     }
@@ -322,6 +324,7 @@ pub async fn connect_to_stream(
         tokio::spawn(async move {
             chat_monitoring_task(
                 app_handle,
+                video_id,
                 innertube_client,
                 messages,
                 websocket_server,
@@ -347,6 +350,7 @@ pub async fn connect_to_stream(
 /// Chat monitoring task that polls for new messages
 async fn chat_monitoring_task(
     app: AppHandle,
+    video_id: String,
     innertube_client: Arc<RwLock<Option<InnerTubeClient>>>,
     messages: Arc<RwLock<std::collections::VecDeque<ChatMessage>>>,
     websocket_server: Arc<RwLock<Option<crate::core::api::WebSocketServer>>>,
@@ -363,6 +367,17 @@ async fn chat_monitoring_task(
     let poll_interval = std::time::Duration::from_millis(1500);
     let raw_response_saver = RawResponseSaver::new(save_config);
     let mut poll_count = 0u64;
+
+    // Initialize in-stream comment counter (restore from DB if session already has messages)
+    let mut in_stream_counts: std::collections::HashMap<String, u32> = {
+        let db_guard = database.read().await;
+        if let Some(db) = db_guard.as_ref() {
+            let conn = db.connection().await;
+            database::get_in_stream_comment_counts(&conn, &video_id).unwrap_or_default()
+        } else {
+            std::collections::HashMap::new()
+        }
+    };
 
     loop {
         // Check if we should stop monitoring
@@ -457,7 +472,27 @@ async fn chat_monitoring_task(
         };
 
         // Process new messages
-        for msg in new_messages {
+        for mut msg in new_messages {
+            // Skip system messages for enrichment
+            let is_system = matches!(msg.message_type, crate::core::models::MessageType::System);
+
+            if !is_system {
+                // Determine if first-time viewer and update in-stream comment count
+                if let Some(ref broadcaster_id) = broadcaster_id {
+                    let db_guard = database.read().await;
+                    if let Some(db) = db_guard.as_ref() {
+                        let conn = db.connection().await;
+                        let exists = database::viewer_exists(&conn, broadcaster_id, &msg.channel_id)
+                            .unwrap_or(false);
+                        msg.is_first_time_viewer = !exists;
+                    }
+                }
+
+                let count = in_stream_counts.entry(msg.channel_id.clone()).or_insert(0);
+                *count += 1;
+                msg.in_stream_comment_count = Some(*count);
+            }
+
             // Add to buffer
             {
                 let mut msgs = messages.write().await;

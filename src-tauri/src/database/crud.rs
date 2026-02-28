@@ -242,6 +242,37 @@ pub fn get_session_messages(
 // Viewer Profile Operations
 // ============================================================================
 
+/// Check if a viewer profile exists for a given broadcaster + channel combo
+pub fn viewer_exists(conn: &Connection, broadcaster_channel_id: &str, channel_id: &str) -> Result<bool> {
+    let count: i64 = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM viewer_profiles WHERE broadcaster_channel_id = ?1 AND channel_id = ?2)",
+        params![broadcaster_channel_id, channel_id],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+/// Get in-stream comment counts per channel_id for a given video_id
+pub fn get_in_stream_comment_counts(conn: &Connection, video_id: &str) -> Result<std::collections::HashMap<String, u32>> {
+    let like_pattern = format!("%watch?v={}%", video_id);
+    let mut stmt = conn.prepare(
+        "SELECT m.channel_id, COUNT(*) as cnt
+         FROM messages m
+         JOIN sessions s ON m.session_id = s.id
+         WHERE s.stream_url LIKE ?1
+           AND m.message_type != 'system'
+         GROUP BY m.channel_id",
+    )?;
+    let counts = stmt
+        .query_map(params![like_pattern], |row| {
+            let channel_id: String = row.get(0)?;
+            let count: u32 = row.get(1)?;
+            Ok((channel_id, count))
+        })?
+        .collect::<Result<std::collections::HashMap<_, _>, _>>()?;
+    Ok(counts)
+}
+
 /// Upsert viewer profile (returns the profile id)
 pub fn upsert_viewer_profile(
     conn: &Connection,
@@ -684,7 +715,8 @@ mod tests {
             runs: vec![],
             metadata: None,
             is_member: false,
-            comment_count: None,
+            is_first_time_viewer: false,
+            in_stream_comment_count: None,
         }
     }
 
@@ -701,7 +733,8 @@ mod tests {
             runs: vec![],
             metadata: None,
             is_member: false,
-            comment_count: None,
+            is_first_time_viewer: false,
+            in_stream_comment_count: None,
         }
     }
 
@@ -1005,5 +1038,109 @@ mod tests {
         let session = get_session(&conn, &session_id).unwrap().unwrap();
         assert_eq!(session.total_messages, 2);
         assert!(session.total_revenue > 0.0);
+    }
+
+    // ========================================================================
+    // viewer_exists (first-time viewer detection)
+    // ========================================================================
+
+    #[tokio::test]
+    async fn viewer_exists_returns_false_for_unknown_viewer() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let exists = viewer_exists(&conn, "UC_bc", "UC_unknown").unwrap();
+        assert!(!exists);
+    }
+
+    #[tokio::test]
+    async fn viewer_exists_returns_true_after_upsert() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "Viewer", "UC_viewer", "hi")).unwrap();
+
+        let exists = viewer_exists(&conn, "UC_bc", "UC_viewer").unwrap();
+        assert!(exists);
+    }
+
+    #[tokio::test]
+    async fn viewer_exists_is_scoped_per_broadcaster() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let session_id = create_session(&conn, None, None, Some("UC_bcA"), Some("BcA")).unwrap();
+
+        save_message(&conn, &session_id, Some("UC_bcA"), &make_text_message("m1", "Viewer", "UC_viewer", "hi")).unwrap();
+
+        // Exists for bcA but not bcB
+        assert!(viewer_exists(&conn, "UC_bcA", "UC_viewer").unwrap());
+        assert!(!viewer_exists(&conn, "UC_bcB", "UC_viewer").unwrap());
+    }
+
+    // ========================================================================
+    // get_in_stream_comment_counts (in-stream comment count aggregation)
+    // ========================================================================
+
+    #[tokio::test]
+    async fn get_in_stream_comment_counts_returns_empty_for_unknown_video() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let counts = get_in_stream_comment_counts(&conn, "nonexistent_video").unwrap();
+        assert!(counts.is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_in_stream_comment_counts_returns_message_counts_per_channel() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let video_id = "dQw4w9WgXcQ";
+        let stream_url = format!("https://www.youtube.com/watch?v={}", video_id);
+        let session_id = create_session(&conn, Some(&stream_url), Some("Test Stream"), Some("UC_bc"), Some("BC")).unwrap();
+
+        // User A sends 3 messages, User B sends 2
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "A", "UC_a", "hi1")).unwrap();
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m2", "A", "UC_a", "hi2")).unwrap();
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m3", "A", "UC_a", "hi3")).unwrap();
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m4", "B", "UC_b", "hey1")).unwrap();
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m5", "B", "UC_b", "hey2")).unwrap();
+
+        let counts = get_in_stream_comment_counts(&conn, video_id).unwrap();
+        assert_eq!(counts.get("UC_a"), Some(&3u32));
+        assert_eq!(counts.get("UC_b"), Some(&2u32));
+    }
+
+    #[tokio::test]
+    async fn get_in_stream_comment_counts_does_not_count_system_messages() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let video_id = "testVideo123";
+        let stream_url = format!("https://www.youtube.com/watch?v={}", video_id);
+        let session_id = create_session(&conn, Some(&stream_url), None, Some("UC_bc"), Some("BC")).unwrap();
+
+        let sys_msg = ChatMessage {
+            id: "sys1".to_string(),
+            timestamp: "12:00:00".to_string(),
+            timestamp_usec: "1000000".to_string(),
+            message_type: MessageType::System,
+            author: "System".to_string(),
+            author_icon_url: None,
+            channel_id: "UC_sys".to_string(),
+            content: "Stream started".to_string(),
+            runs: vec![],
+            metadata: None,
+            is_member: false,
+            is_first_time_viewer: false,
+            in_stream_comment_count: None,
+        };
+        save_message(&conn, &session_id, Some("UC_bc"), &sys_msg).unwrap();
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "A", "UC_a", "hi")).unwrap();
+
+        let counts = get_in_stream_comment_counts(&conn, video_id).unwrap();
+        // system messages are saved as message_type="system", but counted only for non-system?
+        // spec says count all messages in session, system messages included in DB but here we count text
+        // Per spec: in_stream_comment_count = count of messages by channel_id in stream
+        // System messages have a channel_id, but per spec only user messages should count
+        assert_eq!(counts.get("UC_sys"), None, "System messages should not be counted");
+        assert_eq!(counts.get("UC_a"), Some(&1u32));
     }
 }

@@ -552,7 +552,8 @@ async fn test_chatmessage_json_format_matches_spec() {
     //     "runs": [{ "type": "text", "text": "こんにちは！" }],
     //     "metadata": { "amount": null, "badges": [...], "is_moderator": false, "is_verified": false },
     //     "is_member": true,
-    //     "comment_count": 5
+    //     "is_first_time_viewer": false,
+    //     "in_stream_comment_count": 5
     //   }
     // }
 
@@ -588,7 +589,8 @@ async fn test_chatmessage_json_format_matches_spec() {
             superchat_colors: None,
         }),
         is_member: true,
-        comment_count: Some(5),
+        is_first_time_viewer: false,
+        in_stream_comment_count: Some(5),
     };
 
     server.broadcast_message(&test_msg).await;
@@ -618,7 +620,8 @@ async fn test_chatmessage_json_format_matches_spec() {
     assert_eq!(data["channel_id"], "UCtest123");
     assert_eq!(data["content"], "Hello World");
     assert_eq!(data["is_member"], true);
-    assert_eq!(data["comment_count"], 5);
+    assert_eq!(data["is_first_time_viewer"], false);
+    assert_eq!(data["in_stream_comment_count"], 5);
 
     // Verify message_type format: unit variant serializes to string "Text"
     assert_eq!(
@@ -728,7 +731,8 @@ fn create_test_message(id: &str, author: &str, content: &str) -> ChatMessage {
         runs: vec![],
         metadata: None,
         is_member: false,
-        comment_count: Some(1),
+        is_first_time_viewer: false,
+        in_stream_comment_count: Some(1),
     }
 }
 
@@ -821,7 +825,8 @@ async fn test_broadcast_preserves_message_content() {
         runs: vec![],
         metadata: None,
         is_member: true,
-        comment_count: Some(42),
+        is_first_time_viewer: false,
+        in_stream_comment_count: Some(42),
     };
     server.broadcast_message(&test_msg).await;
 
@@ -840,7 +845,8 @@ async fn test_broadcast_preserves_message_content() {
     assert_eq!(json["data"]["channel_id"], "UCspecial");
     assert_eq!(json["data"]["content"], "特殊なメッセージ 🎉");
     assert_eq!(json["data"]["is_member"], true);
-    assert_eq!(json["data"]["comment_count"], 42);
+    assert_eq!(json["data"]["is_first_time_viewer"], false);
+    assert_eq!(json["data"]["in_stream_comment_count"], 42);
 
     server.stop().await;
 }

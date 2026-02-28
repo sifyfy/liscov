@@ -16,7 +16,8 @@ function createMessage(overrides: Partial<ChatMessageType> = {}): ChatMessageTyp
 		message_type: 'text',
 		amount: null,
 		is_member: false,
-		comment_count: null,
+		is_first_time_viewer: false,
+		in_stream_comment_count: null,
 		metadata: null,
 		...overrides,
 	};
@@ -145,6 +146,51 @@ describe('ChatMessage', () => {
 			const textElement = container.querySelector('.mt-1.ml-8 p') as HTMLElement;
 
 			expect(textElement.style.color).toBe('var(--text-secondary)');
+		});
+	});
+
+	describe('初見さんバッジ', () => {
+		it('is_first_time_viewer=true のとき 🎉NEW バッジを表示する', () => {
+			const message = createMessage({ is_first_time_viewer: true });
+			const { container } = render(ChatMessage, { props: { message, fontSize: 13, showTimestamps: false } });
+			expect(container.textContent).toContain('🎉NEW');
+		});
+
+		it('is_first_time_viewer=false のとき 🎉NEW バッジを表示しない', () => {
+			const message = createMessage({ is_first_time_viewer: false });
+			const { container } = render(ChatMessage, { props: { message, fontSize: 13, showTimestamps: false } });
+			expect(container.textContent).not.toContain('🎉NEW');
+		});
+	});
+
+	describe('配信内コメント回数', () => {
+		it('in_stream_comment_count=1 のとき #1 を表示する', () => {
+			const message = createMessage({ in_stream_comment_count: 1 });
+			const { container } = render(ChatMessage, { props: { message, fontSize: 13, showTimestamps: false } });
+			expect(container.textContent).toContain('#1');
+		});
+
+		it('in_stream_comment_count=5 のとき #5 を表示する', () => {
+			const message = createMessage({ in_stream_comment_count: 5 });
+			const { container } = render(ChatMessage, { props: { message, fontSize: 13, showTimestamps: false } });
+			expect(container.textContent).toContain('#5');
+		});
+
+		it('in_stream_comment_count=null のとき回数を表示しない', () => {
+			const message = createMessage({ in_stream_comment_count: null });
+			const { container } = render(ChatMessage, { props: { message, fontSize: 13, showTimestamps: false } });
+			// '#' 記号がないことを確認（他の要素に含まれないよう確認）
+			const metadataRow = container.querySelector('.flex.items-center.gap-2');
+			expect(metadataRow?.textContent).not.toMatch(/#\d/);
+		});
+	});
+
+	describe('初見さんバッジと配信内コメント回数の同時表示', () => {
+		it('is_first_time_viewer=true + in_stream_comment_count=1 のとき両方表示する', () => {
+			const message = createMessage({ is_first_time_viewer: true, in_stream_comment_count: 1 });
+			const { container } = render(ChatMessage, { props: { message, fontSize: 13, showTimestamps: false } });
+			expect(container.textContent).toContain('🎉NEW');
+			expect(container.textContent).toContain('#1');
 		});
 	});
 });

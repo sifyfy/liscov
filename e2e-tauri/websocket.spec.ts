@@ -510,7 +510,8 @@ test.describe('WebSocket API (03_websocket.md)', () => {
             superchat_colors: unknown | null;
           } | null;
           is_member: boolean;
-          comment_count: number | null;
+          is_first_time_viewer: boolean;
+          in_stream_comment_count: number | null;
         };
       };
 
@@ -526,7 +527,8 @@ test.describe('WebSocket API (03_websocket.md)', () => {
       expect(msg.data).toHaveProperty('runs');
       expect(msg.data).toHaveProperty('metadata');
       expect(msg.data).toHaveProperty('is_member');
-      expect(msg.data).toHaveProperty('comment_count');
+      expect(msg.data).toHaveProperty('is_first_time_viewer');
+      expect(msg.data).toHaveProperty('in_stream_comment_count');
 
       if (msg.data.metadata) {
         expect(msg.data.metadata).toHaveProperty('amount');

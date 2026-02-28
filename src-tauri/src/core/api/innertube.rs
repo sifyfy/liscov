@@ -439,7 +439,8 @@ fn parse_text_message(renderer: &Value) -> Option<ChatMessage> {
         runs,
         metadata: None,
         is_member,
-        comment_count: None,
+        is_first_time_viewer: false,
+        in_stream_comment_count: None,
     })
 }
 
@@ -516,7 +517,8 @@ fn parse_superchat_message(renderer: &Value) -> Option<ChatMessage> {
             superchat_colors,
         }),
         is_member: false,
-        comment_count: None,
+        is_first_time_viewer: false,
+        in_stream_comment_count: None,
     })
 }
 
@@ -582,7 +584,8 @@ fn parse_supersticker_message(renderer: &Value) -> Option<ChatMessage> {
             superchat_colors,
         }),
         is_member: false,
-        comment_count: None,
+        is_first_time_viewer: false,
+        in_stream_comment_count: None,
     })
 }
 
@@ -640,7 +643,8 @@ fn parse_membership_message(renderer: &Value) -> Option<ChatMessage> {
         runs: vec![],
         metadata: None,
         is_member: true,
-        comment_count: None,
+        is_first_time_viewer: false,
+        in_stream_comment_count: None,
     })
 }
 
@@ -729,7 +733,8 @@ fn parse_membership_gift_message(renderer: &Value) -> Option<ChatMessage> {
         runs: vec![],
         metadata: None,
         is_member: true,
-        comment_count: None,
+        is_first_time_viewer: false,
+        in_stream_comment_count: None,
     })
 }
 

@@ -138,15 +138,15 @@
     }
   });
 
-  // Comment count display
+  // 初見さん判定
+  let isFirstTimeViewer = $derived(message.is_first_time_viewer);
+
+  // 配信内コメント回数表示
   let commentCountDisplay = $derived(() => {
-    if (message.comment_count === null || message.comment_count === undefined) {
+    if (message.in_stream_comment_count === null || message.in_stream_comment_count === undefined) {
       return null;
     }
-    if (message.comment_count === 1) {
-      return '🎉#1';
-    }
-    return `#${message.comment_count}`;
+    return `#${message.in_stream_comment_count}`;
   });
 
 </script>
@@ -248,9 +248,16 @@
       </span>
     {/if}
 
-    <!-- Comment count -->
+    <!-- 初見さんバッジ -->
+    {#if isFirstTimeViewer}
+      <span class="px-1.5 py-0.5 text-[10px] bg-[var(--success-subtle)] text-[var(--success)] rounded font-bold">
+        🎉NEW
+      </span>
+    {/if}
+
+    <!-- 配信内コメント回数 -->
     {#if commentCountDisplay()}
-      <span class="text-xs {message.comment_count === 1 ? 'text-[var(--warning)] font-bold' : 'text-[var(--text-muted)]'}">
+      <span class="text-[10px] text-[var(--text-muted)]">
         {commentCountDisplay()}
       </span>
     {/if}

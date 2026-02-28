@@ -129,7 +129,8 @@ pub struct WebSocketStatus {
       "superchat_colors": null
     },
     "is_member": true,
-    "comment_count": 5
+    "is_first_time_viewer": false,
+    "in_stream_comment_count": 5
   }
 }
 ```

@@ -35,7 +35,8 @@ function createMessage(id: string, overrides: Partial<ChatMessage> = {}): ChatMe
 		message_type: 'text',
 		amount: null,
 		is_member: false,
-		comment_count: null,
+		is_first_time_viewer: false,
+		in_stream_comment_count: null,
 		metadata: null,
 		...overrides,
 	};

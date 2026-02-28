@@ -45,7 +45,8 @@ export interface ChatMessage {
   message_type: MessageType;
   amount: string | null;
   is_member: boolean;
-  comment_count: number | null;
+  is_first_time_viewer: boolean;
+  in_stream_comment_count: number | null;
   metadata: MessageMetadata | null;
 }
 

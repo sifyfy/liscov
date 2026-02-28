@@ -2180,4 +2180,126 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await disconnectAndInitialize(mainPage);
     });
   });
+
+  test.describe('初見さんバッジと配信内コメント回数', () => {
+    test('初見さんの最初のメッセージに🎉NEWバッジと#1が表示される', async () => {
+      // Connect to stream
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_first_time`);
+      await mainPage.locator('button:has-text("開始")').click();
+      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+
+      // Add message from a new user (test DB is clean, so all users are first-time)
+      await addMockMessage({
+        message_type: 'text',
+        author: 'NewUser',
+        content: 'はじめてのコメントです',
+        channel_id: 'UC_new_1',
+        is_member: false,
+      });
+
+      await mainPage.waitForTimeout(3000);
+
+      // Verify the message is shown
+      await expect(mainPage.locator('text=NewUser')).toBeVisible();
+
+      // Find the message element and verify 🎉NEW badge and #1 are present
+      const messageEl = mainPage.locator('[data-message-id]').filter({
+        has: mainPage.locator('text=はじめてのコメントです'),
+      }).first();
+      await expect(messageEl.getByText('🎉NEW')).toBeVisible();
+      await expect(messageEl.getByText('#1')).toBeVisible();
+
+      // Disconnect
+      await disconnectAndInitialize(mainPage);
+    });
+
+    test('同じユーザーの2回目のメッセージには🎉NEWが表示されない', async () => {
+      // Connect to stream
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_repeat`);
+      await mainPage.locator('button:has-text("開始")').click();
+      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+
+      // 1回目のメッセージ
+      await addMockMessage({
+        message_type: 'text',
+        author: 'RepeatUser',
+        content: '1回目のコメント',
+        channel_id: 'UC_repeat',
+        is_member: false,
+      });
+
+      await mainPage.waitForTimeout(3000);
+      await expect(mainPage.locator('text=1回目のコメント')).toBeVisible();
+
+      // 2回目のメッセージ
+      await addMockMessage({
+        message_type: 'text',
+        author: 'RepeatUser',
+        content: '2回目のコメント',
+        channel_id: 'UC_repeat',
+        is_member: false,
+      });
+
+      await mainPage.waitForTimeout(3000);
+      await expect(mainPage.locator('text=2回目のコメント')).toBeVisible();
+
+      // 2回目のメッセージ要素に🎉NEWが無く、#2が表示されることを確認
+      const secondMessageEl = mainPage.locator('[data-message-id]').filter({
+        has: mainPage.locator('text=2回目のコメント'),
+      }).first();
+      await expect(secondMessageEl.getByText('🎉NEW')).not.toBeVisible();
+      await expect(secondMessageEl.getByText('#2')).toBeVisible();
+
+      // Disconnect
+      await disconnectAndInitialize(mainPage);
+    });
+
+    test('異なるユーザーはそれぞれ初見バッジが表示される', async () => {
+      // Connect to stream
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_multi_first`);
+      await mainPage.locator('button:has-text("開始")').click();
+      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+
+      // ユーザーAのメッセージ
+      await addMockMessage({
+        message_type: 'text',
+        author: 'UserAlpha',
+        content: 'UserAlphaのコメント',
+        channel_id: 'UC_a',
+        is_member: false,
+      });
+
+      // ユーザーBのメッセージ
+      await addMockMessage({
+        message_type: 'text',
+        author: 'UserBeta',
+        content: 'UserBetaのコメント',
+        channel_id: 'UC_b',
+        is_member: false,
+      });
+
+      await mainPage.waitForTimeout(3000);
+
+      // 両方に🎉NEWと#1が表示されることを確認
+      const messageA = mainPage.locator('[data-message-id]').filter({
+        has: mainPage.locator('text=UserAlphaのコメント'),
+      }).first();
+      await expect(messageA).toBeVisible();
+      await expect(messageA.getByText('🎉NEW')).toBeVisible();
+      await expect(messageA.getByText('#1')).toBeVisible();
+
+      const messageB = mainPage.locator('[data-message-id]').filter({
+        has: mainPage.locator('text=UserBetaのコメント'),
+      }).first();
+      await expect(messageB).toBeVisible();
+      await expect(messageB.getByText('🎉NEW')).toBeVisible();
+      await expect(messageB.getByText('#1')).toBeVisible();
+
+      // Disconnect
+      await disconnectAndInitialize(mainPage);
+    });
+  });
 });
