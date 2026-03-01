@@ -2182,7 +2182,7 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
   });
 
   test.describe('初見さんバッジと配信内コメント回数', () => {
-    test('初見さんの最初のメッセージに🎉NEWバッジと#1が表示される', async () => {
+    test('初見さんの最初のメッセージに🎉初見さんバッジと#1が表示される', async () => {
       // Connect to stream
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_first_time`);
@@ -2200,21 +2200,18 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
 
       await mainPage.waitForTimeout(3000);
 
-      // Verify the message is shown
-      await expect(mainPage.locator('text=NewUser')).toBeVisible();
-
-      // Find the message element and verify 🎉NEW badge and #1 are present
+      // Find the message element and verify 🎉初見さん badge and #1 are present
       const messageEl = mainPage.locator('[data-message-id]').filter({
         has: mainPage.locator('text=はじめてのコメントです'),
       }).first();
-      await expect(messageEl.getByText('🎉NEW')).toBeVisible();
+      await expect(messageEl.getByText('🎉初見さん')).toBeVisible();
       await expect(messageEl.getByText('#1')).toBeVisible();
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
     });
 
-    test('同じユーザーの2回目のメッセージには🎉NEWが表示されない', async () => {
+    test('初見さんの2回目のメッセージにはmutedな初見さんと#2が表示される', async () => {
       // Connect to stream
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_repeat`);
@@ -2245,11 +2242,12 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
       await mainPage.waitForTimeout(3000);
       await expect(mainPage.locator('text=2回目のコメント')).toBeVisible();
 
-      // 2回目のメッセージ要素に🎉NEWが無く、#2が表示されることを確認
+      // 2回目: 🎉初見さん(目立つ)は無いが、初見さん(muted)と#2が表示される
       const secondMessageEl = mainPage.locator('[data-message-id]').filter({
         has: mainPage.locator('text=2回目のコメント'),
       }).first();
-      await expect(secondMessageEl.getByText('🎉NEW')).not.toBeVisible();
+      await expect(secondMessageEl.getByText('🎉初見さん')).not.toBeVisible();
+      await expect(secondMessageEl.getByText('初見さん')).toBeVisible();
       await expect(secondMessageEl.getByText('#2')).toBeVisible();
 
       // Disconnect
@@ -2283,19 +2281,19 @@ test.describe('Chat Display Feature (02_chat.md)', () => {
 
       await mainPage.waitForTimeout(3000);
 
-      // 両方に🎉NEWと#1が表示されることを確認
+      // 両方に🎉初見さんと#1が表示されることを確認
       const messageA = mainPage.locator('[data-message-id]').filter({
         has: mainPage.locator('text=UserAlphaのコメント'),
       }).first();
       await expect(messageA).toBeVisible();
-      await expect(messageA.getByText('🎉NEW')).toBeVisible();
+      await expect(messageA.getByText('🎉初見さん')).toBeVisible();
       await expect(messageA.getByText('#1')).toBeVisible();
 
       const messageB = mainPage.locator('[data-message-id]').filter({
         has: mainPage.locator('text=UserBetaのコメント'),
       }).first();
       await expect(messageB).toBeVisible();
-      await expect(messageB.getByText('🎉NEW')).toBeVisible();
+      await expect(messageB.getByText('🎉初見さん')).toBeVisible();
       await expect(messageB.getByText('#1')).toBeVisible();
 
       // Disconnect

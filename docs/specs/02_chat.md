@@ -215,71 +215,72 @@ Origin: https://www.youtube.com
 ## チャット監視タスク
 
 ```
-┌─ ループ（1.5秒ごと）────────────────────┐
-│ 1. is_monitoringフラグを確認            │
-│ 2. fetch_messages_with_raw()でAPI呼び出し │
-│    └─ 新しいcontinuation tokenを取得    │
-│ 3. 各メッセージを処理:                   │
-│    ├─ メモリバッファに追加               │
-│    ├─ DBに保存（INSERT OR IGNORE）       │
-│    ├─ upsert_viewer_profile → 初見判定   │
-│    ├─ 配信内コメント数カウンタ更新        │
-│    ├─ GuiChatMessageに初見・回数を付与   │
-│    └─ Tauriイベントを発行               │
-│ 4. sleep(1500ms)                        │
-└────────────────────────────────────────┘
+┌─ ループ（1.5秒ごと）─────────────────────────┐
+│ 1. is_monitoringフラグを確認                  │
+│ 2. fetch_messages_with_raw()でAPI呼び出し     │
+│    └─ 新しいcontinuation tokenを取得          │
+│ 3. 各メッセージを処理:                         │
+│    ├─ 配信内コメント数カウンタ更新              │
+│    ├─ DBに保存（save_message）                │
+│    │   ├─ INSERT OR IGNORE (messages)         │
+│    │   ├─ upsert_viewer_profile               │
+│    │   └─ upsert_viewer_stream(video_id)      │
+│    ├─ is_first_time_viewer(video_id)で初見判定 │
+│    ├─ メモリバッファに追加                     │
+│    ├─ GuiChatMessageに初見・回数を付与         │
+│    └─ Tauriイベントを発行                     │
+│ 4. sleep(1500ms)                              │
+└───────────────────────────────────────────────┘
 ```
 
 ### 初見さん判定
 
 配信者チャンネルにおいて初めてコメントした視聴者を判定する。
 
-#### 判定方法
+#### データ構造: viewer_streams テーブル
 
-`upsert_viewer_profile` の戻り値を拡張し、INSERTが発生したか（初見）UPDATEが発生したか（既存）を区別する。
+各視聴者がどの配信にコメントしたかを記録する。
 
-```rust
-/// upsert_viewer_profileの結果
-pub struct ViewerUpsertResult {
-    pub profile_id: i64,
-    pub is_new: bool,  // true = INSERT（初見）, false = UPDATE（既存）
-}
+```sql
+CREATE TABLE viewer_streams (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    viewer_profile_id INTEGER NOT NULL,     -- viewer_profiles.id
+    video_id TEXT NOT NULL,                 -- 配信のvideo_id
+    first_comment_at TEXT NOT NULL,         -- この配信での最初のコメント時刻
+    last_comment_at TEXT NOT NULL,          -- この配信での最新のコメント時刻
+    message_count INTEGER DEFAULT 1,        -- この配信でのコメント数
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (viewer_profile_id) REFERENCES viewer_profiles(id) ON DELETE CASCADE,
+    UNIQUE(viewer_profile_id, video_id)
+);
 ```
 
-**推奨実装**: `upsert_viewer_profile` 呼び出し前にSELECTで存在チェック。
+#### 判定方法
 
-```rust
-pub fn upsert_viewer_profile_with_detection(
-    conn: &Connection,
-    broadcaster_channel_id: &str,
-    channel_id: &str,
-    display_name: &str,
-    amount: Option<&str>,
-) -> Result<ViewerUpsertResult> {
-    // 1. 既存チェック（O(1) - UNIQUEインデックス使用）
-    let exists: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM viewer_profiles WHERE broadcaster_channel_id = ?1 AND channel_id = ?2)",
-        params![broadcaster_channel_id, channel_id],
-        |row| row.get(0),
-    )?;
+`viewer_streams` テーブルで、視聴者の最古の `video_id` が現在の配信の `video_id` と一致するかで判定する。
 
-    // 2. 既存のupsert処理
-    let profile_id = upsert_viewer_profile(conn, broadcaster_channel_id, channel_id, display_name, amount)?;
-
-    Ok(ViewerUpsertResult {
-        profile_id,
-        is_new: !exists,
-    })
-}
+```
+メッセージ受信時:
+  1. save_message → upsert_viewer_profile (viewer_profile_id を取得)
+                  → upsert_viewer_stream(viewer_profile_id, video_id)
+  2. is_first_time_viewer(broadcaster_id, channel_id, video_id) で判定:
+     oldest_video_id = SELECT video_id FROM viewer_streams vs
+                       JOIN viewer_profiles vp ON vs.viewer_profile_id = vp.id
+                       WHERE vp.broadcaster_channel_id = ? AND vp.channel_id = ?
+                       ORDER BY vs.first_comment_at ASC LIMIT 1
+     msg.is_first_time_viewer = (oldest_video_id == current_video_id)
 ```
 
 #### 注意事項
 
 | ポイント | 説明 |
 |---------|------|
-| 配信者スコープ | `(broadcaster_channel_id, channel_id)` の組み合わせで判定。配信者Aでは初見でも配信者Bでは別途初見判定 |
-| 永続性 | `viewer_profiles` テーブルに基づくため、アプリ再起動後も維持 |
-| システムメッセージ | `message_type == "system"` のメッセージは初見判定の対象外 |
+| 配信者スコープ | `viewer_profiles.broadcaster_channel_id` 経由で配信者スコープを維持 |
+| 永続性 | `viewer_streams` テーブルに基づくためアプリ再起動後も正確 |
+| 配信内一貫性 | DB問い合わせのため、再接続後も自動的に正しい判定を維持（メモリキャッシュ不要） |
+| 判定タイミング | `save_message`（`upsert_viewer_stream` 含む）の**後**に判定する |
+| システムメッセージ | `message_type == "system"` のメッセージは判定対象外 |
+| 将来の拡張 | 視聴者の訪問配信一覧、前回来た配信の特定等に利用可能 |
 
 ### 配信内コメント数カウンタ
 
@@ -457,8 +458,8 @@ Idle ─────────────→ Connecting ─────→ Co
 | 著者名 | フォント設定値 | メンバー: `var(--member-accent)`、非メンバー: `var(--accent)` | font-weight: 600、最大200px |
 | 読み仮名 | 11px固定 | `var(--text-muted)` | 登録時のみ表示 |
 | バッジ画像 | 16×16px | - | 複数表示可 |
-| 初見バッジ | 10px固定 | `var(--success)` テキスト、`var(--success-subtle)` 背景 | `is_first_time_viewer`がtrueの場合のみ表示、太字 |
-| 配信内コメント回数 | 10px固定 | `var(--text-muted)` | 右寄せ。初見バッジとは独立して表示 |
+| 初見バッジ | フォント設定値 | 下記参照 | `is_first_time_viewer`がtrueの場合のみ表示。配信内コメント回数に応じて表示が変化 |
+| 配信内コメント回数 | フォント設定値 | 下記参照 | 初見バッジとは独立して表示。`#1` のみ目立つ色 |
 
 #### 第2行：本文行
 
@@ -593,10 +594,12 @@ SuperChatの色情報がある場合はYouTube APIから取得した色を使用
 ### 初見さんバッジ
 
 配信者チャンネルで初めてコメントした視聴者（初見さん）を識別するためのバッジ。
+初見さんは配信内で一貫して表示され、コメント回数に応じて表示スタイルが変化する。
 
 | 条件 | 表示 | スタイル |
 |------|------|---------|
-| `is_first_time_viewer == true` | `🎉NEW` | `var(--success)` テキスト、`var(--success-subtle)` 背景、太字、border-radius: 4px、padding: 1px 6px |
+| `is_first_time_viewer == true` かつ `in_stream_comment_count == 1` | `🎉初見さん` | `var(--success)` テキスト、`var(--success-subtle)` 背景、太字、border-radius: 4px、padding: 1px 6px |
+| `is_first_time_viewer == true` かつ `in_stream_comment_count > 1` | `初見さん` | `var(--text-muted)` テキスト、背景なし |
 | `is_first_time_viewer == false` | （非表示） | - |
 
 **初見さんの判定基準:**
@@ -604,18 +607,20 @@ SuperChatの色情報がある場合はYouTube APIから取得した色を使用
 | 項目 | 仕様 |
 |------|------|
 | スコープ | 配信者チャンネル単位（`viewer_profiles` の `(broadcaster_channel_id, channel_id)` ペア） |
-| 判定タイミング | `upsert_viewer_profile` でINSERTが成功した場合（初レコード作成時） |
-| 永続性 | DBに記録されるため、アプリ再起動後も同一視聴者は初見扱いにならない |
+| 判定タイミング | 配信内でそのビューワーの最初のメッセージ受信時に `viewer_exists` でDBチェック。結果は `HashSet<String>` にキャッシュし、配信中は一貫して同じ判定を維持 |
+| 永続性 | `viewer_profiles` テーブルに基づくため、アプリ再起動後も同一視聴者は初見扱いにならない |
 | 配信者間の独立性 | 配信者Aで初見でも、配信者Bでは別途初見判定される |
+| 再接続時の復元 | `in_stream_counts` のキー（DBから復元済み）に対して `viewer_exists` で再チェックし、`first_time_viewers` セットを復元する |
+| 配信内一貫性 | 一度初見と判定されたビューワーは、その配信中は何回コメントしても `is_first_time_viewer == true` を維持する |
 
 ### 配信内コメント回数表示
 
 同一配信（video_id単位）内での視聴者のコメント回数を表示する。
 
-| 回数 | 表示 | 色 |
-|------|------|-----|
-| 1回目 | #1 | `var(--text-muted)` |
-| 2回目以降 | #N | `var(--text-muted)` |
+| 回数 | 表示 | スタイル |
+|------|------|---------|
+| 1回目 | `#1` | `var(--warning)` テキスト、太字 |
+| 2回目以降 | `#N` | `var(--text-muted)` テキスト |
 | 取得不可 | （非表示） | - |
 
 **配信内コメント回数の仕様:**
@@ -633,7 +638,8 @@ SuperChatの色情報がある場合はYouTube APIから取得した色を使用
 
 | ケース | 表示例 |
 |--------|--------|
-| チャンネル初見 + 配信1回目 | `🎉NEW` `#1` |
+| チャンネル初見 + 配信1回目 | `🎉初見さん` `#1` |
+| チャンネル初見 + 配信2回目以降 | `初見さん` `#N` |
 | チャンネル初見ではない + 配信1回目 | `#1` |
 | チャンネル初見ではない + 配信3回目 | `#3` |
 

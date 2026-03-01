@@ -248,16 +248,22 @@
       </span>
     {/if}
 
-    <!-- 初見さんバッジ -->
+    <!-- 初見さんバッジ (初コメ時は目立つ、2回目以降はmuted) -->
     {#if isFirstTimeViewer}
-      <span class="px-1.5 py-0.5 text-[10px] bg-[var(--success-subtle)] text-[var(--success)] rounded font-bold">
-        🎉NEW
-      </span>
+      {#if message.in_stream_comment_count === 1}
+        <span class="px-1.5 py-0.5 bg-[var(--success-subtle)] text-[var(--success)] rounded font-bold" style="font-size: {fontSize}px;">
+          🎉初見さん
+        </span>
+      {:else}
+        <span class="text-[var(--text-muted)]" style="font-size: {fontSize}px;">
+          初見さん
+        </span>
+      {/if}
     {/if}
 
-    <!-- 配信内コメント回数 -->
+    <!-- 配信内コメント回数 (#1は目立つ色、#2以降はmuted) -->
     {#if commentCountDisplay()}
-      <span class="text-[10px] text-[var(--text-muted)]">
+      <span class="{message.in_stream_comment_count === 1 ? 'font-bold text-[var(--warning)]' : 'text-[var(--text-muted)]'}" style="font-size: {fontSize}px;">
         {commentCountDisplay()}
       </span>
     {/if}

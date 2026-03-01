@@ -22,6 +22,14 @@ const MIGRATIONS: &[Migration] = &[
         name: "001_initial",
         sql: include_str!("001_initial.sql"),
     },
+    Migration {
+        name: "002_viewer_streams",
+        sql: include_str!("002_viewer_streams.sql"),
+    },
+    Migration {
+        name: "003_backfill_viewer_streams",
+        sql: include_str!("003_backfill_viewer_streams.sql"),
+    },
 ];
 
 /// Run all pending migrations
@@ -324,13 +332,13 @@ mod tests {
         run_migrations(&conn).unwrap();
         run_migrations(&conn).unwrap();
 
-        // Should still only have one record
+        // Should have exactly the number of migrations (no duplicates)
         let count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM schema_versions",
             [],
             |row| row.get(0),
         ).unwrap();
-        assert_eq!(count, 1);
+        assert_eq!(count, MIGRATIONS.len() as i64);
     }
 
     #[test]

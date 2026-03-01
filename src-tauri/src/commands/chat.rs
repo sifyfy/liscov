@@ -477,32 +477,13 @@ async fn chat_monitoring_task(
             let is_system = matches!(msg.message_type, crate::core::models::MessageType::System);
 
             if !is_system {
-                // Determine if first-time viewer and update in-stream comment count
-                if let Some(ref broadcaster_id) = broadcaster_id {
-                    let db_guard = database.read().await;
-                    if let Some(db) = db_guard.as_ref() {
-                        let conn = db.connection().await;
-                        let exists = database::viewer_exists(&conn, broadcaster_id, &msg.channel_id)
-                            .unwrap_or(false);
-                        msg.is_first_time_viewer = !exists;
-                    }
-                }
-
+                // Update in-stream comment counter
                 let count = in_stream_counts.entry(msg.channel_id.clone()).or_insert(0);
                 *count += 1;
                 msg.in_stream_comment_count = Some(*count);
             }
 
-            // Add to buffer
-            {
-                let mut msgs = messages.write().await;
-                if msgs.len() >= 1000 {
-                    msgs.pop_front();
-                }
-                msgs.push_back(msg.clone());
-            }
-
-            // Save to database
+            // Save to database first (creates viewer_profile + viewer_stream)
             if let Some(ref session_id) = session_id {
                 let db_guard = database.read().await;
                 if let Some(db) = db_guard.as_ref() {
@@ -512,10 +493,37 @@ async fn chat_monitoring_task(
                         session_id,
                         broadcaster_id.as_deref(),
                         &msg,
+                        Some(&video_id),
                     ) {
                         tracing::warn!("Failed to save message: {}", e);
                     }
                 }
+            }
+
+            // Determine first-time viewer after DB save (viewer_streams is now populated)
+            if !is_system {
+                if let Some(ref broadcaster_id) = broadcaster_id {
+                    let db_guard = database.read().await;
+                    if let Some(db) = db_guard.as_ref() {
+                        let conn = db.connection().await;
+                        msg.is_first_time_viewer = database::is_first_time_viewer(
+                            &conn,
+                            broadcaster_id,
+                            &msg.channel_id,
+                            &video_id,
+                        )
+                        .unwrap_or(false);
+                    }
+                }
+            }
+
+            // Add to buffer
+            {
+                let mut msgs = messages.write().await;
+                if msgs.len() >= 1000 {
+                    msgs.pop_front();
+                }
+                msgs.push_back(msg.clone());
             }
 
             // Convert to GUI message

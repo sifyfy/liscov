@@ -150,16 +150,23 @@ describe('ChatMessage', () => {
 	});
 
 	describe('初見さんバッジ', () => {
-		it('is_first_time_viewer=true のとき 🎉NEW バッジを表示する', () => {
-			const message = createMessage({ is_first_time_viewer: true });
+		it('is_first_time_viewer=true + count=1 のとき 🎉初見さん バッジを表示する', () => {
+			const message = createMessage({ is_first_time_viewer: true, in_stream_comment_count: 1 });
 			const { container } = render(ChatMessage, { props: { message, fontSize: 13, showTimestamps: false } });
-			expect(container.textContent).toContain('🎉NEW');
+			expect(container.textContent).toContain('🎉初見さん');
 		});
 
-		it('is_first_time_viewer=false のとき 🎉NEW バッジを表示しない', () => {
+		it('is_first_time_viewer=true + count>1 のとき muted な 初見さん を表示する', () => {
+			const message = createMessage({ is_first_time_viewer: true, in_stream_comment_count: 3 });
+			const { container } = render(ChatMessage, { props: { message, fontSize: 13, showTimestamps: false } });
+			expect(container.textContent).toContain('初見さん');
+			expect(container.textContent).not.toContain('🎉初見さん');
+		});
+
+		it('is_first_time_viewer=false のとき 初見さん を表示しない', () => {
 			const message = createMessage({ is_first_time_viewer: false });
 			const { container } = render(ChatMessage, { props: { message, fontSize: 13, showTimestamps: false } });
-			expect(container.textContent).not.toContain('🎉NEW');
+			expect(container.textContent).not.toContain('初見さん');
 		});
 	});
 
@@ -186,10 +193,10 @@ describe('ChatMessage', () => {
 	});
 
 	describe('初見さんバッジと配信内コメント回数の同時表示', () => {
-		it('is_first_time_viewer=true + in_stream_comment_count=1 のとき両方表示する', () => {
+		it('is_first_time_viewer=true + in_stream_comment_count=1 のとき 🎉初見さん と #1 を表示する', () => {
 			const message = createMessage({ is_first_time_viewer: true, in_stream_comment_count: 1 });
 			const { container } = render(ChatMessage, { props: { message, fontSize: 13, showTimestamps: false } });
-			expect(container.textContent).toContain('🎉NEW');
+			expect(container.textContent).toContain('🎉初見さん');
 			expect(container.textContent).toContain('#1');
 		});
 	});

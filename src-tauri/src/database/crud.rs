@@ -148,6 +148,7 @@ pub fn save_message(
     session_id: &str,
     broadcaster_channel_id: Option<&str>,
     message: &ChatMessage,
+    video_id: Option<&str>,
 ) -> Result<i64> {
     let message_type = match &message.message_type {
         crate::core::models::MessageType::Text => "text",
@@ -187,13 +188,18 @@ pub fn save_message(
 
     // Update viewer profile (if broadcaster_channel_id is available)
     if let Some(broadcaster_id) = broadcaster_channel_id {
-        upsert_viewer_profile(
+        let profile_id = upsert_viewer_profile(
             conn,
             broadcaster_id,
             &message.channel_id,
             &message.author,
             amount.as_deref(),
         )?;
+
+        // Record stream participation for first-time viewer detection
+        if let Some(vid) = video_id {
+            upsert_viewer_stream(conn, profile_id, vid)?;
+        }
     }
 
     Ok(conn.last_insert_rowid())
@@ -242,14 +248,48 @@ pub fn get_session_messages(
 // Viewer Profile Operations
 // ============================================================================
 
-/// Check if a viewer profile exists for a given broadcaster + channel combo
-pub fn viewer_exists(conn: &Connection, broadcaster_channel_id: &str, channel_id: &str) -> Result<bool> {
-    let count: i64 = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM viewer_profiles WHERE broadcaster_channel_id = ?1 AND channel_id = ?2)",
-        params![broadcaster_channel_id, channel_id],
-        |row| row.get(0),
+/// Check if a viewer is a first-time viewer for a given broadcaster in a specific stream.
+/// Returns true if the oldest video_id in viewer_streams matches the current_video_id,
+/// meaning this stream is the first one where this viewer commented.
+pub fn is_first_time_viewer(
+    conn: &Connection,
+    broadcaster_channel_id: &str,
+    channel_id: &str,
+    current_video_id: &str,
+) -> Result<bool> {
+    let oldest_video_id: Option<String> = conn
+        .query_row(
+            "SELECT vs.video_id
+             FROM viewer_streams vs
+             JOIN viewer_profiles vp ON vs.viewer_profile_id = vp.id
+             WHERE vp.broadcaster_channel_id = ?1 AND vp.channel_id = ?2
+             ORDER BY vs.first_comment_at ASC
+             LIMIT 1",
+            params![broadcaster_channel_id, channel_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    Ok(oldest_video_id.as_deref() == Some(current_video_id))
+}
+
+/// Record that a viewer has commented on a specific stream.
+/// Creates a new record or updates message_count and last_comment_at on conflict.
+pub fn upsert_viewer_stream(
+    conn: &Connection,
+    viewer_profile_id: i64,
+    video_id: &str,
+) -> Result<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO viewer_streams (viewer_profile_id, video_id, first_comment_at, last_comment_at, message_count)
+         VALUES (?1, ?2, ?3, ?3, 1)
+         ON CONFLICT(viewer_profile_id, video_id) DO UPDATE SET
+            last_comment_at = excluded.last_comment_at,
+            message_count = message_count + 1",
+        params![viewer_profile_id, video_id, now],
     )?;
-    Ok(count > 0)
+    Ok(())
 }
 
 /// Get in-stream comment counts per channel_id for a given video_id
@@ -815,7 +855,7 @@ mod tests {
         let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
 
         let msg = make_text_message("msg1", "User1", "UC_user1", "Hello");
-        save_message(&conn, &session_id, Some("UC_bc"), &msg).unwrap();
+        save_message(&conn, &session_id, Some("UC_bc"), &msg, None).unwrap();
 
         let messages = get_session_messages(&conn, &session_id, 100).unwrap();
         assert_eq!(messages.len(), 1);
@@ -832,9 +872,9 @@ mod tests {
         let session_id = create_session(&conn, None, None, None, None).unwrap();
 
         let msg = make_text_message("dup_msg", "User", "UC_user", "Content");
-        save_message(&conn, &session_id, None, &msg).unwrap();
+        save_message(&conn, &session_id, None, &msg, None).unwrap();
         // INSERT OR IGNORE should not fail on duplicate
-        save_message(&conn, &session_id, None, &msg).unwrap();
+        save_message(&conn, &session_id, None, &msg, None).unwrap();
 
         let messages = get_session_messages(&conn, &session_id, 100).unwrap();
         assert_eq!(messages.len(), 1);
@@ -847,8 +887,8 @@ mod tests {
         let session1 = create_session(&conn, None, None, None, None).unwrap();
         let session2 = create_session(&conn, None, None, None, None).unwrap();
 
-        save_message(&conn, &session1, None, &make_text_message("m1", "A", "UC_a", "msg1")).unwrap();
-        save_message(&conn, &session2, None, &make_text_message("m2", "B", "UC_b", "msg2")).unwrap();
+        save_message(&conn, &session1, None, &make_text_message("m1", "A", "UC_a", "msg1"), None).unwrap();
+        save_message(&conn, &session2, None, &make_text_message("m2", "B", "UC_b", "msg2"), None).unwrap();
 
         let msgs1 = get_session_messages(&conn, &session1, 100).unwrap();
         let msgs2 = get_session_messages(&conn, &session2, 100).unwrap();
@@ -867,7 +907,7 @@ mod tests {
 
         for i in 0..5 {
             let msg = make_text_message(&format!("m{}", i), "User", "UC_u", &format!("msg{}", i));
-            save_message(&conn, &session_id, None, &msg).unwrap();
+            save_message(&conn, &session_id, None, &msg, None).unwrap();
         }
 
         let messages = get_session_messages(&conn, &session_id, 3).unwrap();
@@ -885,7 +925,7 @@ mod tests {
         let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
 
         let msg = make_text_message("m1", "Viewer1", "UC_viewer1", "hi");
-        save_message(&conn, &session_id, Some("UC_bc"), &msg).unwrap();
+        save_message(&conn, &session_id, Some("UC_bc"), &msg, None).unwrap();
 
         let profile = get_viewer_profile(&conn, "UC_bc", "UC_viewer1").unwrap().unwrap();
         assert_eq!(profile.display_name, "Viewer1");
@@ -900,10 +940,10 @@ mod tests {
         let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
 
         let msg1 = make_text_message("m1", "Viewer1", "UC_v1", "first");
-        save_message(&conn, &session_id, Some("UC_bc"), &msg1).unwrap();
+        save_message(&conn, &session_id, Some("UC_bc"), &msg1, None).unwrap();
 
         let msg2 = make_text_message("m2", "Viewer1", "UC_v1", "second");
-        save_message(&conn, &session_id, Some("UC_bc"), &msg2).unwrap();
+        save_message(&conn, &session_id, Some("UC_bc"), &msg2, None).unwrap();
 
         let profile = get_viewer_profile(&conn, "UC_bc", "UC_v1").unwrap().unwrap();
         assert_eq!(profile.message_count, 2);
@@ -916,7 +956,7 @@ mod tests {
         let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
 
         let sc = make_superchat_message("sc1", "BigFan", "UC_fan", "$50.00");
-        save_message(&conn, &session_id, Some("UC_bc"), &sc).unwrap();
+        save_message(&conn, &session_id, Some("UC_bc"), &sc, None).unwrap();
 
         let profile = get_viewer_profile(&conn, "UC_bc", "UC_fan").unwrap().unwrap();
         assert_eq!(profile.message_count, 1);
@@ -935,9 +975,9 @@ mod tests {
         let s2 = create_session(&conn, None, None, Some("UC_bcB"), Some("BroadcasterB")).unwrap();
 
         // Same viewer on different broadcasters
-        save_message(&conn, &s1, Some("UC_bcA"), &make_text_message("m1", "CommonViewer", "UC_common", "hi")).unwrap();
-        save_message(&conn, &s1, Some("UC_bcA"), &make_text_message("m2", "CommonViewer", "UC_common", "hello")).unwrap();
-        save_message(&conn, &s2, Some("UC_bcB"), &make_text_message("m3", "CommonViewer", "UC_common", "hey")).unwrap();
+        save_message(&conn, &s1, Some("UC_bcA"), &make_text_message("m1", "CommonViewer", "UC_common", "hi"), None).unwrap();
+        save_message(&conn, &s1, Some("UC_bcA"), &make_text_message("m2", "CommonViewer", "UC_common", "hello"), None).unwrap();
+        save_message(&conn, &s2, Some("UC_bcB"), &make_text_message("m3", "CommonViewer", "UC_common", "hey"), None).unwrap();
 
         let profile_a = get_viewer_profile(&conn, "UC_bcA", "UC_common").unwrap().unwrap();
         let profile_b = get_viewer_profile(&conn, "UC_bcB", "UC_common").unwrap().unwrap();
@@ -956,7 +996,7 @@ mod tests {
         let conn = db.connection().await;
         let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
 
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "User", "UC_u", "hi")).unwrap();
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "User", "UC_u", "hi"), None).unwrap();
         let profile = get_viewer_profile(&conn, "UC_bc", "UC_u").unwrap().unwrap();
 
         let info = ViewerCustomInfo::new(profile.id)
@@ -975,7 +1015,7 @@ mod tests {
         let conn = db.connection().await;
         let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
 
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "User", "UC_u", "hi")).unwrap();
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "User", "UC_u", "hi"), None).unwrap();
         let profile = get_viewer_profile(&conn, "UC_bc", "UC_u").unwrap().unwrap();
 
         let info = ViewerCustomInfo::new(profile.id).with_reading("test");
@@ -1008,8 +1048,8 @@ mod tests {
         let conn = db.connection().await;
         let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
 
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "V1", "UC_v1", "hi")).unwrap();
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m2", "V2", "UC_v2", "hello")).unwrap();
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "V1", "UC_v1", "hi"), None).unwrap();
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m2", "V2", "UC_v2", "hello"), None).unwrap();
 
         let (deleted, viewer_count) = delete_broadcaster(&conn, "UC_bc").unwrap();
         assert!(deleted);
@@ -1030,8 +1070,8 @@ mod tests {
         let conn = db.connection().await;
         let session_id = create_session(&conn, None, None, None, None).unwrap();
 
-        save_message(&conn, &session_id, None, &make_text_message("m1", "U", "UC_u", "hi")).unwrap();
-        save_message(&conn, &session_id, None, &make_superchat_message("sc1", "U", "UC_u", "$10.00")).unwrap();
+        save_message(&conn, &session_id, None, &make_text_message("m1", "U", "UC_u", "hi"), None).unwrap();
+        save_message(&conn, &session_id, None, &make_superchat_message("sc1", "U", "UC_u", "$10.00"), None).unwrap();
 
         update_session_stats(&conn, &session_id).unwrap();
 
@@ -1041,40 +1081,162 @@ mod tests {
     }
 
     // ========================================================================
-    // viewer_exists (first-time viewer detection)
+    // viewer_streams + is_first_time_viewer (02_chat.md: 初見さん判定)
     // ========================================================================
 
     #[tokio::test]
-    async fn viewer_exists_returns_false_for_unknown_viewer() {
-        let db = setup_db();
-        let conn = db.connection().await;
-        let exists = viewer_exists(&conn, "UC_bc", "UC_unknown").unwrap();
-        assert!(!exists);
-    }
-
-    #[tokio::test]
-    async fn viewer_exists_returns_true_after_upsert() {
+    async fn upsert_viewer_stream_creates_record() {
         let db = setup_db();
         let conn = db.connection().await;
         let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
 
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "Viewer", "UC_viewer", "hi")).unwrap();
+        // Create viewer profile via save_message
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "Viewer", "UC_viewer", "hi"), None).unwrap();
+        let profile = get_viewer_profile(&conn, "UC_bc", "UC_viewer").unwrap().unwrap();
 
-        let exists = viewer_exists(&conn, "UC_bc", "UC_viewer").unwrap();
-        assert!(exists);
+        // Upsert viewer stream
+        upsert_viewer_stream(&conn, profile.id, "video_abc").unwrap();
+
+        // Verify record exists
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM viewer_streams WHERE viewer_profile_id = ?1 AND video_id = ?2",
+            params![profile.id, "video_abc"],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 1);
     }
 
     #[tokio::test]
-    async fn viewer_exists_is_scoped_per_broadcaster() {
+    async fn upsert_viewer_stream_increments_message_count() {
         let db = setup_db();
         let conn = db.connection().await;
-        let session_id = create_session(&conn, None, None, Some("UC_bcA"), Some("BcA")).unwrap();
+        let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
 
-        save_message(&conn, &session_id, Some("UC_bcA"), &make_text_message("m1", "Viewer", "UC_viewer", "hi")).unwrap();
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "Viewer", "UC_viewer", "hi"), None).unwrap();
+        let profile = get_viewer_profile(&conn, "UC_bc", "UC_viewer").unwrap().unwrap();
 
-        // Exists for bcA but not bcB
-        assert!(viewer_exists(&conn, "UC_bcA", "UC_viewer").unwrap());
-        assert!(!viewer_exists(&conn, "UC_bcB", "UC_viewer").unwrap());
+        upsert_viewer_stream(&conn, profile.id, "video_abc").unwrap();
+        upsert_viewer_stream(&conn, profile.id, "video_abc").unwrap();
+
+        let msg_count: i64 = conn.query_row(
+            "SELECT message_count FROM viewer_streams WHERE viewer_profile_id = ?1 AND video_id = ?2",
+            params![profile.id, "video_abc"],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(msg_count, 2);
+    }
+
+    #[tokio::test]
+    async fn upsert_viewer_stream_creates_separate_records_per_video() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "Viewer", "UC_viewer", "hi"), None).unwrap();
+        let profile = get_viewer_profile(&conn, "UC_bc", "UC_viewer").unwrap().unwrap();
+
+        upsert_viewer_stream(&conn, profile.id, "video_1").unwrap();
+        upsert_viewer_stream(&conn, profile.id, "video_2").unwrap();
+
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM viewer_streams WHERE viewer_profile_id = ?1",
+            params![profile.id],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 2);
+    }
+
+    #[tokio::test]
+    async fn is_first_time_viewer_true_when_only_current_stream() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+
+        // Save message with video_id → creates viewer_profile + viewer_stream
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "Viewer", "UC_viewer", "hi"), Some("video_abc")).unwrap();
+
+        // Oldest video_id == current_video_id → first-time viewer
+        assert!(is_first_time_viewer(&conn, "UC_bc", "UC_viewer", "video_abc").unwrap());
+    }
+
+    #[tokio::test]
+    async fn is_first_time_viewer_false_when_seen_in_older_stream() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+
+        // Viewer first commented in video_old
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "Viewer", "UC_viewer", "hi"), Some("video_old")).unwrap();
+
+        // Then commented in video_new
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m2", "Viewer", "UC_viewer", "hello"), Some("video_new")).unwrap();
+
+        // Oldest video_id is "video_old", not "video_new" → not first-time
+        assert!(!is_first_time_viewer(&conn, "UC_bc", "UC_viewer", "video_new").unwrap());
+        // But still first-time for the oldest stream
+        assert!(is_first_time_viewer(&conn, "UC_bc", "UC_viewer", "video_old").unwrap());
+    }
+
+    #[tokio::test]
+    async fn is_first_time_viewer_false_when_no_records() {
+        let db = setup_db();
+        let conn = db.connection().await;
+
+        // No viewer_profiles or viewer_streams → false
+        assert!(!is_first_time_viewer(&conn, "UC_bc", "UC_unknown", "video_abc").unwrap());
+    }
+
+    #[tokio::test]
+    async fn is_first_time_viewer_scoped_per_broadcaster() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let s1 = create_session(&conn, None, None, Some("UC_bcA"), Some("BcA")).unwrap();
+        let s2 = create_session(&conn, None, None, Some("UC_bcB"), Some("BcB")).unwrap();
+
+        // Viewer first seen on bcA in video_old
+        save_message(&conn, &s1, Some("UC_bcA"), &make_text_message("m1", "Viewer", "UC_viewer", "hi"), Some("video_old")).unwrap();
+
+        // Viewer first seen on bcB in video_new (different broadcaster)
+        save_message(&conn, &s2, Some("UC_bcB"), &make_text_message("m2", "Viewer", "UC_viewer", "hello"), Some("video_new")).unwrap();
+
+        // For bcA: oldest is video_old → first-time in video_old
+        assert!(is_first_time_viewer(&conn, "UC_bcA", "UC_viewer", "video_old").unwrap());
+        // For bcB: oldest is video_new → first-time in video_new
+        assert!(is_first_time_viewer(&conn, "UC_bcB", "UC_viewer", "video_new").unwrap());
+    }
+
+    #[tokio::test]
+    async fn save_message_with_video_id_creates_viewer_stream() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+
+        // save_message with video_id should auto-create viewer_stream
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "Viewer", "UC_viewer", "hi"), Some("video_xyz")).unwrap();
+
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM viewer_streams WHERE video_id = 'video_xyz'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[tokio::test]
+    async fn save_message_without_video_id_does_not_create_viewer_stream() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+
+        // save_message without video_id should not create viewer_stream
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "Viewer", "UC_viewer", "hi"), None).unwrap();
+
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM viewer_streams",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 0);
     }
 
     // ========================================================================
@@ -1098,11 +1260,11 @@ mod tests {
         let session_id = create_session(&conn, Some(&stream_url), Some("Test Stream"), Some("UC_bc"), Some("BC")).unwrap();
 
         // User A sends 3 messages, User B sends 2
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "A", "UC_a", "hi1")).unwrap();
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m2", "A", "UC_a", "hi2")).unwrap();
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m3", "A", "UC_a", "hi3")).unwrap();
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m4", "B", "UC_b", "hey1")).unwrap();
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m5", "B", "UC_b", "hey2")).unwrap();
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "A", "UC_a", "hi1"), None).unwrap();
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m2", "A", "UC_a", "hi2"), None).unwrap();
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m3", "A", "UC_a", "hi3"), None).unwrap();
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m4", "B", "UC_b", "hey1"), None).unwrap();
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m5", "B", "UC_b", "hey2"), None).unwrap();
 
         let counts = get_in_stream_comment_counts(&conn, video_id).unwrap();
         assert_eq!(counts.get("UC_a"), Some(&3u32));
@@ -1132,8 +1294,8 @@ mod tests {
             is_first_time_viewer: false,
             in_stream_comment_count: None,
         };
-        save_message(&conn, &session_id, Some("UC_bc"), &sys_msg).unwrap();
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "A", "UC_a", "hi")).unwrap();
+        save_message(&conn, &session_id, Some("UC_bc"), &sys_msg, None).unwrap();
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "A", "UC_a", "hi"), None).unwrap();
 
         let counts = get_in_stream_comment_counts(&conn, video_id).unwrap();
         // system messages are saved as message_type="system", but counted only for non-system?
