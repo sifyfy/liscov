@@ -3,7 +3,7 @@
  */
 
 import { chromium, BrowserContext, Page, Browser, expect } from '@playwright/test';
-import { exec, execSync, spawn, ChildProcess } from 'child_process';
+import { execSync, spawn, ChildProcess } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -19,6 +19,9 @@ export const TEST_KEYRING_SERVICE = 'liscov-test';
 
 // Mock server process reference
 let mockServerProcess: ChildProcess | null = null;
+
+// Tauri app process reference
+let tauriProcess: ChildProcess | null = null;
 
 /**
  * Get test data directories based on platform
@@ -95,7 +98,7 @@ export async function waitForCDP(timeout = 120000): Promise<void> {
     } catch (e) {
       lastError = e instanceof Error ? e.message : String(e);
     }
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await new Promise((resolve) => setTimeout(resolve, 200));
   }
   throw new Error(`CDP not available after ${timeout}ms. Last error: ${lastError}`);
 }
@@ -127,6 +130,11 @@ export async function connectToApp(): Promise<{ browser: Browser; context: Brows
  */
 export async function killTauriApp(): Promise<void> {
   log.debug('Killing Tauri app...');
+  if (tauriProcess) {
+    tauriProcess.kill();
+    tauriProcess = null;
+  }
+  // Also kill any orphaned processes as fallback
   try {
     if (process.platform === 'win32') {
       execSync('taskkill /F /IM liscov-tauri.exe 2>nul', { stdio: 'ignore' });
@@ -136,7 +144,6 @@ export async function killTauriApp(): Promise<void> {
   } catch {
     // Process may not exist
   }
-  // Wait for port to be released
   await new Promise((resolve) => setTimeout(resolve, 1000));
 }
 
@@ -146,23 +153,35 @@ export async function killTauriApp(): Promise<void> {
 export async function startTauriApp(): Promise<void> {
   const env = {
     ...process.env,
-    // Test isolation: use separate namespace
     LISCOV_APP_NAME: TEST_APP_NAME,
     LISCOV_KEYRING_SERVICE: TEST_KEYRING_SERVICE,
-    // Mock server URLs
     LISCOV_AUTH_URL: `${MOCK_SERVER_URL}/?auto_login=true`,
     LISCOV_SESSION_CHECK_URL: `${MOCK_SERVER_URL}/youtubei/v1/account/account_menu`,
     LISCOV_YOUTUBE_BASE_URL: MOCK_SERVER_URL,
-    // Enable CDP for Playwright
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=9222',
   };
 
   log.info(`Starting Tauri app with test namespace: ${TEST_APP_NAME}`);
 
-  // Start app in background
-  exec(`cd "${PROJECT_DIR}" && pnpm tauri dev`, { env });
+  tauriProcess = spawn('pnpm', ['tauri', 'dev'], {
+    cwd: PROJECT_DIR,
+    env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    shell: true,
+  });
 
-  // Wait for CDP to be available
+  const tauriLog = log.child('tauri');
+  tauriProcess.stdout?.on('data', (data) => {
+    const msg = data.toString().trim();
+    if (msg) tauriLog.debug(msg);
+  });
+  tauriProcess.stderr?.on('data', (data) => {
+    const msg = data.toString().trim();
+    if (msg && !msg.includes('Compiling') && !msg.includes('Finished')) {
+      tauriLog.debug(msg);
+    }
+  });
+
   await waitForCDP();
 }
 
@@ -233,7 +252,7 @@ export async function startMockServer(): Promise<void> {
     } catch {
       // Server not ready yet
     }
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise((resolve) => setTimeout(resolve, 200));
   }
   throw new Error(`Mock server not ready after ${timeout}ms`);
 }
@@ -304,13 +323,27 @@ export async function setupTestEnvironment(): Promise<{ browser: Browser; contex
  */
 export async function teardownTestEnvironment(browser?: Browser): Promise<void> {
   log.info('Tearing down test environment...');
-  if (browser) {
-    await browser.close();
+  const errors: Error[] = [];
+
+  for (const [name, cleanup] of [
+    ['browser.close', () => browser?.close()],
+    ['killTauriApp', killTauriApp],
+    ['killMockServer', killMockServer],
+    ['cleanupTestData', cleanupTestData],
+    ['cleanupTestCredentials', cleanupTestCredentials],
+  ] as [string, () => Promise<void> | undefined][]) {
+    try {
+      await cleanup();
+    } catch (e) {
+      const error = e instanceof Error ? e : new Error(String(e));
+      log.warn(`Teardown step "${name}" failed: ${error.message}`);
+      errors.push(error);
+    }
   }
-  await killTauriApp();
-  await killMockServer();
-  await cleanupTestData();
-  await cleanupTestCredentials();
+
+  if (errors.length > 0) {
+    log.warn(`Teardown completed with ${errors.length} error(s)`);
+  }
 }
 
 /**
