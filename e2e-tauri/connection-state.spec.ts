@@ -6,6 +6,7 @@ import {
   teardownTestEnvironment,
   resetMockServer,
   addMockMessage,
+  disconnectAndInitialize,
 } from './utils/test-helpers';
 
 /**
@@ -17,16 +18,6 @@ import {
  * - Resume reconnects to the same stream
  * - Initialize clears all state and returns to idle
  */
-
-// Helper to fully disconnect (stop + initialize) and return to idle state
-async function disconnectAndInitialize(page: Page): Promise<void> {
-  const stopButton = page.locator('button:has-text("停止")');
-  if (await stopButton.isVisible({ timeout: 1000 }).catch(() => false)) {
-    await stopButton.click();
-    await page.locator('button:has-text("初期化")').click();
-    await expect(page.locator('input[placeholder*="YouTube URL"], input[placeholder*="youtube.com"]')).toBeVisible({ timeout: 5000 });
-  }
-}
 
 test.describe('Connection State Transitions (02_chat.md)', () => {
   let browser: Browser;

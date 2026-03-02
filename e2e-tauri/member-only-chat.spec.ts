@@ -6,6 +6,7 @@ import {
   teardownTestEnvironment,
   addMockMessage,
   resetMockServer,
+  disconnectAndInitialize,
 } from './utils/test-helpers';
 
 /**
@@ -47,18 +48,6 @@ async function setAuthState(state: { session_valid?: boolean }): Promise<void> {
   });
   if (!response.ok) {
     throw new Error(`Failed to set auth state: ${response.status}`);
-  }
-}
-
-// Helper to fully disconnect and return to idle state
-async function disconnectAndInitialize(page: Page): Promise<void> {
-  const stopButton = page.locator('button:has-text("停止")');
-  if (await stopButton.isVisible({ timeout: 1000 }).catch(() => false)) {
-    await stopButton.click();
-    await page.locator('button:has-text("初期化")').click();
-    await expect(
-      page.locator('input[placeholder*="youtube.com"]'),
-    ).toBeVisible({ timeout: 5000 });
   }
 }
 

@@ -2,7 +2,7 @@
  * E2Eテスト共通ヘルパー関数
  */
 
-import { chromium, BrowserContext, Page, Browser } from '@playwright/test';
+import { chromium, BrowserContext, Page, Browser, expect } from '@playwright/test';
 import { exec, execSync, spawn, ChildProcess } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -311,4 +311,36 @@ export async function teardownTestEnvironment(browser?: Browser): Promise<void> 
   await killMockServer();
   await cleanupTestData();
   await cleanupTestCredentials();
+}
+
+/**
+ * Fully disconnect (stop + initialize) and return app to idle state.
+ * Clicks 停止 if visible, then 初期化, and waits for the URL input to reappear.
+ */
+export async function disconnectAndInitialize(page: Page): Promise<void> {
+  const stopButton = page.locator('button:has-text("停止")');
+  if (await stopButton.isVisible({ timeout: 1000 }).catch(() => false)) {
+    await stopButton.click();
+    await page.locator('button:has-text("初期化")').click();
+    await expect(page.locator('input[placeholder*="youtube.com"]')).toBeVisible({ timeout: 5000 });
+  }
+}
+
+/**
+ * Connect to mock server stream and wait for stream title to appear.
+ * @param videoId - optional video ID, defaults to "test_video_123"
+ */
+export async function connectToMockStream(page: Page, videoId = 'test_video_123'): Promise<void> {
+  const urlInput = page.locator('input[placeholder*="youtube.com"]');
+  await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=${videoId}`);
+  await page.locator('button:has-text("開始")').click();
+  await expect(page.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+}
+
+/**
+ * Navigate to a tab by its display name using the nav button.
+ */
+export async function navigateToTab(page: Page, tabName: string): Promise<void> {
+  const tab = page.locator(`nav button:has-text("${tabName}")`);
+  await tab.click();
 }

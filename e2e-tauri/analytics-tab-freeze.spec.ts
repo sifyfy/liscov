@@ -6,6 +6,8 @@ import {
   teardownTestEnvironment,
   resetMockServer,
   addMockMessage,
+  disconnectAndInitialize,
+  navigateToTab,
 } from './utils/test-helpers';
 
 /**
@@ -22,23 +24,14 @@ import {
  *   pnpm exec playwright test --config e2e-tauri/playwright.config.ts e2e-tauri/analytics-tab-freeze.spec.ts
  */
 
-// Helper to fully disconnect (stop + initialize) and return to idle state
-async function disconnectAndInitialize(page: Page): Promise<void> {
-  const stopButton = page.locator('button:has-text("停止")');
-  if (await stopButton.isVisible({ timeout: 1000 }).catch(() => false)) {
-    await stopButton.click();
-    await page.locator('button:has-text("初期化")').click();
-    await expect(page.locator('input[placeholder*="youtube.com"]')).toBeVisible({ timeout: 5000 });
-  }
-}
-
 // Helper to wait for app to be fully loaded
 async function waitForAppReady(page: Page): Promise<void> {
   // Wait for the tab navigation to be visible (indicates SvelteKit app has rendered)
   await expect(page.locator('nav button:has-text("Chat")')).toBeVisible({ timeout: 30000 });
 }
 
-// Helper to connect to mock stream
+// NOTE: 共有版 connectToMockStream と異なり、waitForAppReady + 明示的 visibility check が必要
+// analytics テストはタブ切替後の再接続が多く、UI安定化を待つ追加ステップが必須
 async function connectToMockStream(page: Page): Promise<void> {
   await waitForAppReady(page);
   const urlInput = page.locator('input[placeholder*="youtube.com"]');
@@ -46,12 +39,6 @@ async function connectToMockStream(page: Page): Promise<void> {
   await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
   await page.locator('button:has-text("開始")').click();
   await expect(page.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
-}
-
-// Helper to navigate to a tab
-async function navigateToTab(page: Page, tabName: string): Promise<void> {
-  const tab = page.locator(`nav button:has-text("${tabName}")`);
-  await tab.click();
 }
 
 test.describe('Analytics Tab Freeze Bug', () => {

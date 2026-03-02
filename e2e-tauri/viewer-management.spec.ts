@@ -9,6 +9,7 @@ import {
   killTauriApp,
   cleanupTestData,
   cleanupTestCredentials,
+  disconnectAndInitialize,
 } from './utils/test-helpers';
 
 /**
@@ -23,20 +24,6 @@ import {
  * Run tests:
  *    pnpm exec playwright test --config e2e-tauri/playwright.config.ts viewer-management.spec.ts
  */
-
-// Helper to fully disconnect (stop + initialize) and return to idle state
-async function disconnectAndInitialize(page: Page): Promise<void> {
-  // Click 停止 to pause
-  const stopButton = page.locator('button:has-text("停止")');
-  if (await stopButton.isVisible({ timeout: 1000 }).catch(() => false)) {
-    await stopButton.click();
-    // After clicking 停止, app goes to paused state with 再開 and 初期化 buttons
-    // Click 初期化 to return to idle state
-    await page.locator('button:has-text("初期化")').click();
-    // Wait for UI to return to idle state (URL input visible)
-    await expect(page.locator('input[placeholder*="YouTube URL"], input[placeholder*="youtube.com"], input[placeholder*="Enter YouTube URL"]')).toBeVisible({ timeout: 5000 });
-  }
-}
 
 // Use test.describe.serial to ensure tests run in order and share state
 test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {

@@ -7,6 +7,7 @@ import {
   teardownTestEnvironment,
   resetMockServer,
   addMockMessage,
+  disconnectAndInitialize,
 } from './utils/test-helpers';
 
 /**
@@ -124,18 +125,6 @@ function collectMessages(ws: WebSocket, duration: number): Promise<unknown[]> {
       resolve(messages);
     }, duration);
   });
-}
-
-// Helper to fully disconnect (stop + initialize) and return to idle state
-async function disconnectAndInitialize(page: Page): Promise<void> {
-  const stopButton = page.locator('button:has-text("停止")');
-  if (await stopButton.isVisible({ timeout: 1000 }).catch(() => false)) {
-    await stopButton.click();
-    await page.locator('button:has-text("初期化")').click();
-    await expect(page.locator('input[placeholder*="youtube.com"], input[placeholder*="youtube.com"]')).toBeVisible({
-      timeout: 5000,
-    });
-  }
 }
 
 test.describe('WebSocket API (03_websocket.md)', () => {
