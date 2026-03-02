@@ -191,11 +191,14 @@ test.describe('Analytics Tab Freeze Bug', () => {
       channel_id: 'UC_mixed_user',
     });
 
-    // 2. Navigate to Analytics tab
-    await navigateToTab(mainPage, 'Analytics');
+    // 2. Wait for messages to be delivered to chat (ensures DB storage)
+    await expect(mainPage.locator('text=Also a superchat!').first()).toBeVisible({ timeout: 10000 });
 
-    // 3. Wait for data to load
-    await expect(mainPage.locator('button:has-text("Refresh")')).toBeVisible({ timeout: 15000 });
+    // 3. Navigate to Analytics tab and refresh data
+    await navigateToTab(mainPage, 'Analytics');
+    const refreshButton = mainPage.locator('button:has-text("Refresh")');
+    await expect(refreshButton).toBeVisible({ timeout: 15000 });
+    await refreshButton.click();
 
     // 4. Verify Top Contributors section renders without crashing
     //    StickerKing (3 contributions) and MixedUser should be in the DOM
@@ -204,7 +207,7 @@ test.describe('Analytics Tab Freeze Bug', () => {
     //    has an overflow-y-auto scroll container and Playwright considers items below
     //    the scroll viewport as "hidden" even though they are rendered in the DOM
     const analyticsContainer = mainPage.locator('.overflow-y-auto').filter({ has: mainPage.locator('text=Revenue Analytics') });
-    await expect(analyticsContainer).toContainText('Top Contributors', { timeout: 5000 });
+    await expect(analyticsContainer).toContainText('Top Contributors', { timeout: 10000 });
     await expect(analyticsContainer).toContainText('StickerKing', { timeout: 5000 });
     await expect(analyticsContainer).toContainText('MixedUser', { timeout: 5000 });
 

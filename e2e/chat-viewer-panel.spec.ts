@@ -592,6 +592,12 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
+      // Ensure auto-scroll is ON (may be affected by previous tests)
+      const autoScrollCheckbox = mainPage.locator('label').filter({ hasText: '自動スクロール' }).locator('input[type="checkbox"]');
+      if (!(await autoScrollCheckbox.isChecked())) {
+        await autoScrollCheckbox.check();
+      }
+
       // Add first message from target user
       const targetUserId = 'UC_autoscroll_test_user';
       await addMockMessage({
@@ -613,6 +619,9 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
         });
       }
 
+      // Wait for filler messages to be delivered before sending the last one
+      await expect(mainPage.locator('text=Auto-scroll filler message 24').first()).toBeVisible({ timeout: 10000 });
+
       // Add latest message from target user
       await addMockMessage({
         message_type: 'text',
@@ -621,7 +630,7 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
         channel_id: targetUserId,
       });
 
-      // Wait for latest message to be received
+      // Wait for latest message to be received (auto-scroll should bring it into view)
       await expect(mainPage.locator('text=LATEST_MESSAGE_AUTOSCROLL').first()).toBeVisible({ timeout: 10000 });
 
       // Find the virtua VList scroll container (has overflow-y in inline style)
@@ -750,16 +759,14 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
-      // Add 30 messages
-      const addPromises = [];
+      // Add 30 messages sequentially (preserves order for VList scroll verification)
       for (let i = 1; i <= 30; i++) {
-        addPromises.push(addMockMessage({
+        await addMockMessage({
           message_type: 'text',
           author: `StatusUser${i}`,
           content: `StatusMsg_${String(i).padStart(3, '0')}`,
-        }));
+        });
       }
-      await Promise.all(addPromises);
 
       // Verify initial state: unlimited
       await expect(mainPage.getByText(/全30件/)).toBeVisible({ timeout: 10000 });
