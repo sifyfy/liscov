@@ -1,4 +1,4 @@
-# Tauri E2E Tests
+# E2E Tests
 
 実際のTauriアプリケーションを使用したE2Eテストです。WebView2のCDP（Chrome DevTools Protocol）を通じてPlaywrightで操作します。
 
@@ -41,7 +41,7 @@ pnpm tauri dev
 ### 3. E2Eテストを実行
 
 ```bash
-pnpm exec playwright test --config e2e-tauri/playwright.config.ts
+pnpm exec playwright test --config e2e/playwright.config.ts
 ```
 
 ## テスト内容

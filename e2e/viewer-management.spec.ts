@@ -22,7 +22,7 @@ import {
  * - Delete functionality for viewer custom info and broadcaster data
  *
  * Run tests:
- *    pnpm exec playwright test --config e2e-tauri/playwright.config.ts viewer-management.spec.ts
+ *    pnpm exec playwright test --config e2e/playwright.config.ts viewer-management.spec.ts
  */
 
 // Use test.describe.serial to ensure tests run in order and share state

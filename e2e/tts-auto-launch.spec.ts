@@ -33,7 +33,7 @@ async function waitForAppReady(page: Page): Promise<void> {
  * - Error display when launch fails
  *
  * Run tests:
- *    pnpm exec playwright test --config e2e-tauri/playwright.config.ts tts-auto-launch.spec.ts
+ *    pnpm exec playwright test --config e2e/playwright.config.ts tts-auto-launch.spec.ts
  */
 
 // Get VOICEVOX standard installation path

@@ -24,7 +24,7 @@ import {
  * - Font size is restored after app restart
  *
  * Run tests:
- *    pnpm exec playwright test --config e2e-tauri/playwright.config.ts font-size-persistence.spec.ts
+ *    pnpm exec playwright test --config e2e/playwright.config.ts font-size-persistence.spec.ts
  */
 
 // Get test config directory based on platform

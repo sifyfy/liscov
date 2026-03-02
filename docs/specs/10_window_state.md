@@ -119,7 +119,7 @@ tauri::Builder::default()
 
 ## E2Eテスト
 
-`e2e-tauri/window-state.spec.ts` でテスト。
+`e2e/window-state.spec.ts` でテスト。
 
 ### テストケース
 

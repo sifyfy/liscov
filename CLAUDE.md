@@ -53,7 +53,7 @@ pnpm tauri build  # リリースビルド
 
 ### E2Eテスト
 
-E2Eテストは `e2e-tauri/` ディレクトリにあります（Playwright + CDP + モックサーバー）。
+E2Eテストは `e2e/` ディレクトリにあります（Playwright + CDP + モックサーバー）。
 
 ```bash
 # 全E2Eテストを実行（モックサーバー・アプリは自動起動・終了）
@@ -65,7 +65,7 @@ pnpm test:e2e:auth   # 認証フロー
 pnpm test:e2e:ws     # WebSocket
 
 # 個別テスト（ファイル指定）
-pnpm exec playwright test --config e2e-tauri/playwright.config.ts e2e-tauri/viewer-management.spec.ts
+pnpm exec playwright test --config e2e/playwright.config.ts e2e/viewer-management.spec.ts
 ```
 
 > **Note**: モックサーバーはテスト実行時に自動的に起動・停止されます。手動起動は不要です。
@@ -132,7 +132,7 @@ liscov-tauri/
 │   │   ├── tauri/                # Tauri API wrappers
 │   │   └── types/                # TypeScript型定義
 │   └── routes/
-├── e2e-tauri/                    # Tauri E2Eテスト (Playwright + CDP)
+├── e2e/                          # E2Eテスト (Playwright + CDP)
 │   ├── auth-flow.spec.ts         # 認証フローテスト
 │   └── playwright.config.ts      # Playwright設定
 ├── docs/                         # ドキュメント
@@ -183,7 +183,7 @@ src/lib/components/         core/api/ (InnerTubeClient, WebSocket)
 4. `src/lib/tauri/` にTypeScriptラッパーを作成
 5. `src/lib/stores/` にストアを作成 (Svelte 5 runes)
 6. `src/lib/components/` にUIコンポーネントを作成
-7. `e2e-tauri/` にE2Eテストを追加
+7. `e2e/` にE2Eテストを追加
 
 ## 開発ガイドライン
 

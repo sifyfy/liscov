@@ -21,7 +21,7 @@ import {
  * still work (they use native DOM events, not Svelte reactivity).
  *
  * Run:
- *   pnpm exec playwright test --config e2e-tauri/playwright.config.ts e2e-tauri/analytics-tab-freeze.spec.ts
+ *   pnpm exec playwright test --config e2e/playwright.config.ts e2e/analytics-tab-freeze.spec.ts
  */
 
 // Helper to wait for app to be fully loaded

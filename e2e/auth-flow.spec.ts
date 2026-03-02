@@ -23,7 +23,7 @@ import {
  * - Logout button click -> Credentials deleted -> Login button reappears
  *
  * Run tests (mock server and app will be started automatically):
- *    pnpm exec playwright test --config e2e-tauri/playwright.config.ts auth-flow.spec.ts
+ *    pnpm exec playwright test --config e2e/playwright.config.ts auth-flow.spec.ts
  */
 
 test.describe('Authentication Feature (01_auth.md)', () => {

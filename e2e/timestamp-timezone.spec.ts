@@ -20,7 +20,7 @@ import {
  * 2. Verify the displayed time matches the local timezone conversion
  *
  * Run tests:
- *    pnpm exec playwright test --config e2e-tauri/playwright.config.ts timestamp-timezone.spec.ts
+ *    pnpm exec playwright test --config e2e/playwright.config.ts timestamp-timezone.spec.ts
  */
 
 // Helper to add message with specific timestamp to mock server

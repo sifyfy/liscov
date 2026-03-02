@@ -11,7 +11,7 @@ import { log } from './logger';
 
 export const CDP_URL = 'http://127.0.0.1:9222';
 export const MOCK_SERVER_URL = 'http://localhost:3456';
-export const PROJECT_DIR = process.cwd().replace(/[\\/]e2e-tauri$/, '');
+export const PROJECT_DIR = process.cwd().replace(/[\\/]e2e$/, '');
 
 // Test isolation: use separate namespace for credentials and data
 export const TEST_APP_NAME = 'liscov-test';

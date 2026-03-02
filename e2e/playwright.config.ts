@@ -12,7 +12,7 @@ import { defineConfig } from '@playwright/test';
  *    set WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222
  *    set LISCOV_AUTH_URL=http://localhost:3456/
  *    pnpm tauri dev
- * 3. Run tests: pnpm exec playwright test --config e2e-tauri/playwright.config.ts
+ * 3. Run tests: pnpm exec playwright test --config e2e/playwright.config.ts
  */
 export default defineConfig({
   testDir: '.',

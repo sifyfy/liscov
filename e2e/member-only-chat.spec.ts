@@ -19,7 +19,7 @@ import {
  * 4. /next API fallback when watch page doesn't return chat data
  *
  * Run:
- *   pnpm exec playwright test --config e2e-tauri/playwright.config.ts e2e-tauri/member-only-chat.spec.ts
+ *   pnpm exec playwright test --config e2e/playwright.config.ts e2e/member-only-chat.spec.ts
  */
 
 // Helper to set stream state

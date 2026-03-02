@@ -25,7 +25,7 @@ import {
  * - Window position is saved and restored after app restart
  *
  * Run tests:
- *    pnpm exec playwright test --config e2e-tauri/playwright.config.ts window-state.spec.ts
+ *    pnpm exec playwright test --config e2e/playwright.config.ts window-state.spec.ts
  */
 
 // Window state file uses the app identifier from tauri.conf.json
