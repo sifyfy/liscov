@@ -53,16 +53,16 @@ pnpm tauri build  # リリースビルド
 
 ### E2Eテスト
 
-認証機能のE2Eテストは `e2e-tauri/` ディレクトリにあります。
+E2Eテストは `e2e-tauri/` ディレクトリにあります（Playwright + CDP + モックサーバー）。
 
 ```bash
 # 全E2Eテストを実行（モックサーバー・アプリは自動起動・終了）
-pnpm test:e2e:tauri
+pnpm test:e2e
 
 # 特定のテストファイルを実行
-pnpm test:e2e:tauri:chat   # チャット表示
-pnpm test:e2e:tauri:auth   # 認証フロー
-pnpm test:e2e:tauri:ws     # WebSocket
+pnpm test:e2e:chat   # チャット表示
+pnpm test:e2e:auth   # 認証フロー
+pnpm test:e2e:ws     # WebSocket
 
 # 個別テスト（ファイル指定）
 pnpm exec playwright test --config e2e-tauri/playwright.config.ts e2e-tauri/viewer-management.spec.ts
