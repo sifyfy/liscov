@@ -17,7 +17,7 @@
 		"test:run": "vitest run",
 		"test:coverage": "vitest run --coverage",
 		"test:e2e": "playwright test --config e2e-tauri/playwright.config.ts",
-		"test:e2e:chat": "playwright test --config e2e-tauri/playwright.config.ts e2e-tauri/chat-display.spec.ts",
+		"test:e2e:chat": "playwright test --config e2e-tauri/playwright.config.ts e2e-tauri/chat-basic.spec.ts e2e-tauri/chat-message-types.spec.ts e2e-tauri/chat-styling.spec.ts e2e-tauri/chat-viewer-panel.spec.ts",
 		"test:e2e:auth": "playwright test --config e2e-tauri/playwright.config.ts e2e-tauri/auth-flow.spec.ts",
 		"test:e2e:ws": "playwright test --config e2e-tauri/playwright.config.ts e2e-tauri/websocket.spec.ts"
 	},

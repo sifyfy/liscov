@@ -344,3 +344,14 @@ export async function navigateToTab(page: Page, tabName: string): Promise<void> 
   const tab = page.locator(`nav button:has-text("${tabName}")`);
   await tab.click();
 }
+
+/**
+ * Set stream state on the mock server.
+ */
+export async function setStreamState(state: { member_only?: boolean; require_auth?: boolean; title?: string }): Promise<void> {
+  await fetch(`${MOCK_SERVER_URL}/set_stream_state`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(state),
+  });
+}
