@@ -96,9 +96,6 @@ test.describe('Analytics Tab Freeze Bug', () => {
       channel_id: 'UC_normal_donor_001',
     });
 
-    // 3. Wait for messages to be received by the app
-    await mainPage.waitForTimeout(3000);
-
     // 4. Navigate to Analytics tab
     await navigateToTab(mainPage, 'Analytics');
 
@@ -133,8 +130,6 @@ test.describe('Analytics Tab Freeze Bug', () => {
       amount: '¥3,000',
       channel_id: 'UC_sticker_fan_001',
     });
-
-    await mainPage.waitForTimeout(3000);
 
     // 2. Open Analytics tab
     await navigateToTab(mainPage, 'Analytics');
@@ -195,8 +190,6 @@ test.describe('Analytics Tab Freeze Bug', () => {
       tier: 'yellow',
       channel_id: 'UC_mixed_user',
     });
-
-    await mainPage.waitForTimeout(3000);
 
     // 2. Navigate to Analytics tab
     await navigateToTab(mainPage, 'Analytics');

@@ -33,7 +33,8 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
     mainPage = connection.page;
 
     await mainPage.waitForLoadState('domcontentloaded');
-    await mainPage.waitForTimeout(2000);
+    // Wait for SvelteKit app to render
+    await expect(mainPage.locator('nav button:has-text("Chat")')).toBeVisible({ timeout: 15000 });
   });
 
   test.afterAll(async () => {
@@ -79,8 +80,6 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
-
-      await mainPage.waitForTimeout(3000);
 
       const messageCountBefore = await mainPage.locator('[data-message-id]').count();
 
@@ -134,8 +133,6 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
-      await mainPage.waitForTimeout(3000);
-
       const messageCountBefore = await mainPage.locator('[data-message-id]').count();
 
       await mainPage.locator('button:has-text("停止")').click();
@@ -155,15 +152,11 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
-      await mainPage.waitForTimeout(2000);
-
       await mainPage.locator('button:has-text("停止")').click();
       await expect(mainPage.locator('button:has-text("再開")')).toBeVisible();
 
       await mainPage.locator('button:has-text("再開")').click();
       await expect(mainPage.locator('button:has-text("停止")')).toBeVisible({ timeout: 10000 });
-
-      await mainPage.waitForTimeout(2000);
 
       const uniqueContent = `ResumeTest_${Date.now()}`;
       await addMockMessage({
@@ -185,8 +178,6 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
-
-      await mainPage.waitForTimeout(2000);
 
       await mainPage.locator('button:has-text("停止")').click();
       await expect(mainPage.locator('button:has-text("初期化")')).toBeVisible();
@@ -496,9 +487,7 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
         await expect(mainPage.locator('button:has-text("停止")')).toBeVisible({ timeout: 10000 });
 
         await mainPage.locator('button:has-text("Settings")').click();
-        await mainPage.waitForTimeout(300);
         await mainPage.locator('button:has-text("Chat")').click();
-        await mainPage.waitForTimeout(300);
       }
 
       const finalContent = `FinalCheck_${Date.now()}`;
@@ -547,7 +536,6 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
 
       const tabClickStart = Date.now();
       await mainPage.locator('button:has-text("Settings")').click();
-      await mainPage.waitForTimeout(300);
       await mainPage.locator('button:has-text("Chat")').click();
       const tabClickDuration = Date.now() - tabClickStart;
       log.debug(`Tab switching after rapid cycles: ${tabClickDuration}ms`);

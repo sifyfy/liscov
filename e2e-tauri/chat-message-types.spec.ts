@@ -58,10 +58,8 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
         tier: 'green',
       });
 
-      await mainPage.waitForTimeout(3000);
-
       // Verify SuperChat is displayed with amount
-      await expect(mainPage.locator('text=SuperChatter')).toBeVisible();
+      await expect(mainPage.locator('text=SuperChatter')).toBeVisible({ timeout: 5000 });
       await expect(mainPage.locator('text=Thanks for the stream!')).toBeVisible();
       await expect(mainPage.locator('text=¥1,000')).toBeVisible();
       // Check for Super Chat label (Japanese: スーパーチャット)
@@ -85,10 +83,8 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
         content: 'New member!',
       });
 
-      await mainPage.waitForTimeout(3000);
-
       // Verify membership message is displayed
-      await expect(mainPage.getByText('NewMember').first()).toBeVisible();
+      await expect(mainPage.getByText('NewMember').first()).toBeVisible({ timeout: 5000 });
       // "新規メンバー" label in header badge (Japanese for "New Member")
       await expect(mainPage.getByText('新規メンバー').first()).toBeVisible();
 
@@ -117,14 +113,12 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
         tier: 'blue',
       });
 
-      await mainPage.waitForTimeout(3000);
-
       // Find the SuperChat message element
       const superchatMessage = mainPage.locator('[data-message-id]').filter({
         has: mainPage.locator('text=BlueTierDonator')
       }).first();
 
-      await expect(superchatMessage).toBeVisible();
+      await expect(superchatMessage).toBeVisible({ timeout: 5000 });
 
       // Get the inline style attribute - should contain YouTube's blue tier color
       // Blue tier: 0x1565C0 = #1565C0 = rgb(21, 101, 192)
@@ -175,14 +169,12 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
         tier: 'red',
       });
 
-      await mainPage.waitForTimeout(3000);
-
       // Find the red tier SuperChat
       const redSuperchat = mainPage.locator('[data-message-id]').filter({
         has: mainPage.locator('text=RedTierDonator')
       }).first();
 
-      await expect(redSuperchat).toBeVisible();
+      await expect(redSuperchat).toBeVisible({ timeout: 5000 });
 
       const redStyle = await redSuperchat.getAttribute('style');
       console.log(`Red tier SuperChat style: "${redStyle}"`);
@@ -214,10 +206,8 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
         amount: '¥1,500',
       });
 
-      await mainPage.waitForTimeout(3000);
-
       // Verify SuperSticker is displayed
-      await expect(mainPage.locator('text=StickerUser')).toBeVisible();
+      await expect(mainPage.locator('text=StickerUser')).toBeVisible({ timeout: 5000 });
       await expect(mainPage.locator('text=¥1,500')).toBeVisible();
       await expect(mainPage.locator('text=スーパーステッカー')).toBeVisible();
 
@@ -242,11 +232,9 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
         milestone_months: 12,
       });
 
-      await mainPage.waitForTimeout(3000);
-
       // Verify milestone message is displayed
       // Note: content is headerSubtext ("Welcome to Channel!"), user message is in separate field
-      await expect(mainPage.locator('text=LoyalMember')).toBeVisible();
+      await expect(mainPage.locator('text=LoyalMember')).toBeVisible({ timeout: 5000 });
       await expect(mainPage.locator('text=Welcome to Channel')).toBeVisible();
 
       // Disconnect
@@ -270,10 +258,8 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
         gift_count: 10,
       });
 
-      await mainPage.waitForTimeout(3000);
-
       // Verify gift message is displayed
-      await expect(mainPage.locator('text=GenerousGifter')).toBeVisible();
+      await expect(mainPage.locator('text=GenerousGifter')).toBeVisible({ timeout: 5000 });
       // Check for gift count in the message content (e.g., "Sent 10 Channel gift memberships")
       await expect(mainPage.locator('text=/\\b10\\b.*gift/i').first()).toBeVisible();
 
@@ -365,10 +351,8 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
         content: '今日の配信 #gaming #vtuber #ゲーム実況',
       });
 
-      await mainPage.waitForTimeout(3000);
-
       // Verify message with hashtag is displayed correctly
-      await expect(mainPage.getByText('#gaming')).toBeVisible();
+      await expect(mainPage.getByText('#gaming')).toBeVisible({ timeout: 5000 });
       await expect(mainPage.getByText('#vtuber')).toBeVisible();
       await expect(mainPage.getByText('#ゲーム実況')).toBeVisible();
 
@@ -390,10 +374,8 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
         content: 'Hello! <script>alert(1)</script> 💖 @mention [link](url) **bold**',
       });
 
-      await mainPage.waitForTimeout(3000);
-
       // Verify special characters are escaped and displayed correctly
-      await expect(mainPage.getByText('<script>alert(1)</script>')).toBeVisible();
+      await expect(mainPage.getByText('<script>alert(1)</script>')).toBeVisible({ timeout: 5000 });
       await expect(mainPage.getByText('💖')).toBeVisible();
 
       // Disconnect
@@ -414,10 +396,8 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
         content: 'Check this out: https://example.com/path?param=value&foo=bar',
       });
 
-      await mainPage.waitForTimeout(3000);
-
       // Verify URL is displayed
-      await expect(mainPage.getByText('https://example.com/path?param=value&foo=bar')).toBeVisible();
+      await expect(mainPage.getByText('https://example.com/path?param=value&foo=bar')).toBeVisible({ timeout: 5000 });
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
@@ -438,13 +418,11 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
         content: longText,
       });
 
-      await mainPage.waitForTimeout(3000);
-
       // Verify long message is displayed (should break words)
       const messageEl = mainPage.locator('[data-message-id]').filter({
         has: mainPage.locator(`text=${longText.slice(0, 30)}`)
       }).first();
-      await expect(messageEl).toBeVisible();
+      await expect(messageEl).toBeVisible({ timeout: 5000 });
 
       // Check that the message has break-words class
       const hasBreakWords = await messageEl.locator('p.break-words').count();
@@ -472,13 +450,11 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
         is_member: false,
       });
 
-      await mainPage.waitForTimeout(3000);
-
       // Find the message element and verify 🎉初見さん badge and #1 are present
       const messageEl = mainPage.locator('[data-message-id]').filter({
         has: mainPage.locator('text=はじめてのコメントです'),
       }).first();
-      await expect(messageEl.getByText('🎉初見さん')).toBeVisible();
+      await expect(messageEl.getByText('🎉初見さん')).toBeVisible({ timeout: 5000 });
       await expect(messageEl.getByText('#1')).toBeVisible();
 
       // Disconnect
@@ -501,8 +477,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
         is_member: false,
       });
 
-      await mainPage.waitForTimeout(3000);
-      await expect(mainPage.locator('text=1回目のコメント')).toBeVisible();
+      await expect(mainPage.locator('text=1回目のコメント')).toBeVisible({ timeout: 5000 });
 
       // 2回目のメッセージ
       await addMockMessage({
@@ -513,8 +488,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
         is_member: false,
       });
 
-      await mainPage.waitForTimeout(3000);
-      await expect(mainPage.locator('text=2回目のコメント')).toBeVisible();
+      await expect(mainPage.locator('text=2回目のコメント')).toBeVisible({ timeout: 5000 });
 
       // 2回目: 🎉初見さん(目立つ)は無いが、初見さん(muted)と#2が表示される
       const secondMessageEl = mainPage.locator('[data-message-id]').filter({
@@ -553,13 +527,11 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
         is_member: false,
       });
 
-      await mainPage.waitForTimeout(3000);
-
       // 両方に🎉初見さんと#1が表示されることを確認
       const messageA = mainPage.locator('[data-message-id]').filter({
         has: mainPage.locator('text=UserAlphaのコメント'),
       }).first();
-      await expect(messageA).toBeVisible();
+      await expect(messageA).toBeVisible({ timeout: 5000 });
       await expect(messageA.getByText('🎉初見さん')).toBeVisible();
       await expect(messageA.getByText('#1')).toBeVisible();
 

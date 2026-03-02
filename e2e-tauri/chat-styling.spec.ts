@@ -65,8 +65,7 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
       });
 
       // Wait for first message
-      await mainPage.waitForTimeout(2000);
-      await expect(mainPage.getByText(nonMemberName).first()).toBeVisible();
+      await expect(mainPage.getByText(nonMemberName).first()).toBeVisible({ timeout: 5000 });
 
       // Check non-member color - should use var(--accent) CSS variable
       // Dark theme: #6fb8d9 = rgb(111, 184, 217)
@@ -87,8 +86,7 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
       });
 
       // Wait for second message with longer timeout
-      await mainPage.waitForTimeout(3000);
-      await expect(mainPage.getByText(memberName).first()).toBeVisible();
+      await expect(mainPage.getByText(memberName).first()).toBeVisible({ timeout: 5000 });
 
       // Check member color - should use var(--member-accent) CSS variable
       // Dark theme: #6ec98a = rgb(110, 201, 138)
@@ -115,7 +113,6 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
       // Click increase button
       const increaseButton = mainPage.locator('button[title="文字を大きく"]');
       await increaseButton.click();
-      await mainPage.waitForTimeout(100);
 
       // Verify size increased
       const newSize = await fontSizeDisplay.textContent();
@@ -132,7 +129,6 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
       // Click decrease button
       const decreaseButton = mainPage.locator('button[title="文字を小さく"]');
       await decreaseButton.click();
-      await mainPage.waitForTimeout(100);
 
       // Verify size decreased
       const newSize = await fontSizeDisplay.textContent();
@@ -153,7 +149,8 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
         content: 'Check timestamp',
       });
 
-      await mainPage.waitForTimeout(3000);
+      // Wait for message to appear
+      await expect(mainPage.locator('text=TimestampUser')).toBeVisible({ timeout: 5000 });
 
       // Get timestamp toggle
       const timestampToggle = mainPage.locator('label:has-text("タイムスタンプ") input[type="checkbox"]');
@@ -168,7 +165,6 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
 
         // Uncheck and verify timestamp is hidden
         await timestampToggle.uncheck();
-        await mainPage.waitForTimeout(100);
 
         // Timestamp should not be visible
         await expect(timestamp).not.toBeVisible();
@@ -189,7 +185,6 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
       // Decrease to minimum
       for (let i = 0; i < 20; i++) {
         await decreaseButton.click();
-        await mainPage.waitForTimeout(50);
       }
 
       // Should be at minimum (10px)
@@ -199,7 +194,6 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
       // Increase to maximum
       for (let i = 0; i < 20; i++) {
         await increaseButton.click();
-        await mainPage.waitForTimeout(50);
       }
 
       // Should be at maximum (24px)
@@ -209,7 +203,6 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
       // Reset to default (13px)
       for (let i = 0; i < 15; i++) {
         await decreaseButton.click();
-        await mainPage.waitForTimeout(50);
       }
     });
   });
@@ -230,14 +223,12 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
         is_member: true,
       });
 
-      await mainPage.waitForTimeout(3000);
-
       // Find the message element
       const memberMessage = mainPage.locator('[data-message-id]').filter({
         has: mainPage.locator('text=GreenBgMember')
       }).first();
 
-      await expect(memberMessage).toBeVisible();
+      await expect(memberMessage).toBeVisible({ timeout: 5000 });
 
       // Check for green styling - could be on border, background, or author name
       // Option 1: Check author name color (green for members)
@@ -265,13 +256,12 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
         content: 'User with icon',
       });
 
-      await mainPage.waitForTimeout(3000);
-
       // Find message and check for icon (img element)
       const message = mainPage.locator('[data-message-id]').filter({
         has: mainPage.locator('text=IconUser')
       }).first();
 
+      await expect(message).toBeVisible({ timeout: 5000 });
       const icon = message.locator('img').first();
       await expect(icon).toBeVisible();
 
@@ -292,14 +282,11 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
 
-      // Wait for connection and title display
-      await mainPage.waitForTimeout(3000);
-
       // Find the title element (look for <div> containing part of the long title)
       // The title should be in the InputSection component
       const titleElement = mainPage.locator('[data-testid="stream-title"]').first();
 
-      await expect(titleElement).toBeVisible({ timeout: 5000 });
+      await expect(titleElement).toBeVisible({ timeout: 10000 });
 
       // CRITICAL: Check that the title element has proper overflow handling
       // Without these styles, long titles will cause horizontal overflow

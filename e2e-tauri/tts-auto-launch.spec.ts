@@ -479,7 +479,6 @@ test.describe('TTS VOICEVOX Auto-Launch', () => {
     // If still showing "停止", stop the backend first
     if (await stopButton.isVisible({ timeout: 1000 }).catch(() => false)) {
       await stopButton.click();
-      await mainPage.waitForTimeout(2000);
       await expect(launchButton).toBeVisible({ timeout: 5000 });
     }
 

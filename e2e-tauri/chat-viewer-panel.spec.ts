@@ -56,10 +56,9 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
         channel_id: 'UC_clickable_user',
       });
 
-      await mainPage.waitForTimeout(3000);
-
       // Click on the message
       const message = mainPage.locator('text=ClickableUser').first();
+      await expect(message).toBeVisible({ timeout: 5000 });
       await message.click();
 
       // ViewerInfoPanel should open
@@ -93,7 +92,8 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
         });
       }
 
-      await mainPage.waitForTimeout(4000);
+      // Wait for latest message to appear
+      await expect(mainPage.locator('[data-message-id]').filter({ has: mainPage.locator('text=ScrollMsg10') }).first()).toBeVisible({ timeout: 8000 });
 
       // Click on latest message in main chat to open panel
       const latestMessage = mainPage.locator('[data-message-id]').filter({
@@ -118,7 +118,7 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
       // ネストされたoverflow-y-autoコンテナ内の要素はPlaywrightの自動スクロールが到達できないため
       // 先にJSでスクロールしてビューポート内に表示する
       await pastCommentButton.evaluate(el => el.scrollIntoView({ block: 'center' }));
-      await mainPage.waitForTimeout(200);
+      await expect(pastCommentButton).toBeVisible();
       await pastCommentButton.click();
 
       // The message in main chat should be highlighted
@@ -165,11 +165,9 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
         content: 'Check data attribute',
       });
 
-      await mainPage.waitForTimeout(3000);
-
       // Check for data-message-id attribute
       const messageElement = mainPage.locator('[data-message-id]').first();
-      await expect(messageElement).toBeVisible();
+      await expect(messageElement).toBeVisible({ timeout: 5000 });
       const messageId = await messageElement.getAttribute('data-message-id');
       expect(messageId).toBeTruthy();
       expect(messageId).toMatch(/^mock_msg_\d+$/);
@@ -199,10 +197,8 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
         await addMockMessage({ message_type: 'text', author: `User${i}`, content: `Message ${i}` });
       }
 
-      await mainPage.waitForTimeout(4000);
-
       // The latest message should be visible (auto-scrolled)
-      await expect(mainPage.locator('text=Message 20')).toBeVisible();
+      await expect(mainPage.locator('text=Message 20')).toBeVisible({ timeout: 8000 });
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
@@ -224,7 +220,7 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
       }
 
       // Wait for messages to be received and auto-scroll to complete
-      await mainPage.waitForTimeout(5000);
+      await expect(mainPage.locator('text=Bottom scroll test message 30')).toBeVisible({ timeout: 10000 });
 
       // Find the virtua VList scroll container (has overflow-y in inline style)
       const chatContainer = mainPage.locator('[style*="overflow-y"]').filter({ has: mainPage.locator('[data-message-id]') }).first();
@@ -266,7 +262,8 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
         await addMockMessage({ message_type: 'text', author: `InitUser${i}`, content: `Initial message ${i}` });
       }
 
-      await mainPage.waitForTimeout(3000);
+      // Wait for initial messages to appear
+      await expect(mainPage.locator('text=Initial message 10')).toBeVisible({ timeout: 8000 });
 
       // Checkbox should still be ON
       await expect(autoScrollCheckbox).toBeChecked();
@@ -279,11 +276,8 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
         await addMockMessage({ message_type: 'text', author: `BurstUser${i}`, content: `Burst message ${i}` });
       }
 
-      // Wait for all messages to arrive and be processed
-      await mainPage.waitForTimeout(5000);
-
       // The latest message should be visible (auto-scroll maintained)
-      await expect(mainPage.locator('text=Burst message 20')).toBeVisible();
+      await expect(mainPage.locator('text=Burst message 20')).toBeVisible({ timeout: 10000 });
 
       // CRITICAL: Checkbox should still be ON (not automatically unchecked)
       await expect(autoScrollCheckbox).toBeChecked();
@@ -314,7 +308,8 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
         await addMockMessage({ message_type: 'text', author: `User${i}`, content: `Message ${i}` });
       }
 
-      await mainPage.waitForTimeout(4000);
+      // Wait for latest message to appear
+      await expect(mainPage.locator('text=Message 20')).toBeVisible({ timeout: 8000 });
 
       // The "最新に戻る" button is always visible in current UI design
       const scrollButton = mainPage.locator('button:has-text("最新に戻る")');
@@ -323,11 +318,9 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
       // Uncheck the auto-scroll checkbox
       const autoScrollCheckbox = mainPage.locator('label').filter({ hasText: '自動スクロール' }).locator('input[type="checkbox"]');
       await autoScrollCheckbox.uncheck();
-      await mainPage.waitForTimeout(200);
 
       // Click the button to scroll to latest and re-enable auto-scroll
       await scrollButton.click();
-      await mainPage.waitForTimeout(500);
 
       // Checkbox should be checked again (auto-scroll re-enabled)
       await expect(autoScrollCheckbox).toBeChecked();
@@ -366,7 +359,6 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
         await mainPage.mouse.move(vlistBox.x + vlistBox.width / 2, vlistBox.y + vlistBox.height / 2);
         await mainPage.mouse.wheel(0, -10000);
       }
-      await mainPage.waitForTimeout(1000);
       // TOPにいるので最初のメッセージが表示される
       await expect(mainPage.locator('text=ScrollCtrl_01')).toBeVisible({ timeout: 5000 });
 
@@ -374,7 +366,6 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
       for (let i = 41; i <= 60; i++) {
         await addMockMessage({ message_type: 'text', author: `User${i}`, content: `ScrollCtrl_${String(i).padStart(2, '0')}` });
       }
-      await mainPage.waitForTimeout(3000);
 
       // auto-scroll OFFかつTOPにスクロール済みなので、先頭メッセージが依然表示されている
       await expect(mainPage.locator('text=ScrollCtrl_01')).toBeVisible({ timeout: 5000 });
@@ -409,9 +400,8 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
         channel_id: 'UC_test_channel_12345',
       });
 
-      await mainPage.waitForTimeout(3000);
-
       // Click on message to open panel
+      await expect(mainPage.locator('text=ChannelIDUser').first()).toBeVisible({ timeout: 5000 });
       await mainPage.locator('text=ChannelIDUser').first().click();
 
       // Panel should show channel ID
@@ -439,9 +429,8 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
         content: 'Test message',
       });
 
-      await mainPage.waitForTimeout(3000);
-
       // Click on message to open panel
+      await expect(mainPage.locator('text=FuriganaUser').first()).toBeVisible({ timeout: 5000 });
       await mainPage.locator('text=FuriganaUser').first().click();
 
       // Panel should have reading input
@@ -472,9 +461,8 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
         channel_id: testChannelId,
       });
 
-      await mainPage.waitForTimeout(3000);
-
       // Click on message to open panel
+      await expect(mainPage.locator('text=ReadingTestUser').first()).toBeVisible({ timeout: 5000 });
       await mainPage.locator('text=ReadingTestUser').first().click();
       await expect(mainPage.locator('h2:has-text("視聴者情報")')).toBeVisible({ timeout: 5000 });
 
@@ -497,10 +485,7 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
       await mainPage.locator('text=ReadingTestUser').first().click();
       await expect(mainPage.locator('h2:has-text("視聴者情報")')).toBeVisible({ timeout: 5000 });
 
-      // Wait for async data load to complete (the panel loads data asynchronously)
-      await mainPage.waitForTimeout(1000);
-
-      // Verify reading is persisted
+      // Verify reading is persisted (panel loads data asynchronously)
       const readingInputAgain = mainPage.locator('input[placeholder*="例"]');
       await expect(readingInputAgain).toHaveValue('りーでぃんぐてすと', { timeout: 10000 });
 
@@ -532,9 +517,8 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
 
       await addMockMessage({ message_type: 'text', author: 'ScrollTargetUser', content: 'LATEST_TARGET_MSG', channel_id: targetUserId });
 
-      await mainPage.waitForTimeout(4000);
-
       // Click on latest message to open panel
+      await expect(mainPage.locator('text=LATEST_TARGET_MSG').first()).toBeVisible({ timeout: 8000 });
       await mainPage.locator('text=LATEST_TARGET_MSG').first().click();
       await expect(mainPage.locator('h2:has-text("視聴者情報")')).toBeVisible({ timeout: 5000 });
 
@@ -548,14 +532,11 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
 
       // ネストされたoverflow-y-autoコンテナ内の要素をビューポートに表示してからクリック
       await pastComments.first().evaluate(el => el.scrollIntoView({ block: 'center' }));
-      await mainPage.waitForTimeout(200);
+      await expect(pastComments.first()).toBeVisible();
       await pastComments.first().click();
 
-      // Wait for scroll
-      await mainPage.waitForTimeout(1000);
-
       // First message should now be visible in main chat (scrolled into view)
-      await expect(mainChatFirstMsg).toBeVisible({ timeout: 3000 });
+      await expect(mainChatFirstMsg).toBeVisible({ timeout: 5000 });
 
       // The message should be highlighted
       const firstMsgElement = mainPage.locator('[data-message-id]').filter({ hasText: 'FIRST_TARGET_MSG' }).first();
@@ -582,9 +563,8 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
       await addMockMessage({ message_type: 'text', author: 'SameUser', content: 'Second message', channel_id: sameUserId });
       await addMockMessage({ message_type: 'text', author: 'SameUser', content: 'Third message', channel_id: sameUserId });
 
-      await mainPage.waitForTimeout(4000);
-
       // Click on latest message to open panel
+      await expect(mainPage.locator('text=Third message').first()).toBeVisible({ timeout: 5000 });
       await mainPage.locator('text=Third message').first().click();
 
       // Panel should show past comments
@@ -641,8 +621,8 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
         channel_id: targetUserId,
       });
 
-      // Wait for all messages to be received and auto-scroll to process
-      await mainPage.waitForTimeout(5000);
+      // Wait for latest message to be received
+      await expect(mainPage.locator('text=LATEST_MESSAGE_AUTOSCROLL').first()).toBeVisible({ timeout: 10000 });
 
       // Find the virtua VList scroll container (has overflow-y in inline style)
       const chatContainer = mainPage.locator('[style*="overflow-y"]').filter({ has: mainPage.locator('[data-message-id]') }).first();
@@ -651,7 +631,6 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
       await chatContainer.evaluate(el => {
         el.scrollTop = el.scrollHeight;
       });
-      await mainPage.waitForTimeout(500);
 
       // Record scroll position at bottom
       const scrollBefore = await chatContainer.evaluate(el => ({
@@ -679,11 +658,11 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
 
       // ネストされたoverflow-y-autoコンテナ内の要素をビューポートに表示してからクリック
       await pastCommentButton.first().evaluate(el => el.scrollIntoView({ block: 'center' }));
-      await mainPage.waitForTimeout(200);
+      await expect(pastCommentButton.first()).toBeVisible();
       await pastCommentButton.first().click();
 
-      // Wait for scroll animation to complete
-      await mainPage.waitForTimeout(1500);
+      // Wait for first message to become visible (scroll animation completed)
+      await expect(firstMsgElement).toBeVisible({ timeout: 5000 });
 
       // Get scroll position after clicking
       const scrollAfter = await chatContainer.evaluate(el => el.scrollTop);
@@ -694,8 +673,7 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
       console.log(`Scroll test: before=${scrollBefore.scrollTop}, after=${scrollAfter}`);
       expect(scrollAfter).toBeLessThan(scrollBefore.scrollTop);
 
-      // The first message should now be visible
-      await expect(firstMsgElement).toBeVisible({ timeout: 3000 });
+      // The first message should now be visible (already confirmed above)
 
       // Verify the message is highlighted (check for highlight color in any format)
       const style = await firstMsgElement.getAttribute('style');
@@ -728,43 +706,38 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
         }));
       }
       await Promise.all(addPromises);
-      await mainPage.waitForTimeout(5000);
 
       // Verify all messages received (status bar shows total)
-      await expect(mainPage.getByText(/全80件/)).toBeVisible({ timeout: 5000 });
+      await expect(mainPage.getByText(/全80件/)).toBeVisible({ timeout: 10000 });
 
       // Set displayLimit to 50 via select
       const displayLimitSelect = mainPage.locator('select').filter({
         has: mainPage.locator('option[value="unlimited"]'),
       });
       await displayLimitSelect.selectOption('50');
-      await mainPage.waitForTimeout(500);
 
       // Status bar should show filtered count and display limit
+      await expect(mainPage.getByText(/表示枠: 50件/)).toBeVisible({ timeout: 3000 });
       await expect(mainPage.getByText(/フィルタ後: 80件/)).toBeVisible();
-      await expect(mainPage.getByText(/表示枠: 50件/)).toBeVisible();
 
       // Scroll VList to bottom to ensure latest message is rendered in DOM
       const vlistContainer = mainPage.locator('[style*="overflow-y"]').filter({ has: mainPage.locator('[data-message-id]') }).first();
       await vlistContainer.evaluate(el => { el.scrollTop = el.scrollHeight; });
-      await mainPage.waitForTimeout(500);
 
       // Latest message should be visible (displayedMessages slices from end)
       await expect(mainPage.locator('text=LimitMsg_080')).toBeVisible({ timeout: 5000 });
 
       // Scroll to top to verify early messages are excluded
       await vlistContainer.evaluate(el => { el.scrollTop = 0; });
-      await mainPage.waitForTimeout(500);
 
       // Early messages should NOT be in the DOM (excluded by displayLimit)
       await expect(mainPage.locator('text=LimitMsg_001')).not.toBeVisible();
 
       // Reset to unlimited
       await displayLimitSelect.selectOption('unlimited');
-      await mainPage.waitForTimeout(500);
 
       // Status bar should now show unlimited
-      await expect(mainPage.getByText(/表示枠: 無制限/)).toBeVisible();
+      await expect(mainPage.getByText(/表示枠: 無制限/)).toBeVisible({ timeout: 3000 });
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
@@ -787,20 +760,18 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
         }));
       }
       await Promise.all(addPromises);
-      await mainPage.waitForTimeout(5000);
 
       // Verify initial state: unlimited
+      await expect(mainPage.getByText(/全30件/)).toBeVisible({ timeout: 10000 });
       await expect(mainPage.getByText(/表示枠: 無制限/)).toBeVisible();
-      await expect(mainPage.getByText(/全30件/)).toBeVisible();
 
       // Switch to 50 (all 30 should still display since 30 < 50)
       const displayLimitSelect = mainPage.locator('select').filter({
         has: mainPage.locator('option[value="unlimited"]'),
       });
       await displayLimitSelect.selectOption('50');
-      await mainPage.waitForTimeout(500);
 
-      await expect(mainPage.getByText(/表示枠: 50件/)).toBeVisible();
+      await expect(mainPage.getByText(/表示枠: 50件/)).toBeVisible({ timeout: 3000 });
       await expect(mainPage.getByText(/フィルタ後: 30件/)).toBeVisible();
 
       // All messages should still be in displayedMessages (30 < 50)
@@ -809,12 +780,10 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
 
       // Scroll to top to verify first message
       await vlistContainer.evaluate(el => { el.scrollTop = 0; });
-      await mainPage.waitForTimeout(500);
       await expect(mainPage.locator('text=StatusMsg_001')).toBeVisible({ timeout: 5000 });
 
       // Scroll to bottom to verify last message
       await vlistContainer.evaluate(el => { el.scrollTop = el.scrollHeight; });
-      await mainPage.waitForTimeout(500);
       await expect(mainPage.locator('text=StatusMsg_030')).toBeVisible({ timeout: 5000 });
 
       // Disconnect
@@ -833,7 +802,7 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
         has: mainPage.locator('option[value="unlimited"]'),
       });
       await displayLimitSelect.selectOption('100');
-      await mainPage.waitForTimeout(300);
+      await expect(mainPage.getByText(/表示枠: 100件/)).toBeVisible({ timeout: 3000 });
 
       // Add 150 messages in parallel batches for speed
       // 並列バッチ内の到着順は非決定的なので、最終メッセージは順次送信で保証
@@ -848,11 +817,7 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
           }));
         }
         await Promise.all(addPromises);
-        await mainPage.waitForTimeout(2000);
       }
-
-      // Wait for all messages to be processed
-      await mainPage.waitForTimeout(3000);
 
       // Status bar: all messages received, but display limited to 100
       await expect(mainPage.getByText(/全150件/)).toBeVisible({ timeout: 5000 });
@@ -862,7 +827,6 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
       // Scroll to top to check early messages are trimmed
       const vlistContainer = mainPage.locator('[style*="overflow-y"]').filter({ has: mainPage.locator('[data-message-id]') }).first();
       await vlistContainer.evaluate(el => { el.scrollTop = 0; });
-      await mainPage.waitForTimeout(500);
 
       // Early messages (within first 50) should NOT be visible
       // displayedMessages = filteredMessages.slice(-100), so only messages 1-50 are trimmed

@@ -93,10 +93,7 @@ test.describe('Timestamp Timezone Display', () => {
     });
 
     // Wait for message to appear
-    await mainPage.waitForTimeout(3000);
-
-    // Verify message is displayed
-    await expect(mainPage.locator('text=TimezoneTestUser')).toBeVisible();
+    await expect(mainPage.locator('text=TimezoneTestUser')).toBeVisible({ timeout: 5000 });
     await expect(mainPage.locator('text=Testing timezone display')).toBeVisible();
 
     // Get the displayed timestamp from the UI
@@ -199,7 +196,7 @@ test.describe('Timestamp Timezone Display', () => {
     }
 
     // Wait for all messages
-    await mainPage.waitForTimeout(3000);
+    await expect(mainPage.locator('text=ConsistencyUser3')).toBeVisible({ timeout: 5000 });
 
     // Get all displayed timestamps
     const timestamps: string[] = [];

@@ -108,7 +108,6 @@ test.describe('Font Size Persistence', () => {
     const increaseButton = page.getByTitle('文字を大きく');
     for (let i = 0; i < 3; i++) {
       await increaseButton.click();
-      await page.waitForTimeout(100); // クリック間隔
     }
 
     // 変更後のサイズを確認
@@ -160,14 +159,12 @@ test.describe('Font Size Persistence', () => {
     // 上限テスト: 13px → 24px (11回クリック)
     for (let i = 0; i < 15; i++) {
       await increaseButton.click();
-      await page.waitForTimeout(50);
     }
     await expect(fontSizeDisplay).toHaveText('24px'); // 上限は24px
 
     // 下限テスト: 24px → 10px (14回クリック)
     for (let i = 0; i < 20; i++) {
       await decreaseButton.click();
-      await page.waitForTimeout(50);
     }
     await expect(fontSizeDisplay).toHaveText('10px'); // 下限は10px
 

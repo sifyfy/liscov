@@ -77,9 +77,6 @@ async function testApplicationLogicWorks(page: Page): Promise<{ works: boolean; 
   log.debug('Clicking Settings tab...');
   await page.locator('button:has-text("Settings")').click();
 
-  // Wait a moment for any potential state change
-  await page.waitForTimeout(500);
-
   // Check if click handler was registered by testing JS execution
   const jsTestAfter = await page.evaluate(() => {
     const testVar = Date.now();
@@ -117,7 +114,6 @@ async function testApplicationLogicWorks(page: Page): Promise<{ works: boolean; 
 
   // Test 2: Click back to Chat tab
   await page.locator('button:has-text("Chat")').click();
-  await page.waitForTimeout(500);
 
   const settingsVisibleAfterChat = await settingsHeading.isVisible().catch(() => false);
   if (settingsVisibleAfterChat) {

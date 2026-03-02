@@ -237,7 +237,6 @@ test.describe('WebSocket API (03_websocket.md)', () => {
       const { ws: ws1, connectedMsg: connectedMsg1 } = await connectWebSocket(`ws://127.0.0.1:${port}`);
       const msg1 = connectedMsg1 as { type: string; data: { client_id: number } };
 
-      await mainPage.waitForTimeout(200);
       const { ws: ws2, connectedMsg: connectedMsg2 } = await connectWebSocket(`ws://127.0.0.1:${port}`);
       const msg2 = connectedMsg2 as { type: string; data: { client_id: number } };
 
@@ -561,7 +560,6 @@ test.describe('WebSocket API (03_websocket.md)', () => {
         }
       });
 
-      await mainPage.waitForTimeout(300);
       const { ws: ws2 } = await connectWebSocket(`ws://127.0.0.1:${port}`);
       ws2.on('message', (data) => {
         try {
@@ -571,7 +569,6 @@ test.describe('WebSocket API (03_websocket.md)', () => {
         }
       });
 
-      await mainPage.waitForTimeout(300);
       const { ws: ws3 } = await connectWebSocket(`ws://127.0.0.1:${port}`);
       ws3.on('message', (data) => {
         try {

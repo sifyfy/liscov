@@ -107,7 +107,7 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
       });
 
       // Wait for messages to appear (polling interval is 1.5s)
-      await mainPage.waitForTimeout(3000);
+      await expect(mainPage.locator('text=TestUser1')).toBeVisible({ timeout: 5000 });
 
       // Verify messages are displayed
       await expect(mainPage.locator('text=TestUser1')).toBeVisible();
@@ -139,9 +139,6 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
-      // Wait for initial messages
-      await mainPage.waitForTimeout(2000);
-
       // Chat mode toggle button should be visible
       const chatModeButton = mainPage.locator('button[title="チャットモード切り替え"]');
       await expect(chatModeButton).toBeVisible();
@@ -151,7 +148,6 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
 
       // Click to switch to AllChat
       await chatModeButton.click();
-      await mainPage.waitForTimeout(500);
 
       // Verify switched to AllChat (shows "💬 全て")
       await expect(chatModeButton).toHaveText(/全て/);
@@ -173,7 +169,7 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
       const buttonText = await chatModeButton.textContent();
       if (buttonText?.includes('トップ')) {
         await chatModeButton.click();
-        await mainPage.waitForTimeout(300);
+        await expect(chatModeButton).toHaveText(/全て/);
       }
       await expect(chatModeButton).toHaveText(/全て/);
 
@@ -181,15 +177,11 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
-      // Wait for messages
-      await mainPage.waitForTimeout(2000);
-
       // Verify still in AllChat mode
       await expect(chatModeButton).toHaveText(/全て/);
 
       // Switch back to TopChat
       await chatModeButton.click();
-      await mainPage.waitForTimeout(500);
 
       // Verify switched to TopChat
       await expect(chatModeButton).toHaveText(/トップ/);
@@ -212,16 +204,14 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
         content: 'Message in TopChat mode',
       });
 
-      await mainPage.waitForTimeout(2000);
-
       // Verify message received in TopChat mode
-      await expect(mainPage.locator('text=TopChatUser')).toBeVisible();
+      await expect(mainPage.locator('text=TopChatUser')).toBeVisible({ timeout: 5000 });
       await expect(mainPage.locator('text=Message in TopChat mode')).toBeVisible();
 
       // Switch to AllChat mode using toggle button
       const chatModeButton = mainPage.locator('button[title="チャットモード切り替え"]');
       await chatModeButton.click();
-      await mainPage.waitForTimeout(1000);
+      await expect(chatModeButton).toHaveText(/全て/);
 
       // Add messages for AllChat mode
       await addMockMessage({
@@ -230,10 +220,8 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
         content: 'Message in AllChat mode',
       });
 
-      await mainPage.waitForTimeout(2000);
-
       // Verify new message received in AllChat mode
-      await expect(mainPage.locator('text=AllChatUser')).toBeVisible();
+      await expect(mainPage.locator('text=AllChatUser')).toBeVisible({ timeout: 5000 });
       await expect(mainPage.locator('text=Message in AllChat mode')).toBeVisible();
 
       // Disconnect
@@ -257,7 +245,6 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
       const buttonText = await chatModeButton.textContent();
       if (buttonText?.includes('全て')) {
         await chatModeButton.click();
-        await mainPage.waitForTimeout(300);
       }
       await expect(chatModeButton).toHaveText(/トップ/);
 
@@ -267,8 +254,8 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
-      // Wait for initial polling to establish chat mode
-      await mainPage.waitForTimeout(3000);
+      // Wait for initial polling to establish chat mode (backend needs to receive token)
+      await expect(chatModeButton).toHaveText(/トップ/);
 
       // Verify initial state: UI shows TopChat AND backend uses TopChat token
       await expect(chatModeButton).toHaveText(/トップ/);
@@ -286,7 +273,7 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
 
       // Switch to AllChat mode in UI
       await chatModeButton.click();
-      await mainPage.waitForTimeout(3000);
+      await expect(chatModeButton).toHaveText(/全て/);
 
       // Verify AllChat state: UI shows AllChat AND backend uses AllChat token
       await expect(chatModeButton).toHaveText(/全て/);
@@ -303,7 +290,7 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
 
       // Switch back to TopChat in UI
       await chatModeButton.click();
-      await mainPage.waitForTimeout(3000);
+      await expect(chatModeButton).toHaveText(/トップ/);
 
       // Verify TopChat state again: UI shows TopChat AND backend uses TopChat token
       await expect(chatModeButton).toHaveText(/トップ/);
@@ -326,7 +313,6 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
 
       // Switch to AllChat before connecting
       await chatModeButton.click();
-      await mainPage.waitForTimeout(300);
       await expect(chatModeButton).toHaveText(/全て/);
 
       // Connect to stream
@@ -337,7 +323,6 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
-      await mainPage.waitForTimeout(1000);
 
       // Verify AllChat is still selected after disconnect
       await expect(chatModeButton).toHaveText(/全て/);
@@ -369,8 +354,7 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
         content: 'This will be cleared',
       });
 
-      await mainPage.waitForTimeout(3000);
-      await expect(mainPage.locator('text=ClearTestUser')).toBeVisible();
+      await expect(mainPage.locator('text=ClearTestUser')).toBeVisible({ timeout: 5000 });
 
       // Click Clear button (in control bar)
       await mainPage.locator('button:has-text("クリア")').first().click();
@@ -421,8 +405,7 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
         is_member: true,
       });
 
-      await mainPage.waitForTimeout(3000);
-      await expect(mainPage.locator('text=MemberOnlyUser')).toBeVisible();
+      await expect(mainPage.locator('text=MemberOnlyUser')).toBeVisible({ timeout: 5000 });
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
@@ -445,16 +428,15 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
       await addMockMessage({ message_type: 'superchat', author: 'SCUser', content: 'SC message', amount: '¥500' });
       await addMockMessage({ message_type: 'membership', author: 'MemberUser', content: 'New member!' });
 
-      await mainPage.waitForTimeout(3000);
-
       // All messages should be visible initially
-      await expect(mainPage.locator('text=TextUser')).toBeVisible();
+      await expect(mainPage.locator('text=TextUser')).toBeVisible({ timeout: 5000 });
       await expect(mainPage.locator('text=SCUser')).toBeVisible();
       await expect(mainPage.locator('text=MemberUser')).toBeVisible();
 
       // Open filter panel
       await mainPage.locator('button:has-text("フィルター")').click();
-      await mainPage.waitForTimeout(300);
+      // Wait for filter panel to be visible
+      await expect(mainPage.locator('label').filter({ hasText: '通常' })).toBeVisible();
 
       // Uncheck text messages (labeled as "通常" in Japanese UI)
       const textFilter = mainPage.locator('label').filter({ hasText: '通常' }).locator('input[type="checkbox"]');
@@ -467,8 +449,6 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
       if (await membershipFilter.isChecked()) {
         await membershipFilter.uncheck();
       }
-
-      await mainPage.waitForTimeout(500);
 
       // Only SuperChat should be visible
       await expect(mainPage.locator('text=TextUser')).not.toBeVisible();
@@ -499,7 +479,8 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
       await addMockMessage({ message_type: 'text', author: 'User2', content: 'Goodbye world' });
       await addMockMessage({ message_type: 'text', author: 'SearchTarget', content: 'Find me please' });
 
-      await mainPage.waitForTimeout(3000);
+      // Wait for messages to appear
+      await expect(mainPage.locator('text=SearchTarget')).toBeVisible({ timeout: 5000 });
 
       // Open filter panel
       await mainPage.locator('button:has-text("フィルター")').click();
@@ -516,7 +497,6 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
       if (hasSearch) {
         const input = await searchInputAlt.isVisible() ? searchInputAlt : searchInputAlt2;
         await input.fill('SearchTarget');
-        await mainPage.waitForTimeout(500);
 
         // Only matching message should be visible
         await expect(mainPage.locator('text=User1')).not.toBeVisible();
@@ -542,9 +522,6 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
 
       // Click Connect
       await mainPage.locator('button:has-text("開始")').click();
-
-      // Wait a bit for error to appear
-      await mainPage.waitForTimeout(2000);
 
       // Check if error message appears (may be in various formats)
       const errorText = mainPage.locator('.text-red-500, [class*="error"], text=/error|失敗|Invalid|エラー/i').first();
