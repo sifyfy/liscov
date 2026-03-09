@@ -6,6 +6,7 @@ import { log } from './utils/logger';
 import {
   setupTestEnvironment,
   teardownTestEnvironment,
+  ensureSvelteHydrated,
   startTauriApp,
   connectToApp,
   killTauriApp,
@@ -15,7 +16,7 @@ import {
 
 // Helper to wait for SvelteKit app to fully render (not just HTML load)
 async function waitForAppReady(page: Page): Promise<void> {
-  await expect(page.locator('nav button:has-text("Chat")')).toBeVisible({ timeout: 30000 });
+  await ensureSvelteHydrated(page);
 }
 
 /**

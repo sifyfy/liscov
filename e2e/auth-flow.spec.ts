@@ -4,6 +4,7 @@ import {
   MOCK_SERVER_URL,
   setupTestEnvironment,
   teardownTestEnvironment,
+  ensureSvelteHydrated,
   killTauriApp,
   startTauriApp,
   connectToApp,
@@ -130,6 +131,7 @@ test.describe('Authentication Feature (01_auth.md)', () => {
       browser = connection.browser;
       context = connection.context;
       mainPage = connection.page;
+      await ensureSvelteHydrated(mainPage);
 
       // Navigate to Settings
       await mainPage.getByRole('button', { name: 'Settings' }).click();

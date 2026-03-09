@@ -82,6 +82,24 @@ export async function cleanupTestCredentials(): Promise<void> {
 }
 
 /**
+ * 指定ポートが解放される（LISTENING 状態でなくなる）まで待機する
+ */
+async function waitForPortFree(port: number, timeout: number): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/`);
+      // まだ応答がある → まだ使用中
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    } catch {
+      // 接続拒否 → ポートが解放された
+      return;
+    }
+  }
+  log.warn(`Port ${port} still in use after ${timeout}ms`);
+}
+
+/**
  * Wait for CDP to be available
  */
 export async function waitForCDP(timeout = 120000): Promise<void> {
@@ -104,6 +122,40 @@ export async function waitForCDP(timeout = 120000): Promise<void> {
 }
 
 /**
+ * WebView2 + Vite dev server の初回ロードでは SvelteKit の ESM 動的 import が
+ * サイレントに失敗し空白ページになることがある。
+ * ページリロードをリトライしてハイドレーション完了を保証する。
+ */
+export async function ensureSvelteHydrated(page: Page): Promise<void> {
+  const heading = page.getByRole('heading', { name: 'Chat Monitor' });
+  const maxRetries = 5;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const visible = await heading.isVisible().catch(() => false);
+    if (visible) {
+      log.debug(`SvelteKit hydrated (attempt ${attempt})`);
+      return;
+    }
+    log.debug(`SvelteKit not hydrated, reloading... (attempt ${attempt + 1}/${maxRetries})`);
+    try {
+      await page.goto('http://localhost:5173/', { waitUntil: 'load', timeout: 30000 });
+    } catch (e) {
+      // Vite dev server がまだ起動していない場合は少し待ってリトライ
+      log.debug(`goto failed: ${e instanceof Error ? e.message : String(e)}`);
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      continue;
+    }
+    try {
+      await heading.waitFor({ state: 'visible', timeout: 10000 });
+      return;
+    } catch {
+      // タイムアウトした場合は次のリトライ
+    }
+  }
+  // 最終確認（ここで失敗すると例外が飛ぶ）
+  await heading.waitFor({ state: 'visible', timeout: 30000 });
+}
+
+/**
  * Connect to Tauri app via CDP
  */
 export async function connectToApp(): Promise<{ browser: Browser; context: BrowserContext; page: Page }> {
@@ -121,30 +173,49 @@ export async function connectToApp(): Promise<{ browser: Browser; context: Brows
     throw new Error('No pages found in context');
   }
 
+  const page = pages[0];
+
+  // WebView2 初回ロードの SvelteKit ハイドレーション失敗を回避
+  await ensureSvelteHydrated(page);
+
   log.info('Connected to Tauri app');
-  return { browser, context, page: pages[0] };
+  return { browser, context, page };
 }
 
 /**
  * Kill Tauri app
+ *
+ * Windows では tauriProcess.kill() だけでは子プロセスツリー（cargo, liscov-tauri.exe,
+ * msedgewebview2.exe）が残り、CDP ポート 9222 を占有し続ける。
+ * /T フラグでプロセスツリーごと強制終了する。
  */
 export async function killTauriApp(): Promise<void> {
   log.debug('Killing Tauri app...');
   if (tauriProcess) {
-    tauriProcess.kill();
+    if (process.platform === 'win32' && tauriProcess.pid) {
+      // プロセスツリーごと強制終了（子プロセスの WebView2 も含む）
+      try {
+        execSync(`taskkill /F /T /PID ${tauriProcess.pid} 2>nul`, { stdio: 'ignore' });
+      } catch {
+        // プロセスが既に終了している場合
+      }
+    } else {
+      tauriProcess.kill();
+    }
     tauriProcess = null;
   }
-  // Also kill any orphaned processes as fallback
+  // 孤立プロセスのフォールバック: liscov-tauri.exe を /T（ツリーごと）で強制終了
   try {
     if (process.platform === 'win32') {
-      execSync('taskkill /F /IM liscov-tauri.exe 2>nul', { stdio: 'ignore' });
+      execSync('taskkill /F /T /IM liscov-tauri.exe 2>nul', { stdio: 'ignore' });
     } else {
       execSync('pkill -f liscov-tauri', { stdio: 'ignore' });
     }
   } catch {
     // Process may not exist
   }
-  await new Promise((resolve) => setTimeout(resolve, 1000));
+  // CDP ポートが解放されるまで待機
+  await waitForPortFree(9222, 5000);
 }
 
 /**
@@ -191,20 +262,29 @@ export async function startTauriApp(): Promise<void> {
 export async function killMockServer(): Promise<void> {
   if (mockServerProcess) {
     log.debug('Stopping mock server...');
-    mockServerProcess.kill();
+    if (process.platform === 'win32' && mockServerProcess.pid) {
+      try {
+        execSync(`taskkill /F /T /PID ${mockServerProcess.pid} 2>nul`, { stdio: 'ignore' });
+      } catch {
+        // プロセスが既に終了している場合
+      }
+    } else {
+      mockServerProcess.kill();
+    }
     mockServerProcess = null;
   }
-  // Also kill any orphaned mock_server processes
+  // 孤立プロセスのフォールバック
   try {
     if (process.platform === 'win32') {
-      execSync('taskkill /F /IM mock_server.exe 2>nul', { stdio: 'ignore' });
+      execSync('taskkill /F /T /IM mock-server.exe 2>nul', { stdio: 'ignore' });
     } else {
       execSync('pkill -f mock_server', { stdio: 'ignore' });
     }
   } catch {
     // Process may not exist
   }
-  await new Promise((resolve) => setTimeout(resolve, 500));
+  // ポート解放を待機
+  await waitForPortFree(3456, 3000);
 }
 
 /**
@@ -307,15 +387,8 @@ export async function setupTestEnvironment(): Promise<{ browser: Browser; contex
   // Step 5: Start Tauri app with test namespace
   await startTauriApp();
 
-  // Step 6: Connect to the running Tauri app
-  const connection = await connectToApp();
-
-  // Wait for Svelte app to fully mount (not just HTML load)
-  await connection.page.waitForLoadState('load');
-  // Wait for a known UI element that only exists after Svelte renders
-  await connection.page.getByRole('heading', { name: 'Chat Monitor' }).waitFor({ state: 'visible', timeout: 30000 });
-
-  return connection;
+  // Step 6: Connect to the running Tauri app（ensureSvelteHydrated は connectToApp 内で実行）
+  return await connectToApp();
 }
 
 /**
@@ -353,14 +426,12 @@ export async function teardownTestEnvironment(browser?: Browser): Promise<void> 
 export async function restartApp(): Promise<{ browser: Browser; context: BrowserContext; page: Page }> {
   // 既存のアプリを終了
   await killTauriApp();
-  // プロセス終了を待機
-  await new Promise((resolve) => setTimeout(resolve, 2000));
+  // Vite dev server のポートも解放されるまで待機
+  await waitForPortFree(5173, 5000);
   // 新しいインスタンスを起動
   await startTauriApp();
-  // CDP接続を確立
-  const { browser, context, page } = await connectToApp();
-  await page.waitForLoadState('domcontentloaded');
-  return { browser, context, page };
+  // CDP接続を確立（ensureSvelteHydrated は connectToApp 内で実行）
+  return await connectToApp();
 }
 
 /**

@@ -12,6 +12,7 @@ import {
   startMockServer,
   waitForCDP,
   connectToApp,
+  ensureSvelteHydrated,
 } from './utils/test-helpers';
 
 /**
@@ -160,8 +161,8 @@ test.describe('Real YouTube - Application Logic Freeze Detection', { tag: '@exte
       }
     });
 
-    await mainPage.waitForLoadState('domcontentloaded');
-    await mainPage.waitForTimeout(2000);
+    // WebView2 初回ロードの SvelteKit ハイドレーション失敗を回避
+    await ensureSvelteHydrated(mainPage);
     log.info('Connected to Tauri app');
   });
 
@@ -269,8 +270,8 @@ test.describe('Mock Server - Application Logic Freeze Detection', () => {
       }
     });
 
-    await mainPage.waitForLoadState('domcontentloaded');
-    await mainPage.waitForTimeout(2000);
+    // WebView2 初回ロードの SvelteKit ハイドレーション失敗を回避
+    await ensureSvelteHydrated(mainPage);
     log.info('Connected to Tauri app');
   });
 
