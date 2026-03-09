@@ -311,26 +311,3 @@ pub async fn get_top_contributors(
         .map(GuiContributorStats::from)
         .collect())
 }
-
-// Backward compatibility aliases (deprecated)
-
-/// Get viewer profile (deprecated: use viewer_get_profile instead)
-#[tauri::command]
-pub async fn get_viewer_profile(
-    state: State<'_, AppState>,
-    broadcaster_id: String,
-    channel_id: String,
-) -> Result<Option<GuiViewerProfile>, String> {
-    viewer_get_profile(state, broadcaster_id, channel_id).await
-}
-
-/// Search viewers (deprecated: use viewer_search instead)
-#[tauri::command]
-pub async fn search_viewers(
-    state: State<'_, AppState>,
-    broadcaster_id: String,
-    query: String,
-    limit: Option<usize>,
-) -> Result<Vec<GuiViewerWithInfo>, String> {
-    viewer_search(state, broadcaster_id, query, limit).await
-}

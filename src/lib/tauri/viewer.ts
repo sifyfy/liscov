@@ -117,60 +117,7 @@ export async function viewerUpdateInfo(
 }
 
 // ============================================================================
-// Backward compatibility aliases (deprecated)
-// ============================================================================
-
-/**
- * @deprecated Use viewerGetProfile instead
- */
-export async function getViewerProfile(
-  broadcasterId: string,
-  channelId: string
-): Promise<ViewerProfile | null> {
-  return viewerGetProfile(broadcasterId, channelId);
-}
-
-/**
- * @deprecated Use viewerSearch instead
- */
-export async function searchViewers(
-  broadcasterId: string,
-  query: string,
-  limit?: number
-): Promise<ViewerWithCustomInfo[]> {
-  return viewerSearch(broadcasterId, query, limit);
-}
-
-/**
- * @deprecated Use viewerGetList instead
- */
-export async function getViewersForBroadcaster(
-  broadcasterId: string,
-  searchQuery?: string,
-  limit?: number,
-  offset?: number
-): Promise<ViewerWithCustomInfo[]> {
-  return viewerGetList(broadcasterId, searchQuery, limit, offset);
-}
-
-/**
- * @deprecated Use broadcasterGetList instead
- */
-export async function getBroadcasterList(): Promise<BroadcasterChannel[]> {
-  return broadcasterGetList();
-}
-
-/**
- * @deprecated Use broadcasterDelete instead
- */
-export async function deleteBroadcaster(
-  broadcasterId: string
-): Promise<[boolean, number]> {
-  return broadcasterDelete(broadcasterId);
-}
-
-// ============================================================================
-// Session helpers (unchanged)
+// Session helpers
 // ============================================================================
 
 /**

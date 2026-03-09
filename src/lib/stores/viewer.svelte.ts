@@ -140,21 +140,17 @@ function createViewerStore() {
   }
 
   async function loadBroadcasters(): Promise<void> {
-    console.log('[viewerStore] loadBroadcasters called');
     isLoading = true;
     error = null;
 
     try {
-      const result = await viewerApi.broadcasterGetList();
-      console.log('[viewerStore] broadcasterGetList result:', JSON.stringify(result));
-      broadcasters = result;
+      broadcasters = await viewerApi.broadcasterGetList();
     } catch (e) {
       console.error('[viewerStore] loadBroadcasters error:', e);
       error = e instanceof Error ? e.message : String(e);
       broadcasters = [];
     } finally {
       isLoading = false;
-      console.log('[viewerStore] loadBroadcasters finished, count:', broadcasters.length);
     }
   }
 

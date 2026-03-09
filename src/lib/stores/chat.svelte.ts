@@ -175,10 +175,7 @@ function createChatStore() {
 
   // モニタリングを再開（同じストリームに再接続）
   async function resume(): Promise<ConnectionResult> {
-    console.log('[chat.svelte.ts] resume() called, streamUrl:', streamUrl, 'chatMode:', chatMode);
-
     if (!streamUrl) {
-      console.log('[chat.svelte.ts] resume() - no streamUrl, returning error');
       return {
         success: false,
         stream_title: null,
@@ -189,26 +186,20 @@ function createChatStore() {
       };
     }
 
-    console.log('[chat.svelte.ts] resume() - setting connectionState to connecting');
     connectionState = 'connecting';
     error = null;
 
     try {
-      console.log('[chat.svelte.ts] resume() - calling chatApi.connectToStream...');
       const result = await chatApi.connectToStream(streamUrl, chatMode);
-      console.log('[chat.svelte.ts] resume() - connectToStream returned:', JSON.stringify(result));
 
       if (result.success) {
-        console.log('[chat.svelte.ts] resume() - success, updating state...');
         connectionState = 'connected';
         streamTitle = result.stream_title;
         broadcasterName = result.broadcaster_name;
         broadcasterChannelId = result.broadcaster_channel_id;
         isReplay = result.is_replay;
-        console.log('[chat.svelte.ts] resume() - state updated, connectionState:', connectionState);
         // 再開時はメッセージをクリアしない
       } else {
-        console.log('[chat.svelte.ts] resume() - failed:', result.error);
         connectionState = 'error';
         error = result.error;
       }
@@ -307,33 +298,19 @@ function createChatStore() {
 
   // イベントリスナーのクリーンアップ関数
   let unlisten: (() => void) | null = null;
-  let messageCountSinceResume = 0;
-  let lastMessageLogTime = 0;
 
   async function setupEventListeners(): Promise<void> {
-    console.log('[chat.svelte.ts] setupEventListeners() called');
-
     // 新規チャットメッセージイベントを購読
     const unlistenMessage = await listen<ChatMessage>('chat:message', (event) => {
-      messageCountSinceResume++;
-      const now = Date.now();
-      // 最大5秒ごとにログ出力
-      if (now - lastMessageLogTime > 5000) {
-        console.log('[chat.svelte.ts] chat:message received, count since last log:', messageCountSinceResume, 'connectionState:', connectionState);
-        messageCountSinceResume = 0;
-        lastMessageLogTime = now;
-      }
       addMessage(event.payload);
     });
 
     // 接続状態変更イベントを購読
     const unlistenConnection = await listen<ConnectionResult>('chat:connection', (event) => {
       const result = event.payload;
-      console.log('[chat.svelte.ts] chat:connection received:', JSON.stringify(result), 'current connectionState:', connectionState);
 
       // idle状態（未接続）の場合は無視
       if (connectionState === 'idle') {
-        console.log('[chat.svelte.ts] chat:connection - ignoring because connectionState is idle');
         return;
       }
 
@@ -343,11 +320,9 @@ function createChatStore() {
         broadcasterName = result.broadcaster_name;
         broadcasterChannelId = result.broadcaster_channel_id;
         isReplay = result.is_replay;
-        console.log('[chat.svelte.ts] chat:connection - updated to connected');
       } else {
         connectionState = 'error';
         error = result.error;
-        console.log('[chat.svelte.ts] chat:connection - updated to error:', error);
       }
     });
 
