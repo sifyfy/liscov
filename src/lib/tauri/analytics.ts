@@ -1,38 +1,55 @@
-// Analytics Tauri commands
+// アナリティクス関連の Tauri コマンドラッパー
 import { invoke } from '@tauri-apps/api/core';
 import type { RevenueAnalytics, ExportConfig } from '$lib/types';
+import { normalizeError } from './errors';
 
 /**
- * Get revenue analytics for current session
+ * 現在のセッションの収益アナリティクスを取得する
  */
 export async function getRevenueAnalytics(): Promise<RevenueAnalytics> {
-  return invoke('get_revenue_analytics');
+  try {
+    return await invoke('get_revenue_analytics');
+  } catch (e) {
+    throw normalizeError(e);
+  }
 }
 
 /**
- * Get analytics for a specific session from database
+ * データベースから特定セッションのアナリティクスを取得する
  */
 export async function getSessionAnalytics(sessionId: string): Promise<RevenueAnalytics> {
-  return invoke('get_session_analytics', { sessionId });
+  try {
+    return await invoke('get_session_analytics', { sessionId });
+  } catch (e) {
+    throw normalizeError(e);
+  }
 }
 
 /**
- * Export session data to file
+ * セッションデータをファイルにエクスポートする
  */
 export async function exportSessionData(
   sessionId: string,
   filePath: string,
   config: ExportConfig
 ): Promise<void> {
-  return invoke('export_session_data', { sessionId, filePath, config });
+  try {
+    return await invoke('export_session_data', { sessionId, filePath, config });
+  } catch (e) {
+    throw normalizeError(e);
+  }
 }
 
 /**
- * Export current session messages to file
+ * 現在のセッションメッセージをファイルにエクスポートする
  */
 export async function exportCurrentMessages(
   filePath: string,
   config: ExportConfig
 ): Promise<void> {
-  return invoke('export_current_messages', { filePath, config });
+  try {
+    return await invoke('export_current_messages', { filePath, config });
+  } catch (e) {
+    throw normalizeError(e);
+  }
 }

@@ -1,39 +1,56 @@
-// Chat-related Tauri commands
+// チャット関連の Tauri コマンドラッパー
 import { invoke } from '@tauri-apps/api/core';
 import type { ChatMessage, ConnectionResult, ChatMode } from '$lib/types';
+import { normalizeError } from './errors';
 
 /**
- * Connect to a YouTube live stream
+ * YouTube ライブストリームに接続する
  */
 export async function connectToStream(
   url: string,
   chatMode?: ChatMode
 ): Promise<ConnectionResult> {
-  return invoke('connect_to_stream', {
-    url,
-    chatMode: chatMode === 'all' ? 'AllChat' : 'TopChat'
-  });
+  try {
+    return await invoke('connect_to_stream', {
+      url,
+      chatMode: chatMode === 'all' ? 'AllChat' : 'TopChat'
+    });
+  } catch (e) {
+    throw normalizeError(e);
+  }
 }
 
 /**
- * Disconnect from the current stream
+ * 現在のストリームから切断する
  */
 export async function disconnectStream(): Promise<void> {
-  return invoke('disconnect_stream');
+  try {
+    return await invoke('disconnect_stream');
+  } catch (e) {
+    throw normalizeError(e);
+  }
 }
 
 /**
- * Get recent chat messages
+ * 最近のチャットメッセージを取得する
  */
 export async function getChatMessages(limit?: number): Promise<ChatMessage[]> {
-  return invoke('get_chat_messages', { limit });
+  try {
+    return await invoke('get_chat_messages', { limit });
+  } catch (e) {
+    throw normalizeError(e);
+  }
 }
 
 /**
- * Set chat mode (top or all)
+ * チャットモードを設定する（トップ or 全て）
  */
 export async function setChatMode(mode: ChatMode): Promise<boolean> {
-  return invoke('set_chat_mode', {
-    mode: mode === 'all' ? 'AllChat' : 'TopChat'
-  });
+  try {
+    return await invoke('set_chat_mode', {
+      mode: mode === 'all' ? 'AllChat' : 'TopChat'
+    });
+  } catch (e) {
+    throw normalizeError(e);
+  }
 }
