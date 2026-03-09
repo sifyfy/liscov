@@ -11,7 +11,7 @@
   let format = $state<'csv' | 'json'>('json');
   let includeMetadata = $state(true);
   let includeSystemMessages = $state(false);
-  let maxRecords = $state<number | undefined>(undefined);
+  let maxRecords = $state<number | null>(null);
   let isExporting = $state(false);
   let exportError = $state<string | null>(null);
   let exportSuccess = $state(false);
@@ -25,7 +25,8 @@
       format,
       include_metadata: includeMetadata,
       include_system_messages: includeSystemMessages,
-      max_records: maxRecords
+      max_records: maxRecords,
+      sort_order: null
     };
 
     // Generate filename

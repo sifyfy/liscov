@@ -158,7 +158,8 @@ function createChatStore() {
         broadcaster_channel_id: null,
         broadcaster_name: null,
         is_replay: false,
-        error: error
+        error: error,
+        session_id: null
       };
     }
   }
@@ -182,7 +183,8 @@ function createChatStore() {
         broadcaster_channel_id: null,
         broadcaster_name: null,
         is_replay: false,
-        error: 'No stream URL to resume'
+        error: 'No stream URL to resume',
+        session_id: null
       };
     }
 
@@ -215,7 +217,8 @@ function createChatStore() {
         broadcaster_channel_id: null,
         broadcaster_name: null,
         is_replay: false,
-        error: error
+        error: error,
+        session_id: null
       };
     }
   }

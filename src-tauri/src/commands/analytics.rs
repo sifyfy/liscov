@@ -13,10 +13,12 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use tauri::State;
+use ts_rs::TS;
 
 /// SuperChat tier based on YouTube color scheme
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, TS)]
 #[serde(rename_all = "lowercase")]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub enum SuperChatTier {
     Blue,     // Lowest tier (USD $1-2)
     Cyan,     // USD $2-5
@@ -28,7 +30,8 @@ pub enum SuperChatTier {
 }
 
 /// SuperChat tier statistics
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub struct SuperChatTierStats {
     pub tier_red: usize,
     pub tier_magenta: usize,
@@ -59,7 +62,8 @@ impl SuperChatTierStats {
 }
 
 /// Revenue analytics data (07_revenue.md)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub struct RevenueAnalytics {
     pub super_chat_count: usize,
     pub super_chat_by_tier: SuperChatTierStats,
@@ -83,7 +87,8 @@ impl Default for RevenueAnalytics {
 }
 
 /// Contributor information (07_revenue.md)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub struct ContributorInfo {
     pub channel_id: String,
     pub display_name: String,
@@ -92,7 +97,8 @@ pub struct ContributorInfo {
 }
 
 /// Hourly statistics (07_revenue.md)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub struct HourlyStats {
     pub hour: String,
     pub super_chat_count: usize,
@@ -102,7 +108,8 @@ pub struct HourlyStats {
 }
 
 /// Export configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub struct ExportConfig {
     pub format: String, // "csv", "json"
     pub include_metadata: bool,
