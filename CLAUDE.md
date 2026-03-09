@@ -93,10 +93,10 @@ E2Eテスト用のYouTube InnerTube APIモックサーバー。
 
 ```bash
 # 基本起動
-cargo run --manifest-path src-tauri/Cargo.toml --bin mock_server
+cargo run --manifest-path crates/mock-server/Cargo.toml
 
 # NDJSONファイルからリプレイ
-cargo run --manifest-path src-tauri/Cargo.toml --bin mock_server -- -f replay.ndjson
+cargo run --manifest-path crates/mock-server/Cargo.toml -- -f replay.ndjson
 
 # オプション
 #   -p, --port <PORT>        ポート番号 (default: 3456)
@@ -116,10 +116,13 @@ cargo run --manifest-path src-tauri/Cargo.toml --bin mock_server -- -f replay.nd
 
 ```
 liscov-tauri/
+├── Cargo.toml                    # Cargo workspace 設定
+├── crates/
+│   └── mock-server/              # E2Eテスト用モックサーバー（独立クレート）
+│       ├── src/main.rs
+│       └── Cargo.toml
 ├── src-tauri/                    # Rust Backend
 │   ├── src/
-│   │   ├── bin/                  # スタンドアロンバイナリ
-│   │   │   └── mock_server.rs    # E2Eテスト用モックサーバー
 │   │   ├── commands/             # Tauri commands
 │   │   ├── core/                 # コアモジュール (api/, models/)
 │   │   ├── database/             # SQLiteデータベース操作

@@ -290,6 +290,8 @@ struct ReplayState {
 
 #[tokio::main]
 async fn main() {
+    // ログ初期化（スタンドアロンバイナリとして env_logger を使用）
+    env_logger::init();
     let args = Args::parse();
     if let Some(path) = args.generate {
         if let Err(e) = generate_sample_ndjson(&path) { eprintln!("Error: {}", e); std::process::exit(1); }

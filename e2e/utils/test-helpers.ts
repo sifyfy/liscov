@@ -216,9 +216,9 @@ export async function startMockServer(): Promise<void> {
   // Kill any existing mock server first
   await killMockServer();
 
-  // Start mock server as a child process
-  const cargoPath = path.join(PROJECT_DIR, 'src-tauri', 'Cargo.toml');
-  mockServerProcess = spawn('cargo', ['run', '--manifest-path', cargoPath, '--bin', 'mock_server'], {
+  // モックサーバーを独立クレートから起動
+  const cargoPath = path.join(PROJECT_DIR, 'crates', 'mock-server', 'Cargo.toml');
+  mockServerProcess = spawn('cargo', ['run', '--manifest-path', cargoPath], {
     cwd: PROJECT_DIR,
     stdio: ['ignore', 'pipe', 'pipe'],
     shell: true,
