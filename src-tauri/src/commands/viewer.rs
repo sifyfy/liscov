@@ -1,6 +1,7 @@
 //! Viewer management commands
 
 use crate::database::{self, ContributorStats, ViewerCustomInfo};
+use crate::errors::CommandError;
 use crate::AppState;
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -110,15 +111,15 @@ pub async fn viewer_get_profile(
     state: State<'_, AppState>,
     broadcaster_id: String,
     channel_id: String,
-) -> Result<Option<GuiViewerProfile>, String> {
+) -> Result<Option<GuiViewerProfile>, CommandError> {
     let db_guard = state.database.read().await;
     let db = db_guard
         .as_ref()
-        .ok_or_else(|| "Database not initialized".to_string())?;
+        .ok_or_else(|| CommandError::DatabaseError("Database not initialized".to_string()))?;
 
     let conn = db.connection().await;
     let profile = database::get_viewer_profile(&conn, &broadcaster_id, &channel_id)
-        .map_err(|e| format!("Failed to get viewer profile: {}", e))?;
+        .map_err(|e| CommandError::DatabaseError(format!("Failed to get viewer profile: {}", e)))?;
 
     Ok(profile.map(GuiViewerProfile::from))
 }
@@ -131,11 +132,11 @@ pub async fn viewer_get_list(
     search_query: Option<String>,
     limit: Option<usize>,
     offset: Option<usize>,
-) -> Result<Vec<GuiViewerWithInfo>, String> {
+) -> Result<Vec<GuiViewerWithInfo>, CommandError> {
     let db_guard = state.database.read().await;
     let db = db_guard
         .as_ref()
-        .ok_or_else(|| "Database not initialized".to_string())?;
+        .ok_or_else(|| CommandError::DatabaseError("Database not initialized".to_string()))?;
 
     let conn = db.connection().await;
     let viewers = database::get_viewers_for_broadcaster(
@@ -145,7 +146,7 @@ pub async fn viewer_get_list(
         limit.unwrap_or(50),
         offset.unwrap_or(0),
     )
-    .map_err(|e| format!("Failed to get viewers: {}", e))?;
+    .map_err(|e| CommandError::DatabaseError(format!("Failed to get viewers: {}", e)))?;
 
     Ok(viewers.into_iter().map(GuiViewerWithInfo::from).collect())
 }
@@ -157,11 +158,11 @@ pub async fn viewer_search(
     broadcaster_id: String,
     query: String,
     limit: Option<usize>,
-) -> Result<Vec<GuiViewerWithInfo>, String> {
+) -> Result<Vec<GuiViewerWithInfo>, CommandError> {
     let db_guard = state.database.read().await;
     let db = db_guard
         .as_ref()
-        .ok_or_else(|| "Database not initialized".to_string())?;
+        .ok_or_else(|| CommandError::DatabaseError("Database not initialized".to_string()))?;
 
     let conn = db.connection().await;
     let viewers = database::get_viewers_for_broadcaster(
@@ -171,7 +172,7 @@ pub async fn viewer_search(
         limit.unwrap_or(50),
         0,
     )
-    .map_err(|e| format!("Failed to search viewers: {}", e))?;
+    .map_err(|e| CommandError::DatabaseError(format!("Failed to search viewers: {}", e)))?;
 
     Ok(viewers.into_iter().map(GuiViewerWithInfo::from).collect())
 }
@@ -181,15 +182,15 @@ pub async fn viewer_search(
 pub async fn viewer_get_custom_info(
     state: State<'_, AppState>,
     viewer_profile_id: i64,
-) -> Result<Option<ViewerCustomInfo>, String> {
+) -> Result<Option<ViewerCustomInfo>, CommandError> {
     let db_guard = state.database.read().await;
     let db = db_guard
         .as_ref()
-        .ok_or_else(|| "Database not initialized".to_string())?;
+        .ok_or_else(|| CommandError::DatabaseError("Database not initialized".to_string()))?;
 
     let conn = db.connection().await;
     database::get_viewer_custom_info(&conn, viewer_profile_id)
-        .map_err(|e| format!("Failed to get viewer custom info: {}", e))
+        .map_err(|e| CommandError::DatabaseError(format!("Failed to get viewer custom info: {}", e)))
 }
 
 /// Upsert viewer custom info
@@ -200,11 +201,11 @@ pub async fn viewer_upsert_custom_info(
     reading: Option<String>,
     notes: Option<String>,
     custom_data: Option<String>,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     let db_guard = state.database.read().await;
     let db = db_guard
         .as_ref()
-        .ok_or_else(|| "Database not initialized".to_string())?;
+        .ok_or_else(|| CommandError::DatabaseError("Database not initialized".to_string()))?;
 
     let conn = db.connection().await;
 
@@ -218,7 +219,7 @@ pub async fn viewer_upsert_custom_info(
     };
 
     database::upsert_viewer_custom_info(&conn, &info)
-        .map_err(|e| format!("Failed to upsert custom info: {}", e))?;
+        .map_err(|e| CommandError::DatabaseError(format!("Failed to upsert custom info: {}", e)))?;
 
     Ok(())
 }
@@ -228,15 +229,15 @@ pub async fn viewer_upsert_custom_info(
 pub async fn viewer_delete(
     state: State<'_, AppState>,
     viewer_profile_id: i64,
-) -> Result<bool, String> {
+) -> Result<bool, CommandError> {
     let db_guard = state.database.read().await;
     let db = db_guard
         .as_ref()
-        .ok_or_else(|| "Database not initialized".to_string())?;
+        .ok_or_else(|| CommandError::DatabaseError("Database not initialized".to_string()))?;
 
     let conn = db.connection().await;
     let deleted = database::delete_viewer_profile(&conn, viewer_profile_id)
-        .map_err(|e| format!("Failed to delete viewer: {}", e))?;
+        .map_err(|e| CommandError::DatabaseError(format!("Failed to delete viewer: {}", e)))?;
 
     Ok(deleted)
 }
@@ -245,21 +246,21 @@ pub async fn viewer_delete(
 #[tauri::command]
 pub async fn broadcaster_get_list(
     state: State<'_, AppState>,
-) -> Result<Vec<GuiBroadcasterChannel>, String> {
+) -> Result<Vec<GuiBroadcasterChannel>, CommandError> {
     let db_guard = state.database.read().await;
     let db = db_guard
         .as_ref()
-        .ok_or_else(|| "Database not initialized".to_string())?;
+        .ok_or_else(|| CommandError::DatabaseError("Database not initialized".to_string()))?;
 
     let conn = db.connection().await;
 
     let broadcasters = database::get_distinct_broadcaster_channels(&conn)
-        .map_err(|e| format!("Failed to get broadcasters: {}", e))?;
+        .map_err(|e| CommandError::DatabaseError(format!("Failed to get broadcasters: {}", e)))?;
 
     let mut result = Vec::new();
     for broadcaster in broadcasters {
         let viewer_count = database::get_viewer_count_for_broadcaster(&conn, &broadcaster.channel_id)
-            .map_err(|e| format!("Failed to get viewer count: {}", e))?;
+            .map_err(|e| CommandError::DatabaseError(format!("Failed to get viewer count: {}", e)))?;
 
         result.push(GuiBroadcasterChannel {
             channel_id: broadcaster.channel_id,
@@ -277,15 +278,15 @@ pub async fn broadcaster_get_list(
 pub async fn broadcaster_delete(
     state: State<'_, AppState>,
     broadcaster_id: String,
-) -> Result<(bool, u32), String> {
+) -> Result<(bool, u32), CommandError> {
     let db_guard = state.database.read().await;
     let db = db_guard
         .as_ref()
-        .ok_or_else(|| "Database not initialized".to_string())?;
+        .ok_or_else(|| CommandError::DatabaseError("Database not initialized".to_string()))?;
 
     let conn = db.connection().await;
     let (broadcaster_deleted, viewers_deleted) = database::delete_broadcaster(&conn, &broadcaster_id)
-        .map_err(|e| format!("Failed to delete broadcaster: {}", e))?;
+        .map_err(|e| CommandError::DatabaseError(format!("Failed to delete broadcaster: {}", e)))?;
 
     Ok((broadcaster_deleted, viewers_deleted))
 }
@@ -296,15 +297,15 @@ pub async fn get_top_contributors(
     state: State<'_, AppState>,
     session_id: String,
     limit: Option<usize>,
-) -> Result<Vec<GuiContributorStats>, String> {
+) -> Result<Vec<GuiContributorStats>, CommandError> {
     let db_guard = state.database.read().await;
     let db = db_guard
         .as_ref()
-        .ok_or_else(|| "Database not initialized".to_string())?;
+        .ok_or_else(|| CommandError::DatabaseError("Database not initialized".to_string()))?;
 
     let conn = db.connection().await;
     let contributors = database::get_top_contributors(&conn, &session_id, limit.unwrap_or(10))
-        .map_err(|e| format!("Failed to get contributors: {}", e))?;
+        .map_err(|e| CommandError::DatabaseError(format!("Failed to get contributors: {}", e)))?;
 
     Ok(contributors
         .into_iter()
