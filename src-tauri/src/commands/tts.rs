@@ -1,5 +1,6 @@
 //! TTS (Text-to-Speech) commands
 
+use crate::errors::CommandError;
 use crate::state::AppState;
 use crate::tts::{TtsBackendType, TtsConfig, TtsProcessManager, TtsPriority, TtsQueueItem};
 use serde::{Deserialize, Serialize};
@@ -147,7 +148,7 @@ pub async fn tts_speak(
     priority: Option<String>,
     author_name: Option<String>,
     amount: Option<String>,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     let priority = match priority.as_deref() {
         Some("superchat") => TtsPriority::SuperChat,
         Some("membership") => TtsPriority::Membership,
@@ -167,12 +168,12 @@ pub async fn tts_speak(
 
 /// Speak text directly (bypasses queue)
 #[tauri::command]
-pub async fn tts_speak_direct(state: State<'_, AppState>, text: String) -> Result<(), String> {
+pub async fn tts_speak_direct(state: State<'_, AppState>, text: String) -> Result<(), CommandError> {
     state
         .tts_manager
         .speak_direct(&text)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(CommandError::from)
 }
 
 /// Update TTS configuration
@@ -180,7 +181,7 @@ pub async fn tts_speak_direct(state: State<'_, AppState>, text: String) -> Resul
 pub async fn tts_update_config(
     state: State<'_, AppState>,
     config: TtsConfigDto,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     let was_enabled = state.tts_manager.get_config().await.enabled;
     let will_be_enabled = config.enabled;
 
@@ -198,7 +199,7 @@ pub async fn tts_update_config(
 
 /// Get current TTS configuration
 #[tauri::command]
-pub async fn tts_get_config(state: State<'_, AppState>) -> Result<TtsConfigDto, String> {
+pub async fn tts_get_config(state: State<'_, AppState>) -> Result<TtsConfigDto, CommandError> {
     let config = state.tts_manager.get_config().await;
     Ok(config.into())
 }
@@ -208,7 +209,7 @@ pub async fn tts_get_config(state: State<'_, AppState>) -> Result<TtsConfigDto, 
 pub async fn tts_test_connection(
     state: State<'_, AppState>,
     backend: Option<String>,
-) -> Result<bool, String> {
+) -> Result<bool, CommandError> {
     if let Some(backend_str) = backend {
         let backend_type = match backend_str.as_str() {
             "bouyomichan" => TtsBackendType::Bouyomichan,
@@ -219,40 +220,40 @@ pub async fn tts_test_connection(
             .tts_manager
             .test_backend_connection(backend_type)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(CommandError::from)
     } else {
         state
             .tts_manager
             .test_connection()
             .await
-            .map_err(|e| e.to_string())
+            .map_err(CommandError::from)
     }
 }
 
 /// Start TTS queue processing
 #[tauri::command]
-pub async fn tts_start(state: State<'_, AppState>) -> Result<(), String> {
+pub async fn tts_start(state: State<'_, AppState>) -> Result<(), CommandError> {
     state.tts_manager.start_processing().await;
     Ok(())
 }
 
 /// Stop TTS queue processing
 #[tauri::command]
-pub async fn tts_stop(state: State<'_, AppState>) -> Result<(), String> {
+pub async fn tts_stop(state: State<'_, AppState>) -> Result<(), CommandError> {
     state.tts_manager.stop_processing().await;
     Ok(())
 }
 
 /// Clear TTS queue
 #[tauri::command]
-pub async fn tts_clear_queue(state: State<'_, AppState>) -> Result<(), String> {
+pub async fn tts_clear_queue(state: State<'_, AppState>) -> Result<(), CommandError> {
     state.tts_manager.clear_queue().await;
     Ok(())
 }
 
 /// Get TTS status
 #[tauri::command]
-pub async fn tts_get_status(state: State<'_, AppState>) -> Result<TtsStatus, String> {
+pub async fn tts_get_status(state: State<'_, AppState>) -> Result<TtsStatus, CommandError> {
     Ok(TtsStatus {
         is_processing: state.tts_manager.is_processing().await,
         queue_size: state.tts_manager.queue_size().await,
@@ -269,7 +270,7 @@ pub struct TtsLaunchStatus {
 
 /// Discover executable path for a TTS backend
 #[tauri::command]
-pub async fn tts_discover_exe(backend: String) -> Result<Option<String>, String> {
+pub async fn tts_discover_exe(backend: String) -> Result<Option<String>, CommandError> {
     let backend_type = match backend.as_str() {
         "bouyomichan" => TtsBackendType::Bouyomichan,
         "voicevox" => TtsBackendType::Voicevox,
@@ -280,7 +281,7 @@ pub async fn tts_discover_exe(backend: String) -> Result<Option<String>, String>
 
 /// Select executable file via dialog
 #[tauri::command]
-pub async fn tts_select_exe(app: tauri::AppHandle) -> Result<Option<String>, String> {
+pub async fn tts_select_exe(app: tauri::AppHandle) -> Result<Option<String>, CommandError> {
     let file = app
         .dialog()
         .file()
@@ -297,18 +298,19 @@ pub async fn tts_launch_backend(
     state: State<'_, AppState>,
     backend: String,
     exe_path: Option<String>,
-) -> Result<u32, String> {
+) -> Result<u32, CommandError> {
     let backend_type = match backend.as_str() {
         "bouyomichan" => TtsBackendType::Bouyomichan,
         "voicevox" => TtsBackendType::Voicevox,
-        _ => return Err("Invalid backend type".to_string()),
+        _ => return Err(CommandError::InvalidInput("Invalid backend type".to_string())),
     };
     let result = state
         .tts_process_manager
         .launch(backend_type, exe_path.as_deref())
-        .await;
+        .await
+        .map_err(|e| CommandError::TtsError(e));
 
-    // Emit event on successful launch
+    // 起動成功時にイベントを送信
     if result.is_ok() {
         let _ = app.emit("tts:process_launched", &backend);
     }
@@ -322,15 +324,16 @@ pub async fn tts_kill_backend(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     backend: String,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     let backend_type = match backend.as_str() {
         "bouyomichan" => TtsBackendType::Bouyomichan,
         "voicevox" => TtsBackendType::Voicevox,
-        _ => return Err("Invalid backend type".to_string()),
+        _ => return Err(CommandError::InvalidInput("Invalid backend type".to_string())),
     };
-    let result = state.tts_process_manager.kill(&backend_type).await;
+    let result = state.tts_process_manager.kill(&backend_type).await
+        .map_err(|e| CommandError::TtsError(e));
 
-    // Emit event on successful kill
+    // 停止成功時にイベントを送信
     if result.is_ok() {
         let _ = app.emit("tts:process_stopped", &backend);
     }
@@ -340,7 +343,7 @@ pub async fn tts_kill_backend(
 
 /// Get TTS backend launch status
 #[tauri::command]
-pub async fn tts_get_launch_status(state: State<'_, AppState>) -> Result<TtsLaunchStatus, String> {
+pub async fn tts_get_launch_status(state: State<'_, AppState>) -> Result<TtsLaunchStatus, CommandError> {
     Ok(TtsLaunchStatus {
         bouyomichan_launched: state
             .tts_process_manager

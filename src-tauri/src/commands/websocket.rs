@@ -4,6 +4,7 @@
 //! Manual start/stop is not required.
 
 use crate::core::api::{ClientEvent, WebSocketServer};
+use crate::errors::CommandError;
 use crate::AppState;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -90,7 +91,7 @@ pub async fn start_websocket_server_auto(
 #[tauri::command]
 pub async fn websocket_get_status(
     state: tauri::State<'_, AppState>,
-) -> Result<WebSocketStatus, String> {
+) -> Result<WebSocketStatus, CommandError> {
     let ws = state.websocket_server.read().await;
 
     if let Some(server) = ws.as_ref() {

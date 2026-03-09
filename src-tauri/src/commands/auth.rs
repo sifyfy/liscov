@@ -5,6 +5,7 @@
 use crate::commands::auth_window;
 use crate::commands::config::{ConfigState, StorageMode};
 use crate::core::models::YouTubeCookies;
+use crate::errors::CommandError;
 use crate::state::AppState;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -524,7 +525,7 @@ async fn check_session_validity_internal(cookies: &YouTubeCookies) -> SessionVal
 pub async fn auth_get_status(
     _state: State<'_, AppState>,
     config_state: State<'_, ConfigState>,
-) -> Result<AuthStatus, String> {
+) -> Result<AuthStatus, CommandError> {
     log::info!("🔍 auth_get_status called");
     let config = config_state.get();
     let storage_mode = &config.storage.mode;
@@ -566,7 +567,7 @@ pub async fn auth_get_status(
 #[tauri::command]
 pub async fn auth_load_credentials(
     config_state: State<'_, ConfigState>,
-) -> Result<bool, String> {
+) -> Result<bool, CommandError> {
     let config = config_state.get();
     let storage_mode = &config.storage.mode;
 
@@ -577,7 +578,7 @@ pub async fn auth_load_credentials(
         }
         Err(e) => {
             log::warn!("Failed to load credentials: {}", e);
-            Err(e)
+            Err(CommandError::AuthRequired(e))
         }
     }
 }
@@ -587,18 +588,19 @@ pub async fn auth_load_credentials(
 pub async fn auth_save_raw_cookies(
     raw_cookies: String,
     config_state: State<'_, ConfigState>,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     if raw_cookies.is_empty() {
-        return Err("Cookie string is empty".to_string());
+        return Err(CommandError::InvalidInput("Cookie string is empty".to_string()));
     }
 
     if !raw_cookies.contains("SAPISID=") {
-        return Err("Cookie string must contain SAPISID".to_string());
+        return Err(CommandError::InvalidInput("Cookie string must contain SAPISID".to_string()));
     }
 
     let cookies = parse_raw_cookies(&raw_cookies);
     let config = config_state.get();
-    save_cookies(&cookies, &config.storage.mode)?;
+    save_cookies(&cookies, &config.storage.mode)
+        .map_err(|e| CommandError::StorageError(e))?;
 
     log::info!("Credentials saved from raw cookies");
     Ok(())
@@ -613,9 +615,9 @@ pub async fn auth_save_credentials(
     apisid: String,
     sapisid: String,
     config_state: State<'_, ConfigState>,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     if sapisid.is_empty() {
-        return Err("SAPISID is required".to_string());
+        return Err(CommandError::InvalidInput("SAPISID is required".to_string()));
     }
 
     let cookies = YouTubeCookies {
@@ -628,7 +630,8 @@ pub async fn auth_save_credentials(
     };
 
     let config = config_state.get();
-    save_cookies(&cookies, &config.storage.mode)?;
+    save_cookies(&cookies, &config.storage.mode)
+        .map_err(|e| CommandError::StorageError(e))?;
 
     log::info!("Credentials saved");
     Ok(())
@@ -638,9 +641,10 @@ pub async fn auth_save_credentials(
 #[tauri::command]
 pub async fn auth_delete_credentials(
     config_state: State<'_, ConfigState>,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     let config = config_state.get();
-    delete_credentials(&config.storage.mode)?;
+    delete_credentials(&config.storage.mode)
+        .map_err(|e| CommandError::StorageError(e))?;
     log::info!("Credentials deleted");
     Ok(())
 }
@@ -649,17 +653,17 @@ pub async fn auth_delete_credentials(
 #[tauri::command]
 pub async fn auth_clear_webview_cookies(
     app: tauri::AppHandle,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     use tauri::Manager;
 
     log::info!("🧹 Clearing WebView cookies...");
 
-    // Get the main webview window
+    // メインのWebViewウィンドウを取得
     if let Some(window) = app.get_webview_window("main") {
-        // Clear all browsing data (includes cookies)
+        // ブラウジングデータ（Cookieを含む）をすべてクリア
         window
             .clear_all_browsing_data()
-            .map_err(|e| format!("Failed to clear browsing data: {}", e))?;
+            .map_err(|e| CommandError::Internal(format!("Failed to clear browsing data: {}", e)))?;
         log::info!("✅ WebView cookies cleared successfully");
     } else {
         log::warn!("⚠️ Main window not found, skipping WebView cookie clear");
@@ -672,11 +676,12 @@ pub async fn auth_clear_webview_cookies(
 #[tauri::command]
 pub async fn auth_validate_credentials(
     config_state: State<'_, ConfigState>,
-) -> Result<bool, String> {
+) -> Result<bool, CommandError> {
     let config = config_state.get();
-    let cookies = load_cookies(&config.storage.mode)?;
+    let cookies = load_cookies(&config.storage.mode)
+        .map_err(|e| CommandError::AuthRequired(e))?;
 
-    // Simple validation: check that SAPISID is present and non-empty
+    // SAPISIDが存在し空でないことをチェック
     Ok(!cookies.sapisid.is_empty())
 }
 
@@ -684,10 +689,11 @@ pub async fn auth_validate_credentials(
 #[tauri::command]
 pub async fn auth_check_session_validity(
     config_state: State<'_, ConfigState>,
-) -> Result<SessionValidity, String> {
+) -> Result<SessionValidity, CommandError> {
     log::info!("🔍 auth_check_session_validity called");
     let config = config_state.get();
-    let cookies = load_cookies(&config.storage.mode)?;
+    let cookies = load_cookies(&config.storage.mode)
+        .map_err(|e| CommandError::AuthRequired(e))?;
     log::info!("🔍 Checking session validity...");
 
     let result = check_session_validity_internal(&cookies).await;
@@ -699,31 +705,31 @@ pub async fn auth_check_session_validity(
 #[tauri::command]
 pub async fn auth_use_fallback_storage(
     config_state: State<'_, ConfigState>,
-) -> Result<bool, String> {
+) -> Result<bool, CommandError> {
     let mut config = config_state.get();
 
-    // Check if we have credentials in secure storage to migrate
+    // セキュアストレージからの移行対象クレデンシャルを確認
     let credentials_to_migrate = if config.storage.mode == StorageMode::Secure {
         load_cookies_from_secure_storage().ok()
     } else {
         None
     };
 
-    // Switch to fallback mode
+    // フォールバックモードに切り替え
     config.storage.mode = StorageMode::Fallback;
     config_state.set(config.clone());
 
-    // Save the config
+    // 設定ファイルを保存
     use crate::commands::config::save_config_to_file;
     if let Err(e) = save_config_to_file(&config) {
         log::error!("Failed to save config: {}", e);
     }
 
-    // Migrate credentials if they existed
+    // クレデンシャルが存在する場合は移行
     if let Some(cookies) = credentials_to_migrate {
         if let Err(e) = save_cookies_to_file(&cookies) {
             log::error!("Failed to migrate credentials to file: {}", e);
-            return Err(format!("Failed to migrate credentials: {}", e));
+            return Err(CommandError::StorageError(format!("Failed to migrate credentials: {}", e)));
         }
         log::info!("Credentials migrated to file storage");
     }
@@ -737,17 +743,18 @@ pub async fn auth_use_fallback_storage(
 pub async fn auth_open_window(
     app: tauri::AppHandle,
     config_state: State<'_, ConfigState>,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     match auth_window::open_auth_window(app).await {
         Ok(cookies) => {
             log::info!("Authentication successful via WebView");
 
-            // Save the cookies using the current storage mode
+            // 現在のストレージモードでCookieを保存
             let config = config_state.get();
-            save_cookies(&cookies, &config.storage.mode)?;
+            save_cookies(&cookies, &config.storage.mode)
+                .map_err(|e| CommandError::StorageError(e))?;
 
-            // Wait for Windows Credential Manager to persist the entry
-            // See: https://docs.rs/keyring/latest/x86_64-pc-windows-msvc/keyring/windows/index.html
+            // Windows資格情報マネージャーへの永続化を待機
+            // 参照: https://docs.rs/keyring/latest/x86_64-pc-windows-msvc/keyring/windows/index.html
             // "setting a password on one thread and then immediately spawning another
             // to get the password may return a NoEntry error"
             log::info!("⏳ Waiting 500ms for credential persistence...");
@@ -759,7 +766,7 @@ pub async fn auth_open_window(
         }
         Err(e) => {
             log::warn!("Authentication failed: {}", e);
-            Err(e.to_string())
+            Err(CommandError::AuthFailed(e.to_string()))
         }
     }
 }

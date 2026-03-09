@@ -2,6 +2,7 @@
 //!
 //! Implements 09_config.md specification
 
+use crate::errors::CommandError;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs;
@@ -188,7 +189,7 @@ pub fn save_config_to_file(config: &Config) -> Result<(), String> {
 
 /// Load configuration
 #[tauri::command]
-pub async fn config_load(state: State<'_, ConfigState>) -> Result<Config, String> {
+pub async fn config_load(state: State<'_, ConfigState>) -> Result<Config, CommandError> {
     let config = load_config_from_file();
     state.set(config.clone());
     Ok(config)
@@ -196,9 +197,10 @@ pub async fn config_load(state: State<'_, ConfigState>) -> Result<Config, String
 
 /// Save configuration
 #[tauri::command]
-pub async fn config_save(config: Config, state: State<'_, ConfigState>) -> Result<(), String> {
+pub async fn config_save(config: Config, state: State<'_, ConfigState>) -> Result<(), CommandError> {
     state.set(config.clone());
     save_config_to_file(&config)
+        .map_err(|e| CommandError::IoError(e))
 }
 
 /// Get a specific configuration value
@@ -207,7 +209,7 @@ pub async fn config_get_value(
     section: String,
     key: String,
     state: State<'_, ConfigState>,
-) -> Result<Option<Value>, String> {
+) -> Result<Option<Value>, CommandError> {
     let config = state.get();
 
     let value = match section.as_str() {
@@ -238,45 +240,45 @@ pub async fn config_set_value(
     key: String,
     value: Value,
     state: State<'_, ConfigState>,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     let mut config = state.get();
 
     match section.as_str() {
         "storage" => match key.as_str() {
             "mode" => {
                 config.storage.mode = serde_json::from_value(value)
-                    .map_err(|e| format!("Invalid storage mode value: {}", e))?;
+                    .map_err(|e| CommandError::InvalidInput(format!("Invalid storage mode value: {}", e)))?;
             }
-            _ => return Err(format!("Unknown key in storage section: {}", key)),
+            _ => return Err(CommandError::InvalidInput(format!("Unknown key in storage section: {}", key))),
         },
         "chat_display" => match key.as_str() {
             "message_font_size" => {
                 let size: u32 = serde_json::from_value(value)
-                    .map_err(|e| format!("Invalid font size value: {}", e))?;
-                // Validate range (10-24)
+                    .map_err(|e| CommandError::InvalidInput(format!("Invalid font size value: {}", e)))?;
+                // 有効範囲チェック (10-24)
                 if size < 10 || size > 24 {
-                    return Err(format!("Font size must be between 10 and 24, got {}", size));
+                    return Err(CommandError::InvalidInput(format!("Font size must be between 10 and 24, got {}", size)));
                 }
                 config.chat_display.message_font_size = size;
             }
             "show_timestamps" => {
                 config.chat_display.show_timestamps = serde_json::from_value(value)
-                    .map_err(|e| format!("Invalid show_timestamps value: {}", e))?;
+                    .map_err(|e| CommandError::InvalidInput(format!("Invalid show_timestamps value: {}", e)))?;
             }
             "auto_scroll_enabled" => {
                 config.chat_display.auto_scroll_enabled = serde_json::from_value(value)
-                    .map_err(|e| format!("Invalid auto_scroll_enabled value: {}", e))?;
+                    .map_err(|e| CommandError::InvalidInput(format!("Invalid auto_scroll_enabled value: {}", e)))?;
             }
-            _ => return Err(format!("Unknown key in chat_display section: {}", key)),
+            _ => return Err(CommandError::InvalidInput(format!("Unknown key in chat_display section: {}", key))),
         },
         "ui" => match key.as_str() {
             "theme" => {
                 config.ui.theme = serde_json::from_value(value)
-                    .map_err(|e| format!("Invalid theme value: {}", e))?;
+                    .map_err(|e| CommandError::InvalidInput(format!("Invalid theme value: {}", e)))?;
             }
-            _ => return Err(format!("Unknown key in ui section: {}", key)),
+            _ => return Err(CommandError::InvalidInput(format!("Unknown key in ui section: {}", key))),
         },
-        _ => return Err(format!("Unknown section: {}", section)),
+        _ => return Err(CommandError::InvalidInput(format!("Unknown section: {}", section))),
     }
 
     state.set(config.clone());

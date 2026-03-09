@@ -1,6 +1,7 @@
 //! Database commands
 
 use crate::database::{self, Session, ViewerCustomInfo};
+use crate::errors::CommandError;
 use crate::AppState;
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -70,15 +71,15 @@ impl From<database::StoredMessage> for GuiStoredMessage {
 pub async fn get_sessions(
     state: State<'_, AppState>,
     limit: Option<usize>,
-) -> Result<Vec<GuiSession>, String> {
+) -> Result<Vec<GuiSession>, CommandError> {
     let db_guard = state.database.read().await;
     let db = db_guard
         .as_ref()
-        .ok_or_else(|| "Database not initialized".to_string())?;
+        .ok_or_else(|| CommandError::DatabaseError("Database not initialized".to_string()))?;
 
     let conn = db.connection().await;
     let sessions = database::get_sessions(&conn, limit.unwrap_or(50))
-        .map_err(|e| format!("Failed to get sessions: {}", e))?;
+        .map_err(|e| CommandError::DatabaseError(format!("Failed to get sessions: {}", e)))?;
 
     Ok(sessions.into_iter().map(GuiSession::from).collect())
 }
@@ -89,15 +90,15 @@ pub async fn get_session_messages(
     state: State<'_, AppState>,
     session_id: String,
     limit: Option<usize>,
-) -> Result<Vec<GuiStoredMessage>, String> {
+) -> Result<Vec<GuiStoredMessage>, CommandError> {
     let db_guard = state.database.read().await;
     let db = db_guard
         .as_ref()
-        .ok_or_else(|| "Database not initialized".to_string())?;
+        .ok_or_else(|| CommandError::DatabaseError("Database not initialized".to_string()))?;
 
     let conn = db.connection().await;
     let messages = database::get_session_messages(&conn, &session_id, limit.unwrap_or(100))
-        .map_err(|e| format!("Failed to get messages: {}", e))?;
+        .map_err(|e| CommandError::DatabaseError(format!("Failed to get messages: {}", e)))?;
 
     Ok(messages.into_iter().map(GuiStoredMessage::from).collect())
 }
@@ -111,15 +112,15 @@ pub async fn viewer_update_info(
     notes: Option<String>,
     custom_data: Option<String>,
     tags: Option<Vec<String>>,
-) -> Result<bool, String> {
+) -> Result<bool, CommandError> {
     let db_guard = state.database.read().await;
     let db = db_guard
         .as_ref()
-        .ok_or_else(|| "Database not initialized".to_string())?;
+        .ok_or_else(|| CommandError::DatabaseError("Database not initialized".to_string()))?;
 
     let conn = db.connection().await;
 
-    // Update custom info (reading, notes, custom_data)
+    // カスタム情報 (reading, notes, custom_data) を更新
     let custom_info = ViewerCustomInfo {
         viewer_profile_id,
         reading,
@@ -129,12 +130,12 @@ pub async fn viewer_update_info(
         updated_at: None,
     };
     database::upsert_viewer_custom_info(&conn, &custom_info)
-        .map_err(|e| format!("Failed to update custom info: {}", e))?;
+        .map_err(|e| CommandError::DatabaseError(format!("Failed to update custom info: {}", e)))?;
 
-    // Update tags in viewer_profiles if provided
+    // タグが指定されていれば viewer_profiles も更新
     if let Some(tags) = tags {
         database::update_viewer_tags(&conn, viewer_profile_id, Some(tags))
-            .map_err(|e| format!("Failed to update tags: {}", e))?;
+            .map_err(|e| CommandError::DatabaseError(format!("Failed to update tags: {}", e)))?;
     }
 
     Ok(true)

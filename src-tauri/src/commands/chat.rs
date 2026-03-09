@@ -4,6 +4,7 @@ use crate::core::api::InnerTubeClient;
 use crate::core::models::{extract_video_id, ChatMessage, ChatMode, ConnectionStatus};
 use crate::core::raw_response::{RawResponseSaver, SaveConfig};
 use crate::database::{self, Database};
+use crate::errors::CommandError;
 use crate::AppState;
 use crate::commands::SaveConfigState;
 use crate::commands::config::ConfigState;
@@ -182,7 +183,7 @@ pub async fn connect_to_stream(
     config_state: State<'_, ConfigState>,
     url: String,
     chat_mode: Option<String>,
-) -> Result<ConnectionResult, String> {
+) -> Result<ConnectionResult, CommandError> {
     // Increment connection ID to invalidate any running monitoring tasks
     let new_connection_id = state.connection_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
     tracing::info!("connect_to_stream called with url: {}, chat_mode: {:?}, connection_id: {}", url, chat_mode, new_connection_id);
@@ -207,8 +208,9 @@ pub async fn connect_to_stream(
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     tracing::debug!("connect_to_stream: delay complete, proceeding with connection");
 
-    // Extract video ID from URL
-    let video_id = extract_video_id(&url).ok_or_else(|| "Invalid YouTube URL".to_string())?;
+    // URLからビデオIDを抽出
+    let video_id = extract_video_id(&url)
+        .ok_or_else(|| CommandError::InvalidInput("Invalid YouTube URL".to_string()))?;
 
     // Parse chat mode
     let mode = match chat_mode.as_deref() {
@@ -231,7 +233,7 @@ pub async fn connect_to_stream(
     let status = client
         .initialize()
         .await
-        .map_err(|e| format!("Failed to connect: {}", e))?;
+        .map_err(|e| CommandError::ConnectionFailed(format!("Failed to connect: {}", e)))?;
 
     // Set chat mode after initialization (requires continuation token)
     if status.is_connected {
@@ -311,9 +313,9 @@ pub async fn connect_to_stream(
         let tts_manager = Arc::clone(&state.tts_manager);
         let app_handle = app.clone();
 
-        // Get save config for raw response saving
+        // raw response保存用の設定を取得
         let save_config = save_config_state.0.lock()
-            .map_err(|e| e.to_string())?
+            .map_err(|e| CommandError::Internal(format!("Mutex lock failed: {}", e)))?
             .clone();
 
         {
@@ -590,7 +592,7 @@ async fn chat_monitoring_task(
 pub async fn disconnect_stream(
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     tracing::info!("disconnect_stream called");
 
     // Stop monitoring
@@ -641,7 +643,7 @@ pub async fn disconnect_stream(
 pub async fn get_chat_messages(
     state: State<'_, AppState>,
     limit: Option<usize>,
-) -> Result<Vec<GuiChatMessage>, String> {
+) -> Result<Vec<GuiChatMessage>, CommandError> {
     let limit = limit.unwrap_or(100);
     let messages = state.get_messages(limit).await;
     Ok(messages.into_iter().map(GuiChatMessage::from).collect())
@@ -652,7 +654,7 @@ pub async fn get_chat_messages(
 pub async fn set_chat_mode(
     state: State<'_, AppState>,
     mode: String,
-) -> Result<bool, String> {
+) -> Result<bool, CommandError> {
     let chat_mode = match mode.as_str() {
         "all" | "AllChat" => ChatMode::AllChat,
         _ => ChatMode::TopChat,
@@ -663,6 +665,6 @@ pub async fn set_chat_mode(
         client.set_chat_mode(chat_mode);
         Ok(true)
     } else {
-        Err("Not connected to any stream".to_string())
+        Err(CommandError::NotConnected("Not connected to any stream".to_string()))
     }
 }

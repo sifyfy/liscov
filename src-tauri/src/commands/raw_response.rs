@@ -1,6 +1,7 @@
 //! Raw response save configuration commands
 
 use crate::core::raw_response::SaveConfig;
+use crate::errors::CommandError;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use tauri::State;
@@ -50,8 +51,9 @@ impl From<GuiSaveConfig> for SaveConfig {
 
 /// Get current save config (spec: 05_raw_response.md)
 #[tauri::command]
-pub fn raw_response_get_config(state: State<'_, SaveConfigState>) -> Result<GuiSaveConfig, String> {
-    let config = state.0.lock().map_err(|e| e.to_string())?;
+pub fn raw_response_get_config(state: State<'_, SaveConfigState>) -> Result<GuiSaveConfig, CommandError> {
+    let config = state.0.lock()
+        .map_err(|e| CommandError::Internal(format!("Mutex lock failed: {}", e)))?;
     Ok(GuiSaveConfig::from(config.clone()))
 }
 
@@ -60,8 +62,9 @@ pub fn raw_response_get_config(state: State<'_, SaveConfigState>) -> Result<GuiS
 pub fn raw_response_update_config(
     state: State<'_, SaveConfigState>,
     config: GuiSaveConfig,
-) -> Result<(), String> {
-    let mut current = state.0.lock().map_err(|e| e.to_string())?;
+) -> Result<(), CommandError> {
+    let mut current = state.0.lock()
+        .map_err(|e| CommandError::Internal(format!("Mutex lock failed: {}", e)))?;
     *current = SaveConfig::from(config);
     tracing::info!("💾 Save config updated: enabled={}", current.enabled);
     Ok(())
@@ -102,10 +105,12 @@ fn validate_file_path(file_path: &str) -> Result<(), String> {
 /// Get resolved file path (resolves relative paths to data directory)
 /// (spec: 05_raw_response.md)
 #[tauri::command]
-pub fn raw_response_resolve_path(file_path: String) -> Result<String, String> {
+pub fn raw_response_resolve_path(file_path: String) -> Result<String, CommandError> {
     use std::path::Path;
 
-    validate_file_path(&file_path)?;
+    // パスのバリデーション（内部関数は Result<(), String> を返す）
+    validate_file_path(&file_path)
+        .map_err(|e| CommandError::InvalidInput(e))?;
 
     if Path::new(&file_path).is_absolute() {
         Ok(file_path)
@@ -113,7 +118,8 @@ pub fn raw_response_resolve_path(file_path: String) -> Result<String, String> {
         // 相対パスの場合はアプリデータディレクトリを基準に解決する
         match crate::paths::data_dir() {
             Ok(data_dir) => {
-                std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+                std::fs::create_dir_all(&data_dir)
+                    .map_err(|e| CommandError::IoError(format!("Failed to create data dir: {}", e)))?;
                 Ok(data_dir.join(&file_path).to_string_lossy().to_string())
             }
             Err(_) => Ok(file_path),

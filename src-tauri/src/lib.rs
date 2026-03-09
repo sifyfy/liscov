@@ -4,6 +4,7 @@
 pub mod commands;
 pub mod core;
 pub mod database;
+pub mod errors;
 pub mod paths;
 pub mod state;
 pub mod tts;
