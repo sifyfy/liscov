@@ -1,9 +1,9 @@
 //! Chat monitoring commands
 
 use crate::core::api::InnerTubeClient;
+use crate::core::chat_runtime::{MonitoringDeps, run_monitoring_loop};
 use crate::core::models::{extract_video_id, ChatMessage, ChatMode, ConnectionStatus};
-use crate::core::raw_response::{RawResponseSaver, SaveConfig};
-use crate::database::{self, Database};
+use crate::database;
 use crate::errors::CommandError;
 use crate::AppState;
 use crate::commands::SaveConfigState;
@@ -12,7 +12,6 @@ use crate::commands::auth;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
-use tokio::sync::RwLock;
 
 /// Result of connecting to a stream
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -301,43 +300,34 @@ pub async fn connect_to_stream(
         // Clear old messages
         state.clear_messages().await;
 
-        // Start monitoring task
-        let is_monitoring = Arc::clone(&state.is_monitoring);
-        let connection_id = Arc::clone(&state.connection_id);
+        // 監視タスクの依存を MonitoringDeps にまとめる（Arc::clone を一元化）
+        let deps = MonitoringDeps::from_state(&state);
         let innertube_client = Arc::clone(&state.innertube_client);
-        let messages = Arc::clone(&state.messages);
-        let websocket_server = Arc::clone(&state.websocket_server);
-        let database = Arc::clone(&state.database);
-        let current_session_id = Arc::clone(&state.current_session_id);
-        let current_broadcaster_id = Arc::clone(&state.current_broadcaster_id);
-        let tts_manager = Arc::clone(&state.tts_manager);
         let app_handle = app.clone();
 
-        // raw response保存用の設定を取得
+        // 生レスポンス保存設定を取得
         let save_config = save_config_state.0.lock()
             .map_err(|e| CommandError::Internal(format!("Mutex lock failed: {}", e)))?
             .clone();
 
         {
-            let mut monitoring = is_monitoring.write().await;
+            let mut monitoring = deps.is_monitoring.write().await;
             *monitoring = true;
         }
 
         tokio::spawn(async move {
-            chat_monitoring_task(
+            run_monitoring_loop(
+                deps,
+                innertube_client,
                 app_handle,
                 video_id,
-                innertube_client,
-                messages,
-                websocket_server,
-                database,
-                current_session_id,
-                current_broadcaster_id,
-                is_monitoring,
-                connection_id,
                 new_connection_id,
                 save_config,
-                tts_manager,
+                |app, msg| {
+                    // ChatMessage を GUI 用に変換してフロントエンドへ emit
+                    let gui_msg = GuiChatMessage::from(msg.clone());
+                    let _ = app.emit("chat:message", &gui_msg);
+                },
             )
             .await;
         });
@@ -347,244 +337,6 @@ pub async fn connect_to_stream(
     }
 
     Ok(result)
-}
-
-/// Chat monitoring task that polls for new messages
-async fn chat_monitoring_task(
-    app: AppHandle,
-    video_id: String,
-    innertube_client: Arc<RwLock<Option<InnerTubeClient>>>,
-    messages: Arc<RwLock<std::collections::VecDeque<ChatMessage>>>,
-    websocket_server: Arc<RwLock<Option<crate::core::api::WebSocketServer>>>,
-    database: Arc<RwLock<Option<Database>>>,
-    current_session_id: Arc<RwLock<Option<String>>>,
-    current_broadcaster_id: Arc<RwLock<Option<String>>>,
-    is_monitoring: Arc<RwLock<bool>>,
-    connection_id: Arc<std::sync::atomic::AtomicU64>,
-    my_connection_id: u64,
-    save_config: SaveConfig,
-    tts_manager: Arc<crate::tts::TtsManager>,
-) {
-    tracing::info!("Chat monitoring task started for connection_id: {}", my_connection_id);
-    let poll_interval = std::time::Duration::from_millis(1500);
-    let raw_response_saver = RawResponseSaver::new(save_config);
-    let mut poll_count = 0u64;
-
-    // Initialize in-stream comment counter (restore from DB if session already has messages)
-    let mut in_stream_counts: std::collections::HashMap<String, u32> = {
-        let db_guard = database.read().await;
-        if let Some(db) = db_guard.as_ref() {
-            let conn = db.connection().await;
-            database::get_in_stream_comment_counts(&conn, &video_id).unwrap_or_default()
-        } else {
-            std::collections::HashMap::new()
-        }
-    };
-
-    loop {
-        // Check if we should stop monitoring
-        {
-            let monitoring = is_monitoring.read().await;
-            if !*monitoring {
-                tracing::info!("Monitoring stopped by flag after {} polls (connection_id: {})", poll_count, my_connection_id);
-                break;
-            }
-        }
-
-        // Check if connection ID has changed (new connection started)
-        {
-            let current_id = connection_id.load(std::sync::atomic::Ordering::SeqCst);
-            if current_id != my_connection_id {
-                tracing::info!(
-                    "Monitoring stopped: connection ID changed from {} to {} after {} polls",
-                    my_connection_id, current_id, poll_count
-                );
-                break;
-            }
-        }
-
-        poll_count += 1;
-
-        // Take client out of the lock to minimize lock hold time during network call
-        let client_opt = {
-            let mut client_guard = innertube_client.write().await;
-            client_guard.take()
-        };
-
-        let Some(mut client) = client_opt else {
-            tracing::warn!("No InnerTube client available, stopping monitoring");
-            break;
-        };
-
-        // Check connection ID again before network call (in case disconnect was called)
-        {
-            let current_id = connection_id.load(std::sync::atomic::Ordering::SeqCst);
-            if current_id != my_connection_id {
-                tracing::info!(
-                    "Monitoring stopped before fetch: connection ID changed from {} to {}",
-                    my_connection_id, current_id
-                );
-                // Don't put client back - a new connection will create its own
-                break;
-            }
-        }
-
-        // Fetch new messages with raw response (lock is NOT held during this network call)
-        let (new_messages, raw_response) = match client.fetch_messages_with_raw().await {
-            Ok((msgs, raw)) => {
-                if !msgs.is_empty() {
-                    tracing::debug!("Poll {}: fetched {} messages", poll_count, msgs.len());
-                }
-                (msgs, Some(raw))
-            }
-            Err(e) => {
-                tracing::warn!("Poll {}: Failed to fetch messages: {}", poll_count, e);
-                (vec![], None)
-            }
-        };
-
-        // Put client back, but only if connection ID hasn't changed
-        {
-            let current_id = connection_id.load(std::sync::atomic::Ordering::SeqCst);
-            if current_id == my_connection_id {
-                let mut client_guard = innertube_client.write().await;
-                *client_guard = Some(client);
-            } else {
-                tracing::info!(
-                    "Not restoring client: connection ID changed from {} to {} during fetch",
-                    my_connection_id, current_id
-                );
-                // Don't put client back and exit loop
-                break;
-            }
-        }
-
-        // Save raw response if enabled
-        if let Some(raw_json) = raw_response {
-            if let Err(e) = raw_response_saver.save_response(&raw_json).await {
-                tracing::warn!("Failed to save raw response: {}", e);
-            }
-        }
-
-        // Get current session ID and broadcaster ID
-        let (session_id, broadcaster_id) = {
-            let session = current_session_id.read().await;
-            let broadcaster = current_broadcaster_id.read().await;
-            (session.clone(), broadcaster.clone())
-        };
-
-        // Process new messages
-        for mut msg in new_messages {
-            // Skip system messages for enrichment
-            let is_system = matches!(msg.message_type, crate::core::models::MessageType::System);
-
-            if !is_system {
-                // Update in-stream comment counter
-                let count = in_stream_counts.entry(msg.channel_id.clone()).or_insert(0);
-                *count += 1;
-                msg.in_stream_comment_count = Some(*count);
-            }
-
-            // Save to database first (creates viewer_profile + viewer_stream)
-            if let Some(ref session_id) = session_id {
-                let db_guard = database.read().await;
-                if let Some(db) = db_guard.as_ref() {
-                    let conn = db.connection().await;
-                    if let Err(e) = database::save_message(
-                        &conn,
-                        session_id,
-                        broadcaster_id.as_deref(),
-                        &msg,
-                        Some(&video_id),
-                    ) {
-                        tracing::warn!("Failed to save message: {}", e);
-                    }
-                }
-            }
-
-            // Determine first-time viewer after DB save (viewer_streams is now populated)
-            if !is_system {
-                if let Some(ref broadcaster_id) = broadcaster_id {
-                    let db_guard = database.read().await;
-                    if let Some(db) = db_guard.as_ref() {
-                        let conn = db.connection().await;
-                        msg.is_first_time_viewer = database::is_first_time_viewer(
-                            &conn,
-                            broadcaster_id,
-                            &msg.channel_id,
-                            &video_id,
-                        )
-                        .unwrap_or(false);
-                    }
-                }
-            }
-
-            // Add to buffer
-            {
-                let mut msgs = messages.write().await;
-                if msgs.len() >= 1000 {
-                    msgs.pop_front();
-                }
-                msgs.push_back(msg.clone());
-            }
-
-            // Convert to GUI message
-            let gui_msg = GuiChatMessage::from(msg.clone());
-
-            // Emit to frontend
-            let _ = app.emit("chat:message", &gui_msg);
-
-            // Broadcast to WebSocket clients
-            {
-                let ws = websocket_server.read().await;
-                if let Some(server) = ws.as_ref() {
-                    server.broadcast_message(&msg).await;
-                }
-            }
-
-            // Enqueue to TTS
-            let tts_item = crate::tts::TtsQueueItem {
-                text: msg.content.clone(),
-                priority: match &msg.message_type {
-                    crate::core::models::MessageType::SuperChat { .. }
-                    | crate::core::models::MessageType::SuperSticker { .. } => crate::tts::TtsPriority::SuperChat,
-                    crate::core::models::MessageType::Membership { .. }
-                    | crate::core::models::MessageType::MembershipGift { .. } => crate::tts::TtsPriority::Membership,
-                    _ => crate::tts::TtsPriority::Normal,
-                },
-                author_name: Some(msg.author.clone()),
-                amount: match &msg.message_type {
-                    crate::core::models::MessageType::SuperChat { amount }
-                    | crate::core::models::MessageType::SuperSticker { amount } => Some(amount.clone()),
-                    _ => None,
-                },
-            };
-            tts_manager.enqueue(tts_item).await;
-        }
-
-        tokio::time::sleep(poll_interval).await;
-    }
-
-    // End session
-    tracing::debug!("Monitoring task cleanup: checking session (connection_id: {})", my_connection_id);
-    if let Some(session_id) = current_session_id.read().await.as_ref() {
-        tracing::debug!("Monitoring task cleanup: ending session {} (connection_id: {})", session_id, my_connection_id);
-        let db_guard = database.read().await;
-        if let Some(db) = db_guard.as_ref() {
-            let conn = db.connection().await;
-            if let Err(e) = database::end_session(&conn, session_id) {
-                tracing::warn!("Failed to end session: {}", e);
-            }
-            if let Err(e) = database::update_session_stats(&conn, session_id) {
-                tracing::warn!("Failed to update session stats: {}", e);
-            }
-            tracing::debug!("Monitoring task cleanup: session ended (connection_id: {})", my_connection_id);
-        }
-    } else {
-        tracing::debug!("Monitoring task cleanup: no session to end (connection_id: {})", my_connection_id);
-    }
-
-    tracing::info!("Chat monitoring task stopped (connection_id: {}, polls: {})", my_connection_id, poll_count);
 }
 
 /// Disconnect from the current stream
