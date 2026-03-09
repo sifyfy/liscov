@@ -347,6 +347,23 @@ export async function teardownTestEnvironment(browser?: Browser): Promise<void> 
 }
 
 /**
+ * アプリを再起動する（設定永続化テスト用）
+ * 既存のアプリを終了し、新しいインスタンスを起動してCDP接続を確立する
+ */
+export async function restartApp(): Promise<{ browser: Browser; context: BrowserContext; page: Page }> {
+  // 既存のアプリを終了
+  await killTauriApp();
+  // プロセス終了を待機
+  await new Promise((resolve) => setTimeout(resolve, 2000));
+  // 新しいインスタンスを起動
+  await startTauriApp();
+  // CDP接続を確立
+  const { browser, context, page } = await connectToApp();
+  await page.waitForLoadState('domcontentloaded');
+  return { browser, context, page };
+}
+
+/**
  * Fully disconnect (stop + initialize) and return app to idle state.
  * Clicks 停止 if visible, then 初期化, and waits for the URL input to reappear.
  */

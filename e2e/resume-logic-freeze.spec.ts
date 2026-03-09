@@ -126,8 +126,8 @@ async function testApplicationLogicWorks(page: Page): Promise<{ works: boolean; 
   return { works: true, details: 'Application logic is working' };
 }
 
-// Real YouTube test
-test.describe('Real YouTube - Application Logic Freeze Detection', () => {
+// 実YouTube接続テスト（CIから除外するため @external タグを付与）
+test.describe('Real YouTube - Application Logic Freeze Detection', { tag: '@external' }, () => {
   let browser: Browser;
   let context: BrowserContext;
   let mainPage: Page;
