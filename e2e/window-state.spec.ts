@@ -1,20 +1,16 @@
-import { test, expect, BrowserContext, Page, Browser } from '@playwright/test';
-import { exec } from 'child_process';
+import { test, expect, Page } from '@playwright/test';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { log } from './utils/logger';
 import {
-  MOCK_SERVER_URL,
-  CDP_URL,
-  PROJECT_DIR,
   TEST_APP_NAME,
-  TEST_KEYRING_SERVICE,
   killTauriApp,
   cleanupTestData,
   cleanupTestCredentials,
-  waitForCDP,
+  startTauriApp,
   connectToApp,
+  restartApp,
 } from './utils/test-helpers';
 
 /**
@@ -28,10 +24,10 @@ import {
  *    pnpm exec playwright test --config e2e/playwright.config.ts window-state.spec.ts
  */
 
-// Window state file uses the app identifier from tauri.conf.json
+// ウィンドウ状態ファイルはtauri.conf.jsonのapp identifierを使用する
 const WINDOW_STATE_APP_ID = 'com.liscov-tauri.app';
 
-// Get test config directory based on platform
+// テスト用設定ディレクトリのパスを取得
 function getTestConfigDir(): string {
   const configDir = process.platform === 'win32'
     ? process.env.APPDATA
@@ -42,7 +38,7 @@ function getTestConfigDir(): string {
   return path.join(configDir!, TEST_APP_NAME);
 }
 
-// Get window state file path (uses app identifier, not LISCOV_APP_NAME)
+// ウィンドウ状態ファイルのパスを取得（app identifierを使用、LISCOV_APP_NAMEではない）
 function getWindowStateFilePath(): string {
   const configDir = process.platform === 'win32'
     ? process.env.APPDATA
@@ -53,11 +49,11 @@ function getWindowStateFilePath(): string {
   return path.join(configDir!, WINDOW_STATE_APP_ID, '.window-state.json');
 }
 
-// Clean up test data directories (extended to include window state file)
+// テストデータとウィンドウ状態ファイルを両方クリーンアップ
 async function cleanupTestDataWithWindowState(): Promise<void> {
   await cleanupTestData();
 
-  // Also clean up window state file
+  // ウィンドウ状態ファイルも削除
   const windowStateFile = getWindowStateFilePath();
   if (fs.existsSync(windowStateFile)) {
     log.debug(`Cleaning up window state file: ${windowStateFile}`);
@@ -65,7 +61,7 @@ async function cleanupTestDataWithWindowState(): Promise<void> {
   }
 }
 
-// Helper to close Tauri app gracefully via window close
+// Tauriウィンドウをグレースフルにクローズ（ウィンドウ状態を保存させるため）
 async function closeTauriAppGracefully(page: Page): Promise<void> {
   try {
     await page.evaluate(async () => {
@@ -74,37 +70,13 @@ async function closeTauriAppGracefully(page: Page): Promise<void> {
       await invoke('plugin:window|close', { label: 'main' });
     });
   } catch {
-    // Window may already be closed
+    // ウィンドウが既に閉じている場合は無視
   }
-  // Wait for app to fully exit and release port
+  // ポートが解放されるまで待機
   await new Promise(resolve => setTimeout(resolve, 2000));
 }
 
-// Helper to start Tauri app with test isolation
-async function startTauriApp(): Promise<void> {
-  const env = {
-    ...process.env,
-    // Test isolation: use separate namespace
-    LISCOV_APP_NAME: TEST_APP_NAME,
-    LISCOV_KEYRING_SERVICE: TEST_KEYRING_SERVICE,
-    // Mock server URLs (needed for app to start without errors)
-    LISCOV_AUTH_URL: `${MOCK_SERVER_URL}/?auto_login=true`,
-    LISCOV_SESSION_CHECK_URL: `${MOCK_SERVER_URL}/youtubei/v1/account/account_menu`,
-    LISCOV_YOUTUBE_BASE_URL: MOCK_SERVER_URL,
-    // Enable CDP for Playwright
-    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=9222',
-  };
-
-  log.info(`Starting Tauri app with test namespace: ${TEST_APP_NAME}`);
-
-  // Start app in background
-  exec(`cd "${PROJECT_DIR}" && pnpm tauri dev`, { env });
-
-  // Wait for CDP to be available
-  await waitForCDP();
-}
-
-// Read window state file and return the stored values
+// ウィンドウ状態ファイルを読み取り、保存された値を返す
 function readWindowState(): { width?: number; height?: number; x?: number; y?: number } | null {
   const windowStateFile = getWindowStateFilePath();
   if (!fs.existsSync(windowStateFile)) {
@@ -121,12 +93,11 @@ function readWindowState(): { width?: number; height?: number; x?: number; y?: n
   }
 }
 
-// Get window bounds using Tauri invoke (via __TAURI_INTERNALS__)
+// Tauri invokeでウィンドウのバウンド情報を取得
 async function getWindowBounds(page: Page): Promise<{ width: number; height: number; x: number; y: number }> {
   return await page.evaluate(async () => {
     // @ts-ignore - Tauri internal global
     const invoke = window.__TAURI_INTERNALS__.invoke;
-    // Use Tauri's internal plugin command to get window position and size
     const position = await invoke('plugin:window|inner_position', { label: 'main' });
     const size = await invoke('plugin:window|inner_size', { label: 'main' });
     return {
@@ -138,7 +109,7 @@ async function getWindowBounds(page: Page): Promise<{ width: number; height: num
   });
 }
 
-// Set window bounds using Tauri invoke (via __TAURI_INTERNALS__)
+// Tauri invokeでウィンドウのバウンド情報を設定
 async function setWindowBounds(
   page: Page,
   bounds: { width?: number; height?: number; x?: number; y?: number }
@@ -166,14 +137,14 @@ test.describe('Window State Persistence', () => {
   test.setTimeout(180000);
 
   test.beforeAll(async () => {
-    // Clean up before tests
+    // テスト前のクリーンアップ
     await killTauriApp();
     await cleanupTestDataWithWindowState();
     await cleanupTestCredentials();
   });
 
   test.afterAll(async () => {
-    // Clean up after tests
+    // テスト後のクリーンアップ
     await killTauriApp();
   });
 
@@ -204,7 +175,7 @@ test.describe('Window State Persistence', () => {
     expect(changedBounds.width).toBe(newWidth);
     expect(changedBounds.height).toBe(newHeight);
 
-    // Close app gracefully to trigger window state save
+    // グレースフルクローズでウィンドウ状態を保存させる
     await closeTauriAppGracefully(page);
     await browser.close();
 
@@ -218,8 +189,7 @@ test.describe('Window State Persistence', () => {
     // ============================================
     // Phase 2: 再起動、サイズが維持されていることを確認
     // ============================================
-    await startTauriApp();
-    const { browser: browser2, page: page2 } = await connectToApp();
+    const { browser: browser2, page: page2 } = await restartApp();
 
     // ページが読み込まれるのを待つ
     await page2.waitForLoadState('networkidle');
@@ -235,7 +205,7 @@ test.describe('Window State Persistence', () => {
   });
 
   test('ウィンドウ位置が再起動後も維持される', async () => {
-    // Clean slate
+    // クリーンな状態でテスト
     await killTauriApp();
     await cleanupTestDataWithWindowState();
 
@@ -261,7 +231,7 @@ test.describe('Window State Persistence', () => {
     expect(Math.abs(changedBounds.x - newX)).toBeLessThan(20);
     expect(Math.abs(changedBounds.y - newY)).toBeLessThan(50); // タイトルバー分のずれを許容
 
-    // Close app gracefully to trigger window state save
+    // グレースフルクローズでウィンドウ状態を保存させる
     await closeTauriAppGracefully(page);
     await browser.close();
 
@@ -276,8 +246,7 @@ test.describe('Window State Persistence', () => {
     // ============================================
     // Phase 2: 再起動、位置が維持されていることを確認
     // ============================================
-    await startTauriApp();
-    const { browser: browser2, page: page2 } = await connectToApp();
+    const { browser: browser2, page: page2 } = await restartApp();
 
     // ページが読み込まれるのを待つ
     await page2.waitForLoadState('networkidle');

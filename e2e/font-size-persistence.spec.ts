@@ -1,19 +1,16 @@
-import { test, expect, BrowserContext, Page, Browser } from '@playwright/test';
-import { exec } from 'child_process';
+import { test, expect } from '@playwright/test';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { log } from './utils/logger';
 import {
-  MOCK_SERVER_URL,
-  PROJECT_DIR,
   TEST_APP_NAME,
-  TEST_KEYRING_SERVICE,
   killTauriApp,
   cleanupTestData,
   cleanupTestCredentials,
-  waitForCDP,
+  startTauriApp,
   connectToApp,
+  restartApp,
 } from './utils/test-helpers';
 
 /**
@@ -27,7 +24,7 @@ import {
  *    pnpm exec playwright test --config e2e/playwright.config.ts font-size-persistence.spec.ts
  */
 
-// Get test config directory based on platform
+// テスト用設定ディレクトリのパスを取得
 function getTestConfigDir(): string {
   const configDir = process.platform === 'win32'
     ? process.env.APPDATA
@@ -38,31 +35,7 @@ function getTestConfigDir(): string {
   return path.join(configDir!, TEST_APP_NAME);
 }
 
-// Helper to start Tauri app with test isolation
-async function startTauriApp(): Promise<void> {
-  const env = {
-    ...process.env,
-    // Test isolation: use separate namespace
-    LISCOV_APP_NAME: TEST_APP_NAME,
-    LISCOV_KEYRING_SERVICE: TEST_KEYRING_SERVICE,
-    // Mock server URLs (needed for app to start without errors)
-    LISCOV_AUTH_URL: `${MOCK_SERVER_URL}/?auto_login=true`,
-    LISCOV_SESSION_CHECK_URL: `${MOCK_SERVER_URL}/youtubei/v1/account/account_menu`,
-    LISCOV_YOUTUBE_BASE_URL: MOCK_SERVER_URL,
-    // Enable CDP for Playwright
-    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=9222',
-  };
-
-  log.info(`Starting Tauri app with test namespace: ${TEST_APP_NAME}`);
-
-  // Start app in background
-  exec(`cd "${PROJECT_DIR}" && pnpm tauri dev`, { env });
-
-  // Wait for CDP to be available
-  await waitForCDP();
-}
-
-// Read config.toml and return message_font_size value
+// config.toml からフォントサイズ値を読み取る
 function readConfigFontSize(): number | null {
   const configPath = path.join(getTestConfigDir(), 'config.toml');
   if (!fs.existsSync(configPath)) {
@@ -78,14 +51,14 @@ test.describe('Font Size Persistence', () => {
   test.setTimeout(180000);
 
   test.beforeAll(async () => {
-    // Clean up before tests
+    // テスト前のクリーンアップ
     await killTauriApp();
     await cleanupTestData();
     await cleanupTestCredentials();
   });
 
   test.afterAll(async () => {
-    // Clean up after tests
+    // テスト後のクリーンアップ
     await killTauriApp();
   });
 
@@ -122,13 +95,11 @@ test.describe('Font Size Persistence', () => {
     expect(savedFontSize).toBe(16);
 
     await browser.close();
-    await killTauriApp();
 
     // ============================================
     // Phase 2: 再起動、設定が維持されていることを確認
     // ============================================
-    await startTauriApp();
-    const { browser: browser2, page: page2 } = await connectToApp();
+    const { browser: browser2, page: page2 } = await restartApp();
 
     // Svelteアプリのマウント完了を待つ
     await page2.waitForLoadState('networkidle');
@@ -142,7 +113,7 @@ test.describe('Font Size Persistence', () => {
   });
 
   test('文字サイズの上限・下限が守られる', async () => {
-    // Clean slate
+    // クリーンな状態でテスト
     await killTauriApp();
     await cleanupTestData();
 
