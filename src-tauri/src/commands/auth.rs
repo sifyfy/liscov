@@ -13,13 +13,8 @@ use std::path::PathBuf;
 use std::sync::RwLock;
 use tauri::State;
 
-const KEYRING_SERVICE_DEFAULT: &str = "liscov-tauri";
+// keyring_service のデフォルト値は paths モジュールで管理
 const KEYRING_USER: &str = "youtube_credentials";
-
-/// Get keyring service name (can be overridden via LISCOV_KEYRING_SERVICE env var for testing)
-fn get_keyring_service() -> String {
-    std::env::var("LISCOV_KEYRING_SERVICE").unwrap_or_else(|_| KEYRING_SERVICE_DEFAULT.to_string())
-}
 
 /// In-memory cache for credentials to work around keyring issues on Windows
 /// The keyring crate may fail to read credentials from a new Entry instance
@@ -138,16 +133,9 @@ impl From<&YouTubeCookies> for YouTubeCookiesConfig {
     }
 }
 
-/// Get the app name for directory paths (can be overridden via LISCOV_APP_NAME env var for testing)
-fn get_app_name() -> String {
-    std::env::var("LISCOV_APP_NAME").unwrap_or_else(|_| "liscov-tauri".to_string())
-}
-
-/// Get credentials file path (for fallback mode)
+/// 認証情報ファイルのパスを返す（フォールバックモード用）
 fn get_credentials_path() -> Result<PathBuf, String> {
-    let config_dir = dirs::config_dir()
-        .ok_or_else(|| "Failed to determine config directory".to_string())?;
-    Ok(config_dir.join(get_app_name()).join("credentials.toml"))
+    crate::paths::credentials_path()
 }
 
 /// Check if credentials file exists
@@ -164,7 +152,7 @@ fn credentials_file_exists() -> bool {
 /// Load cookies from secure storage (keyring)
 fn load_cookies_from_secure_storage() -> Result<YouTubeCookies, String> {
     log::info!("📂 Loading from secure storage...");
-    let entry = keyring::Entry::new(&get_keyring_service(), KEYRING_USER)
+    let entry = keyring::Entry::new(&crate::paths::keyring_service(), KEYRING_USER)
         .map_err(|e| format!("Failed to access secure storage: {}", e))?;
 
     let secret = entry.get_password()
@@ -193,7 +181,7 @@ fn load_cookies_from_secure_storage() -> Result<YouTubeCookies, String> {
 /// Save cookies to secure storage (keyring)
 fn save_cookies_to_secure_storage(cookies: &YouTubeCookies) -> Result<(), String> {
     log::info!("📝 Saving to secure storage...");
-    let entry = keyring::Entry::new(&get_keyring_service(), KEYRING_USER)
+    let entry = keyring::Entry::new(&crate::paths::keyring_service(), KEYRING_USER)
         .map_err(|e| format!("Failed to access secure storage: {}", e))?;
 
     let json: CredentialsJson = cookies.into();
@@ -227,7 +215,7 @@ fn save_cookies_to_secure_storage(cookies: &YouTubeCookies) -> Result<(), String
 
 /// Delete credentials from secure storage
 fn delete_from_secure_storage() -> Result<(), String> {
-    let entry = keyring::Entry::new(&get_keyring_service(), KEYRING_USER)
+    let entry = keyring::Entry::new(&crate::paths::keyring_service(), KEYRING_USER)
         .map_err(|e| format!("Failed to access secure storage: {}", e))?;
 
     match entry.delete_credential() {
@@ -245,7 +233,7 @@ fn delete_from_secure_storage() -> Result<(), String> {
 
 /// Check if secure storage is available
 fn is_secure_storage_available() -> bool {
-    match keyring::Entry::new(&get_keyring_service(), KEYRING_USER) {
+    match keyring::Entry::new(&crate::paths::keyring_service(), KEYRING_USER) {
         Ok(entry) => {
             // Try to access the entry (read or write test)
             match entry.get_password() {

@@ -67,11 +67,6 @@ pub fn raw_response_update_config(
     Ok(())
 }
 
-/// Get the app name for directory paths (can be overridden via LISCOV_APP_NAME env var for testing)
-fn get_app_name() -> String {
-    std::env::var("LISCOV_APP_NAME").unwrap_or_else(|_| "liscov-tauri".to_string())
-}
-
 /// Validate file path for security (spec: 05_raw_response.md パス検証)
 fn validate_file_path(file_path: &str) -> Result<(), String> {
     // Null文字
@@ -115,14 +110,13 @@ pub fn raw_response_resolve_path(file_path: String) -> Result<String, String> {
     if Path::new(&file_path).is_absolute() {
         Ok(file_path)
     } else {
-        // Use app data directory
-        let app_name = get_app_name();
-        if let Some(proj_dirs) = directories::ProjectDirs::from("dev", "sifyfy", &app_name) {
-            let data_dir = proj_dirs.data_dir();
-            std::fs::create_dir_all(data_dir).map_err(|e| e.to_string())?;
-            Ok(data_dir.join(&file_path).to_string_lossy().to_string())
-        } else {
-            Ok(file_path)
+        // 相対パスの場合はアプリデータディレクトリを基準に解決する
+        match crate::paths::data_dir() {
+            Ok(data_dir) => {
+                std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+                Ok(data_dir.join(&file_path).to_string_lossy().to_string())
+            }
+            Err(_) => Ok(file_path),
         }
     }
 }
