@@ -12,6 +12,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::RwLock;
 use tauri::State;
+use ts_rs::TS;
 
 // keyring_service のデフォルト値は paths モジュールで管理
 const KEYRING_USER: &str = "youtube_credentials";
@@ -23,15 +24,17 @@ const KEYRING_USER: &str = "youtube_credentials";
 static CREDENTIALS_CACHE: RwLock<Option<YouTubeCookies>> = RwLock::new(None);
 
 /// Storage type for credentials
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "lowercase")]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub enum StorageType {
     Secure,
     Fallback,
 }
 
 /// Authentication status
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub struct AuthStatus {
     pub is_authenticated: bool,
     pub has_saved_credentials: bool,
@@ -40,7 +43,8 @@ pub struct AuthStatus {
 }
 
 /// Session validity result
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub struct SessionValidity {
     pub is_valid: bool,
     pub checked_at: String,

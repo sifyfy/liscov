@@ -1,25 +1,15 @@
-// Authentication types (01_auth.md)
+// 認証関連の型定義
+// Rust型は generated/ から re-export、フロントエンド固有型はここで定義
 
-export type StorageType = 'secure' | 'fallback';
+export type { AuthStatus } from './generated/AuthStatus';
+export type { SessionValidity } from './generated/SessionValidity';
+export type { StorageType } from './generated/StorageType';
 
-export interface AuthStatus {
-  is_authenticated: boolean;
-  has_saved_credentials: boolean;
-  storage_type: StorageType;
-  storage_error: string | null;
-}
-
-export interface SessionValidity {
-  is_valid: boolean;
-  checked_at: string;
-  error: string | null;
-}
-
-// Auth indicator states for UI
+// Auth indicator states for UI（フロントエンド固有）
 export type AuthIndicatorState =
-  | 'unauthenticated'      // グレー / 鍵（閉）
-  | 'authenticated_valid'   // 緑 / 鍵（開）
-  | 'authenticated_checking' // 黄 / スピナー
-  | 'authenticated_invalid'  // 赤 / 警告
-  | 'authenticated_error'    // オレンジ / ?
-  | 'storage_error';         // 赤 / !
+  | 'unauthenticated'         // グレー / 鍵（閉）
+  | 'authenticated_valid'     // 緑 / 鍵（開）
+  | 'authenticated_checking'  // 黄 / スピナー
+  | 'authenticated_invalid'   // 赤 / 警告
+  | 'authenticated_error'     // オレンジ / ?
+  | 'storage_error';          // 赤 / !

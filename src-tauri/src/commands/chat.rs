@@ -12,9 +12,11 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::RwLock;
+use ts_rs::TS;
 
 /// Result of connecting to a stream
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub struct ConnectionResult {
     pub success: bool,
     pub stream_title: Option<String>,
@@ -40,15 +42,17 @@ impl From<ConnectionStatus> for ConnectionResult {
 }
 
 /// Message run (text or emoji)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(tag = "type")]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub enum MessageRun {
     Text { content: String },
     Emoji { emoji_id: String, image_url: String, alt_text: String },
 }
 
 /// Badge information
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub struct BadgeInfo {
     pub badge_type: String,
     pub label: String,
@@ -57,7 +61,8 @@ pub struct BadgeInfo {
 }
 
 /// SuperChat color scheme from YouTube
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub struct SuperChatColors {
     pub header_background: String,
     pub header_text: String,
@@ -66,7 +71,8 @@ pub struct SuperChatColors {
 }
 
 /// Message metadata
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub struct GuiMessageMetadata {
     pub amount: Option<String>,
     pub milestone_months: Option<u32>,
@@ -79,7 +85,8 @@ pub struct GuiMessageMetadata {
 }
 
 /// GUI-friendly chat message
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub struct GuiChatMessage {
     pub id: String,
     pub timestamp: String,

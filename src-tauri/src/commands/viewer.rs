@@ -4,16 +4,22 @@ use crate::database::{self, ContributorStats, ViewerCustomInfo};
 use crate::AppState;
 use serde::{Deserialize, Serialize};
 use tauri::State;
+use ts_rs::TS;
 
 /// GUI-friendly viewer profile
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub struct GuiViewerProfile {
+    /// SQLite の行ID（JS number の安全整数範囲内）
+    #[ts(type = "number")]
     pub id: i64,
     pub broadcaster_channel_id: String,
     pub channel_id: String,
     pub display_name: String,
     pub first_seen: String,
     pub last_seen: String,
+    /// 通算メッセージ数（JS number の安全整数範囲内）
+    #[ts(type = "number")]
     pub message_count: i64,
     pub total_contribution: f64,
     pub membership_level: Option<String>,
@@ -38,14 +44,19 @@ impl From<database::ViewerProfile> for GuiViewerProfile {
 }
 
 /// GUI-friendly viewer with custom info
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub struct GuiViewerWithInfo {
+    /// SQLite の行ID（JS number の安全整数範囲内）
+    #[ts(type = "number")]
     pub id: i64,
     pub broadcaster_channel_id: String,
     pub channel_id: String,
     pub display_name: String,
     pub first_seen: String,
     pub last_seen: String,
+    /// 通算メッセージ数（JS number の安全整数範囲内）
+    #[ts(type = "number")]
     pub message_count: i64,
     pub total_contribution: f64,
     pub membership_level: Option<String>,
@@ -76,10 +87,13 @@ impl From<database::ViewerWithCustomInfo> for GuiViewerWithInfo {
 }
 
 /// GUI-friendly contributor stats
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub struct GuiContributorStats {
     pub channel_id: String,
     pub display_name: String,
+    /// 通算メッセージ数（JS number の安全整数範囲内）
+    #[ts(type = "number")]
     pub message_count: i64,
     pub total_contribution: f64,
 }
@@ -96,11 +110,14 @@ impl From<ContributorStats> for GuiContributorStats {
 }
 
 /// GUI-friendly broadcaster channel
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub struct GuiBroadcasterChannel {
     pub channel_id: String,
     pub channel_name: Option<String>,
     pub handle: Option<String>,
+    /// ビューワー数（JS number の安全整数範囲内）
+    #[ts(type = "number")]
     pub viewer_count: i64,
 }
 

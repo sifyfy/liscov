@@ -26,14 +26,15 @@
   }
 
   // Tier color configuration (spec: 07_revenue.md)
+  // SuperChatTier は小文字（Rust の serde(rename_all = "lowercase") に対応）
   const tierConfig: Record<SuperChatTier, { label: string; bgColor: string; textColor: string }> = {
-    Red: { label: 'Red', bgColor: 'bg-red-500', textColor: 'text-white' },
-    Magenta: { label: 'Magenta', bgColor: 'bg-pink-500', textColor: 'text-white' },
-    Orange: { label: 'Orange', bgColor: 'bg-orange-500', textColor: 'text-white' },
-    Yellow: { label: 'Yellow', bgColor: 'bg-yellow-400', textColor: 'text-black' },
-    Green: { label: 'Green', bgColor: 'bg-green-500', textColor: 'text-white' },
-    Cyan: { label: 'Cyan', bgColor: 'bg-cyan-400', textColor: 'text-black' },
-    Blue: { label: 'Blue', bgColor: 'bg-blue-500', textColor: 'text-white' },
+    red: { label: 'Red', bgColor: 'bg-red-500', textColor: 'text-white' },
+    magenta: { label: 'Magenta', bgColor: 'bg-pink-500', textColor: 'text-white' },
+    orange: { label: 'Orange', bgColor: 'bg-orange-500', textColor: 'text-white' },
+    yellow: { label: 'Yellow', bgColor: 'bg-yellow-400', textColor: 'text-black' },
+    green: { label: 'Green', bgColor: 'bg-green-500', textColor: 'text-white' },
+    cyan: { label: 'Cyan', bgColor: 'bg-cyan-400', textColor: 'text-black' },
+    blue: { label: 'Blue', bgColor: 'bg-blue-500', textColor: 'text-white' },
   };
 
   // Get tier stats as array for rendering
@@ -41,13 +42,13 @@
     if (!analyticsStore.analytics) return [];
     const t = analyticsStore.analytics.super_chat_by_tier;
     return [
-      { tier: 'Red' as SuperChatTier, count: t.tier_red },
-      { tier: 'Magenta' as SuperChatTier, count: t.tier_magenta },
-      { tier: 'Orange' as SuperChatTier, count: t.tier_orange },
-      { tier: 'Yellow' as SuperChatTier, count: t.tier_yellow },
-      { tier: 'Green' as SuperChatTier, count: t.tier_green },
-      { tier: 'Cyan' as SuperChatTier, count: t.tier_cyan },
-      { tier: 'Blue' as SuperChatTier, count: t.tier_blue },
+      { tier: 'red' as SuperChatTier, count: t.tier_red },
+      { tier: 'magenta' as SuperChatTier, count: t.tier_magenta },
+      { tier: 'orange' as SuperChatTier, count: t.tier_orange },
+      { tier: 'yellow' as SuperChatTier, count: t.tier_yellow },
+      { tier: 'green' as SuperChatTier, count: t.tier_green },
+      { tier: 'cyan' as SuperChatTier, count: t.tier_cyan },
+      { tier: 'blue' as SuperChatTier, count: t.tier_blue },
     ];
   }
 </script>

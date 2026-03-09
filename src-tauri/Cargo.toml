@@ -71,6 +71,9 @@ tracing = "0.1"
 # Config
 toml = "0.8"
 
+# TypeScript 型自動生成
+ts-rs = { version = "10", features = ["serde-compat"] }
+
 # Mock server (dev tool)
 clap = { version = "4.5", features = ["derive"] }
 warp = "0.3"
