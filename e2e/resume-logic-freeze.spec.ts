@@ -1,16 +1,14 @@
 import { test, expect, BrowserContext, Page, Browser } from '@playwright/test';
-import { exec } from 'child_process';
 import { log } from './utils/logger';
 import {
   MOCK_SERVER_URL,
-  PROJECT_DIR,
   TEST_APP_NAME,
   TEST_KEYRING_SERVICE,
   cleanupTestData,
   killTauriApp,
   killMockServer,
   startMockServer,
-  waitForCDP,
+  startTauriAppWithEnv,
   connectToApp,
 } from './utils/test-helpers';
 
@@ -29,29 +27,23 @@ import {
 
 // Start Tauri app pointing to real YouTube (no mock)
 async function startTauriAppForRealYouTube(): Promise<void> {
-  const env = {
-    ...process.env,
+  await startTauriAppWithEnv({
     LISCOV_APP_NAME: TEST_APP_NAME,
     LISCOV_KEYRING_SERVICE: TEST_KEYRING_SERVICE,
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=9222',
-  };
-  exec(`cd "${PROJECT_DIR}" && pnpm tauri dev`, { env });
-  await waitForCDP();
+  });
 }
 
 // Start Tauri app pointing to mock server
 async function startTauriAppForMockServer(): Promise<void> {
-  const env = {
-    ...process.env,
+  await startTauriAppWithEnv({
     LISCOV_APP_NAME: TEST_APP_NAME,
     LISCOV_KEYRING_SERVICE: TEST_KEYRING_SERVICE,
     LISCOV_AUTH_URL: `${MOCK_SERVER_URL}/?auto_login=true`,
     LISCOV_SESSION_CHECK_URL: `${MOCK_SERVER_URL}/youtubei/v1/account/account_menu`,
     LISCOV_YOUTUBE_BASE_URL: MOCK_SERVER_URL,
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=9222',
-  };
-  exec(`cd "${PROJECT_DIR}" && pnpm tauri dev`, { env });
-  await waitForCDP();
+  });
 }
 
 /**
