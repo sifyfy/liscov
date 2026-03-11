@@ -25,16 +25,15 @@ import {
  * This is DIFFERENT from high-rate UI freeze (which was fixed in fcfa476)
  */
 
-// Start Tauri app pointing to real YouTube (no mock)
+// 実YouTube向け（モックなし）でTauriアプリを起動する
 async function startTauriAppForRealYouTube(): Promise<void> {
   await startTauriAppWithEnv({
     LISCOV_APP_NAME: TEST_APP_NAME,
     LISCOV_KEYRING_SERVICE: TEST_KEYRING_SERVICE,
-    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=9222',
   });
 }
 
-// Start Tauri app pointing to mock server
+// モックサーバー向けでTauriアプリを起動する
 async function startTauriAppForMockServer(): Promise<void> {
   await startTauriAppWithEnv({
     LISCOV_APP_NAME: TEST_APP_NAME,
@@ -42,7 +41,6 @@ async function startTauriAppForMockServer(): Promise<void> {
     LISCOV_AUTH_URL: `${MOCK_SERVER_URL}/?auto_login=true`,
     LISCOV_SESSION_CHECK_URL: `${MOCK_SERVER_URL}/youtubei/v1/account/account_menu`,
     LISCOV_YOUTUBE_BASE_URL: MOCK_SERVER_URL,
-    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=9222',
   });
 }
 

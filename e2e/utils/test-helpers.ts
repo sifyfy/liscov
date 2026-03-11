@@ -3,7 +3,7 @@
  */
 
 import { chromium, BrowserContext, Page, Browser, expect } from '@playwright/test';
-import { execSync, spawn, spawnSync, ChildProcess, SpawnOptionsWithoutStdio } from 'child_process';
+import { execSync, spawn, ChildProcess } from 'child_process';
 import * as fs from 'fs';
 import * as http from 'http';
 import * as path from 'path';
@@ -14,219 +14,98 @@ export const CDP_URL = 'http://127.0.0.1:9222';
 export const MOCK_SERVER_URL = 'http://127.0.0.1:3456';
 export const PROJECT_DIR = process.cwd().replace(/[\\/]e2e$/, '');
 
-// Test isolation: use separate namespace for credentials and data
+// テスト分離: 認証情報・データに専用名前空間を使用
 export const TEST_APP_NAME = 'liscov-test';
 export const TEST_KEYRING_SERVICE = 'liscov-test';
 
-// Mock server process reference
+// モックサーバープロセス参照
 let mockServerProcess: ChildProcess | null = null;
 
-// Tauri app process reference
+// Tauriアプリプロセス参照
 let tauriProcess: ChildProcess | null = null;
 let staticFrontendServer: http.Server | null = null;
 
-const WINDOWS_DEFAULT_PATHEXT = '.COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC';
-const WINDOWS_VSDEVCMD_CANDIDATES = [
-  'C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\Common7\\Tools\\VsDevCmd.bat',
-  'C:\\Program Files\\Microsoft Visual Studio\\2022\\BuildTools\\Common7\\Tools\\VsDevCmd.bat',
-  'C:\\Program Files\\Microsoft Visual Studio\\2022\\Professional\\Common7\\Tools\\VsDevCmd.bat',
-  'C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\Common7\\Tools\\VsDevCmd.bat',
-];
-const WINDOWS_TEMP_DIR = path.join(PROJECT_DIR, '.tmp', 'e2e', 'temp');
+// プリビルドバイナリのパス（Windowsのみ対応）
 const PREBUILT_TAURI_APP_PATH = path.join(PROJECT_DIR, 'src-tauri', 'target', 'debug', 'liscov-tauri.exe');
 const PREBUILT_MOCK_SERVER_PATH = path.join(PROJECT_DIR, 'src-tauri', 'target', 'debug', 'mock_server.exe');
 const PREBUILT_FRONTEND_INDEX_PATH = path.join(PROJECT_DIR, 'build', 'index.html');
 const PREBUILT_FRONTEND_DIR = path.join(PROJECT_DIR, 'build');
 const PREBUILT_FRONTEND_PORT = 5173;
 
-let cachedWindowsShellEnv: NodeJS.ProcessEnv | null = null;
-let cachedVsDevCmdPath: string | null | undefined;
-
-function ensureDir(dir: string): void {
-  fs.mkdirSync(dir, { recursive: true });
-}
-
-function getWindowsHomeDir(): string {
-  return process.env.USERPROFILE ?? process.env.HOME ?? os.homedir();
-}
-
-function getWindowsPathParts(fullPath: string): { drive: string; relativePath: string } {
-  const parsed = path.parse(fullPath);
-  const drive = process.env.HOMEDRIVE ?? parsed.root.replace(/[\\\/]+$/, '');
-  const relativePath = process.env.HOMEPATH ?? fullPath.slice(drive.length).replace(/\//g, '\\');
-  return {
-    drive,
-    relativePath: relativePath || '\\',
-  };
-}
-
-function getWindowsBaseEnv(): NodeJS.ProcessEnv {
-  const homeDir = getWindowsHomeDir();
-  const { drive, relativePath } = getWindowsPathParts(homeDir);
-  const appData = process.env.APPDATA ?? path.join(homeDir, 'AppData', 'Roaming');
-  const localAppData = process.env.LOCALAPPDATA ?? path.join(homeDir, 'AppData', 'Local');
-  const systemRoot = process.env.SystemRoot ?? 'C:\\Windows';
-
-  ensureDir(WINDOWS_TEMP_DIR);
-
-  return {
-    ALLUSERSPROFILE: process.env.ALLUSERSPROFILE ?? 'C:\\ProgramData',
-    APPDATA: appData,
-    COMSPEC: process.env.COMSPEC ?? path.join(systemRoot, 'System32', 'cmd.exe'),
-    HOME: process.env.HOME ?? homeDir,
-    HOMEDRIVE: drive,
-    HOMEPATH: relativePath,
-    LOCALAPPDATA: localAppData,
-    PATHEXT: process.env.PATHEXT ?? WINDOWS_DEFAULT_PATHEXT,
-    ProgramData: process.env.ProgramData ?? 'C:\\ProgramData',
-    SystemRoot: systemRoot,
-    TEMP: process.env.TEMP ?? WINDOWS_TEMP_DIR,
-    TMP: process.env.TMP ?? WINDOWS_TEMP_DIR,
-    USERPROFILE: homeDir,
-    WINDIR: process.env.WINDIR ?? systemRoot,
-  };
-}
-
-function applyWindowsBaseEnvToProcess(): void {
-  if (process.platform !== 'win32') {
-    return;
-  }
-
-  for (const [key, value] of Object.entries(getWindowsBaseEnv())) {
-    if (value && !process.env[key]) {
-      process.env[key] = value;
-    }
-  }
-}
-
-applyWindowsBaseEnvToProcess();
-
-function resolveVsDevCmdPath(): string | null {
-  if (cachedVsDevCmdPath !== undefined) {
-    return cachedVsDevCmdPath;
-  }
-
-  cachedVsDevCmdPath = WINDOWS_VSDEVCMD_CANDIDATES.find((candidate) => fs.existsSync(candidate)) ?? null;
-  return cachedVsDevCmdPath;
-}
-
-function parseWindowsShellEnv(output: string): NodeJS.ProcessEnv {
-  return output
-    .split(/\r?\n/)
-    .filter((line) => line.includes('='))
-    .reduce<NodeJS.ProcessEnv>((env, line) => {
-      const separatorIndex = line.indexOf('=');
-      const key = line.slice(0, separatorIndex).trim();
-      const value = line.slice(separatorIndex + 1);
-      if (key.length > 0) {
-        env[key] = value;
-      }
-      return env;
-    }, {});
-}
-
-function getWindowsShellEnv(): NodeJS.ProcessEnv {
-  if (process.platform !== 'win32') {
-    return {};
-  }
-
-  if (cachedWindowsShellEnv) {
-    return cachedWindowsShellEnv;
-  }
-
-  const baseEnv = {
-    ...process.env,
-    ...getWindowsBaseEnv(),
-    VSCMD_SKIP_SENDTELEMETRY: '1',
-  };
-  const vsDevCmdPath = resolveVsDevCmdPath();
-
-  if (!vsDevCmdPath) {
-    log.warn('VsDevCmd.bat が見つからないため、現在の環境変数のみで E2E を実行します');
-    cachedWindowsShellEnv = baseEnv;
-    return cachedWindowsShellEnv;
-  }
-
-  const vsEnvScriptPath = path.join(PROJECT_DIR, '.tmp', 'e2e', 'load-vsdevcmd-env.bat');
-  ensureDir(path.dirname(vsEnvScriptPath));
-  fs.writeFileSync(
-    vsEnvScriptPath,
-    [
-      '@echo off',
-      `call "${vsDevCmdPath}" -no_logo -arch=amd64`,
-      'if errorlevel 1 exit /b %errorlevel%',
-      'set',
-      '',
-    ].join('\r\n'),
-    'utf-8'
-  );
-
-  const result = spawnSync(
-    baseEnv.COMSPEC!,
-    ['/d', '/c', vsEnvScriptPath],
-    {
-      cwd: PROJECT_DIR,
-      encoding: 'utf-8',
-      env: baseEnv,
-      windowsHide: true,
-      maxBuffer: 10 * 1024 * 1024,
-    }
-  );
-
-  if (result.status !== 0) {
-    log.warn(`VsDevCmd.bat の読み込みに失敗したため、現在の環境変数のみで続行します (status=${result.status ?? 'unknown'})`);
-    cachedWindowsShellEnv = baseEnv;
-    return cachedWindowsShellEnv;
-  }
-
-  cachedWindowsShellEnv = {
-    ...baseEnv,
-    ...parseWindowsShellEnv(result.stdout),
-  };
-
-  return cachedWindowsShellEnv;
-}
-
+/**
+ * テスト用プロセス環境変数を生成する
+ */
 function getTestProcessEnv(extraEnv: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
-  return process.platform === 'win32'
-    ? {
-        ...getWindowsShellEnv(),
-        ...extraEnv,
-      }
-    : {
-        ...process.env,
-        ...extraEnv,
-    };
+  return { ...process.env, ...extraEnv };
 }
 
-function spawnCommand(
-  executable: string,
-  args: string[],
-  options: SpawnOptionsWithoutStdio
-): ChildProcess {
-  return spawn(executable, args, {
-    ...options,
-    env: getTestProcessEnv(options.env),
-    shell: false,
-    windowsHide: process.platform === 'win32',
-  });
+/**
+ * プラットフォームに応じた設定ディレクトリを返す
+ */
+export function getPlatformConfigDir(): string {
+  if (process.platform === 'win32') {
+    return process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming');
+  }
+  return process.platform === 'darwin'
+    ? path.join(os.homedir(), 'Library', 'Application Support')
+    : path.join(os.homedir(), '.config');
 }
 
-function spawnProjectCommand(
-  command: 'cargo' | 'pnpm',
-  args: string[],
-  options: SpawnOptionsWithoutStdio
-): ChildProcess {
-  const executable =
-    process.platform === 'win32'
-      ? command === 'cargo'
-        ? 'cargo.exe'
-        : 'pnpm.cmd'
-      : command;
-
-  return spawnCommand(executable, args, options);
+export function getTestAppDataDir(): string {
+  return path.join(getPlatformConfigDir(), TEST_APP_NAME);
 }
 
+export function getTestDatabasePath(): string {
+  return path.join(getTestAppDataDir(), 'liscov.db');
+}
+
+/**
+ * プラットフォームに応じたテストデータディレクトリ一覧を返す
+ */
+export function getTestDataDirs(): string[] {
+  const dirs: string[] = [];
+  const configDir = getPlatformConfigDir();
+  dirs.push(path.join(configDir, TEST_APP_NAME));
+  // Linux では設定とデータが別ディレクトリになる場合がある
+  if (process.platform !== 'win32' && process.platform !== 'darwin') {
+    const dataDir = path.join(os.homedir(), '.local', 'share');
+    if (dataDir !== configDir) {
+      dirs.push(path.join(dataDir, TEST_APP_NAME));
+    }
+  }
+  return dirs;
+}
+
+/**
+ * テストデータディレクトリを削除する
+ */
+export async function cleanupTestData(): Promise<void> {
+  const dirs = getTestDataDirs();
+  for (const dir of dirs) {
+    if (fs.existsSync(dir)) {
+      log.debug(`Cleaning up test data directory: ${dir}`);
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+}
+
+/**
+ * テスト用キーリング認証情報を削除する（Windows資格情報マネージャー）
+ */
+export async function cleanupTestCredentials(): Promise<void> {
+  if (process.platform === 'win32') {
+    try {
+      execSync(`cmdkey /delete:youtube_credentials.${TEST_KEYRING_SERVICE} 2>nul`, { stdio: 'ignore' });
+      log.debug('Cleaned up test credentials from Windows Credential Manager');
+    } catch {
+      // 認証情報が存在しない場合は無視
+    }
+  }
+}
+
+/**
+ * レスポンスコンテンツタイプを拡張子から解決する
+ */
 function getStaticContentType(filePath: string): string {
   switch (path.extname(filePath).toLowerCase()) {
     case '.css':
@@ -252,6 +131,9 @@ function getStaticContentType(filePath: string): string {
   }
 }
 
+/**
+ * リクエストURLからビルド済みフロントエンドのファイルパスを解決する
+ */
 function resolveStaticFrontendFile(requestUrl?: string): string {
   const requestPath = decodeURIComponent(new URL(requestUrl ?? '/', 'http://127.0.0.1').pathname);
   const relativePath = requestPath === '/' ? 'index.html' : requestPath.replace(/^\/+/, '');
@@ -264,42 +146,43 @@ function resolveStaticFrontendFile(requestUrl?: string): string {
   return PREBUILT_FRONTEND_INDEX_PATH;
 }
 
+/**
+ * 静的フロントエンドサーバーを起動する（既に起動済みの場合は再利用）
+ */
 async function ensureStaticFrontendServer(): Promise<void> {
-  if (staticFrontendServer || !fs.existsSync(PREBUILT_FRONTEND_INDEX_PATH)) {
-    return;
-  }
+  if (staticFrontendServer) return;
 
-  staticFrontendServer = http.createServer((request, response) => {
+  staticFrontendServer = http.createServer((req, res) => {
+    const filePath = resolveStaticFrontendFile(req.url);
     try {
-      const filePath = resolveStaticFrontendFile(request.url);
-      const body = fs.readFileSync(filePath);
-      response.writeHead(200, { 'Content-Type': getStaticContentType(filePath) });
-      response.end(body);
-    } catch (error) {
-      response.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
-      response.end(error instanceof Error ? error.message : String(error));
+      const content = fs.readFileSync(filePath);
+      res.writeHead(200, { 'Content-Type': getStaticContentType(filePath) });
+      res.end(content);
+    } catch {
+      res.writeHead(404);
+      res.end('Not found');
     }
   });
 
   await new Promise<void>((resolve, reject) => {
     staticFrontendServer!.once('error', (error) => {
       if ((error as NodeJS.ErrnoException).code === 'EADDRINUSE') {
-        log.debug(`Static frontend server already running on port ${PREBUILT_FRONTEND_PORT}`);
+        log.debug(`Port ${PREBUILT_FRONTEND_PORT} already in use, reusing existing server`);
         staticFrontendServer = null;
         resolve();
         return;
       }
-
       reject(error);
     });
-
-    staticFrontendServer!.listen(PREBUILT_FRONTEND_PORT, () => {
-      log.debug(`Static frontend server ready on port ${PREBUILT_FRONTEND_PORT}`);
-      resolve();
-    });
+    staticFrontendServer!.listen(PREBUILT_FRONTEND_PORT, '127.0.0.1', resolve);
   });
+
+  log.debug(`Static frontend server started on port ${PREBUILT_FRONTEND_PORT}`);
 }
 
+/**
+ * プロセスの直近ログ行を記録するバッファを生成する
+ */
 function buildProcessTailRecorder(maxEntries = 20): {
   lines: string[];
   push: (chunk: string) => void;
@@ -323,6 +206,9 @@ function buildProcessTailRecorder(maxEntries = 20): {
   };
 }
 
+/**
+ * プロセスが終了していた場合に終了情報の文字列を返す（生存中は null）
+ */
 function describeExitedProcess(processName: string, process: ChildProcess, tailLines: string[]): string | null {
   if (process.exitCode === null && process.signalCode === null) {
     return null;
@@ -336,84 +222,59 @@ function describeExitedProcess(processName: string, process: ChildProcess, tailL
   return `${exitDescription}.${outputDescription}`;
 }
 
-export function getPlatformConfigDir(): string {
-  if (process.platform === 'win32') {
-    return getTestProcessEnv().APPDATA ?? path.join(getWindowsHomeDir(), 'AppData', 'Roaming');
-  }
-
-  return process.platform === 'darwin'
-    ? path.join(os.homedir(), 'Library', 'Application Support')
-    : path.join(os.homedir(), '.config');
-}
-
-export function getTestAppDataDir(): string {
-  return path.join(getPlatformConfigDir(), TEST_APP_NAME);
-}
-
-export function getTestDatabasePath(): string {
-  return path.join(getTestAppDataDir(), 'liscov.db');
-}
-
 /**
- * Get test data directories based on platform
+ * 指定ポートが解放されるまで待機する
  */
-export function getTestDataDirs(): string[] {
-  const dirs: string[] = [];
-
-  const configDir =
-    process.platform === 'win32'
-      ? getPlatformConfigDir()
-      : process.platform === 'darwin'
-        ? path.join(os.homedir(), 'Library', 'Application Support')
-        : path.join(os.homedir(), '.config');
-
-  if (configDir) {
-    dirs.push(path.join(configDir, TEST_APP_NAME));
-  }
-
-  const dataDir =
-    process.platform === 'win32'
-      ? getPlatformConfigDir()
-      : process.platform === 'darwin'
-        ? path.join(os.homedir(), 'Library', 'Application Support')
-        : path.join(os.homedir(), '.local', 'share');
-
-  if (dataDir && dataDir !== configDir) {
-    dirs.push(path.join(dataDir, TEST_APP_NAME));
-  }
-
-  return dirs;
-}
-
-/**
- * Clean up test data directories
- */
-export async function cleanupTestData(): Promise<void> {
-  const dirs = getTestDataDirs();
-  for (const dir of dirs) {
-    if (fs.existsSync(dir)) {
-      log.debug(`Cleaning up test data directory: ${dir}`);
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
-  }
-}
-
-/**
- * Clean up test keyring credentials (Windows Credential Manager)
- */
-export async function cleanupTestCredentials(): Promise<void> {
-  if (process.platform === 'win32') {
+async function waitForPortFree(port: number, timeout: number): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
     try {
-      execSync(`cmdkey /delete:youtube_credentials.${TEST_KEYRING_SERVICE} 2>nul`, { stdio: 'ignore' });
-      log.debug('Cleaned up test credentials from Windows Credential Manager');
+      await fetch(`http://127.0.0.1:${port}/`);
+      // まだ応答がある → まだ使用中
+      await new Promise((resolve) => setTimeout(resolve, 300));
     } catch {
-      // Credential may not exist, which is fine
+      // 接続拒否 → ポートが解放された
+      return;
     }
   }
+  log.warn(`Port ${port} still in use after ${timeout}ms`);
 }
 
 /**
- * Wait for CDP to be available
+ * Tauriアプリを終了する（graceful shutdown → 強制終了の順で試行）
+ */
+export async function killTauriApp(): Promise<void> {
+  log.debug('Killing Tauri app...');
+  if (tauriProcess) {
+    if (process.platform === 'win32' && tauriProcess.pid) {
+      // まず graceful shutdown を試行
+      try {
+        execSync(`taskkill /PID ${tauriProcess.pid} 2>nul`, { stdio: 'ignore' });
+        await waitForPortFree(9222, 3000);
+      } catch { /* 既に終了していた場合は無視 */ }
+      // プロセスツリーごと強制終了（フォールバック）
+      try {
+        execSync(`taskkill /F /T /PID ${tauriProcess.pid} 2>nul`, { stdio: 'ignore' });
+      } catch { /* 既に終了していた場合は無視 */ }
+    } else {
+      tauriProcess.kill();
+    }
+    tauriProcess = null;
+  }
+  // 孤立プロセスのフォールバック: プロセスツリーごと強制終了
+  try {
+    if (process.platform === 'win32') {
+      execSync('taskkill /F /T /IM liscov-tauri.exe 2>nul', { stdio: 'ignore' });
+    } else {
+      execSync('pkill -f liscov-tauri', { stdio: 'ignore' });
+    }
+  } catch { /* プロセスが存在しない場合は無視 */ }
+  // CDP ポートが解放されるまで待機
+  await waitForPortFree(9222, 5000);
+}
+
+/**
+ * CDPが利用可能になるまで待機する
  */
 export async function waitForCDP(timeout = 120000): Promise<void> {
   return waitForCDPWithProcess(timeout);
@@ -444,7 +305,7 @@ async function waitForCDPWithProcess(timeout = 120000, process?: ChildProcess, t
 }
 
 /**
- * Connect to Tauri app via CDP
+ * CDPでTauriアプリに接続する
  */
 export async function connectToApp(): Promise<{ browser: Browser; context: BrowserContext; page: Page }> {
   const browser = await chromium.connectOverCDP(CDP_URL);
@@ -466,29 +327,7 @@ export async function connectToApp(): Promise<{ browser: Browser; context: Brows
 }
 
 /**
- * Kill Tauri app
- */
-export async function killTauriApp(): Promise<void> {
-  log.debug('Killing Tauri app...');
-  if (tauriProcess) {
-    tauriProcess.kill();
-    tauriProcess = null;
-  }
-  // Also kill any orphaned processes as fallback
-  try {
-    if (process.platform === 'win32') {
-      execSync('taskkill /F /IM liscov-tauri.exe 2>nul', { stdio: 'ignore' });
-    } else {
-      execSync('pkill -f liscov-tauri', { stdio: 'ignore' });
-    }
-  } catch {
-    // Process may not exist
-  }
-  await new Promise((resolve) => setTimeout(resolve, 1000));
-}
-
-/**
- * Start Tauri app with test isolation
+ * テスト分離用の環境変数でTauriアプリを起動する
  */
 export async function startTauriApp(): Promise<void> {
   await startTauriAppWithEnv({
@@ -497,35 +336,41 @@ export async function startTauriApp(): Promise<void> {
     LISCOV_AUTH_URL: `${MOCK_SERVER_URL}/?auto_login=true`,
     LISCOV_SESSION_CHECK_URL: `${MOCK_SERVER_URL}/youtubei/v1/account/account_menu`,
     LISCOV_YOUTUBE_BASE_URL: MOCK_SERVER_URL,
-    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=9222',
   });
 }
 
+/**
+ * 指定した環境変数でTauriアプリを起動する（プリビルドバイナリ必須）
+ */
 export async function startTauriAppWithEnv(extraEnv: NodeJS.ProcessEnv): Promise<void> {
+  if (!fs.existsSync(PREBUILT_TAURI_APP_PATH)) {
+    throw new Error(
+      `プリビルドバイナリが見つかりません: ${PREBUILT_TAURI_APP_PATH}\n` +
+        '`pnpm test:e2e:build` を実行してビルドしてください。'
+    );
+  }
+  if (!fs.existsSync(PREBUILT_FRONTEND_INDEX_PATH)) {
+    throw new Error(
+      `ビルド済みフロントエンドが見つかりません: ${PREBUILT_FRONTEND_INDEX_PATH}\n` +
+        '`pnpm test:e2e:build` を実行してビルドしてください。'
+    );
+  }
+
+  await ensureStaticFrontendServer();
+
   const env = getTestProcessEnv({
     ...extraEnv,
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=9222',
   });
 
-  log.info(`Starting Tauri app with test namespace: ${TEST_APP_NAME}`);
-
+  log.info(`Starting prebuilt Tauri app: ${PREBUILT_TAURI_APP_PATH}`);
   const tauriTail = buildProcessTailRecorder();
 
-  if (process.platform === 'win32' && fs.existsSync(PREBUILT_TAURI_APP_PATH) && fs.existsSync(PREBUILT_FRONTEND_INDEX_PATH)) {
-    await ensureStaticFrontendServer();
-    log.debug(`Using prebuilt Tauri app binary: ${PREBUILT_TAURI_APP_PATH}`);
-    tauriProcess = spawnCommand(PREBUILT_TAURI_APP_PATH, [], {
-      cwd: PROJECT_DIR,
-      env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-  } else {
-    tauriProcess = spawnProjectCommand('pnpm', ['tauri', 'dev'], {
-      cwd: PROJECT_DIR,
-      env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-  }
+  tauriProcess = spawn(PREBUILT_TAURI_APP_PATH, [], {
+    cwd: PROJECT_DIR,
+    env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
 
   const tauriLog = log.child('tauri');
   tauriProcess.stdout?.on('data', (data) => {
@@ -545,56 +390,59 @@ export async function startTauriAppWithEnv(extraEnv: NodeJS.ProcessEnv): Promise
 }
 
 /**
- * Kill mock server process
+ * モックサーバープロセスを終了する（graceful shutdown → 強制終了の順で試行）
  */
 export async function killMockServer(): Promise<void> {
   if (mockServerProcess) {
     log.debug('Stopping mock server...');
-    mockServerProcess.kill();
+    if (process.platform === 'win32' && mockServerProcess.pid) {
+      // まず graceful shutdown を試行
+      try {
+        execSync(`taskkill /PID ${mockServerProcess.pid} 2>nul`, { stdio: 'ignore' });
+        await waitForPortFree(3456, 3000);
+      } catch { /* 既に終了していた場合は無視 */ }
+      // プロセスツリーごと強制終了（フォールバック）
+      try {
+        execSync(`taskkill /F /T /PID ${mockServerProcess.pid} 2>nul`, { stdio: 'ignore' });
+      } catch { /* 既に終了していた場合は無視 */ }
+    } else {
+      mockServerProcess.kill();
+    }
     mockServerProcess = null;
   }
-  // Also kill any orphaned mock_server processes
+  // 孤立プロセスのフォールバック
   try {
     if (process.platform === 'win32') {
-      execSync('taskkill /F /IM mock_server.exe 2>nul', { stdio: 'ignore' });
+      execSync('taskkill /F /T /IM mock_server.exe 2>nul', { stdio: 'ignore' });
     } else {
       execSync('pkill -f mock_server', { stdio: 'ignore' });
     }
-  } catch {
-    // Process may not exist
-  }
-  await new Promise((resolve) => setTimeout(resolve, 500));
+  } catch { /* プロセスが存在しない場合は無視 */ }
+  await waitForPortFree(3456, 3000);
 }
 
 /**
- * Start mock server
+ * モックサーバーを起動する（プリビルドバイナリ必須）
  */
 export async function startMockServer(): Promise<void> {
   log.info('Starting mock server...');
-
-  // Kill any existing mock server first
   await killMockServer();
 
-  // Start mock server as a child process
-  const cargoPath = path.join(PROJECT_DIR, 'src-tauri', 'Cargo.toml');
-  const mockTail = buildProcessTailRecorder();
-
-  if (process.platform === 'win32' && fs.existsSync(PREBUILT_MOCK_SERVER_PATH)) {
-    log.debug(`Using prebuilt mock server binary: ${PREBUILT_MOCK_SERVER_PATH}`);
-    mockServerProcess = spawnCommand(PREBUILT_MOCK_SERVER_PATH, [], {
-      cwd: PROJECT_DIR,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-  } else {
-    mockServerProcess = spawnProjectCommand('cargo', ['run', '--manifest-path', cargoPath, '--bin', 'mock_server'], {
-      cwd: PROJECT_DIR,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+  if (!fs.existsSync(PREBUILT_MOCK_SERVER_PATH)) {
+    throw new Error(
+      `モックサーバーバイナリが見つかりません: ${PREBUILT_MOCK_SERVER_PATH}\n` +
+        '`pnpm test:e2e:build` を実行してビルドしてください。'
+    );
   }
 
-  const mockLog = log.child('mock_server');
+  const mockTail = buildProcessTailRecorder();
 
-  // Log mock server output for debugging
+  mockServerProcess = spawn(PREBUILT_MOCK_SERVER_PATH, [], {
+    cwd: PROJECT_DIR,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  const mockLog = log.child('mock_server');
   mockServerProcess.stdout?.on('data', (data) => {
     const msg = data.toString().trim();
     mockTail.push(msg);
@@ -603,20 +451,17 @@ export async function startMockServer(): Promise<void> {
   mockServerProcess.stderr?.on('data', (data) => {
     const msg = data.toString().trim();
     mockTail.push(msg);
-    // Filter out cargo build warnings/info
     if (msg && !msg.includes('Compiling') && !msg.includes('Finished') && !msg.includes('warning:')) {
       mockLog.debug(msg);
     }
   });
 
-  // Wait for mock server to be ready
+  // モックサーバーの起動を待機
   const timeout = 60000;
   const start = Date.now();
   while (Date.now() - start < timeout) {
-    const exitInfo = describeExitedProcess('Mock server', mockServerProcess, mockTail.lines);
-    if (exitInfo) {
-      throw new Error(`Mock server failed to start because ${exitInfo}`);
-    }
+    const exitInfo = describeExitedProcess('mock_server', mockServerProcess, mockTail.lines);
+    if (exitInfo) throw new Error(`モックサーバーが起動できませんでした: ${exitInfo}`);
 
     try {
       const response = await fetch(`${MOCK_SERVER_URL}/status`);
@@ -625,7 +470,7 @@ export async function startMockServer(): Promise<void> {
         return;
       }
     } catch {
-      // Server not ready yet
+      // まだ起動していない
     }
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
@@ -633,7 +478,7 @@ export async function startMockServer(): Promise<void> {
 }
 
 /**
- * Reset mock server state
+ * モックサーバーの状態をリセットする
  */
 export async function resetMockServer(): Promise<void> {
   log.debug('Resetting mock server state...');
@@ -641,7 +486,7 @@ export async function resetMockServer(): Promise<void> {
 }
 
 /**
- * Add message to mock server
+ * モックサーバーにメッセージを追加する
  */
 export async function addMockMessage(message: {
   message_type: string;
@@ -662,39 +507,40 @@ export async function addMockMessage(message: {
 }
 
 /**
- * Common setup for E2E tests
+ * E2Eテスト共通セットアップ
  */
 export async function setupTestEnvironment(): Promise<{ browser: Browser; context: BrowserContext; page: Page }> {
-  // Step 1: Kill any existing processes
   log.info('Setting up test environment...');
+
+  // Step 1: 既存のプロセスを終了
   await killTauriApp();
 
-  // Step 2: Clean up test data and credentials for a fresh start
+  // Step 2: テストデータ・認証情報を削除してクリーンな状態にする
   await cleanupTestData();
   await cleanupTestCredentials();
 
-  // Step 3: Start mock server
+  // Step 3: モックサーバーを起動
   await startMockServer();
 
-  // Step 4: Reset mock server state
+  // Step 4: モックサーバーの状態をリセット
   await resetMockServer();
 
-  // Step 5: Start Tauri app with test namespace
+  // Step 5: テスト用名前空間でTauriアプリを起動
   await startTauriApp();
 
-  // Step 6: Connect to the running Tauri app
+  // Step 6: Tauriアプリに接続
   const connection = await connectToApp();
 
-  // Wait for Svelte app to fully mount (not just HTML load)
+  // Svelteアプリが完全にマウントされるまで待機
   await connection.page.waitForLoadState('load');
-  // Wait for a known UI element that only exists after Svelte renders
+  // Svelteレンダリング後にのみ表示される既知のUI要素を待機
   await connection.page.getByRole('heading', { name: 'Chat Monitor' }).waitFor({ state: 'visible', timeout: 30000 });
 
   return connection;
 }
 
 /**
- * Common teardown for E2E tests
+ * E2Eテスト共通ティアダウン（静的サーバーも停止する）
  */
 export async function teardownTestEnvironment(browser?: Browser): Promise<void> {
   log.info('Tearing down test environment...');
@@ -704,6 +550,10 @@ export async function teardownTestEnvironment(browser?: Browser): Promise<void> 
     ['browser.close', () => browser?.close()],
     ['killTauriApp', killTauriApp],
     ['killMockServer', killMockServer],
+    ['stopStaticServer', () => new Promise<void>((resolve) => {
+      if (!staticFrontendServer) { resolve(); return; }
+      staticFrontendServer.close(() => { staticFrontendServer = null; resolve(); });
+    })],
     ['cleanupTestData', cleanupTestData],
     ['cleanupTestCredentials', cleanupTestCredentials],
   ] as [string, () => Promise<void> | undefined][]) {
@@ -722,8 +572,8 @@ export async function teardownTestEnvironment(browser?: Browser): Promise<void> 
 }
 
 /**
- * Fully disconnect (stop + initialize) and return app to idle state.
- * Clicks 停止 if visible, then 初期化, and waits for the URL input to reappear.
+ * 停止・初期化してアプリをアイドル状態に戻す。
+ * 「停止」が表示されていればクリック後「初期化」をクリックし、URL入力欄の再表示を待機する。
  */
 export async function disconnectAndInitialize(page: Page): Promise<void> {
   const stopButton = page.locator('button:has-text("停止")');
@@ -735,8 +585,8 @@ export async function disconnectAndInitialize(page: Page): Promise<void> {
 }
 
 /**
- * Connect to mock server stream and wait for stream title to appear.
- * @param videoId - optional video ID, defaults to "test_video_123"
+ * モックサーバーのストリームに接続し、ストリームタイトルの表示を待機する。
+ * @param videoId - 動画ID（省略時は "test_video_123"）
  */
 export async function connectToMockStream(page: Page, videoId = 'test_video_123'): Promise<void> {
   const urlInput = page.locator('input[placeholder*="youtube.com"]');
@@ -746,7 +596,7 @@ export async function connectToMockStream(page: Page, videoId = 'test_video_123'
 }
 
 /**
- * Navigate to a tab by its display name using the nav button.
+ * ナビゲーションボタンから指定タブに遷移する
  */
 export async function navigateToTab(page: Page, tabName: string): Promise<void> {
   const tab = page.locator(`nav button:has-text("${tabName}")`);
@@ -754,7 +604,7 @@ export async function navigateToTab(page: Page, tabName: string): Promise<void> 
 }
 
 /**
- * Set stream state on the mock server.
+ * モックサーバーのストリーム状態を設定する
  */
 export async function setStreamState(state: { member_only?: boolean; require_auth?: boolean; title?: string }): Promise<void> {
   await fetch(`${MOCK_SERVER_URL}/set_stream_state`, {
@@ -762,4 +612,17 @@ export async function setStreamState(state: { member_only?: boolean; require_aut
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(state),
   });
+}
+
+/**
+ * アプリを再起動して新しいブラウザ接続を返す
+ */
+export async function restartApp(): Promise<{
+  browser: Browser;
+  context: BrowserContext;
+  page: Page;
+}> {
+  await killTauriApp();
+  await startTauriApp();
+  return await connectToApp();
 }
