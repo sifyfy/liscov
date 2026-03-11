@@ -8,6 +8,7 @@ node_modules
 .wrangler
 /.svelte-kit
 /build
+/target
 
 # OS
 .DS_Store
@@ -29,6 +30,8 @@ vite.config.ts.timestamp-*
 
 # Temporary files
 /.temp/
+/.tmp
+/docs/plans
 
 # IDE
 .idea/
@@ -43,6 +46,7 @@ pnpm-debug.log*
 
 # Temporary Claude files
 tmpclaude-*
+/.claude/worktrees/
 
 # Local cargo config (machine-specific)
 /.cargo/
