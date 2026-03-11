@@ -4,7 +4,6 @@ import {
   MOCK_SERVER_URL,
   setupTestEnvironment,
   teardownTestEnvironment,
-  ensureSvelteHydrated,
   killTauriApp,
   startTauriApp,
   connectToApp,
@@ -131,7 +130,6 @@ test.describe('Authentication Feature (01_auth.md)', () => {
       browser = connection.browser;
       context = connection.context;
       mainPage = connection.page;
-      await ensureSvelteHydrated(mainPage);
 
       // Navigate to Settings
       await mainPage.getByRole('button', { name: 'Settings' }).click();
@@ -185,10 +183,10 @@ test.describe('Authentication Feature (01_auth.md)', () => {
       // by confirming the mock server receives a fresh login page visit
 
       // Reset mock server state to track new login page visits
-      await fetch('http://localhost:3456/reset', { method: 'POST' });
+      await fetch(`${MOCK_SERVER_URL}/reset`, { method: 'POST' });
 
       // Verify login_page_visits is 0 after reset
-      const initialStatus = await fetch('http://localhost:3456/status');
+      const initialStatus = await fetch(`${MOCK_SERVER_URL}/status`);
       const initialData = (await initialStatus.json()) as { login_page_visits: number };
       expect(initialData.login_page_visits).toBe(0);
 
@@ -210,7 +208,7 @@ test.describe('Authentication Feature (01_auth.md)', () => {
       // existing SAPISID without visiting the login page at all.
       // login_page_visits > 0 proves the auth window visited the login page,
       // which means cookies were properly cleared.
-      const statusResponse = await fetch('http://localhost:3456/status');
+      const statusResponse = await fetch(`${MOCK_SERVER_URL}/status`);
       const status = (await statusResponse.json()) as { login_page_visits: number };
       log.debug('Mock server status after re-login', status);
 

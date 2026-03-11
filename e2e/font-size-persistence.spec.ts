@@ -1,16 +1,16 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, BrowserContext, Page, Browser } from '@playwright/test';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import { log } from './utils/logger';
 import {
+  MOCK_SERVER_URL,
   TEST_APP_NAME,
   killTauriApp,
   cleanupTestData,
   cleanupTestCredentials,
   startTauriApp,
   connectToApp,
-  restartApp,
+  getTestAppDataDir,
 } from './utils/test-helpers';
 
 /**
@@ -24,20 +24,9 @@ import {
  *    pnpm exec playwright test --config e2e/playwright.config.ts font-size-persistence.spec.ts
  */
 
-// テスト用設定ディレクトリのパスを取得
-function getTestConfigDir(): string {
-  const configDir = process.platform === 'win32'
-    ? process.env.APPDATA
-    : process.platform === 'darwin'
-      ? path.join(os.homedir(), 'Library', 'Application Support')
-      : path.join(os.homedir(), '.config');
-
-  return path.join(configDir!, TEST_APP_NAME);
-}
-
-// config.toml からフォントサイズ値を読み取る
+// Read config.toml and return message_font_size value
 function readConfigFontSize(): number | null {
-  const configPath = path.join(getTestConfigDir(), 'config.toml');
+  const configPath = path.join(getTestAppDataDir(), 'config.toml');
   if (!fs.existsSync(configPath)) {
     return null;
   }
@@ -51,14 +40,14 @@ test.describe('Font Size Persistence', () => {
   test.setTimeout(180000);
 
   test.beforeAll(async () => {
-    // テスト前のクリーンアップ
+    // Clean up before tests
     await killTauriApp();
     await cleanupTestData();
     await cleanupTestCredentials();
   });
 
   test.afterAll(async () => {
-    // テスト後のクリーンアップ
+    // Clean up after tests
     await killTauriApp();
   });
 
@@ -95,11 +84,13 @@ test.describe('Font Size Persistence', () => {
     expect(savedFontSize).toBe(16);
 
     await browser.close();
+    await killTauriApp();
 
     // ============================================
     // Phase 2: 再起動、設定が維持されていることを確認
     // ============================================
-    const { browser: browser2, page: page2 } = await restartApp();
+    await startTauriApp();
+    const { browser: browser2, page: page2 } = await connectToApp();
 
     // Svelteアプリのマウント完了を待つ
     await page2.waitForLoadState('networkidle');
@@ -113,7 +104,7 @@ test.describe('Font Size Persistence', () => {
   });
 
   test('文字サイズの上限・下限が守られる', async () => {
-    // クリーンな状態でテスト
+    // Clean slate
     await killTauriApp();
     await cleanupTestData();
 

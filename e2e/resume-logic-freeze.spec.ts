@@ -1,18 +1,15 @@
 import { test, expect, BrowserContext, Page, Browser } from '@playwright/test';
-import { exec } from 'child_process';
 import { log } from './utils/logger';
 import {
   MOCK_SERVER_URL,
-  PROJECT_DIR,
   TEST_APP_NAME,
   TEST_KEYRING_SERVICE,
   cleanupTestData,
   killTauriApp,
   killMockServer,
   startMockServer,
-  waitForCDP,
+  startTauriAppWithEnv,
   connectToApp,
-  ensureSvelteHydrated,
 } from './utils/test-helpers';
 
 /**
@@ -28,31 +25,23 @@ import {
  * This is DIFFERENT from high-rate UI freeze (which was fixed in fcfa476)
  */
 
-// Start Tauri app pointing to real YouTube (no mock)
+// 実YouTube向け（モックなし）でTauriアプリを起動する
 async function startTauriAppForRealYouTube(): Promise<void> {
-  const env = {
-    ...process.env,
+  await startTauriAppWithEnv({
     LISCOV_APP_NAME: TEST_APP_NAME,
     LISCOV_KEYRING_SERVICE: TEST_KEYRING_SERVICE,
-    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=9222',
-  };
-  exec(`cd "${PROJECT_DIR}" && pnpm tauri dev`, { env });
-  await waitForCDP();
+  });
 }
 
-// Start Tauri app pointing to mock server
+// モックサーバー向けでTauriアプリを起動する
 async function startTauriAppForMockServer(): Promise<void> {
-  const env = {
-    ...process.env,
+  await startTauriAppWithEnv({
     LISCOV_APP_NAME: TEST_APP_NAME,
     LISCOV_KEYRING_SERVICE: TEST_KEYRING_SERVICE,
     LISCOV_AUTH_URL: `${MOCK_SERVER_URL}/?auto_login=true`,
     LISCOV_SESSION_CHECK_URL: `${MOCK_SERVER_URL}/youtubei/v1/account/account_menu`,
     LISCOV_YOUTUBE_BASE_URL: MOCK_SERVER_URL,
-    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=9222',
-  };
-  exec(`cd "${PROJECT_DIR}" && pnpm tauri dev`, { env });
-  await waitForCDP();
+  });
 }
 
 /**
@@ -127,8 +116,8 @@ async function testApplicationLogicWorks(page: Page): Promise<{ works: boolean; 
   return { works: true, details: 'Application logic is working' };
 }
 
-// 実YouTube接続テスト（CIから除外するため @external タグを付与）
-test.describe('Real YouTube - Application Logic Freeze Detection', { tag: '@external' }, () => {
+// Real YouTube test
+test.describe('Real YouTube - Application Logic Freeze Detection', () => {
   let browser: Browser;
   let context: BrowserContext;
   let mainPage: Page;
@@ -161,8 +150,8 @@ test.describe('Real YouTube - Application Logic Freeze Detection', { tag: '@exte
       }
     });
 
-    // WebView2 初回ロードの SvelteKit ハイドレーション失敗を回避
-    await ensureSvelteHydrated(mainPage);
+    await mainPage.waitForLoadState('domcontentloaded');
+    await mainPage.waitForTimeout(2000);
     log.info('Connected to Tauri app');
   });
 
@@ -270,8 +259,8 @@ test.describe('Mock Server - Application Logic Freeze Detection', () => {
       }
     });
 
-    // WebView2 初回ロードの SvelteKit ハイドレーション失敗を回避
-    await ensureSvelteHydrated(mainPage);
+    await mainPage.waitForLoadState('domcontentloaded');
+    await mainPage.waitForTimeout(2000);
     log.info('Connected to Tauri app');
   });
 
