@@ -1,4 +1,5 @@
-import { test, expect, BrowserContext, Page, Browser } from '@playwright/test';
+import { test, expect } from './utils/fixtures';
+import type { BrowserContext, Page, Browser } from '@playwright/test';
 import { log } from './utils/logger';
 import {
   MOCK_SERVER_URL,
@@ -314,7 +315,7 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
       if (styles.scrollWidth > styles.clientWidth) {
         // Text is being truncated (scrollWidth > clientWidth means content overflows)
         // This is expected behavior with truncation
-        console.log(`Title truncated: scrollWidth=${styles.scrollWidth}, clientWidth=${styles.clientWidth}`);
+        log.debug(`Title truncated: scrollWidth=${styles.scrollWidth}, clientWidth=${styles.clientWidth}`);
       }
 
       // Disconnect

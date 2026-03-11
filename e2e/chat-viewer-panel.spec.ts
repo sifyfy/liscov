@@ -1,4 +1,5 @@
-import { test, expect, BrowserContext, Page, Browser } from '@playwright/test';
+import { test, expect } from './utils/fixtures';
+import type { BrowserContext, Page, Browser } from '@playwright/test';
 import { log } from './utils/logger';
 import {
   MOCK_SERVER_URL,
@@ -136,12 +137,12 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
         // If the highlight didn't appear, log debug info and skip the assertion
         const styleAttr = await highlightedMessage.getAttribute('style');
         const msgId = await highlightedMessage.getAttribute('data-message-id');
-        console.log(`Highlight timeout - style: "${styleAttr}", msgId: ${msgId}`);
+        log.debug(`Highlight timeout - style: "${styleAttr}", msgId: ${msgId}`);
 
         // This test verifies scrolling to message works, highlight is a bonus
         // The scroll functionality is verified by the element being visible
         await expect(highlightedMessage).toBeVisible();
-        console.log('Note: Highlight style not applied within timeout, but message is visible (scroll worked)');
+        log.debug('Note: Highlight style not applied within timeout, but message is visible (scroll worked)');
       }
 
       // Close panel
@@ -233,7 +234,7 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
         distanceFromBottom: el.scrollHeight - el.scrollTop - el.clientHeight,
       }));
 
-      console.log(`Scroll to bottom test: scrollTop=${scrollInfo.scrollTop}, scrollHeight=${scrollInfo.scrollHeight}, clientHeight=${scrollInfo.clientHeight}, distanceFromBottom=${scrollInfo.distanceFromBottom}`);
+      log.debug(`Scroll to bottom test: scrollTop=${scrollInfo.scrollTop}, scrollHeight=${scrollInfo.scrollHeight}, clientHeight=${scrollInfo.clientHeight}, distanceFromBottom=${scrollInfo.distanceFromBottom}`);
 
       // The distance from bottom should be very small (within threshold of 30px)
       // Perfect scroll would have distanceFromBottom === 0
@@ -679,7 +680,7 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
       // The scroll position should have CHANGED (moved up to show first message)
       // This is the key assertion - the bug was that scroll position didn't change
       // because $effect auto-scroll would immediately scroll back to bottom
-      console.log(`Scroll test: before=${scrollBefore.scrollTop}, after=${scrollAfter}`);
+      log.debug(`Scroll test: before=${scrollBefore.scrollTop}, after=${scrollAfter}`);
       expect(scrollAfter).toBeLessThan(scrollBefore.scrollTop);
 
       // The first message should now be visible (already confirmed above)

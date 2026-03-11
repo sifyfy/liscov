@@ -1,4 +1,5 @@
-import { test, expect, BrowserContext, Page, Browser } from '@playwright/test';
+import { test, expect } from './utils/fixtures';
+import type { BrowserContext, Page, Browser } from '@playwright/test';
 import { log } from './utils/logger';
 import {
   MOCK_SERVER_URL,

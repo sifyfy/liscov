@@ -1,4 +1,5 @@
-import { test, expect, BrowserContext, Page, Browser } from '@playwright/test';
+import { test, expect } from './utils/fixtures';
+import type { BrowserContext, Page, Browser } from '@playwright/test';
 import { log } from './utils/logger';
 import {
   MOCK_SERVER_URL,
@@ -132,7 +133,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
       // - The tier color (blue = #1565C0) in border-left-color
       // - A gradient background using the tier color
 
-      console.log(`SuperChat style attribute: "${styleAttr}"`);
+      log.debug(`SuperChat style attribute: "${styleAttr}"`);
 
       // CRITICAL ASSERTION: Style must contain the YouTube-specified blue tier color
       // Either as hex (#1565c0) or rgb (rgb(21, 101, 192))
@@ -177,7 +178,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
       await expect(redSuperchat).toBeVisible({ timeout: 5000 });
 
       const redStyle = await redSuperchat.getAttribute('style');
-      console.log(`Red tier SuperChat style: "${redStyle}"`);
+      log.debug(`Red tier SuperChat style: "${redStyle}"`);
 
       // Red tier should have red color (0xD00000 = #D00000 = rgb(208, 0, 0))
       expect(redStyle).toBeTruthy();
@@ -288,7 +289,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
 
       // Get the full text content of the title element (even if visually truncated)
       const titleTextContent = await titleElement.textContent();
-      console.log(`Title text content: "${titleTextContent}"`);
+      log.debug(`Title text content: "${titleTextContent}"`);
 
       // Verify the full title is present in the DOM (not truncated at hashtag)
       expect(titleTextContent).toContain('#vtuber');
@@ -320,7 +321,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
       const titleElement = mainPage.locator('[data-testid="stream-title"]').first();
       await expect(titleElement).toBeVisible();
       const titleTextContent = await titleElement.textContent();
-      console.log(`Title text content: "${titleTextContent}"`);
+      log.debug(`Title text content: "${titleTextContent}"`);
 
       // Verify full title content (not truncated)
       expect(titleTextContent).toContain('#game');

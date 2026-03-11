@@ -1,4 +1,5 @@
-import { test, expect, BrowserContext, Page, Browser } from '@playwright/test';
+import { test, expect } from './utils/fixtures';
+import type { BrowserContext, Page, Browser } from '@playwright/test';
 import { log } from './utils/logger';
 import {
   MOCK_SERVER_URL,
@@ -510,7 +511,7 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
         await input.clear();
       } else {
         // Search functionality may not be implemented yet - test passes if filter panel opens
-        console.log('Search input not found - filter panel exists but search not implemented');
+        log.debug('Search input not found - filter panel exists but search not implemented');
       }
 
       // Disconnect
@@ -536,7 +537,7 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
       if (!hasError) {
         // Verify we didn't connect (URL input should still be visible)
         await expect(urlInput).toBeVisible();
-        console.log('No visible error message, but connection was prevented (URL input still visible)');
+        log.debug('No visible error message, but connection was prevented (URL input still visible)');
       }
     });
 

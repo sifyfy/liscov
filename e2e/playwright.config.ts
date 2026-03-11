@@ -20,7 +20,9 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   workers: 1,
-  reporter: 'list',
+  // list レポーターの後に buffered-log-reporter を配置することで、
+  // テスト結果行（✓/✘）の後にログが表示される
+  reporter: [['list'], ['./utils/buffered-log-reporter.ts']],
   timeout: 60000,
   use: {
     trace: 'retain-on-failure',
