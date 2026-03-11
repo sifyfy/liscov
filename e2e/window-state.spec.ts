@@ -1,20 +1,17 @@
 import { test, expect, BrowserContext, Page, Browser } from '@playwright/test';
-import { exec } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import { log } from './utils/logger';
 import {
   MOCK_SERVER_URL,
-  CDP_URL,
-  PROJECT_DIR,
   TEST_APP_NAME,
-  TEST_KEYRING_SERVICE,
   killTauriApp,
   cleanupTestData,
   cleanupTestCredentials,
-  waitForCDP,
+  startTauriApp,
   connectToApp,
+  getPlatformConfigDir,
+  getTestAppDataDir,
 } from './utils/test-helpers';
 
 /**
@@ -31,26 +28,9 @@ import {
 // Window state file uses the app identifier from tauri.conf.json
 const WINDOW_STATE_APP_ID = 'com.liscov-tauri.app';
 
-// Get test config directory based on platform
-function getTestConfigDir(): string {
-  const configDir = process.platform === 'win32'
-    ? process.env.APPDATA
-    : process.platform === 'darwin'
-      ? path.join(os.homedir(), 'Library', 'Application Support')
-      : path.join(os.homedir(), '.config');
-
-  return path.join(configDir!, TEST_APP_NAME);
-}
-
 // Get window state file path (uses app identifier, not LISCOV_APP_NAME)
 function getWindowStateFilePath(): string {
-  const configDir = process.platform === 'win32'
-    ? process.env.APPDATA
-    : process.platform === 'darwin'
-      ? path.join(os.homedir(), 'Library', 'Application Support')
-      : path.join(os.homedir(), '.config');
-
-  return path.join(configDir!, WINDOW_STATE_APP_ID, '.window-state.json');
+  return path.join(getPlatformConfigDir(), WINDOW_STATE_APP_ID, '.window-state.json');
 }
 
 // Clean up test data directories (extended to include window state file)
@@ -78,30 +58,6 @@ async function closeTauriAppGracefully(page: Page): Promise<void> {
   }
   // Wait for app to fully exit and release port
   await new Promise(resolve => setTimeout(resolve, 2000));
-}
-
-// Helper to start Tauri app with test isolation
-async function startTauriApp(): Promise<void> {
-  const env = {
-    ...process.env,
-    // Test isolation: use separate namespace
-    LISCOV_APP_NAME: TEST_APP_NAME,
-    LISCOV_KEYRING_SERVICE: TEST_KEYRING_SERVICE,
-    // Mock server URLs (needed for app to start without errors)
-    LISCOV_AUTH_URL: `${MOCK_SERVER_URL}/?auto_login=true`,
-    LISCOV_SESSION_CHECK_URL: `${MOCK_SERVER_URL}/youtubei/v1/account/account_menu`,
-    LISCOV_YOUTUBE_BASE_URL: MOCK_SERVER_URL,
-    // Enable CDP for Playwright
-    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=9222',
-  };
-
-  log.info(`Starting Tauri app with test namespace: ${TEST_APP_NAME}`);
-
-  // Start app in background
-  exec(`cd "${PROJECT_DIR}" && pnpm tauri dev`, { env });
-
-  // Wait for CDP to be available
-  await waitForCDP();
 }
 
 // Read window state file and return the stored values

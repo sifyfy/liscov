@@ -14,6 +14,7 @@ import {
   cleanupTestData,
   cleanupTestCredentials,
   TEST_APP_NAME,
+  getTestDatabasePath,
 } from './utils/test-helpers';
 
 /**
@@ -178,7 +179,7 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
     log.info('Messages received in chat');
 
     // Check the database file directly
-    const dbPath = path.join(process.env.APPDATA || '', TEST_APP_NAME, 'liscov.db');
+    const dbPath = getTestDatabasePath();
     log.debug(`Database path: ${dbPath}`);
     log.debug(`Database exists: ${fs.existsSync(dbPath)}`);
 

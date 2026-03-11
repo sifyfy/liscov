@@ -5,6 +5,7 @@
 //! Instead, we use tier-based aggregation based on YouTube's color scheme.
 
 use crate::core::MessageType;
+use crate::errors::CommandError;
 use crate::state::AppState;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -12,10 +13,12 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use tauri::State;
+use ts_rs::TS;
 
 /// SuperChat tier based on YouTube color scheme
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, TS)]
 #[serde(rename_all = "lowercase")]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub enum SuperChatTier {
     Blue,     // Lowest tier (USD $1-2)
     Cyan,     // USD $2-5
@@ -27,7 +30,8 @@ pub enum SuperChatTier {
 }
 
 /// SuperChat tier statistics
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub struct SuperChatTierStats {
     pub tier_red: usize,
     pub tier_magenta: usize,
@@ -58,7 +62,8 @@ impl SuperChatTierStats {
 }
 
 /// Revenue analytics data (07_revenue.md)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub struct RevenueAnalytics {
     pub super_chat_count: usize,
     pub super_chat_by_tier: SuperChatTierStats,
@@ -82,7 +87,8 @@ impl Default for RevenueAnalytics {
 }
 
 /// Contributor information (07_revenue.md)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub struct ContributorInfo {
     pub channel_id: String,
     pub display_name: String,
@@ -91,7 +97,8 @@ pub struct ContributorInfo {
 }
 
 /// Hourly statistics (07_revenue.md)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub struct HourlyStats {
     pub hour: String,
     pub super_chat_count: usize,
@@ -101,7 +108,8 @@ pub struct HourlyStats {
 }
 
 /// Export configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub struct ExportConfig {
     pub format: String, // "csv", "json"
     pub include_metadata: bool,
@@ -227,7 +235,7 @@ fn parse_amount_value(amount_str: &str) -> Option<f64> {
 #[tauri::command]
 pub async fn get_revenue_analytics(
     state: State<'_, AppState>,
-) -> Result<RevenueAnalytics, String> {
+) -> Result<RevenueAnalytics, CommandError> {
     let messages = state.messages.read().await;
     let mut analytics = RevenueAnalytics::default();
 
@@ -311,18 +319,20 @@ pub async fn get_revenue_analytics(
 pub async fn get_session_analytics(
     state: State<'_, AppState>,
     session_id: String,
-) -> Result<RevenueAnalytics, String> {
+) -> Result<RevenueAnalytics, CommandError> {
     let db_guard = state.database.read().await;
-    let db = db_guard.as_ref().ok_or("Database not initialized")?;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| CommandError::DatabaseError("Database not initialized".to_string()))?;
 
     let conn = db.connection().await;
 
-    // Get messages for session with color info
+    // セッションのメッセージをカラー情報と一緒に取得
     let mut stmt = conn
         .prepare(
             "SELECT message_type, amount, header_color FROM messages WHERE session_id = ?"
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| CommandError::DatabaseError(e.to_string()))?;
 
     let mut analytics = RevenueAnalytics::default();
 
@@ -334,10 +344,11 @@ pub async fn get_session_analytics(
                 row.get::<_, Option<String>>(2)?,
             ))
         })
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| CommandError::DatabaseError(e.to_string()))?;
 
     for row in rows {
-        let (message_type, amount_str, header_color) = row.map_err(|e| e.to_string())?;
+        let (message_type, amount_str, header_color) = row
+            .map_err(|e| CommandError::DatabaseError(e.to_string()))?;
 
         match message_type.as_str() {
             "superchat" => {
@@ -373,13 +384,15 @@ pub async fn export_session_data(
     session_id: String,
     file_path: String,
     config: ExportConfig,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     let db_guard = state.database.read().await;
-    let db = db_guard.as_ref().ok_or("Database not initialized")?;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| CommandError::DatabaseError("Database not initialized".to_string()))?;
 
     let conn = db.connection().await;
 
-    // Get session metadata
+    // セッションメタデータを取得
     let session = conn
         .query_row(
             "SELECT id, start_time, end_time, stream_url, stream_title,
@@ -399,9 +412,9 @@ pub async fn export_session_data(
                 })
             },
         )
-        .map_err(|e| format!("Session not found: {}", e))?;
+        .map_err(|e| CommandError::NotFound(format!("Session not found: {}", e)))?;
 
-    // Get messages
+    // メッセージを取得
     let limit_clause = config.max_records.map(|n| format!(" LIMIT {}", n)).unwrap_or_default();
     let query = format!(
         "SELECT id, timestamp, author, channel_id, content, message_type, amount, is_member,
@@ -410,7 +423,8 @@ pub async fn export_session_data(
         limit_clause
     );
 
-    let mut stmt = conn.prepare(&query).map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(&query)
+        .map_err(|e| CommandError::DatabaseError(e.to_string()))?;
 
     let messages: Vec<ExportMessage> = stmt
         .query_map([&session_id], |row| {
@@ -450,7 +464,7 @@ pub async fn export_session_data(
                 badges,
             })
         })
-        .map_err(|e| e.to_string())?
+        .map_err(|e| CommandError::DatabaseError(e.to_string()))?
         .filter_map(|r| r.ok())
         .collect();
 
@@ -462,19 +476,19 @@ pub async fn export_session_data(
         statistics,
     };
 
-    // Export based on format
+    // フォーマットに応じてエクスポート
     let content = match config.format.as_str() {
         "json" => export_to_json(&export_data, &config)?,
         "csv" => export_to_csv(&export_data, &config)?,
-        _ => return Err(format!("Unsupported format: {}", config.format)),
+        _ => return Err(CommandError::InvalidInput(format!("Unsupported format: {}", config.format))),
     };
 
-    // Write to file
+    // ファイルに書き出し
     let mut file = File::create(&file_path)
-        .map_err(|e| format!("Failed to create file: {}", e))?;
+        .map_err(|e| CommandError::IoError(format!("Failed to create file: {}", e)))?;
 
     file.write_all(content.as_bytes())
-        .map_err(|e| format!("Failed to write file: {}", e))?;
+        .map_err(|e| CommandError::IoError(format!("Failed to write file: {}", e)))?;
 
     Ok(())
 }
@@ -485,7 +499,7 @@ pub async fn export_current_messages(
     state: State<'_, AppState>,
     file_path: String,
     config: ExportConfig,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     let messages = state.messages.read().await;
     let session_id = state.current_session_id.read().await.clone();
     let broadcaster_id = state.current_broadcaster_id.read().await.clone();
@@ -559,14 +573,14 @@ pub async fn export_current_messages(
     let content = match config.format.as_str() {
         "json" => export_to_json(&export_data, &config)?,
         "csv" => export_to_csv(&export_data, &config)?,
-        _ => return Err(format!("Unsupported format: {}", config.format)),
+        _ => return Err(CommandError::InvalidInput(format!("Unsupported format: {}", config.format))),
     };
 
     let mut file = File::create(&file_path)
-        .map_err(|e| format!("Failed to create file: {}", e))?;
+        .map_err(|e| CommandError::IoError(format!("Failed to create file: {}", e)))?;
 
     file.write_all(content.as_bytes())
-        .map_err(|e| format!("Failed to write file: {}", e))?;
+        .map_err(|e| CommandError::IoError(format!("Failed to write file: {}", e)))?;
 
     Ok(())
 }
@@ -606,17 +620,17 @@ fn calculate_session_statistics(messages: &[ExportMessage]) -> SessionStatistics
     }
 }
 
-fn export_to_json(data: &SessionExportData, config: &ExportConfig) -> Result<String, String> {
+fn export_to_json(data: &SessionExportData, config: &ExportConfig) -> Result<String, CommandError> {
     if config.include_metadata {
         serde_json::to_string_pretty(data)
-            .map_err(|e| format!("JSON serialization error: {}", e))
+            .map_err(|e| CommandError::Internal(format!("JSON serialization error: {}", e)))
     } else {
         serde_json::to_string_pretty(&data.messages)
-            .map_err(|e| format!("JSON serialization error: {}", e))
+            .map_err(|e| CommandError::Internal(format!("JSON serialization error: {}", e)))
     }
 }
 
-fn export_to_csv(data: &SessionExportData, config: &ExportConfig) -> Result<String, String> {
+fn export_to_csv(data: &SessionExportData, config: &ExportConfig) -> Result<String, CommandError> {
     let mut csv = String::new();
 
     // Metadata header (per spec)

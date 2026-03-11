@@ -1,20 +1,37 @@
-// Tauri Config API wrapper
+// 設定関連の Tauri コマンドラッパー
 
 import { invoke } from '@tauri-apps/api/core';
 import type { Config } from '$lib/types';
+import { normalizeError } from './errors';
 
 export async function configLoad(): Promise<Config> {
-  return invoke('config_load');
+  try {
+    return await invoke('config_load');
+  } catch (e) {
+    throw normalizeError(e);
+  }
 }
 
 export async function configSave(config: Config): Promise<void> {
-  await invoke('config_save', { config });
+  try {
+    await invoke('config_save', { config });
+  } catch (e) {
+    throw normalizeError(e);
+  }
 }
 
 export async function configGetValue<T>(section: string, key: string): Promise<T | null> {
-  return invoke('config_get_value', { section, key });
+  try {
+    return await invoke('config_get_value', { section, key });
+  } catch (e) {
+    throw normalizeError(e);
+  }
 }
 
 export async function configSetValue<T>(section: string, key: string, value: T): Promise<void> {
-  await invoke('config_set_value', { section, key, value });
+  try {
+    await invoke('config_set_value', { section, key, value });
+  } catch (e) {
+    throw normalizeError(e);
+  }
 }

@@ -1,41 +1,16 @@
-// Viewer-related type definitions
+// ビューワー管理関連の型定義
+// Rust型は generated/ から re-export、フロントエンド固有型はここで定義
 
-export interface ViewerProfile {
-  id: number;
-  broadcaster_channel_id: string;
-  channel_id: string;
-  display_name: string;
-  first_seen: string;
-  last_seen: string;
-  message_count: number;
-  total_contribution: number;
-  membership_level: string | null;
-  tags: string[];
-}
+// GuiViewerProfile を ViewerProfile として re-export（フロントエンドの命名慣習に合わせる）
+export type { GuiViewerProfile as ViewerProfile } from './generated/GuiViewerProfile';
+// GuiViewerWithInfo を ViewerWithCustomInfo として re-export
+export type { GuiViewerWithInfo as ViewerWithCustomInfo } from './generated/GuiViewerWithInfo';
+// GuiContributorStats を ContributorStats として re-export
+export type { GuiContributorStats as ContributorStats } from './generated/GuiContributorStats';
+// GuiBroadcasterChannel を BroadcasterChannel として re-export
+export type { GuiBroadcasterChannel as BroadcasterChannel } from './generated/GuiBroadcasterChannel';
 
-export interface ViewerCustomInfo {
-  viewer_profile_id: number;
-  reading: string | null;
-  notes: string | null;
-  custom_data: string | null;
-}
-
-export interface ViewerWithCustomInfo {
-  id: number;
-  broadcaster_channel_id: string;
-  channel_id: string;
-  display_name: string;
-  first_seen: string;
-  last_seen: string;
-  message_count: number;
-  total_contribution: number;
-  membership_level: string | null;
-  tags: string[];
-  reading: string | null;
-  notes: string | null;
-  custom_data: string | null;
-}
-
+// Session（DBから取得、フロントエンド固有定義）
 export interface Session {
   id: string;
   start_time: string;
@@ -47,16 +22,10 @@ export interface Session {
   total_revenue: number;
 }
 
-export interface ContributorStats {
-  channel_id: string;
-  display_name: string;
-  message_count: number;
-  total_contribution: number;
-}
-
-export interface BroadcasterChannel {
-  channel_id: string;
-  channel_name: string | null;
-  handle: string | null;
-  viewer_count: number;
+// ViewerCustomInfo（インライン情報、フロントエンド固有）
+export interface ViewerCustomInfo {
+  viewer_profile_id: number;
+  reading: string | null;
+  notes: string | null;
+  custom_data: string | null;
 }

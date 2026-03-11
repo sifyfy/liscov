@@ -1,19 +1,16 @@
 import { test, expect, BrowserContext, Page, Browser } from '@playwright/test';
-import { exec } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import { log } from './utils/logger';
 import {
   MOCK_SERVER_URL,
-  PROJECT_DIR,
   TEST_APP_NAME,
-  TEST_KEYRING_SERVICE,
   killTauriApp,
   cleanupTestData,
   cleanupTestCredentials,
-  waitForCDP,
+  startTauriApp,
   connectToApp,
+  getTestAppDataDir,
 } from './utils/test-helpers';
 
 /**
@@ -27,44 +24,9 @@ import {
  *    pnpm exec playwright test --config e2e/playwright.config.ts font-size-persistence.spec.ts
  */
 
-// Get test config directory based on platform
-function getTestConfigDir(): string {
-  const configDir = process.platform === 'win32'
-    ? process.env.APPDATA
-    : process.platform === 'darwin'
-      ? path.join(os.homedir(), 'Library', 'Application Support')
-      : path.join(os.homedir(), '.config');
-
-  return path.join(configDir!, TEST_APP_NAME);
-}
-
-// Helper to start Tauri app with test isolation
-async function startTauriApp(): Promise<void> {
-  const env = {
-    ...process.env,
-    // Test isolation: use separate namespace
-    LISCOV_APP_NAME: TEST_APP_NAME,
-    LISCOV_KEYRING_SERVICE: TEST_KEYRING_SERVICE,
-    // Mock server URLs (needed for app to start without errors)
-    LISCOV_AUTH_URL: `${MOCK_SERVER_URL}/?auto_login=true`,
-    LISCOV_SESSION_CHECK_URL: `${MOCK_SERVER_URL}/youtubei/v1/account/account_menu`,
-    LISCOV_YOUTUBE_BASE_URL: MOCK_SERVER_URL,
-    // Enable CDP for Playwright
-    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=9222',
-  };
-
-  log.info(`Starting Tauri app with test namespace: ${TEST_APP_NAME}`);
-
-  // Start app in background
-  exec(`cd "${PROJECT_DIR}" && pnpm tauri dev`, { env });
-
-  // Wait for CDP to be available
-  await waitForCDP();
-}
-
 // Read config.toml and return message_font_size value
 function readConfigFontSize(): number | null {
-  const configPath = path.join(getTestConfigDir(), 'config.toml');
+  const configPath = path.join(getTestAppDataDir(), 'config.toml');
   if (!fs.existsSync(configPath)) {
     return null;
   }

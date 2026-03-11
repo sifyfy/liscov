@@ -85,6 +85,34 @@
     }, 300);
   }
 
+  async function saveImmediately() {
+    if (!config) return;
+
+    if (saveTimeout) {
+      clearTimeout(saveTimeout);
+      saveTimeout = null;
+    }
+
+    await ttsStore.saveConfig(config);
+  }
+
+  type ToggleConfigKey =
+    | 'bouyomichan_auto_launch'
+    | 'bouyomichan_auto_close'
+    | 'voicevox_auto_launch'
+    | 'voicevox_auto_close';
+
+  async function toggleConfig(key: ToggleConfigKey) {
+    if (!config) return;
+
+    config = {
+      ...config,
+      [key]: !config[key]
+    };
+
+    await saveImmediately();
+  }
+
   async function testConnection() {
     if (!config) return;
     await ttsStore.testConnection(config.backend);
@@ -254,7 +282,7 @@
             <div class="flex items-center justify-between">
               <span class="text-sm text-[var(--text-primary)]">アプリ起動時に自動起動</span>
               <button
-                onclick={() => { config!.bouyomichan_auto_launch = !config!.bouyomichan_auto_launch; handleConfigChange(); }}
+                onclick={() => toggleConfig('bouyomichan_auto_launch')}
                 data-testid="bouyomichan-auto-launch-toggle"
                 aria-pressed={config.bouyomichan_auto_launch}
                 class="{config.bouyomichan_auto_launch ? 'bg-[var(--success)]' : 'bg-[var(--bg-surface-3)]'} relative inline-flex h-5 w-9 items-center rounded-full transition-colors"
@@ -293,7 +321,7 @@
             <div class="flex items-center justify-between">
               <span class="text-sm text-[var(--text-primary)]">アプリ終了時に自動停止</span>
               <button
-                onclick={() => { config!.bouyomichan_auto_close = !config!.bouyomichan_auto_close; handleConfigChange(); }}
+                onclick={() => toggleConfig('bouyomichan_auto_close')}
                 data-testid="bouyomichan-auto-close-toggle"
                 aria-pressed={config.bouyomichan_auto_close}
                 class="{config.bouyomichan_auto_close ? 'bg-[var(--success)]' : 'bg-[var(--bg-surface-3)]'} relative inline-flex h-5 w-9 items-center rounded-full transition-colors"
@@ -423,7 +451,7 @@
             <div class="flex items-center justify-between">
               <span class="text-sm text-[var(--text-primary)]">アプリ起動時に自動起動</span>
               <button
-                onclick={() => { config!.voicevox_auto_launch = !config!.voicevox_auto_launch; handleConfigChange(); }}
+                onclick={() => toggleConfig('voicevox_auto_launch')}
                 data-testid="voicevox-auto-launch-toggle"
                 aria-pressed={config.voicevox_auto_launch}
                 class="{config.voicevox_auto_launch ? 'bg-[var(--success)]' : 'bg-[var(--bg-surface-3)]'} relative inline-flex h-5 w-9 items-center rounded-full transition-colors"
@@ -462,7 +490,7 @@
             <div class="flex items-center justify-between">
               <span class="text-sm text-[var(--text-primary)]">アプリ終了時に自動停止</span>
               <button
-                onclick={() => { config!.voicevox_auto_close = !config!.voicevox_auto_close; handleConfigChange(); }}
+                onclick={() => toggleConfig('voicevox_auto_close')}
                 data-testid="voicevox-auto-close-toggle"
                 aria-pressed={config.voicevox_auto_close}
                 class="{config.voicevox_auto_close ? 'bg-[var(--success)]' : 'bg-[var(--bg-surface-3)]'} relative inline-flex h-5 w-9 items-center rounded-full transition-colors"

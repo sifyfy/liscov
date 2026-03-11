@@ -9,8 +9,8 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-/// Maximum number of messages to keep in memory
-const MAX_MESSAGES: usize = 1000;
+/// メモリに保持するメッセージの最大数
+pub const MAX_MESSAGES: usize = 1000;
 
 /// Application state shared across commands
 pub struct AppState {

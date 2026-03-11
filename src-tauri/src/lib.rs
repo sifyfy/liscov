@@ -4,6 +4,8 @@
 pub mod commands;
 pub mod core;
 pub mod database;
+pub mod errors;
+pub mod paths;
 pub mod state;
 pub mod tts;
 
@@ -38,7 +40,6 @@ use commands::{
     viewer_get_profile, viewer_get_list, viewer_search, viewer_get_custom_info,
     viewer_upsert_custom_info,
     viewer_delete, broadcaster_get_list, broadcaster_delete, get_top_contributors,
-    get_viewer_profile, search_viewers, // Backward compatibility aliases
     // Raw Response (spec: 05_raw_response.md)
     raw_response_get_config, raw_response_update_config, raw_response_resolve_path, SaveConfigState,
 };
@@ -175,8 +176,6 @@ pub fn run() {
             broadcaster_get_list,
             broadcaster_delete,
             get_top_contributors,
-            get_viewer_profile,   // Backward compatibility
-            search_viewers,       // Backward compatibility
             // Raw Response (spec: 05_raw_response.md)
             raw_response_get_config,
             raw_response_update_config,
