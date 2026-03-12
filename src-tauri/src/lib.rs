@@ -2,6 +2,7 @@
 //! Tauri backend implementation
 
 pub mod commands;
+pub mod connection;
 pub mod core;
 pub mod database;
 pub mod errors;
