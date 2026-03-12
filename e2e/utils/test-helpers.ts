@@ -572,27 +572,39 @@ export async function teardownTestEnvironment(browser?: Browser): Promise<void> 
 }
 
 /**
- * 停止・初期化してアプリをアイドル状態に戻す。
- * 「停止」が表示されていればクリック後「初期化」をクリックし、URL入力欄の再表示を待機する。
+ * 全接続を切断してアプリをアイドル状態に戻す。
+ * 接続リスト内の切断ボタンを順次クリックし、接続リストが空になるのを待つ。
+ * 全切断ボタンが表示されている場合はそちらを優先して使用する。
  */
 export async function disconnectAndInitialize(page: Page): Promise<void> {
-  const stopButton = page.locator('button:has-text("停止")');
-  if (await stopButton.isVisible({ timeout: 1000 }).catch(() => false)) {
-    await stopButton.click();
-    await page.locator('button:has-text("初期化")').click();
-    await expect(page.locator('input[placeholder*="youtube.com"]')).toBeVisible({ timeout: 5000 });
+  // 全切断ボタン（2件以上の接続時に表示）
+  const disconnectAllBtn = page.locator('.disconnect-all-btn');
+  if (await disconnectAllBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+    await disconnectAllBtn.click();
+    await expect(page.locator('.connection-item')).toHaveCount(0, { timeout: 10000 });
+    return;
+  }
+
+  // 個別切断ボタン（1件の接続時）
+  const disconnectBtn = page.locator('.connection-item .disconnect-btn').first();
+  if (await disconnectBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+    await disconnectBtn.click();
+    await expect(page.locator('.connection-item')).toHaveCount(0, { timeout: 10000 });
   }
 }
 
 /**
- * モックサーバーのストリームに接続し、ストリームタイトルの表示を待機する。
+ * モックサーバーのストリームに接続し、接続リストへの追加を待機する。
+ * URLフォームは常に表示されているため、接続後も入力欄は残る。
  * @param videoId - 動画ID（省略時は "test_video_123"）
+ * @param expectedTitle - 接続確認に使うストリームタイトル（省略時は "Mock Live"）
  */
-export async function connectToMockStream(page: Page, videoId = 'test_video_123'): Promise<void> {
+export async function connectToMockStream(page: Page, videoId = 'test_video_123', expectedTitle = 'Mock Live'): Promise<void> {
   const urlInput = page.locator('input[placeholder*="youtube.com"]');
   await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=${videoId}`);
   await page.locator('button:has-text("開始")').click();
-  await expect(page.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+  // 接続リストにエントリが追加されるのを待つ
+  await expect(page.getByText(expectedTitle).first()).toBeVisible({ timeout: 10000 });
 }
 
 /**
