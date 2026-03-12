@@ -4,9 +4,9 @@
 //! コマンド層は入出力の変換と MonitoringDeps / run_monitoring_loop への委譲のみを担う。
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tokio_util::sync::CancellationToken;
 
 use tauri::AppHandle;
 
@@ -17,27 +17,19 @@ use crate::database::{self, Database};
 use crate::state::MAX_MESSAGES;
 use crate::tts::{TtsManager, TtsQueueItem, TtsPriority};
 
-/// 監視タスクが必要とする依存をまとめた構造体
+/// 監視タスクが必要とする共有依存をまとめた構造体
 ///
-/// chat_monitoring_task の 13 引数をグループ化し、
-/// connect_to_stream から MonitoringDeps::from_state で一括生成できるようにする。
+/// 複数接続間で共有されるリソース（メッセージバッファ、DB、WebSocket、TTS）を保持する。
+/// 接続固有の情報（session_id, broadcaster_id, client）は run_monitoring_loop の引数で渡す。
 pub struct MonitoringDeps {
-    /// フロントエンドに送信するチャットメッセージバッファ
+    /// 全接続のメッセージを統合するグローバルバッファ
     pub messages: Arc<RwLock<VecDeque<ChatMessage>>>,
-    /// 監視中フラグ（false にすることでループを停止）
-    pub is_monitoring: Arc<RwLock<bool>>,
-    /// 接続 ID（新規接続が始まると変化し、古いタスクを終了させる）
-    pub connection_id: Arc<AtomicU64>,
     /// データベース接続
     pub database: Arc<RwLock<Option<Database>>>,
     /// WebSocket サーバー（外部アプリへのブロードキャスト）
     pub websocket_server: Arc<RwLock<Option<WebSocketServer>>>,
     /// TTS マネージャー
     pub tts_manager: Arc<TtsManager>,
-    /// 現在のセッション ID
-    pub current_session_id: Arc<RwLock<Option<String>>>,
-    /// 現在の配信者チャンネル ID
-    pub current_broadcaster_id: Arc<RwLock<Option<String>>>,
 }
 
 impl MonitoringDeps {
@@ -45,13 +37,9 @@ impl MonitoringDeps {
     pub fn from_state(state: &crate::AppState) -> Self {
         Self {
             messages: Arc::clone(&state.messages),
-            is_monitoring: Arc::clone(&state.is_monitoring),
-            connection_id: Arc::clone(&state.connection_id),
             database: Arc::clone(&state.database),
             websocket_server: Arc::clone(&state.websocket_server),
             tts_manager: Arc::clone(&state.tts_manager),
-            current_session_id: Arc::clone(&state.current_session_id),
-            current_broadcaster_id: Arc::clone(&state.current_broadcaster_id),
         }
     }
 }
@@ -62,25 +50,32 @@ impl MonitoringDeps {
 /// ループ終了後にセッションの終了処理（end_session / update_session_stats）を行う。
 ///
 /// # 引数
-/// - `deps` — 監視タスクが必要とする依存一式
-/// - `innertube_client` — InnerTube クライアント（AppState から Arc::clone 済み）
+/// - `deps` — 監視タスクが必要とする共有依存一式
+/// - `innertube_client` — InnerTube クライアント（Arc<RwLock> でラップ済み）
 /// - `app` — Tauri AppHandle（フロントエンドへの emit に使用）
 /// - `video_id` — 監視対象の YouTube 動画 ID
-/// - `my_connection_id` — このタスクが生成された時点での接続 ID
+/// - `connection_id` — この接続に割り当てられた接続 ID
+/// - `session_id` — データベースセッション ID
+/// - `broadcaster_id` — 配信者チャンネル ID
+/// - `cancellation_token` — この接続のキャンセレーショントークン
 /// - `save_config` — レスポンス保存設定
 /// - `emit_gui_message` — ChatMessage を GUI 用に変換して emit するコールバック
+#[allow(clippy::too_many_arguments)]
 pub async fn run_monitoring_loop<F>(
     deps: MonitoringDeps,
     innertube_client: Arc<RwLock<Option<InnerTubeClient>>>,
     app: AppHandle,
     video_id: String,
-    my_connection_id: u64,
+    connection_id: u64,
+    session_id: Option<String>,
+    broadcaster_id: Option<String>,
+    cancellation_token: CancellationToken,
     save_config: SaveConfig,
     emit_gui_message: F,
 ) where
     F: Fn(&AppHandle, &ChatMessage) + Send + Sync + 'static,
 {
-    tracing::info!("チャット監視タスク開始 connection_id: {}", my_connection_id);
+    tracing::info!("チャット監視タスク開始 connection_id: {}", connection_id);
     let poll_interval = std::time::Duration::from_millis(1500);
     let raw_response_saver = RawResponseSaver::new(save_config);
     let mut poll_count = 0u64;
@@ -97,31 +92,14 @@ pub async fn run_monitoring_loop<F>(
     };
 
     loop {
-        // 監視停止フラグを確認
-        {
-            let monitoring = deps.is_monitoring.read().await;
-            if !*monitoring {
-                tracing::info!(
-                    "監視フラグにより停止 polls: {} connection_id: {}",
-                    poll_count,
-                    my_connection_id
-                );
-                break;
-            }
-        }
-
-        // 接続 ID が変わっていれば（新規接続が始まった）終了
-        {
-            let current_id = deps.connection_id.load(Ordering::SeqCst);
-            if current_id != my_connection_id {
-                tracing::info!(
-                    "接続 ID 変化により停止 {} → {} polls: {}",
-                    my_connection_id,
-                    current_id,
-                    poll_count
-                );
-                break;
-            }
+        // CancellationToken でループ停止を確認
+        if cancellation_token.is_cancelled() {
+            tracing::info!(
+                "CancellationToken によりループ停止 connection_id: {} polls: {}",
+                connection_id,
+                poll_count
+            );
+            break;
         }
 
         poll_count += 1;
@@ -137,17 +115,13 @@ pub async fn run_monitoring_loop<F>(
             break;
         };
 
-        // フェッチ前にも接続 ID を確認（disconnect が呼ばれた場合への対応）
-        {
-            let current_id = deps.connection_id.load(Ordering::SeqCst);
-            if current_id != my_connection_id {
-                tracing::info!(
-                    "フェッチ前に接続 ID 変化 {} → {}",
-                    my_connection_id,
-                    current_id
-                );
-                break;
-            }
+        // フェッチ前にもキャンセルを確認
+        if cancellation_token.is_cancelled() {
+            tracing::info!(
+                "フェッチ前にキャンセル検出 connection_id: {}",
+                connection_id
+            );
+            break;
         }
 
         // メッセージをフェッチ（ロックを保持しない）
@@ -164,20 +138,18 @@ pub async fn run_monitoring_loop<F>(
             }
         };
 
-        // クライアントを戻す（接続 ID が変わっていなければ）
+        // キャンセルされていなければクライアントを戻す
+        if cancellation_token.is_cancelled() {
+            tracing::info!(
+                "フェッチ中にキャンセル検出（クライアントを戻さず終了） connection_id: {}",
+                connection_id
+            );
+            break;
+        }
+
         {
-            let current_id = deps.connection_id.load(Ordering::SeqCst);
-            if current_id == my_connection_id {
-                let mut client_guard = innertube_client.write().await;
-                *client_guard = Some(client);
-            } else {
-                tracing::info!(
-                    "フェッチ中に接続 ID 変化 {} → {}（クライアントを戻さず終了）",
-                    my_connection_id,
-                    current_id
-                );
-                break;
-            }
+            let mut client_guard = innertube_client.write().await;
+            *client_guard = Some(client);
         }
 
         // 生レスポンスを保存（設定が有効な場合）
@@ -186,13 +158,6 @@ pub async fn run_monitoring_loop<F>(
                 tracing::warn!("生レスポンス保存失敗: {}", e);
             }
         }
-
-        // セッション ID と配信者 ID を取得
-        let (session_id, broadcaster_id) = {
-            let session = deps.current_session_id.read().await;
-            let broadcaster = deps.current_broadcaster_id.read().await;
-            (session.clone(), broadcaster.clone())
-        };
 
         // 各メッセージを処理
         for mut msg in new_messages {
@@ -230,15 +195,22 @@ pub async fn run_monitoring_loop<F>(
             enqueue_tts(&deps.tts_manager, &msg).await;
         }
 
-        tokio::time::sleep(poll_interval).await;
+        // スリープ中もキャンセルを検知できるように select! を使用
+        tokio::select! {
+            _ = cancellation_token.cancelled() => {
+                tracing::info!("sleep中にCancellationTokenキャンセル connection_id: {}", connection_id);
+                break;
+            }
+            _ = tokio::time::sleep(poll_interval) => {}
+        }
     }
 
     // セッション終了処理
-    finish_session(&deps, my_connection_id).await;
+    finish_session(&deps, connection_id, &session_id).await;
 
     tracing::info!(
         "チャット監視タスク停止 connection_id: {} polls: {}",
-        my_connection_id,
+        connection_id,
         poll_count
     );
 }
@@ -322,35 +294,35 @@ async fn enqueue_tts(tts_manager: &TtsManager, msg: &ChatMessage) {
 }
 
 /// ループ終了後のセッション終了処理
-async fn finish_session(deps: &MonitoringDeps, my_connection_id: u64) {
+async fn finish_session(deps: &MonitoringDeps, connection_id: u64, session_id: &Option<String>) {
     tracing::debug!(
         "監視タスク終了処理: セッション確認 connection_id: {}",
-        my_connection_id
+        connection_id
     );
-    if let Some(session_id) = deps.current_session_id.read().await.as_ref() {
+    if let Some(sid) = session_id.as_ref() {
         tracing::debug!(
             "監視タスク終了処理: セッション {} を終了 connection_id: {}",
-            session_id,
-            my_connection_id
+            sid,
+            connection_id
         );
         let db_guard = deps.database.read().await;
         if let Some(db) = db_guard.as_ref() {
             let conn = db.connection().await;
-            if let Err(e) = database::end_session(&conn, session_id) {
+            if let Err(e) = database::end_session(&conn, sid) {
                 tracing::warn!("セッション終了失敗: {}", e);
             }
-            if let Err(e) = database::update_session_stats(&conn, session_id) {
+            if let Err(e) = database::update_session_stats(&conn, sid) {
                 tracing::warn!("セッション統計更新失敗: {}", e);
             }
             tracing::debug!(
                 "監視タスク終了処理: セッション終了完了 connection_id: {}",
-                my_connection_id
+                connection_id
             );
         }
     } else {
         tracing::debug!(
             "監視タスク終了処理: 終了すべきセッションなし connection_id: {}",
-            my_connection_id
+            connection_id
         );
     }
 }
