@@ -501,8 +501,20 @@ pub async fn export_current_messages(
     config: ExportConfig,
 ) -> Result<(), CommandError> {
     let messages = state.messages.read().await;
-    let session_id = state.current_session_id.read().await.clone();
-    let broadcaster_id = state.current_broadcaster_id.read().await.clone();
+
+    // 多接続モデルでは最初のアクティブ接続からセッション情報を取得する
+    let (session_id, broadcaster_id) = {
+        let connections = state.connections.read().await;
+        let first = connections.values().next();
+        (
+            first.and_then(|c| c.session_id.clone()),
+            if let Some(c) = first {
+                if c.broadcaster_channel_id.is_empty() { None } else { Some(c.broadcaster_channel_id.clone()) }
+            } else {
+                None
+            },
+        )
+    };
 
     let export_messages: Vec<ExportMessage> = messages
         .iter()

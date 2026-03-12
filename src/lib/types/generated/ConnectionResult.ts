@@ -3,4 +3,8 @@
 /**
  * Result of connecting to a stream
  */
-export type ConnectionResult = { success: boolean, stream_title: string | null, broadcaster_channel_id: string | null, broadcaster_name: string | null, is_replay: boolean, error: string | null, session_id: string | null, };
+export type ConnectionResult = { success: boolean, stream_title: string | null, broadcaster_channel_id: string | null, broadcaster_name: string | null, is_replay: boolean, error: string | null, session_id: string | null, 
+/**
+ * この接続に割り当てられた接続ID（success=trueのときのみ有効）
+ */
+connection_id: bigint, };
