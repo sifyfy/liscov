@@ -47,6 +47,7 @@ pnpm-debug.log*
 # Temporary Claude files
 tmpclaude-*
 /.claude/worktrees/
+.worktrees/
 
 # Local cargo config (machine-specific)
 /.cargo/
