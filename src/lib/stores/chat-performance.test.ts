@@ -38,6 +38,10 @@ function createMessage(id: string, overrides: Partial<ChatMessage> = {}): ChatMe
 		is_first_time_viewer: false,
 		in_stream_comment_count: null,
 		metadata: null,
+		// 多接続対応で追加されたフィールド
+		connection_id: BigInt(1),
+		platform: 'youtube',
+		broadcaster_name: 'TestBroadcaster',
 		...overrides,
 	};
 }
