@@ -2383,6 +2383,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-tungstenite 0.24.0",
+ "tokio-util",
  "toml 0.8.2",
  "tracing",
  "ts-rs",
@@ -5234,6 +5235,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "pin-project-lite",
  "tokio",
 ]
