@@ -21,8 +21,12 @@
     settings: { icon: 'settings', label: 'Settings', shortLabel: 'Settings' }
   };
 
-  // broadcasterChannelId を derived で取得
-  let broadcasterId = $derived(chatStore.broadcasterChannelId || '');
+  // 最初の接続のbroadcasterChannelIdを使用（ViewerInfoPanel用）
+  let broadcasterId = $derived(
+    chatStore.connections.size > 0
+      ? [...chatStore.connections.values()][0].broadcasterChannelId
+      : ''
+  );
 
   // ストレージエラーが発生した場合にダイアログを表示
   let hasStorageError = $derived(authStore.storageError !== null);
@@ -61,7 +65,14 @@
             style="background: {chatStore.isConnected ? 'var(--success)' : 'var(--text-muted)'};"
           ></div>
           <span class="text-xs text-[var(--text-secondary)]">
-            {chatStore.isConnected ? '接続中' : '未接続'}
+            {#if chatStore.connections.size === 0}
+              未接続
+            {:else if chatStore.connections.size === 1}
+              {@const first = [...chatStore.connections.values()][0]}
+              {first.streamTitle || first.broadcasterName || '接続中'}
+            {:else}
+              {chatStore.connections.size}配信接続中
+            {/if}
           </span>
         </div>
         <!-- WebSocket状態（実行中の場合のみ表示） -->
