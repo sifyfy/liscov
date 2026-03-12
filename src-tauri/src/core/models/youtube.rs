@@ -1,6 +1,24 @@
 //! YouTube-specific models
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
+
+/// 配信プラットフォーム
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "lowercase")]
+pub enum Platform {
+    YouTube,
+}
+
+impl Platform {
+    /// プラットフォームを小文字の文字列として返す
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Platform::YouTube => "youtube",
+        }
+    }
+}
 
 /// Video ID wrapper
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -148,6 +166,26 @@ pub fn extract_video_id(url: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn platform_serializes_to_lowercase() {
+        // Platform::YouTubeは小文字の"youtube"にシリアライズされる
+        let json = serde_json::to_string(&Platform::YouTube).unwrap();
+        assert_eq!(json, r#""youtube""#);
+    }
+
+    #[test]
+    fn platform_deserializes_from_lowercase() {
+        // 小文字の"youtube"からPlatform::YouTubeにデシリアライズできる
+        let platform: Platform = serde_json::from_str(r#""youtube""#).unwrap();
+        assert_eq!(platform, Platform::YouTube);
+    }
+
+    #[test]
+    fn platform_display() {
+        // as_str()は"youtube"を返す
+        assert_eq!(Platform::YouTube.as_str(), "youtube");
+    }
 
     #[test]
     fn test_to_cookie_string_returns_raw_when_present() {
