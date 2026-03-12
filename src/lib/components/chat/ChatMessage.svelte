@@ -7,9 +7,13 @@
     showTimestamps: boolean;
     highlighted?: boolean;
     onClick?: () => void;
+    // 配信元インジケーター（多接続時に使用）
+    showSourceIndicator?: boolean;
+    sourceColor?: string;
+    sourceName?: string;
   }
 
-  let { message, fontSize, showTimestamps, highlighted = false, onClick }: Props = $props();
+  let { message, fontSize, showTimestamps, highlighted = false, onClick, showSourceIndicator = false, sourceColor, sourceName }: Props = $props();
 
   // Get SuperChat colors from metadata or use defaults
   let superchatColors = $derived(() => {
@@ -160,6 +164,14 @@
   tabindex="0"
   onkeydown={(e) => e.key === 'Enter' && onClick?.()}
 >
+  <!-- 配信元インジケーター（多接続時：2接続以上のとき表示） -->
+  {#if showSourceIndicator && sourceColor}
+    <div class="source-indicator-row">
+      <div class="source-indicator" style="background-color: {sourceColor}"></div>
+      <span class="source-label">{sourceName ?? ''}</span>
+    </div>
+  {/if}
+
   <!-- Type header for special messages -->
   {#if typeHeader()}
     {#if superchatColors()}
@@ -306,3 +318,28 @@
     </p>
   </div>
 </div>
+
+<style>
+  /* 配信元インジケーター（多接続時に使用） */
+  .source-indicator-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 4px;
+  }
+  .source-indicator {
+    width: 3px;
+    height: 12px;
+    border-radius: 1px;
+    flex-shrink: 0;
+  }
+  .source-label {
+    font-size: 0.7em;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    max-width: 60px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-shrink: 0;
+  }
+</style>

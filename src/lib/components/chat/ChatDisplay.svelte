@@ -122,12 +122,17 @@
       style="flex: 1; overflow-y: auto; padding: 12px; font-size: {fontSize}px;"
     >
       {#snippet children(message)}
+        {@const showSource = chatStore.connections.size >= 2}
+        {@const conn = chatStore.connections.get(Number(message.connection_id))}
         <div class="mb-1">
           <ChatMessageComponent
             {message}
             {fontSize}
             {showTimestamps}
             highlighted={highlightedMessageId === message.id}
+            showSourceIndicator={showSource}
+            sourceColor={conn?.color}
+            sourceName={conn?.broadcasterName}
             onClick={() => handleMessageClick(message)}
           />
         </div>
