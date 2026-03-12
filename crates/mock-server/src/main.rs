@@ -395,9 +395,16 @@ fn build_routes(state: Arc<ServerState>) -> impl Filter<Extract = impl warp::Rep
             let vid = q.v.as_deref().unwrap_or(&sw.config.video_id);
             let stream_state = sw.stream_state.lock().unwrap();
             let require_auth = stream_state.require_auth;
-            let title = stream_state.title_override.as_ref().unwrap_or(&sw.config.stream_title);
+            // video_idに応じてデフォルトのタイトルとチャンネル名を決定する（複数ストリーム対応）
+            let (default_title, default_channel_name) = match vid {
+                "test_video_456" => ("Mock Live 2".to_string(), "MockBroadcaster2".to_string()),
+                _ => (sw.config.stream_title.clone(), sw.config.channel_name.clone()),
+            };
+            let title_owned = stream_state.title_override.clone().unwrap_or(default_title);
+            let title = &title_owned;
             let channel_id = stream_state.channel_id_override.as_ref().unwrap_or(&sw.config.channel_id);
-            let channel_name = stream_state.channel_name_override.as_ref().unwrap_or(&sw.config.channel_name);
+            let channel_name_owned = stream_state.channel_name_override.clone().unwrap_or(default_channel_name);
+            let channel_name = &channel_name_owned;
             // Cookie記録（E2E cookie pipeline検証用）
             if let Some(ref cookies) = cookie_header {
                 sw.last_request_cookies.lock().unwrap().watch = Some(cookies.clone());
