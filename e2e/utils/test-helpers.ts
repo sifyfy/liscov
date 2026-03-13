@@ -269,8 +269,8 @@ export async function killTauriApp(): Promise<void> {
       execSync('pkill -f liscov-tauri', { stdio: 'ignore' });
     }
   } catch { /* プロセスが存在しない場合は無視 */ }
-  // CDP ポートが解放されるまで待機
-  await waitForPortFree(9222, 5000);
+  // CDP ポートが解放されるまで待機（Windowsではプロセスツリー終了が遅延するため長めに設定）
+  await waitForPortFree(9222, 10000);
 }
 
 /**
