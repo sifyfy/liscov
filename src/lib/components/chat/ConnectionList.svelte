@@ -23,7 +23,7 @@
         <div class="color-indicator" style="background-color: {conn.color}"></div>
         <div class="connection-info">
           <span class="broadcaster-name">{conn.broadcasterName}</span>
-          <span class="stream-title">{conn.streamTitle}</span>
+          <span class="stream-title" data-testid="stream-title">{conn.streamTitle}</span>
         </div>
         <button
           class="disconnect-btn"

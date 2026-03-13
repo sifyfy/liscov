@@ -22,11 +22,7 @@
   };
 
   // 最初の接続のbroadcasterChannelIdを使用（ViewerInfoPanel用）
-  let broadcasterId = $derived(
-    chatStore.connections.size > 0
-      ? [...chatStore.connections.values()][0].broadcasterChannelId
-      : ''
-  );
+  let broadcasterId = $derived(chatStore.broadcasterChannelId ?? '');
 
   // ストレージエラーが発生した場合にダイアログを表示
   let hasStorageError = $derived(authStore.storageError !== null);
@@ -68,8 +64,7 @@
             {#if chatStore.connections.size === 0}
               未接続
             {:else if chatStore.connections.size === 1}
-              {@const first = [...chatStore.connections.values()][0]}
-              {first.streamTitle || first.broadcasterName || '接続中'}
+              {chatStore.streamTitle || chatStore.broadcasterName || '接続中'}
             {:else}
               {chatStore.connections.size}配信接続中
             {/if}

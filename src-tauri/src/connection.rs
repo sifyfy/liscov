@@ -1,6 +1,5 @@
 //! 配信接続の管理
 
-use crate::core::api::InnerTubeClient;
 use crate::core::models::Platform;
 use serde::{Deserialize, Serialize};
 use tokio::task::JoinHandle;
@@ -11,6 +10,9 @@ use ts_rs::TS;
 pub const MAX_CONNECTIONS: usize = 32;
 
 /// 個別の配信接続を表す
+///
+/// InnerTube クライアントは監視タスク内の Arc<RwLock> で管理され、
+/// この構造体には含まれない（ライフタイムが異なるため）。
 pub struct StreamConnection {
     pub id: u64,
     pub platform: Platform,
@@ -19,7 +21,6 @@ pub struct StreamConnection {
     pub broadcaster_name: String,
     pub broadcaster_channel_id: String,
     pub is_monitoring: bool,
-    pub innertube_client: Option<InnerTubeClient>,
     pub session_id: Option<String>,
     pub cancellation_token: CancellationToken,
     pub task_handle: Option<JoinHandle<()>>,
@@ -69,7 +70,6 @@ mod tests {
             broadcaster_name: "テスト配信者".to_string(),
             broadcaster_channel_id: "UCtest123".to_string(),
             is_monitoring: false,
-            innertube_client: None,
             session_id: None,
             cancellation_token: CancellationToken::new(),
             task_handle: None,

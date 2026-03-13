@@ -572,24 +572,35 @@ export async function teardownTestEnvironment(browser?: Browser): Promise<void> 
 }
 
 /**
- * 全接続を切断してアプリをアイドル状態に戻す。
- * 接続リスト内の切断ボタンを順次クリックし、接続リストが空になるのを待つ。
- * 全切断ボタンが表示されている場合はそちらを優先して使用する。
+ * 全接続を切断し、蓄積されたメッセージをクリアしてアプリをアイドル状態に戻す。
+ * 多接続リファクタリングで「初期化」ボタンが廃止されたため、
+ * 切断後にFilterPanelの「クリア」ボタンでメッセージを消去する。
  */
 export async function disconnectAndInitialize(page: Page): Promise<void> {
-  // 全切断ボタン（2件以上の接続時に表示）
+  // Step 1: 全接続を切断
   const disconnectAllBtn = page.locator('.disconnect-all-btn');
   if (await disconnectAllBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
     await disconnectAllBtn.click();
     await expect(page.locator('.connection-item')).toHaveCount(0, { timeout: 10000 });
-    return;
+  } else {
+    const disconnectBtn = page.locator('.connection-item .disconnect-btn').first();
+    if (await disconnectBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await disconnectBtn.click();
+      await expect(page.locator('.connection-item')).toHaveCount(0, { timeout: 10000 });
+    }
   }
 
-  // 個別切断ボタン（1件の接続時）
-  const disconnectBtn = page.locator('.connection-item .disconnect-btn').first();
-  if (await disconnectBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-    await disconnectBtn.click();
-    await expect(page.locator('.connection-item')).toHaveCount(0, { timeout: 10000 });
+  // Step 2: 蓄積メッセージをクリア（テスト間の状態分離のため）
+  // FilterPanelの「クリア」ボタン → 確認ダイアログ → 実行
+  const clearButton = page.locator('button:has-text("クリア")').first();
+  if (await clearButton.isEnabled({ timeout: 1000 }).catch(() => false)) {
+    await clearButton.click();
+    // 確認ダイアログ内のクリアボタン
+    const dialog = page.locator('.fixed.inset-0');
+    await expect(dialog).toBeVisible({ timeout: 3000 });
+    const confirmBtn = dialog.locator('button:has-text("クリア")');
+    await confirmBtn.click();
+    await expect(dialog).not.toBeVisible({ timeout: 3000 });
   }
 }
 

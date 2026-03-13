@@ -54,17 +54,6 @@ export async function getConnections(): Promise<ConnectionInfo[]> {
 }
 
 /**
- * 最近のチャットメッセージを取得する
- */
-export async function getChatMessages(limit?: number): Promise<ChatMessage[]> {
-  try {
-    return await invoke('get_chat_messages', { limit });
-  } catch (e) {
-    throw normalizeError(e);
-  }
-}
-
-/**
  * 特定の接続のチャットモードを設定する（トップ or 全て）
  */
 export async function setChatMode(connectionId: number, mode: ChatMode): Promise<boolean> {

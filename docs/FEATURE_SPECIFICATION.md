@@ -13,16 +13,17 @@
 | 7 | 収益分析・エクスポート機能 | SuperChat、メンバーシップ等の収益を分析し、エクスポートする | [07_revenue.md](specs/07_revenue.md) |
 | 8 | データベース・セッション管理 | チャットセッション、メッセージ、視聴者情報をSQLiteに永続化する | [08_database.md](specs/08_database.md) |
 | 9 | 設定機能 | アプリケーション設定の永続化と管理を行う | [09_config.md](specs/09_config.md) |
+| 10 | ウィンドウ状態管理 | ウィンドウサイズと位置を永続化し、次回起動時に復元する | [10_window_state.md](specs/10_window_state.md) |
 
 ## 永続化ファイル一覧
 
 | ファイル | パス | 形式 | 用途 |
 |---------|------|------|------|
-| config.toml | `%APPDATA%/liscov/config.toml` | TOML | アプリケーション設定 |
-| credentials.toml | `%APPDATA%/liscov/credentials.toml` | TOML | YouTube認証情報（fallbackモード時） |
-| tts_config.toml | `%APPDATA%/liscov/tts_config.toml` | TOML | TTS設定 |
-| liscov.db | `%APPDATA%/liscov/liscov.db` | SQLite | セッション・メッセージ・視聴者情報 |
-| raw_responses.ndjson | `%APPDATA%/liscov/raw_responses.ndjson` | NDJSON | 生APIレスポンス（任意） |
+| config.toml | `%APPDATA%/liscov-tauri/config.toml` | TOML | アプリケーション設定 |
+| credentials.toml | `%APPDATA%/liscov-tauri/credentials.toml` | TOML | YouTube認証情報（fallbackモード時） |
+| tts_config.toml | `%APPDATA%/liscov-tauri/tts_config.toml` | TOML | TTS設定 |
+| liscov.db | `%APPDATA%/liscov-tauri/liscov.db` | SQLite | セッション・メッセージ・視聴者情報 |
+| raw_responses.ndjson | ユーザー指定パス（デフォルト: `raw_responses.ndjson`） | NDJSON | 生APIレスポンス（任意） |
 
 ## テスト要件
 

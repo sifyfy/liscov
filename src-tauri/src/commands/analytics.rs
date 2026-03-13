@@ -502,19 +502,21 @@ pub async fn export_current_messages(
 ) -> Result<(), CommandError> {
     let messages = state.messages.read().await;
 
-    // 多接続モデルでは最初のアクティブ接続からセッション情報を取得する
-    let (session_id, broadcaster_id) = {
+    // 多接続モデル: 全接続のセッションID・配信者IDを収集
+    let (session_ids, broadcaster_ids): (Vec<String>, Vec<String>) = {
         let connections = state.connections.read().await;
-        let first = connections.values().next();
-        (
-            first.and_then(|c| c.session_id.clone()),
-            if let Some(c) = first {
-                if c.broadcaster_channel_id.is_empty() { None } else { Some(c.broadcaster_channel_id.clone()) }
-            } else {
-                None
-            },
-        )
+        let sids: Vec<String> = connections.values()
+            .filter_map(|c| c.session_id.clone())
+            .collect();
+        let bids: Vec<String> = connections.values()
+            .map(|c| c.broadcaster_channel_id.clone())
+            .filter(|id| !id.is_empty())
+            .collect();
+        (sids, bids)
     };
+    // 後方互換: 単一値として最初の要素を使用（エクスポートヘッダ用）
+    let session_id = session_ids.first().cloned();
+    let broadcaster_id = broadcaster_ids.first().cloned();
 
     let export_messages: Vec<ExportMessage> = messages
         .iter()

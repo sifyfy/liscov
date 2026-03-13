@@ -352,7 +352,6 @@ pub async fn connect_to_stream(
             broadcaster_name: result.broadcaster_name.clone().unwrap_or_default(),
             broadcaster_channel_id: result.broadcaster_channel_id.clone().unwrap_or_default(),
             is_monitoring: true,
-            innertube_client: None, // クライアントは監視タスク側で管理
             session_id: session_id.clone(),
             cancellation_token: cancellation_token.clone(),
             task_handle: None, // spawn後に設定
@@ -362,6 +361,10 @@ pub async fn connect_to_stream(
             let mut connections = state.connections.write().await;
             connections.insert(connection_id, stream_conn);
         }
+
+        // 監視タスク終了後のクリーンアップ用に connections Arc をキャプチャ
+        let connections_for_cleanup = Arc::clone(&state.connections);
+        let app_for_cleanup = app.clone();
 
         // 監視タスクをスポーン
         let handle = tokio::spawn(async move {
@@ -387,6 +390,32 @@ pub async fn connect_to_stream(
                 },
             )
             .await;
+
+            // 監視タスク終了後: connections マップに残っている場合はクリーンアップ
+            // （disconnect_stream 経由で既に削除済みの場合はスキップ）
+            let was_present = {
+                let mut connections = connections_for_cleanup.write().await;
+                connections.remove(&conn_id).is_some()
+            };
+            if was_present {
+                tracing::info!(
+                    "監視タスクが自律終了 — フロントエンドに切断を通知 connection_id: {}",
+                    conn_id
+                );
+                let _ = app_for_cleanup.emit(
+                    "chat:connection",
+                    ConnectionResult {
+                        success: false,
+                        stream_title: None,
+                        broadcaster_channel_id: None,
+                        broadcaster_name: None,
+                        is_replay: false,
+                        error: Some("監視タスクが予期せず終了しました".to_string()),
+                        session_id: None,
+                        connection_id: conn_id,
+                    },
+                );
+            }
         });
 
         // JoinHandle を StreamConnection に格納
@@ -488,15 +517,19 @@ pub async fn disconnect_all_streams(
         handles
     };
 
-    // 全タスクを待機
+    // 全タスクを並列待機（直列だと N × timeout になるため）
     let timeout = std::time::Duration::from_secs(5);
-    for (id, handle) in handles {
-        match tokio::time::timeout(timeout, handle).await {
-            Ok(Ok(())) => tracing::debug!("disconnect_all: task {} completed", id),
-            Ok(Err(e)) => tracing::warn!("disconnect_all: task {} panicked: {}", id, e),
-            Err(_) => tracing::warn!("disconnect_all: task {} timed out", id),
-        }
-    }
+    let futures: Vec<_> = handles
+        .into_iter()
+        .map(|(id, handle)| async move {
+            match tokio::time::timeout(timeout, handle).await {
+                Ok(Ok(())) => tracing::debug!("disconnect_all: task {} completed", id),
+                Ok(Err(e)) => tracing::warn!("disconnect_all: task {} panicked: {}", id, e),
+                Err(_) => tracing::warn!("disconnect_all: task {} timed out", id),
+            }
+        })
+        .collect();
+    futures_util::future::join_all(futures).await;
 
     // connections マップをクリア
     {
@@ -516,17 +549,6 @@ pub async fn get_connections(
     Ok(connections.values().map(ConnectionInfo::from).collect())
 }
 
-/// Get recent chat messages
-#[tauri::command]
-pub async fn get_chat_messages(
-    state: State<'_, AppState>,
-    limit: Option<usize>,
-) -> Result<Vec<GuiChatMessage>, CommandError> {
-    let limit = limit.unwrap_or(100);
-    let messages = state.get_messages(limit).await;
-    Ok(messages.into_iter().map(GuiChatMessage::from).collect())
-}
-
 /// Set chat mode (TopChat or AllChat) for a specific connection
 #[tauri::command]
 pub async fn set_chat_mode(
@@ -539,21 +561,14 @@ pub async fn set_chat_mode(
         _ => ChatMode::TopChat,
     };
 
-    // 指定された接続の InnerTube クライアントへモード変更を適用
     // クライアントは監視タスク内の Arc<RwLock> で管理されているため、
-    // connections マップには存在しない。
-    // set_chat_mode は接続のキャンセルなしには直接操作できないため、
-    // この操作はフィールド経由ではなくチャンネルで行うべきだが、
-    // 現時点では接続IDに対応するクライアントが存在するかを確認してエラーを返す
+    // connections マップからは直接アクセスできない。
+    // チャットモード変更には接続の再作成が必要（Phase 2 で改善予定）。
     let connections = state.connections.read().await;
     if connections.contains_key(&connection_id) {
-        // TODO: 各接続のクライアントへのアクセスは今後の改善で対応
-        // 現状では接続が存在すれば成功として返す（実際の切替は接続再作成が必要）
-        tracing::warn!(
-            "set_chat_mode: connection {} exists but direct client access not yet implemented",
-            connection_id
-        );
-        Ok(true)
+        Err(CommandError::InvalidInput(
+            "チャットモードの動的切り替えは未実装です。切断して再接続してください。".to_string()
+        ))
     } else {
         Err(CommandError::NotConnected(format!(
             "接続 {} が見つかりません",

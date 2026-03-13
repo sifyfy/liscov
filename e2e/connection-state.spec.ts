@@ -141,12 +141,17 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
       await expect(mainPage.getByText(uniqueContent)).toBeVisible({ timeout: 5000 });
       const messageCountBefore = await mainPage.locator('[data-message-id]').count();
 
-      // 切断
-      await disconnectAndInitialize(mainPage);
+      // 切断のみ（disconnectAndInitializeはメッセージもクリアするため使わない）
+      const disconnectBtn = mainPage.locator('.connection-item .disconnect-btn').first();
+      await disconnectBtn.click();
+      await expect(mainPage.locator('.connection-item')).toHaveCount(0, { timeout: 10000 });
 
       // メッセージは保持される（クリアされない）
       const messageCountAfter = await mainPage.locator('[data-message-id]').count();
       expect(messageCountAfter).toBe(messageCountBefore);
+
+      // テスト後クリーンアップ（次のテストのために状態をリセット）
+      await disconnectAndInitialize(mainPage);
     });
   });
 
@@ -293,7 +298,7 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
       const countBefore = parseInt(statusBefore?.match(/全(\d+)件/)?.[1] || '0');
       log.debug(`Messages before disconnect: ${countBefore}`);
 
-      // 切断
+      // 切断（disconnectAndInitializeはメッセージもクリアする）
       await disconnectAndInitialize(mainPage);
 
       // 再接続
@@ -303,11 +308,11 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
 
       await mainPage.waitForTimeout(5000);
 
-      // 新しいメッセージが届いている
+      // 新しいメッセージが届いている（disconnectAndInitializeでクリア済みなので0から再開）
       const statusAfter = await mainPage.locator('text=/全\\d+件/').textContent();
       const countAfter = parseInt(statusAfter?.match(/全(\d+)件/)?.[1] || '0');
       log.debug(`Messages after reconnect: ${countAfter}`);
-      expect(countAfter).toBeGreaterThan(countBefore);
+      expect(countAfter).toBeGreaterThan(0);
 
       await disableAutoMessages();
       await disconnectAndInitialize(mainPage);

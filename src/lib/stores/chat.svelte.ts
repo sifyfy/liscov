@@ -127,8 +127,6 @@ function createChatStore() {
   async function connect(url: string, mode?: ChatMode): Promise<ConnectionResult> {
     error = null;
 
-    // 接続中の仮エントリを追加（UIフィードバック用）
-    // connect_to_stream完了後に正式エントリに差し替え
     try {
       const result = await chatApi.connectToStream(url, mode);
 
@@ -235,9 +233,14 @@ function createChatStore() {
 
   async function setChatModeAction(mode: ChatMode): Promise<void> {
     chatMode = mode;
-    // 全接続にモード変更を適用
+    // チャットモード動的切り替えは未実装（Phase 2）
+    // エラーはログに出力し、ユーザーには chatMode の UI 状態のみ更新する
     for (const [connId] of connections) {
-      await chatApi.setChatMode(connId, mode);
+      try {
+        await chatApi.setChatMode(connId, mode);
+      } catch {
+        // 未実装エラーは想定内 — 切断・再接続で反映される
+      }
     }
   }
 
@@ -318,10 +321,12 @@ function createChatStore() {
           broadcasterChannelId: result.broadcaster_channel_id ?? conn.broadcasterChannelId
         });
         connections = next;
+      } else if (conn.connectionState === 'disconnecting') {
+        // 意図的切断 — disconnect() の finally で処理されるため何もしない
       } else {
-        // エラー状態に更新
+        // 監視タスクの異常終了等 — 接続を削除してエラーを表示
         const next = new Map(connections);
-        next.set(connId, { ...conn, connectionState: 'error' });
+        next.delete(connId);
         connections = next;
         error = result.error;
       }

@@ -24,7 +24,7 @@ use commands::{
     auth_open_window, auth_check_session_validity, auth_use_fallback_storage,
     // Chat (spec: 02_chat.md)
     connect_to_stream, disconnect_stream, disconnect_all_streams, get_connections,
-    get_chat_messages, set_chat_mode,
+    set_chat_mode,
     // Config (spec: 09_config.md)
     config_load, config_save, config_get_value, config_set_value, ConfigState,
     // WebSocket (spec: 03_websocket.md) - auto-start, no manual start/stop
@@ -137,7 +137,6 @@ pub fn run() {
             disconnect_stream,
             disconnect_all_streams,
             get_connections,
-            get_chat_messages,
             set_chat_mode,
             // Config (spec: 09_config.md)
             config_load,
