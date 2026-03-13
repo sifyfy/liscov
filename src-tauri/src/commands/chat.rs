@@ -1,8 +1,9 @@
 //! Chat monitoring commands
 
+use crate::connection::{ConnectionInfo, StreamConnection, MAX_CONNECTIONS};
 use crate::core::api::InnerTubeClient;
 use crate::core::chat_runtime::{MonitoringDeps, run_monitoring_loop};
-use crate::core::models::{extract_video_id, ChatMessage, ChatMode, ConnectionStatus};
+use crate::core::models::{extract_video_id, ChatMessage, ChatMode, ConnectionStatus, Platform};
 use crate::database;
 use crate::errors::CommandError;
 use crate::AppState;
@@ -11,7 +12,10 @@ use crate::commands::config::ConfigState;
 use crate::commands::auth;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Emitter, State};
+use tokio::sync::{RwLock, watch};
+use tokio_util::sync::CancellationToken;
 use ts_rs::TS;
 
 /// Result of connecting to a stream
@@ -25,6 +29,8 @@ pub struct ConnectionResult {
     pub is_replay: bool,
     pub error: Option<String>,
     pub session_id: Option<String>,
+    /// この接続に割り当てられた接続ID（success=trueのときのみ有効）
+    pub connection_id: u64,
 }
 
 impl From<ConnectionStatus> for ConnectionResult {
@@ -37,6 +43,8 @@ impl From<ConnectionStatus> for ConnectionResult {
             is_replay: status.is_replay,
             error: status.error,
             session_id: None,
+            // 呼び出し元で設定する
+            connection_id: 0,
         }
     }
 }
@@ -102,6 +110,12 @@ pub struct GuiChatMessage {
     pub is_first_time_viewer: bool,
     pub in_stream_comment_count: Option<u32>,
     pub metadata: Option<GuiMessageMetadata>,
+    /// この接続に割り当てられた接続ID
+    pub connection_id: u64,
+    /// 配信プラットフォーム（例: "youtube"）
+    pub platform: String,
+    /// 配信者名
+    pub broadcaster_name: String,
 }
 
 impl From<ChatMessage> for GuiChatMessage {
@@ -123,7 +137,7 @@ impl From<ChatMessage> for GuiChatMessage {
             crate::core::models::MessageType::System => ("system".to_string(), None, None, None),
         };
 
-        // Convert runs from core models to GUI models
+        // runs を core models から GUI models に変換
         let runs: Vec<MessageRun> = msg.runs.into_iter().map(|run| {
             match run {
                 crate::core::models::MessageRun::Text { content } => MessageRun::Text { content },
@@ -133,7 +147,7 @@ impl From<ChatMessage> for GuiChatMessage {
             }
         }).collect();
 
-        // Convert metadata
+        // metadata を変換
         let metadata = msg.metadata.map(|m| {
             GuiMessageMetadata {
                 amount: m.amount,
@@ -176,7 +190,27 @@ impl From<ChatMessage> for GuiChatMessage {
             is_first_time_viewer: msg.is_first_time_viewer,
             in_stream_comment_count: msg.in_stream_comment_count,
             metadata,
+            // デフォルト値（呼び出し元で from_with_connection を使うべき）
+            connection_id: 0,
+            platform: "youtube".to_string(),
+            broadcaster_name: String::new(),
         }
+    }
+}
+
+impl GuiChatMessage {
+    /// 接続情報付きで ChatMessage から GuiChatMessage を生成する
+    pub fn from_with_connection(
+        msg: ChatMessage,
+        connection_id: u64,
+        platform: &str,
+        broadcaster_name: &str,
+    ) -> Self {
+        let mut gui = Self::from(msg);
+        gui.connection_id = connection_id;
+        gui.platform = platform.to_string();
+        gui.broadcaster_name = broadcaster_name.to_string();
+        gui
     }
 }
 
@@ -190,44 +224,40 @@ pub async fn connect_to_stream(
     url: String,
     chat_mode: Option<String>,
 ) -> Result<ConnectionResult, CommandError> {
-    // Increment connection ID to invalidate any running monitoring tasks
-    let new_connection_id = state.connection_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
-    tracing::info!("connect_to_stream called with url: {}, chat_mode: {:?}, connection_id: {}", url, chat_mode, new_connection_id);
-
-    // Stop any existing monitoring
-    tracing::debug!("connect_to_stream: acquiring is_monitoring lock...");
+    // 同時接続数の上限チェック
     {
-        let mut monitoring = state.is_monitoring.write().await;
-        *monitoring = false;
+        let connections = state.connections.read().await;
+        if connections.len() >= MAX_CONNECTIONS {
+            return Err(CommandError::InvalidInput(format!(
+                "同時接続数の上限（{}）に達しています",
+                MAX_CONNECTIONS
+            )));
+        }
     }
-    tracing::debug!("connect_to_stream: is_monitoring set to false");
 
-    // Clear old client to help old monitoring task exit faster
-    tracing::debug!("connect_to_stream: acquiring innertube_client lock...");
-    {
-        let mut client = state.innertube_client.write().await;
-        *client = None;
-    }
-    tracing::debug!("connect_to_stream: innertube_client cleared");
-
-    // Small delay to allow old task to notice the changes
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    tracing::debug!("connect_to_stream: delay complete, proceeding with connection");
+    // 新しい接続IDを採番
+    let connection_id = state.next_connection_id.fetch_add(1, Ordering::SeqCst) + 1;
+    tracing::info!(
+        "connect_to_stream called with url: {}, chat_mode: {:?}, connection_id: {}",
+        url,
+        chat_mode,
+        connection_id
+    );
 
     // URLからビデオIDを抽出
     let video_id = extract_video_id(&url)
         .ok_or_else(|| CommandError::InvalidInput("Invalid YouTube URL".to_string()))?;
 
-    // Parse chat mode
+    // チャットモードをパース
     let mode = match chat_mode.as_deref() {
         Some("all") | Some("AllChat") => ChatMode::AllChat,
         _ => ChatMode::TopChat,
     };
 
-    // Create and initialize InnerTube client
+    // InnerTube クライアントを作成・初期化
     let mut client = InnerTubeClient::new(&video_id);
 
-    // Load auth cookies from storage and set on client (required for member-only streams)
+    // 認証クッキーをストレージから読み込んでクライアントに設定（メンバー限定配信用）
     let config = config_state.get();
     if let Ok(cookies) = auth::load_cookies(&config.storage.mode) {
         tracing::info!("Auth cookies loaded, setting on InnerTube client");
@@ -241,14 +271,13 @@ pub async fn connect_to_stream(
         .await
         .map_err(|e| CommandError::ConnectionFailed(format!("Failed to connect: {}", e)))?;
 
-    // Set chat mode after initialization (requires continuation token)
+    // 初期化後にチャットモードを設定（continuation token が必要）
     if status.is_connected {
         if !client.set_chat_mode(mode) {
             tracing::warn!("Failed to set chat mode to {:?}, using default", mode);
         }
     }
 
-    // Debug: Log connection status details
     tracing::info!(
         "Connection status: is_connected={}, stream_title={:?}, broadcaster_channel_id={:?}, broadcaster_name={:?}",
         status.is_connected,
@@ -258,9 +287,10 @@ pub async fn connect_to_stream(
     );
 
     let mut result = ConnectionResult::from(status.clone());
+    result.connection_id = connection_id;
 
     if result.success {
-        // Create database session
+        // データベースセッションを作成
         let session_id = {
             let db_guard = state.database.read().await;
             if let Some(db) = db_guard.as_ref() {
@@ -288,99 +318,154 @@ pub async fn connect_to_stream(
 
         result.session_id = session_id.clone();
 
-        // Store session and broadcaster info in state
-        {
-            let mut session = state.current_session_id.write().await;
-            *session = session_id;
-        }
-        {
-            let mut broadcaster = state.current_broadcaster_id.write().await;
-            *broadcaster = result.broadcaster_channel_id.clone();
-        }
+        // クライアントを監視タスク用の Arc<RwLock> にラップ
+        let innertube_client: Arc<RwLock<Option<InnerTubeClient>>> =
+            Arc::new(RwLock::new(Some(client)));
 
-        // Store client in state
-        {
-            let mut innertube = state.innertube_client.write().await;
-            *innertube = Some(client);
-        }
+        // キャンセレーショントークンを生成
+        let cancellation_token = CancellationToken::new();
 
-        // Clear old messages
-        state.clear_messages().await;
+        // チャットモード制御用の watch チャネルを生成
+        let (chat_mode_tx, chat_mode_rx) = watch::channel(mode);
 
-        // 監視タスクの依存を MonitoringDeps にまとめる（Arc::clone を一元化）
+        // 監視タスクの共有依存を構築
         let deps = MonitoringDeps::from_state(&state);
-        let innertube_client = Arc::clone(&state.innertube_client);
-        let app_handle = app.clone();
 
         // 生レスポンス保存設定を取得
         let save_config = save_config_state.0.lock()
             .map_err(|e| CommandError::Internal(format!("Mutex lock failed: {}", e)))?
             .clone();
 
+        // emit コールバック用に接続情報をキャプチャ
+        let conn_id = connection_id;
+        let platform_str = Platform::YouTube.as_str().to_string();
+        let broadcaster = result.broadcaster_name.clone().unwrap_or_default();
+
+        let app_handle = app.clone();
+        let innertube_for_task = Arc::clone(&innertube_client);
+        let token_for_task = cancellation_token.clone();
+        let broadcaster_id = result.broadcaster_channel_id.clone();
+
+        // StreamConnection を生成して connections マップに追加
+        let stream_conn = StreamConnection {
+            id: connection_id,
+            platform: Platform::YouTube,
+            stream_url: url.clone(),
+            stream_title: result.stream_title.clone().unwrap_or_default(),
+            broadcaster_name: result.broadcaster_name.clone().unwrap_or_default(),
+            broadcaster_channel_id: result.broadcaster_channel_id.clone().unwrap_or_default(),
+            is_monitoring: true,
+            session_id: session_id.clone(),
+            cancellation_token: cancellation_token.clone(),
+            task_handle: None, // spawn後に設定
+            chat_mode_tx,
+        };
+
         {
-            let mut monitoring = deps.is_monitoring.write().await;
-            *monitoring = true;
+            let mut connections = state.connections.write().await;
+            connections.insert(connection_id, stream_conn);
         }
 
-        tokio::spawn(async move {
+        // 監視タスク終了後のクリーンアップ用に connections Arc をキャプチャ
+        let connections_for_cleanup = Arc::clone(&state.connections);
+        let app_for_cleanup = app.clone();
+
+        // 監視タスクをスポーン
+        let handle = tokio::spawn(async move {
             run_monitoring_loop(
                 deps,
-                innertube_client,
+                innertube_for_task,
                 app_handle,
                 video_id,
-                new_connection_id,
+                conn_id,
+                session_id,
+                broadcaster_id,
+                token_for_task,
                 save_config,
-                |app, msg| {
-                    // ChatMessage を GUI 用に変換してフロントエンドへ emit
-                    let gui_msg = GuiChatMessage::from(msg.clone());
+                chat_mode_rx,
+                move |app, msg| {
+                    // ChatMessage を接続情報付き GUI メッセージに変換してフロントエンドへ emit
+                    let gui_msg = GuiChatMessage::from_with_connection(
+                        msg.clone(),
+                        conn_id,
+                        &platform_str,
+                        &broadcaster,
+                    );
                     let _ = app.emit("chat:message", &gui_msg);
                 },
             )
             .await;
+
+            // 監視タスク終了後: connections マップに残っている場合はクリーンアップ
+            // （disconnect_stream 経由で既に削除済みの場合はスキップ）
+            let was_present = {
+                let mut connections = connections_for_cleanup.write().await;
+                connections.remove(&conn_id).is_some()
+            };
+            if was_present {
+                tracing::info!(
+                    "監視タスクが自律終了 — フロントエンドに切断を通知 connection_id: {}",
+                    conn_id
+                );
+                let _ = app_for_cleanup.emit(
+                    "chat:connection",
+                    ConnectionResult {
+                        success: false,
+                        stream_title: None,
+                        broadcaster_channel_id: None,
+                        broadcaster_name: None,
+                        is_replay: false,
+                        error: Some("監視タスクが予期せず終了しました".to_string()),
+                        session_id: None,
+                        connection_id: conn_id,
+                    },
+                );
+            }
         });
 
-        // Emit connection event
+        // JoinHandle を StreamConnection に格納
+        {
+            let mut connections = state.connections.write().await;
+            if let Some(conn) = connections.get_mut(&connection_id) {
+                conn.task_handle = Some(handle);
+            }
+        }
+
+        // 接続イベントを emit
         let _ = app.emit("chat:connection", &result);
     }
 
     Ok(result)
 }
 
-/// Disconnect from the current stream
+/// 特定の配信への接続を切断する
 #[tauri::command]
 pub async fn disconnect_stream(
     app: AppHandle,
     state: State<'_, AppState>,
+    connection_id: u64,
 ) -> Result<(), CommandError> {
-    tracing::info!("disconnect_stream called");
+    tracing::info!("disconnect_stream called for connection_id: {}", connection_id);
 
-    // Stop monitoring
-    tracing::debug!("disconnect_stream: stopping monitoring");
-    {
-        let mut monitoring = state.is_monitoring.write().await;
-        *monitoring = false;
-    }
+    // 接続のキャンセレーショントークンを取得してキャンセル
+    let task_handle = {
+        let mut connections = state.connections.write().await;
+        let conn = connections.get_mut(&connection_id).ok_or_else(|| {
+            CommandError::NotConnected(format!(
+                "接続 {} が見つかりません",
+                connection_id
+            ))
+        })?;
 
-    // Clear client
-    tracing::debug!("disconnect_stream: clearing client");
-    {
-        let mut client = state.innertube_client.write().await;
-        *client = None;
-    }
+        // トークンをキャンセル
+        conn.cancellation_token.cancel();
+        tracing::debug!("disconnect_stream: connection {} cancelled", connection_id);
 
-    // Clear session and broadcaster info
-    tracing::debug!("disconnect_stream: clearing session");
-    {
-        let mut session = state.current_session_id.write().await;
-        *session = None;
-    }
-    tracing::debug!("disconnect_stream: clearing broadcaster");
-    {
-        let mut broadcaster = state.current_broadcaster_id.write().await;
-        *broadcaster = None;
-    }
+        // JoinHandle を取り出す
+        conn.task_handle.take()
+    };
 
-    // Emit disconnection event
+    // 切断イベントを emit
     let _ = app.emit(
         "chat:connection",
         ConnectionResult {
@@ -391,27 +476,92 @@ pub async fn disconnect_stream(
             is_replay: false,
             error: None,
             session_id: None,
+            connection_id,
         },
     );
+
+    // JoinHandle を待機（タイムアウト付き）
+    if let Some(handle) = task_handle {
+        let timeout = std::time::Duration::from_secs(5);
+        match tokio::time::timeout(timeout, handle).await {
+            Ok(Ok(())) => tracing::debug!("disconnect_stream: task {} completed", connection_id),
+            Ok(Err(e)) => tracing::warn!("disconnect_stream: task {} panicked: {}", connection_id, e),
+            Err(_) => tracing::warn!("disconnect_stream: task {} timed out", connection_id),
+        }
+    }
+
+    // connections マップから削除
+    {
+        let mut connections = state.connections.write().await;
+        connections.remove(&connection_id);
+    }
 
     Ok(())
 }
 
-/// Get recent chat messages
+/// 全接続を一括切断する
 #[tauri::command]
-pub async fn get_chat_messages(
+pub async fn disconnect_all_streams(
     state: State<'_, AppState>,
-    limit: Option<usize>,
-) -> Result<Vec<GuiChatMessage>, CommandError> {
-    let limit = limit.unwrap_or(100);
-    let messages = state.get_messages(limit).await;
-    Ok(messages.into_iter().map(GuiChatMessage::from).collect())
+) -> Result<(), CommandError> {
+    tracing::info!("disconnect_all_streams called");
+
+    // State は Clone でないため Arc を直接操作する
+    let connections_arc = Arc::clone(&state.connections);
+
+    // 全接続のトークンとハンドルを収集してキャンセル
+    let handles: Vec<(u64, tokio::task::JoinHandle<()>)> = {
+        let mut connections = connections_arc.write().await;
+        let mut handles = Vec::new();
+        for (id, conn) in connections.iter_mut() {
+            conn.cancellation_token.cancel();
+            if let Some(handle) = conn.task_handle.take() {
+                handles.push((*id, handle));
+            }
+        }
+        handles
+    };
+
+    // 全タスクを並列待機（直列だと N × timeout になるため）
+    let timeout = std::time::Duration::from_secs(5);
+    let futures: Vec<_> = handles
+        .into_iter()
+        .map(|(id, handle)| async move {
+            match tokio::time::timeout(timeout, handle).await {
+                Ok(Ok(())) => tracing::debug!("disconnect_all: task {} completed", id),
+                Ok(Err(e)) => tracing::warn!("disconnect_all: task {} panicked: {}", id, e),
+                Err(_) => tracing::warn!("disconnect_all: task {} timed out", id),
+            }
+        })
+        .collect();
+    futures_util::future::join_all(futures).await;
+
+    // connections マップをクリア
+    {
+        let mut connections = connections_arc.write().await;
+        connections.clear();
+    }
+
+    Ok(())
 }
 
-/// Set chat mode (TopChat or AllChat)
+/// 現在アクティブな全接続情報を取得する
+#[tauri::command]
+pub async fn get_connections(
+    state: State<'_, AppState>,
+) -> Result<Vec<ConnectionInfo>, CommandError> {
+    let connections = state.connections.read().await;
+    Ok(connections.values().map(ConnectionInfo::from).collect())
+}
+
+/// チャットモード（TopChat/AllChat）を変更する
+///
+/// watch チャネル経由で監視タスクにモード変更要求を送信する。
+/// 実際の適用は次回ポーリング時に行われる（非同期）。
 #[tauri::command]
 pub async fn set_chat_mode(
     state: State<'_, AppState>,
+    connection_id: u64,
     mode: String,
 ) -> Result<bool, CommandError> {
     let chat_mode = match mode.as_str() {
@@ -419,11 +569,21 @@ pub async fn set_chat_mode(
         _ => ChatMode::TopChat,
     };
 
-    let mut client_guard = state.innertube_client.write().await;
-    if let Some(client) = client_guard.as_mut() {
-        client.set_chat_mode(chat_mode);
-        Ok(true)
-    } else {
-        Err(CommandError::NotConnected("Not connected to any stream".to_string()))
-    }
+    // connections ロックを短時間で解放するため、send() 完了後すぐ drop
+    let connections = state.connections.read().await;
+    let conn = connections.get(&connection_id).ok_or_else(|| {
+        CommandError::NotConnected(format!("接続 {} が見つかりません", connection_id))
+    })?;
+
+    conn.chat_mode_tx.send(chat_mode).map_err(|_| {
+        CommandError::Internal("監視タスクが既に終了しています".to_string())
+    })?;
+
+    tracing::info!(
+        "チャットモード変更要求を送信: connection_id={}, mode={:?}",
+        connection_id,
+        chat_mode
+    );
+
+    Ok(true)
 }

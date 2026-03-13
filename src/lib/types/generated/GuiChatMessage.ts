@@ -5,4 +5,16 @@ import type { MessageRun } from "./MessageRun";
 /**
  * GUI-friendly chat message
  */
-export type GuiChatMessage = { id: string, timestamp: string, timestamp_usec: string, author: string, author_icon_url: string | null, channel_id: string, content: string, runs: Array<MessageRun>, message_type: string, amount: string | null, is_member: boolean, is_first_time_viewer: boolean, in_stream_comment_count: number | null, metadata: GuiMessageMetadata | null, };
+export type GuiChatMessage = { id: string, timestamp: string, timestamp_usec: string, author: string, author_icon_url: string | null, channel_id: string, content: string, runs: Array<MessageRun>, message_type: string, amount: string | null, is_member: boolean, is_first_time_viewer: boolean, in_stream_comment_count: number | null, metadata: GuiMessageMetadata | null, 
+/**
+ * この接続に割り当てられた接続ID
+ */
+connection_id: bigint, 
+/**
+ * 配信プラットフォーム（例: "youtube"）
+ */
+platform: string, 
+/**
+ * 配信者名
+ */
+broadcaster_name: string, };

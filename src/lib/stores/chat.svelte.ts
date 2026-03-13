@@ -1,29 +1,24 @@
 // Chat state management using Svelte 5 runes
 import { listen } from '@tauri-apps/api/event';
-import type { ChatMessage, ConnectionResult, ChatMode, ChatFilter } from '$lib/types';
+import type { ChatMessage, ConnectionResult, ConnectionInfo, ChatMode, ChatFilter, FrontendConnectionState } from '$lib/types';
 import * as chatApi from '$lib/tauri/chat';
+import { getConnectionColor } from '$lib/utils/connection-colors';
 import { configStore } from './config.svelte';
-
-// 接続状態の型定義
-type ConnectionState = 'idle' | 'connecting' | 'connected' | 'paused' | 'error';
 
 // ファクトリ関数：テスト時に独立したストアインスタンスを生成できる
 function createChatStore() {
   // リアクティブ状態
   let messages = $state<ChatMessage[]>([]);
-  let connectionState = $state<ConnectionState>('idle');
-  let streamTitle = $state<string | null>(null);
-  let broadcasterName = $state<string | null>(null);
-  let broadcasterChannelId = $state<string | null>(null);
-  let streamUrl = $state<string | null>(null);
-  let isReplay = $state(false);
+  // 多接続状態マップ（キー: connection_id as number）
+  let connections = $state<Map<number, FrontendConnectionState>>(new Map());
   let chatMode = $state<ChatMode>('top');
   let error = $state<string | null>(null);
 
-  // 後方互換のための派生状態
-  let isConnected = $derived(connectionState === 'connected');
-  let isConnecting = $derived(connectionState === 'connecting');
-  let isPaused = $derived(connectionState === 'paused');
+  // 多接続ベースの派生状態
+  let isConnected = $derived(connections.size > 0);
+  let isConnecting = $derived([...connections.values()].some(c => c.connectionState === 'connecting'));
+  // 多接続ではglobalなpauseはない（常にfalse）
+  let isPaused = $derived(false);
   let filter = $state<ChatFilter>({
     showText: true,
     showSuperchat: true,
@@ -41,7 +36,7 @@ function createChatStore() {
   let displayLimit = $state<number | null>(null);
   let scrollToLatestTrigger = $state(0); // インクリメントでスクロールをトリガー
 
-  // O(1)検索のための重複チェック用セット
+  // O(1)検索のための重複チェック用セット（複合キー: connection_id:message_id）
   let messageIds = new Set<string>();
 
   // O(1)ビューワーメッセージ検索のためのチャンネルIDインデックス
@@ -100,7 +95,9 @@ function createChatStore() {
     if (pendingMessages.length === 0) return;
 
     for (const msg of pendingMessages) {
-      messageIds.add(msg.id);
+      // 複合キー（connection_id:message_id）で重複排除
+      const key = `${msg.connection_id}:${msg.id}`;
+      messageIds.add(key);
       // チャンネルインデックスを更新
       const arr = messagesByChannel.get(msg.channel_id);
       if (arr) arr.push(msg);
@@ -112,8 +109,9 @@ function createChatStore() {
   }
 
   function addMessage(message: ChatMessage): void {
-    // O(1)重複チェック（セットとペンディングリスト両方を確認）
-    if (messageIds.has(message.id) || pendingMessages.some((m) => m.id === message.id)) {
+    // 複合キー（connection_id:message_id）でO(1)重複チェック
+    const key = `${message.connection_id}:${message.id}`;
+    if (messageIds.has(key) || pendingMessages.some((m) => `${m.connection_id}:${m.id}` === key)) {
       return;
     }
 
@@ -127,30 +125,33 @@ function createChatStore() {
 
   // アクション
   async function connect(url: string, mode?: ChatMode): Promise<ConnectionResult> {
-    connectionState = 'connecting';
     error = null;
 
     try {
       const result = await chatApi.connectToStream(url, mode);
 
       if (result.success) {
-        connectionState = 'connected';
-        streamTitle = result.stream_title;
-        broadcasterName = result.broadcaster_name;
-        broadcasterChannelId = result.broadcaster_channel_id;
-        streamUrl = url;
-        isReplay = result.is_replay;
-        messages = [];
-        messageIds.clear();
-        messagesByChannel.clear();
+        const connId = Number(result.connection_id);
+        const newConn: FrontendConnectionState = {
+          id: connId,
+          platform: 'youtube', // TODO: Rustから返ってきたときに更新
+          streamUrl: url,
+          streamTitle: result.stream_title ?? '',
+          broadcasterName: result.broadcaster_name ?? '',
+          broadcasterChannelId: result.broadcaster_channel_id ?? '',
+          connectionState: 'connected',
+          color: getConnectionColor(result.broadcaster_channel_id ?? String(connId))
+        };
+        // イミュータブルに新しいMapを作成して置き換え
+        const next = new Map(connections);
+        next.set(connId, newConn);
+        connections = next;
       } else {
-        connectionState = 'error';
         error = result.error;
       }
 
       return result;
     } catch (e) {
-      connectionState = 'error';
       error = e instanceof Error ? e.message : String(e);
       return {
         success: false,
@@ -159,98 +160,87 @@ function createChatStore() {
         broadcaster_name: null,
         is_replay: false,
         error: error,
-        session_id: null
+        session_id: null,
+        connection_id: BigInt(0)
       };
     }
   }
 
-  // モニタリングを一時停止（メッセージとストリーム情報は保持）
-  async function pause(): Promise<void> {
+  // 特定の接続を切断
+  async function disconnect(connectionId: number): Promise<void> {
+    // 切断中状態に更新
+    const conn = connections.get(connectionId);
+    if (conn) {
+      const next = new Map(connections);
+      next.set(connectionId, { ...conn, connectionState: 'disconnecting' });
+      connections = next;
+    }
+
     try {
-      await chatApi.disconnectStream();
+      await chatApi.disconnectStream(connectionId);
     } finally {
-      connectionState = 'paused';
-      // streamTitle、broadcasterName、messages等はそのまま維持
+      // 接続マップから削除
+      const next = new Map(connections);
+      next.delete(connectionId);
+      connections = next;
     }
   }
 
-  // モニタリングを再開（同じストリームに再接続）
-  async function resume(): Promise<ConnectionResult> {
-    if (!streamUrl) {
-      return {
-        success: false,
-        stream_title: null,
-        broadcaster_channel_id: null,
-        broadcaster_name: null,
-        is_replay: false,
-        error: 'No stream URL to resume',
-        session_id: null
-      };
-    }
-
-    connectionState = 'connecting';
-    error = null;
-
+  // 全接続を切断
+  async function disconnectAll(): Promise<void> {
     try {
-      const result = await chatApi.connectToStream(streamUrl, chatMode);
-
-      if (result.success) {
-        connectionState = 'connected';
-        streamTitle = result.stream_title;
-        broadcasterName = result.broadcaster_name;
-        broadcasterChannelId = result.broadcaster_channel_id;
-        isReplay = result.is_replay;
-        // 再開時はメッセージをクリアしない
-      } else {
-        connectionState = 'error';
-        error = result.error;
-      }
-
-      return result;
-    } catch (e) {
-      console.error('[chat.svelte.ts] resume() - exception:', e);
-      connectionState = 'error';
-      error = e instanceof Error ? e.message : String(e);
-      return {
-        success: false,
-        stream_title: null,
-        broadcaster_channel_id: null,
-        broadcaster_name: null,
-        is_replay: false,
-        error: error,
-        session_id: null
-      };
+      await chatApi.disconnectAllStreams();
+    } finally {
+      connections = new Map();
     }
+  }
+
+  // pause は多接続では非推奨 → disconnectAllのエイリアス
+  async function pause(): Promise<void> {
+    await disconnectAll();
+  }
+
+  // resume は多接続では廃止（ユーザーがURLを再入力して接続）
+  // 後方互換のため空実装を残す
+  async function resume(): Promise<ConnectionResult> {
+    return {
+      success: false,
+      stream_title: null,
+      broadcaster_channel_id: null,
+      broadcaster_name: null,
+      is_replay: false,
+      error: 'resume() is not supported in multi-stream mode',
+      session_id: null,
+      connection_id: BigInt(0)
+    };
   }
 
   // 初期化（全てクリアしてidle状態に戻る）
   async function initialize(): Promise<void> {
     try {
-      await chatApi.disconnectStream();
+      await disconnectAll();
     } catch {
       // クリーンアップ中のエラーは無視
     } finally {
-      connectionState = 'idle';
-      streamTitle = null;
-      broadcasterName = null;
-      broadcasterChannelId = null;
-      streamUrl = null;
-      isReplay = false;
+      connections = new Map();
       messages = [];
       messageIds.clear();
       messagesByChannel.clear();
+      pendingMessages = [];
       error = null;
     }
   }
 
-  // 後方互換のためのdisconnect（pauseのエイリアス）
-  async function disconnect(): Promise<void> {
-    await pause();
-  }
-
   async function setChatModeAction(mode: ChatMode): Promise<void> {
     chatMode = mode;
-    await chatApi.setChatMode(mode);
+    // 全接続にチャットモード変更要求を送信（watch チャネル経由で次回ポーリング時に適用）
+    for (const [connId] of connections) {
+      try {
+        await chatApi.setChatMode(connId, mode);
+      } catch (e) {
+        console.warn(`チャットモード変更失敗 (connection ${connId}):`, e);
+      }
+    }
   }
 
   function setFilter(newFilter: Partial<ChatFilter>): void {
@@ -311,20 +301,32 @@ function createChatStore() {
     // 接続状態変更イベントを購読
     const unlistenConnection = await listen<ConnectionResult>('chat:connection', (event) => {
       const result = event.payload;
+      const connId = Number(result.connection_id);
+      const conn = connections.get(connId);
 
-      // idle状態（未接続）の場合は無視
-      if (connectionState === 'idle') {
+      // 対象接続が存在しない場合は無視
+      if (!conn) {
         return;
       }
 
       if (result.success) {
-        connectionState = 'connected';
-        streamTitle = result.stream_title;
-        broadcasterName = result.broadcaster_name;
-        broadcasterChannelId = result.broadcaster_channel_id;
-        isReplay = result.is_replay;
+        // 接続情報を更新
+        const next = new Map(connections);
+        next.set(connId, {
+          ...conn,
+          connectionState: 'connected',
+          streamTitle: result.stream_title ?? conn.streamTitle,
+          broadcasterName: result.broadcaster_name ?? conn.broadcasterName,
+          broadcasterChannelId: result.broadcaster_channel_id ?? conn.broadcasterChannelId
+        });
+        connections = next;
+      } else if (conn.connectionState === 'disconnecting') {
+        // 意図的切断 — disconnect() の finally で処理されるため何もしない
       } else {
-        connectionState = 'error';
+        // 監視タスクの異常終了等 — 接続を削除してエラーを表示
+        const next = new Map(connections);
+        next.delete(connId);
+        connections = next;
         error = result.error;
       }
     });
@@ -339,6 +341,35 @@ function createChatStore() {
     if (unlisten) {
       unlisten();
       unlisten = null;
+    }
+  }
+
+  // バックエンドのアクティブ接続をフロントエンドに復元（F5リロード対応）
+  async function restoreConnections(): Promise<void> {
+    try {
+      const backendConnections = await chatApi.getConnections();
+      if (backendConnections.length === 0) return;
+
+      const next = new Map(connections);
+      for (const info of backendConnections) {
+        const connId = Number(info.id);
+        // 既にフロントエンドに存在する接続はスキップ
+        if (next.has(connId)) continue;
+
+        next.set(connId, {
+          id: connId,
+          platform: info.platform.toLowerCase() as FrontendConnectionState['platform'],
+          streamUrl: info.stream_url,
+          streamTitle: info.stream_title,
+          broadcasterName: info.broadcaster_name,
+          broadcasterChannelId: info.broadcaster_channel_id,
+          connectionState: info.is_monitoring ? 'connected' : 'disconnecting',
+          color: getConnectionColor(info.broadcaster_channel_id || String(connId))
+        });
+      }
+      connections = next;
+    } catch (e) {
+      console.warn('接続状態の復元に失敗:', e);
     }
   }
 
@@ -362,20 +393,30 @@ function createChatStore() {
     get displayedMessages() {
       return displayedMessages;
     },
+    get connections() {
+      return connections;
+    },
     get isConnected() {
       return isConnected;
     },
+    // 後方互換のため残す（最初の接続のstreamTitle）
     get streamTitle() {
-      return streamTitle;
+      if (connections.size === 0) return null;
+      return [...connections.values()][0].streamTitle || null;
     },
+    // 後方互換のため残す（最初の接続のbroadcasterName）
     get broadcasterName() {
-      return broadcasterName;
+      if (connections.size === 0) return null;
+      return [...connections.values()][0].broadcasterName || null;
     },
+    // 後方互換のため残す（最初の接続のbroadcasterChannelId）
     get broadcasterChannelId() {
-      return broadcasterChannelId;
+      if (connections.size === 0) return null;
+      return [...connections.values()][0].broadcasterChannelId || null;
     },
+    // 後方互換のため残す（常にfalse）
     get isReplay() {
-      return isReplay;
+      return false;
     },
     get chatMode() {
       return chatMode;
@@ -398,8 +439,13 @@ function createChatStore() {
     get isPaused() {
       return isPaused;
     },
+    // 後方互換のため残す（多接続では常に'idle'か'connected'相当）
     get connectionState() {
-      return connectionState;
+      if (connections.size === 0) return 'idle' as const;
+      const states = [...connections.values()].map(c => c.connectionState);
+      if (states.some(s => s === 'connecting')) return 'connecting' as const;
+      if (states.some(s => s === 'connected')) return 'connected' as const;
+      return 'idle' as const;
     },
     get autoScroll() {
       return autoScroll;
@@ -414,6 +460,7 @@ function createChatStore() {
     // アクション
     connect,
     disconnect,
+    disconnectAll,
     pause,
     resume,
     initialize,
@@ -430,7 +477,8 @@ function createChatStore() {
     getMessagesForChannel,
     setupEventListeners,
     cleanup,
-    initDisplaySettings
+    initDisplaySettings,
+    restoreConnections
   };
 }
 

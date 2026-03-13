@@ -11,19 +11,19 @@ import {
   startMockServer,
   startTauriAppWithEnv,
   connectToApp,
+  disconnectAndInitialize,
 } from './utils/test-helpers';
 
 /**
- * E2E test to detect the "application logic freeze" bug
+ * E2Eテスト: 切断/再接続後のアプリケーションロジックフリーズ検出
  *
- * Bug symptoms:
- * - After resume, ALL application logic stops working
- * - DOM interactions (scroll, dropdown visual) still work
- * - But button click handlers don't fire
- * - Tab switching doesn't work (content doesn't change)
- * - Viewer info panel can't be opened
+ * 元のバグ症状:
+ * - 再開（resume）後に全アプリケーションロジックが停止
+ * - DOMインタラクション（スクロール、ドロップダウン）は動作する
+ * - ボタンのクリックハンドラが発火しない
+ * - タブ切り替えが動作しない
  *
- * This is DIFFERENT from high-rate UI freeze (which was fixed in fcfa476)
+ * 多接続リファクタリング後: 停止/再開 → 切断/再接続に変更
  */
 
 // 実YouTube向け（モックなし）でTauriアプリを起動する
@@ -46,51 +46,29 @@ async function startTauriAppForMockServer(): Promise<void> {
 }
 
 /**
- * Test that application logic works after resume
- * Returns true if logic is working, false if frozen
+ * アプリケーションロジックが動作しているかテスト
+ * タブ切り替えで検証（Settings → Chat → Settings）
  */
 async function testApplicationLogicWorks(page: Page): Promise<{ works: boolean; details: string }> {
-  // Test 1: Tab switching - click Settings tab and verify content changes
-  const chatTabContent = page.locator('[data-message-id]').first();
   const settingsHeading = page.getByRole('heading', { name: 'YouTube認証' });
 
-  // Verify we're on Chat tab (or at least Settings content is not visible)
-  const settingsVisibleBefore = await settingsHeading.isVisible().catch(() => false);
-
-  // Check JavaScript execution before clicking
+  // JS実行テスト
   const jsTestBefore = await page.evaluate(() => {
-    const testVar = Date.now();
-    return { works: true, timestamp: testVar };
+    return { works: true, timestamp: Date.now() };
   }).catch((e) => ({ works: false, error: String(e) }));
   log.debug(`JS execution test before tab click: ${JSON.stringify(jsTestBefore)}`);
 
-  // Click Settings tab
+  // Settingsタブをクリック
   log.debug('Clicking Settings tab...');
   await page.locator('button:has-text("Settings")').click();
 
-  // Check if click handler was registered by testing JS execution
-  const jsTestAfter = await page.evaluate(() => {
-    const testVar = Date.now();
-    // Try to read Svelte state through window
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const anyWindow = window as any;
-    return {
-      works: true,
-      timestamp: testVar,
-      hasPendingMicrotasks: typeof anyWindow.queueMicrotask === 'function'
-    };
-  }).catch((e) => ({ works: false, error: String(e) }));
-  log.debug(`JS execution test after tab click: ${JSON.stringify(jsTestAfter)}`);
-
-  // Check if Settings content is now visible
+  // Settings内容が表示されているか確認
   const settingsVisibleAfter = await settingsHeading.isVisible().catch(() => false);
 
   if (!settingsVisibleAfter) {
-    // Additional diagnostics
     const activeTabButton = await page.locator('button:has-text("Settings")').evaluate((el) => {
       const style = window.getComputedStyle(el);
       return {
-        isActive: style.fontWeight === '700' || style.background.includes('rgba(255, 255, 255'),
         background: style.background.substring(0, 100),
         fontWeight: style.fontWeight
       };
@@ -99,11 +77,11 @@ async function testApplicationLogicWorks(page: Page): Promise<{ works: boolean; 
 
     return {
       works: false,
-      details: `Tab click did not change content (Settings heading not visible after clicking Settings tab). Tab button state: ${JSON.stringify(activeTabButton)}`
+      details: `Tab click did not change content. Tab button state: ${JSON.stringify(activeTabButton)}`
     };
   }
 
-  // Test 2: Click back to Chat tab
+  // Chatタブに戻る
   await page.locator('button:has-text("Chat")').click();
 
   const settingsVisibleAfterChat = await settingsHeading.isVisible().catch(() => false);
@@ -117,14 +95,34 @@ async function testApplicationLogicWorks(page: Page): Promise<{ works: boolean; 
   return { works: true, details: 'Application logic is working' };
 }
 
+/**
+ * 接続を切断する（個別切断ボタン使用、メッセージはクリアしない）
+ */
+async function disconnectStream(page: Page): Promise<void> {
+  const disconnectBtn = page.locator('.connection-item .disconnect-btn').first();
+  if (await disconnectBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+    await disconnectBtn.click();
+    await expect(page.locator('.connection-item')).toHaveCount(0, { timeout: 10000 });
+  }
+}
+
+/**
+ * ストリームに接続する
+ */
+async function connectToStream(page: Page, url: string, timeout = 30000): Promise<void> {
+  const urlInput = page.locator('input[placeholder*="YouTube URL"], input[placeholder*="youtube.com"]');
+  await urlInput.fill(url);
+  await page.locator('button:has-text("開始")').click();
+  await expect(page.locator('.connection-item').first()).toBeVisible({ timeout });
+}
+
 // Real YouTube test
 test.describe('Real YouTube - Application Logic Freeze Detection', () => {
   let browser: Browser;
   let context: BrowserContext;
   let mainPage: Page;
 
-  // Use a low-activity stream to rule out high-rate issues
-  const YOUTUBE_URL = 'https://www.youtube.com/watch?v=jfKfPfyJRdk'; // lofi girl - usually stable
+  const YOUTUBE_URL = 'https://www.youtube.com/watch?v=jfKfPfyJRdk'; // lofi girl
 
   test.beforeAll(async () => {
     test.setTimeout(300000);
@@ -140,13 +138,11 @@ test.describe('Real YouTube - Application Logic Freeze Detection', () => {
     context = connection.context;
     mainPage = connection.page;
 
-    // Capture ALL console logs for debugging
     mainPage.on('console', (msg) => {
       const text = msg.text();
-      // Always capture errors and specific debug logs
       if (text.includes('[GLOBAL_ERROR]') || text.includes('[UNHANDLED_REJECTION]')) {
         log.error(`[CRITICAL] ${text}`);
-      } else if (text.includes('[chat.svelte.ts]') || text.includes('resume') || text.includes('error') || text.includes('Error')) {
+      } else if (text.includes('error') || text.includes('Error')) {
         log.debug(`[CONSOLE] ${text}`);
       }
     });
@@ -161,67 +157,52 @@ test.describe('Real YouTube - Application Logic Freeze Detection', () => {
     await cleanupTestData();
   });
 
-  test('should detect application logic freeze after pause/resume with real YouTube', async () => {
-    // Step 1: Connect to YouTube stream
+  test('should detect application logic freeze after disconnect/reconnect with real YouTube', async () => {
+    // Step 1: 接続
     log.info(`Connecting to: ${YOUTUBE_URL}`);
-    const urlInput = mainPage.locator('input[placeholder*="YouTube URL"], input[placeholder*="youtube.com"]');
-    await urlInput.fill(YOUTUBE_URL);
-    await mainPage.locator('button:has-text("開始")').click();
-
-    // Wait for connection
-    await expect(mainPage.locator('button:has-text("停止")')).toBeVisible({ timeout: 30000 });
+    await connectToStream(mainPage, YOUTUBE_URL, 30000);
     log.info('Connected to stream');
 
-    // Step 2: Verify application logic works BEFORE pause
-    log.info('Testing application logic BEFORE pause...');
-    const beforePause = await testApplicationLogicWorks(mainPage);
-    log.info(`Before pause: ${beforePause.details}`);
-    expect(beforePause.works).toBe(true);
+    // Step 2: 接続前のロジック確認
+    log.info('Testing application logic BEFORE disconnect...');
+    const beforeDisconnect = await testApplicationLogicWorks(mainPage);
+    log.info(`Before disconnect: ${beforeDisconnect.details}`);
+    expect(beforeDisconnect.works).toBe(true);
 
-    // Step 3: Wait a bit to ensure stable connection
+    // Step 3: 安定接続を待つ
     log.info('Waiting 5 seconds for stable connection...');
     await mainPage.waitForTimeout(5000);
 
-    // Step 4: Pause
-    log.info('Pausing...');
-    await mainPage.locator('button:has-text("停止")').click();
-    await expect(mainPage.locator('button:has-text("再開")')).toBeVisible({ timeout: 5000 });
-    log.info('Paused');
+    // Step 4: 切断
+    log.info('Disconnecting...');
+    await disconnectStream(mainPage);
+    log.info('Disconnected');
 
-    // Step 5: Wait while paused
-    log.info('Waiting 3 seconds while paused...');
+    // Step 5: 切断中に待機
+    log.info('Waiting 3 seconds while disconnected...');
     await mainPage.waitForTimeout(3000);
 
-    // Step 6: Resume
-    log.info('Resuming...');
-    await mainPage.locator('button:has-text("再開")').click();
-    await expect(mainPage.locator('button:has-text("停止")')).toBeVisible({ timeout: 10000 });
-    log.info('Resume completed');
+    // Step 6: 再接続
+    log.info('Reconnecting...');
+    await connectToStream(mainPage, YOUTUBE_URL, 30000);
+    log.info('Reconnected');
 
-    // Step 7: Test application logic AFTER resume
-    log.info('Testing application logic AFTER resume...');
-
-    // Give a moment for any potential issue to manifest
+    // Step 7: 再接続後のロジック確認
+    log.info('Testing application logic AFTER reconnect...');
     await mainPage.waitForTimeout(1000);
 
-    const afterResume = await testApplicationLogicWorks(mainPage);
-    log.info(`After resume: ${afterResume.details}`);
+    const afterReconnect = await testApplicationLogicWorks(mainPage);
+    log.info(`After reconnect: ${afterReconnect.details}`);
 
-    if (!afterResume.works) {
-      // Take screenshot for debugging
+    if (!afterReconnect.works) {
       await mainPage.screenshot({ path: 'logic-freeze-real-youtube.png' });
-      throw new Error(`BUG DETECTED: Application logic frozen after resume. ${afterResume.details}`);
+      throw new Error(`BUG DETECTED: Application logic frozen after reconnect. ${afterReconnect.details}`);
     }
 
-    log.info('Test passed: Application logic works after resume');
+    log.info('Test passed: Application logic works after reconnect');
 
-    // Cleanup
-    try {
-      await mainPage.locator('button:has-text("停止")').click({ timeout: 2000 });
-      await mainPage.locator('button:has-text("初期化")').click({ timeout: 2000 });
-    } catch {
-      log.debug('Cleanup skipped');
-    }
+    // クリーンアップ
+    await disconnectAndInitialize(mainPage);
   });
 });
 
@@ -249,13 +230,11 @@ test.describe('Mock Server - Application Logic Freeze Detection', () => {
     context = connection.context;
     mainPage = connection.page;
 
-    // Capture ALL console logs for debugging
     mainPage.on('console', (msg) => {
       const text = msg.text();
-      // Always capture errors and specific debug logs
       if (text.includes('[GLOBAL_ERROR]') || text.includes('[UNHANDLED_REJECTION]')) {
         log.error(`[CRITICAL] ${text}`);
-      } else if (text.includes('[chat.svelte.ts]') || text.includes('resume') || text.includes('error') || text.includes('Error')) {
+      } else if (text.includes('error') || text.includes('Error')) {
         log.debug(`[CONSOLE] ${text}`);
       }
     });
@@ -271,9 +250,10 @@ test.describe('Mock Server - Application Logic Freeze Detection', () => {
     await cleanupTestData();
   });
 
-  test('should detect application logic freeze after pause/resume with mock server', async () => {
-    // Enable auto-message generation to simulate real YouTube's continuous message flow
-    // Real YouTube has ~15-20 messages per poll (1.5s interval) = ~10-15 msgs/sec
+  test('should detect application logic freeze after disconnect/reconnect with mock server', async () => {
+    const streamUrl = `${MOCK_SERVER_URL}/watch?v=test_logic_freeze`;
+
+    // 自動メッセージを有効化（実YouTube相当の流量）
     log.info('Enabling auto-messages (20 per poll to match real YouTube)...');
     await fetch(`${MOCK_SERVER_URL}/set_auto_message`, {
       method: 'POST',
@@ -281,142 +261,118 @@ test.describe('Mock Server - Application Logic Freeze Detection', () => {
       body: JSON.stringify({ enabled: true, messages_per_poll: 20 }),
     });
 
-    // Step 1: Connect to mock stream
+    // Step 1: 接続
     log.info('Connecting to mock stream...');
-    const urlInput = mainPage.locator('input[placeholder*="YouTube URL"], input[placeholder*="youtube.com"]');
-    await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_logic_freeze`);
-    await mainPage.locator('button:has-text("開始")').click();
-
-    // Wait for connection
-    await expect(mainPage.locator('button:has-text("停止")')).toBeVisible({ timeout: 10000 });
+    await connectToStream(mainPage, streamUrl);
     log.info('Connected to mock stream');
 
-    // Step 2: Verify application logic works BEFORE pause
-    log.info('Testing application logic BEFORE pause...');
-    const beforePause = await testApplicationLogicWorks(mainPage);
-    log.info(`Before pause: ${beforePause.details}`);
-    expect(beforePause.works).toBe(true);
+    // Step 2: 切断前のロジック確認
+    log.info('Testing application logic BEFORE disconnect...');
+    const beforeDisconnect = await testApplicationLogicWorks(mainPage);
+    log.info(`Before disconnect: ${beforeDisconnect.details}`);
+    expect(beforeDisconnect.works).toBe(true);
 
-    // Step 3: Wait for messages to accumulate (like real YouTube)
+    // Step 3: メッセージ受信を待つ
     log.info('Waiting 5 seconds for messages...');
     await mainPage.waitForTimeout(5000);
 
     const msgCountBefore = await mainPage.locator('[data-message-id]').count();
-    log.debug(`Messages before pause: ${msgCountBefore}`);
+    log.debug(`Messages before disconnect: ${msgCountBefore}`);
 
-    // Step 4: Pause
-    log.info('Pausing...');
-    await mainPage.locator('button:has-text("停止")').click();
-    await expect(mainPage.locator('button:has-text("再開")')).toBeVisible({ timeout: 5000 });
-    log.info('Paused');
+    // Step 4: 切断
+    log.info('Disconnecting...');
+    await disconnectStream(mainPage);
+    log.info('Disconnected');
 
-    // Step 5: Wait while paused (messages continue to be generated server-side)
-    log.info('Waiting 3 seconds while paused...');
+    // Step 5: 切断中に待機（サーバーサイドではメッセージ生成が継続）
+    log.info('Waiting 3 seconds while disconnected...');
     await mainPage.waitForTimeout(3000);
 
-    // Step 6: Resume
-    log.info('Resuming...');
-    await mainPage.locator('button:has-text("再開")').click();
-    await expect(mainPage.locator('button:has-text("停止")')).toBeVisible({ timeout: 10000 });
-    log.info('Resume completed');
+    // Step 6: 再接続
+    log.info('Reconnecting...');
+    await connectToStream(mainPage, streamUrl);
+    log.info('Reconnected');
 
-    // Step 7: Test application logic AFTER resume
-    log.info('Testing application logic AFTER resume...');
+    // Step 7: 再接続後のロジック確認
+    log.info('Testing application logic AFTER reconnect...');
     await mainPage.waitForTimeout(1000);
 
-    const afterResume = await testApplicationLogicWorks(mainPage);
-    log.info(`After resume: ${afterResume.details}`);
+    const afterReconnect = await testApplicationLogicWorks(mainPage);
+    log.info(`After reconnect: ${afterReconnect.details}`);
 
-    if (!afterResume.works) {
+    if (!afterReconnect.works) {
       await mainPage.screenshot({ path: 'logic-freeze-mock-server.png' });
-      // Disable auto-messages before throwing
       await fetch(`${MOCK_SERVER_URL}/set_auto_message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: false }),
       });
-      throw new Error(`BUG DETECTED: Application logic frozen after resume. ${afterResume.details}`);
+      throw new Error(`BUG DETECTED: Application logic frozen after reconnect. ${afterReconnect.details}`);
     }
 
-    log.info('Test passed: Application logic works after resume');
+    log.info('Test passed: Application logic works after reconnect');
 
-    // Disable auto-messages
+    // クリーンアップ
     await fetch(`${MOCK_SERVER_URL}/set_auto_message`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled: false }),
     });
-
-    // Cleanup
-    try {
-      await mainPage.locator('button:has-text("停止")').click({ timeout: 2000 });
-      await mainPage.locator('button:has-text("初期化")').click({ timeout: 2000 });
-    } catch {
-      log.debug('Cleanup skipped');
-    }
+    await disconnectAndInitialize(mainPage);
   });
 
   test('should detect application logic freeze with network delay simulation', async () => {
-    // Simulate real YouTube network latency (500ms for /watch, 200ms for chat)
+    const streamUrl = `${MOCK_SERVER_URL}/watch?v=test_delay`;
+
+    // ネットワーク遅延シミュレーション
     log.info('Configuring network delay simulation...');
     await fetch(`${MOCK_SERVER_URL}/set_stream_state`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        watch_delay_ms: 500,  // Simulate /watch page load time
-        chat_delay_ms: 200    // Simulate chat API latency
-      }),
+      body: JSON.stringify({ watch_delay_ms: 500, chat_delay_ms: 200 }),
     });
 
-    // Enable auto-messages to simulate continuous message flow
     await fetch(`${MOCK_SERVER_URL}/set_auto_message`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled: true, messages_per_poll: 10 }),
     });
 
-    // Step 1: Connect to mock stream
+    // Step 1: 接続（遅延あり）
     log.info('Connecting to mock stream with delay...');
-    const urlInput = mainPage.locator('input[placeholder*="YouTube URL"], input[placeholder*="youtube.com"]');
-    await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_delay`);
-    await mainPage.locator('button:has-text("開始")').click();
-
-    // Wait for connection (may take longer due to delay)
-    await expect(mainPage.locator('button:has-text("停止")')).toBeVisible({ timeout: 15000 });
+    await connectToStream(mainPage, streamUrl, 15000);
     log.info('Connected');
 
-    // Step 2: Verify application logic works BEFORE pause
-    const beforePause = await testApplicationLogicWorks(mainPage);
-    log.info(`Before pause: ${beforePause.details}`);
-    expect(beforePause.works).toBe(true);
+    // Step 2: 切断前のロジック確認
+    const beforeDisconnect = await testApplicationLogicWorks(mainPage);
+    log.info(`Before disconnect: ${beforeDisconnect.details}`);
+    expect(beforeDisconnect.works).toBe(true);
 
-    // Step 3: Wait for messages
+    // Step 3: メッセージ受信を待つ
     log.info('Waiting 5 seconds for messages...');
     await mainPage.waitForTimeout(5000);
 
-    // Step 4: Pause
-    log.info('Pausing...');
-    await mainPage.locator('button:has-text("停止")').click();
-    await expect(mainPage.locator('button:has-text("再開")')).toBeVisible({ timeout: 5000 });
-    log.info('Paused');
+    // Step 4: 切断
+    log.info('Disconnecting...');
+    await disconnectStream(mainPage);
+    log.info('Disconnected');
 
-    // Step 5: Wait while paused
+    // Step 5: 待機
     await mainPage.waitForTimeout(3000);
 
-    // Step 6: Resume (this is where the bug might occur with delay)
-    log.info('Resuming with network delay...');
-    await mainPage.locator('button:has-text("再開")').click();
-    await expect(mainPage.locator('button:has-text("停止")')).toBeVisible({ timeout: 15000 });
-    log.info('Resume completed');
+    // Step 6: 再接続（遅延あり）
+    log.info('Reconnecting with network delay...');
+    await connectToStream(mainPage, streamUrl, 15000);
+    log.info('Reconnected');
 
-    // Step 7: Test application logic AFTER resume
-    log.info('Testing application logic AFTER resume with delay...');
+    // Step 7: 再接続後のロジック確認
+    log.info('Testing application logic AFTER reconnect with delay...');
     await mainPage.waitForTimeout(1000);
 
-    const afterResume = await testApplicationLogicWorks(mainPage);
-    log.info(`After resume with delay: ${afterResume.details}`);
+    const afterReconnect = await testApplicationLogicWorks(mainPage);
+    log.info(`After reconnect with delay: ${afterReconnect.details}`);
 
-    // Clean up delays
+    // 遅延設定をリセット
     await fetch(`${MOCK_SERVER_URL}/set_stream_state`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -428,42 +384,32 @@ test.describe('Mock Server - Application Logic Freeze Detection', () => {
       body: JSON.stringify({ enabled: false }),
     });
 
-    if (!afterResume.works) {
+    if (!afterReconnect.works) {
       await mainPage.screenshot({ path: 'logic-freeze-with-delay.png' });
-      throw new Error(`BUG DETECTED: Application logic frozen after resume with delay. ${afterResume.details}`);
+      throw new Error(`BUG DETECTED: Application logic frozen after reconnect with delay. ${afterReconnect.details}`);
     }
 
-    log.info('Test passed: Application logic works after resume with delay');
-
-    // Cleanup
-    try {
-      await mainPage.locator('button:has-text("停止")').click({ timeout: 2000 });
-      await mainPage.locator('button:has-text("初期化")').click({ timeout: 2000 });
-    } catch {
-      log.debug('Cleanup skipped');
-    }
+    log.info('Test passed: Application logic works after reconnect with delay');
+    await disconnectAndInitialize(mainPage);
   });
 
-  test('should detect logic freeze with multiple pause/resume cycles', async () => {
-    // Connect
-    const urlInput = mainPage.locator('input[placeholder*="YouTube URL"], input[placeholder*="youtube.com"]');
-    await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_multi_cycle`);
-    await mainPage.locator('button:has-text("開始")').click();
-    await expect(mainPage.locator('button:has-text("停止")')).toBeVisible({ timeout: 10000 });
+  test('should detect logic freeze with multiple disconnect/reconnect cycles', async () => {
+    const streamUrl = `${MOCK_SERVER_URL}/watch?v=test_multi_cycle`;
 
-    // Perform 3 pause/resume cycles
+    // 接続
+    await connectToStream(mainPage, streamUrl);
+
+    // 3回の切断/再接続サイクル
     for (let i = 0; i < 3; i++) {
-      log.info(`Cycle ${i + 1}/3: Pause...`);
-      await mainPage.locator('button:has-text("停止")').click();
-      await expect(mainPage.locator('button:has-text("再開")')).toBeVisible({ timeout: 5000 });
+      log.info(`Cycle ${i + 1}/3: Disconnecting...`);
+      await disconnectStream(mainPage);
 
       await mainPage.waitForTimeout(1000);
 
-      log.info(`Cycle ${i + 1}/3: Resume...`);
-      await mainPage.locator('button:has-text("再開")').click();
-      await expect(mainPage.locator('button:has-text("停止")')).toBeVisible({ timeout: 10000 });
+      log.info(`Cycle ${i + 1}/3: Reconnecting...`);
+      await connectToStream(mainPage, streamUrl);
 
-      // Test logic after each resume
+      // 再接続後のロジック確認
       const result = await testApplicationLogicWorks(mainPage);
       log.info(`Cycle ${i + 1}/3: ${result.details}`);
 
@@ -474,13 +420,6 @@ test.describe('Mock Server - Application Logic Freeze Detection', () => {
     }
 
     log.info('All 3 cycles passed');
-
-    // Cleanup
-    try {
-      await mainPage.locator('button:has-text("停止")').click({ timeout: 2000 });
-      await mainPage.locator('button:has-text("初期化")').click({ timeout: 2000 });
-    } catch {
-      log.debug('Cleanup skipped');
-    }
+    await disconnectAndInitialize(mainPage);
   });
 });

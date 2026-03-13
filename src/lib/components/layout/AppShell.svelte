@@ -21,8 +21,8 @@
     settings: { icon: 'settings', label: 'Settings', shortLabel: 'Settings' }
   };
 
-  // broadcasterChannelId を derived で取得
-  let broadcasterId = $derived(chatStore.broadcasterChannelId || '');
+  // 最初の接続のbroadcasterChannelIdを使用（ViewerInfoPanel用）
+  let broadcasterId = $derived(chatStore.broadcasterChannelId ?? '');
 
   // ストレージエラーが発生した場合にダイアログを表示
   let hasStorageError = $derived(authStore.storageError !== null);
@@ -44,7 +44,7 @@
   <header class="flex items-center justify-between px-4 py-2 flex-shrink-0 bg-[var(--bg-surface-1)] border-b" style="border-color: var(--border-default);">
     <!-- 左: タブ情報 + ステータスインジケーター -->
     <div class="flex items-center gap-3 min-w-0">
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2 whitespace-nowrap flex-shrink-0">
         <Icon name={tabInfo[activeTab].icon} size={18} class="text-[var(--accent)]" />
         <h1 class="text-sm font-semibold text-[var(--text-primary)]" style="font-family: var(--font-heading);">
           {tabInfo[activeTab].label}
@@ -54,10 +54,10 @@
       <!-- ステータスインジケーター -->
       <div class="flex items-center gap-2 ml-2">
         <AuthIndicator onclick={openAuthSettings} />
-        <!-- チャット接続状態 -->
-        <div class="flex items-center gap-1.5 px-2 py-1 rounded-md bg-[var(--bg-surface-2)]">
+        <!-- チャット接続状態（ドットのみ） -->
+        <div class="flex items-center gap-1.5 px-2 py-1 rounded-md bg-[var(--bg-surface-2)] whitespace-nowrap">
           <div
-            class="w-1.5 h-1.5 rounded-full"
+            class="w-1.5 h-1.5 rounded-full flex-shrink-0"
             style="background: {chatStore.isConnected ? 'var(--success)' : 'var(--text-muted)'};"
           ></div>
           <span class="text-xs text-[var(--text-secondary)]">
@@ -66,8 +66,8 @@
         </div>
         <!-- WebSocket状態（実行中の場合のみ表示） -->
         {#if websocketStore.isRunning}
-          <div class="flex items-center gap-1.5 px-2 py-1 rounded-md bg-[var(--bg-surface-2)]">
-            <div class="w-1.5 h-1.5 rounded-full" style="background: var(--info);"></div>
+          <div class="flex items-center gap-1.5 px-2 py-1 rounded-md bg-[var(--bg-surface-2)] whitespace-nowrap">
+            <div class="w-1.5 h-1.5 rounded-full flex-shrink-0" style="background: var(--info);"></div>
             <span class="text-xs text-[var(--text-secondary)]" style="font-family: var(--font-mono);">
               WS:{websocketStore.actualPort}({websocketStore.connectedClients})
             </span>

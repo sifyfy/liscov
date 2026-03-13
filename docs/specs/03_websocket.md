@@ -104,6 +104,8 @@ pub struct WebSocketStatus {
 
 チャットメッセージ受信時にブロードキャスト。
 
+> **注意**: WebSocketはコアの `ChatMessage` 構造体をブロードキャストする。フロントエンド向けTauriイベント（`chat:message`）で送られる `GuiChatMessage` とはフィールドが異なる（`connection_id`, `platform`, `broadcaster_name` はWebSocketには含まれない）。runs の直列化形式も異なる（コア: 外部タグ `{ "Text": { ... } }` / GUI: 内部タグ `{ "type": "Text", ... }`）。
+
 ```json
 {
   "type": "ChatMessage",

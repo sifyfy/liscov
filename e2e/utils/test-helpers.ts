@@ -269,8 +269,8 @@ export async function killTauriApp(): Promise<void> {
       execSync('pkill -f liscov-tauri', { stdio: 'ignore' });
     }
   } catch { /* プロセスが存在しない場合は無視 */ }
-  // CDP ポートが解放されるまで待機
-  await waitForPortFree(9222, 5000);
+  // CDP ポートが解放されるまで待機（Windowsではプロセスツリー終了が遅延するため長めに設定）
+  await waitForPortFree(9222, 10000);
 }
 
 /**
@@ -572,27 +572,50 @@ export async function teardownTestEnvironment(browser?: Browser): Promise<void> 
 }
 
 /**
- * 停止・初期化してアプリをアイドル状態に戻す。
- * 「停止」が表示されていればクリック後「初期化」をクリックし、URL入力欄の再表示を待機する。
+ * 全接続を切断し、蓄積されたメッセージをクリアしてアプリをアイドル状態に戻す。
+ * 多接続リファクタリングで「初期化」ボタンが廃止されたため、
+ * 切断後にFilterPanelの「クリア」ボタンでメッセージを消去する。
  */
 export async function disconnectAndInitialize(page: Page): Promise<void> {
-  const stopButton = page.locator('button:has-text("停止")');
-  if (await stopButton.isVisible({ timeout: 1000 }).catch(() => false)) {
-    await stopButton.click();
-    await page.locator('button:has-text("初期化")').click();
-    await expect(page.locator('input[placeholder*="youtube.com"]')).toBeVisible({ timeout: 5000 });
+  // Step 1: 全接続を切断
+  const disconnectAllBtn = page.locator('button:has-text("全切断")');
+  if (await disconnectAllBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+    await disconnectAllBtn.click();
+    await expect(page.locator('.connection-item')).toHaveCount(0, { timeout: 10000 });
+  } else {
+    const disconnectBtn = page.locator('.connection-item .disconnect-btn').first();
+    if (await disconnectBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await disconnectBtn.click();
+      await expect(page.locator('.connection-item')).toHaveCount(0, { timeout: 10000 });
+    }
+  }
+
+  // Step 2: 蓄積メッセージをクリア（テスト間の状態分離のため）
+  // FilterPanelの「クリア」ボタン → 確認ダイアログ → 実行
+  const clearButton = page.locator('button:has-text("クリア")').first();
+  if (await clearButton.isEnabled({ timeout: 1000 }).catch(() => false)) {
+    await clearButton.click();
+    // 確認ダイアログ内のクリアボタン
+    const dialog = page.locator('.fixed.inset-0');
+    await expect(dialog).toBeVisible({ timeout: 3000 });
+    const confirmBtn = dialog.locator('button:has-text("クリア")');
+    await confirmBtn.click();
+    await expect(dialog).not.toBeVisible({ timeout: 3000 });
   }
 }
 
 /**
- * モックサーバーのストリームに接続し、ストリームタイトルの表示を待機する。
+ * モックサーバーのストリームに接続し、接続リストへの追加を待機する。
+ * URLフォームは常に表示されているため、接続後も入力欄は残る。
  * @param videoId - 動画ID（省略時は "test_video_123"）
+ * @param expectedTitle - 接続確認に使うストリームタイトル（省略時は "Mock Live"）
  */
-export async function connectToMockStream(page: Page, videoId = 'test_video_123'): Promise<void> {
+export async function connectToMockStream(page: Page, videoId = 'test_video_123', expectedTitle = 'Mock Live'): Promise<void> {
   const urlInput = page.locator('input[placeholder*="youtube.com"]');
   await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=${videoId}`);
   await page.locator('button:has-text("開始")').click();
-  await expect(page.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+  // 接続リストにエントリが追加されるのを待つ
+  await expect(page.getByText(expectedTitle).first()).toBeVisible({ timeout: 10000 });
 }
 
 /**

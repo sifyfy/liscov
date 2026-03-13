@@ -501,8 +501,22 @@ pub async fn export_current_messages(
     config: ExportConfig,
 ) -> Result<(), CommandError> {
     let messages = state.messages.read().await;
-    let session_id = state.current_session_id.read().await.clone();
-    let broadcaster_id = state.current_broadcaster_id.read().await.clone();
+
+    // 多接続モデル: 全接続のセッションID・配信者IDを収集
+    let (session_ids, broadcaster_ids): (Vec<String>, Vec<String>) = {
+        let connections = state.connections.read().await;
+        let sids: Vec<String> = connections.values()
+            .filter_map(|c| c.session_id.clone())
+            .collect();
+        let bids: Vec<String> = connections.values()
+            .map(|c| c.broadcaster_channel_id.clone())
+            .filter(|id| !id.is_empty())
+            .collect();
+        (sids, bids)
+    };
+    // 後方互換: 単一値として最初の要素を使用（エクスポートヘッダ用）
+    let session_id = session_ids.first().cloned();
+    let broadcaster_id = broadcaster_ids.first().cloned();
 
     let export_messages: Vec<ExportMessage> = messages
         .iter()

@@ -77,8 +77,7 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
       const connectButton = mainPage.locator('button:has-text("開始")');
       await connectButton.click();
 
-      // Wait for connection - should show stream title (use first() to avoid strict mode violation)
-      // UI prioritizes streamTitle over broadcasterName, so only streamTitle is displayed
+      // Wait for connection - stream title appears in connection list (use first() to avoid strict mode violation)
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Disconnect after test
@@ -548,13 +547,14 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
-      // Verify connected state
-      await expect(mainPage.locator('button:has-text("停止")')).toBeVisible();
+      // 接続状態の確認: 接続リストにエントリが表示されている
+      await expect(mainPage.locator('.connection-item').first()).toBeVisible();
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
 
-      // Verify disconnected state
+      // 切断後の状態確認: 接続リストが空になり、URL入力欄と開始ボタンは引き続き表示される
+      await expect(mainPage.locator('.connection-item')).toHaveCount(0);
       await expect(mainPage.locator('button:has-text("開始")')).toBeVisible();
       await expect(mainPage.locator('input[placeholder*="youtube.com"]')).toBeVisible();
     });

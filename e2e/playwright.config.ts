@@ -18,7 +18,7 @@ export default defineConfig({
   testDir: '.',
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 1 : 0,
+  retries: 1,
   workers: 1,
   // list レポーターの後に buffered-log-reporter を配置することで、
   // テスト結果行（✓/✘）の後にログが表示される

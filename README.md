@@ -122,7 +122,8 @@ liscov-tauri/
 ├── src-tauri/                    # Rust Backend
 │   ├── src/
 │   │   ├── commands/             # Tauri commands
-│   │   ├── core/                 # コアモジュール (api/, models/)
+│   │   ├── core/                 # コアモジュール (api/, models/, chat_runtime.rs)
+│   │   ├── connection.rs         # StreamConnection定義（多接続管理）
 │   │   ├── database/             # SQLiteデータベース操作
 │   │   └── tts/                  # TTS (棒読みちゃん/VOICEVOX)
 │   └── Cargo.toml
@@ -155,7 +156,7 @@ src/lib/components/         core/api/ (InnerTubeClient, WebSocket)
 
 - **Tauri Commands**: フロントエンドは `invoke()` でRust関数を呼び出す。コマンドは `src-tauri/src/lib.rs` の `invoke_handler!` マクロで登録。
 - **Tauri Events**: バックエンドからフロントエンドへのリアルタイム通知（`chat:message`, `chat:connection`）。
-- **AppState** (`state.rs`): シングルトン状態管理。`Arc<RwLock<T>>` で並行アクセス。
+- **AppState** (`state.rs`): グローバル状態管理。`Arc<RwLock<HashMap<u64, StreamConnection>>>` で複数接続を並行管理。各接続は `CancellationToken` でライフサイクルを制御。
 
 ### コマンドモジュールと仕様書の対応
 

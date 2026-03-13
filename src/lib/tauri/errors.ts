@@ -66,6 +66,23 @@ export function normalizeError(error: unknown): AppError {
     return normalizeError(error.message);
   }
 
+  // オブジェクト型エラー（Tauri v2がデシリアライズ済みオブジェクトを返す場合）
+  if (error && typeof error === 'object') {
+    const record = error as Record<string, unknown>;
+    if (typeof record.kind === 'string' && typeof record.message === 'string') {
+      const code = record.kind as ErrorCode;
+      return {
+        code,
+        message: record.message,
+        recoverable: RECOVERABLE_CODES.has(code),
+      };
+    }
+    // kind がなくても message フィールドがあればそれを使う
+    if (typeof record.message === 'string') {
+      return { code: 'Internal', message: record.message, recoverable: false };
+    }
+  }
+
   // null / undefined / その他の型
   return { code: 'Internal', message: String(error), recoverable: false };
 }

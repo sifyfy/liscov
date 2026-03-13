@@ -63,7 +63,7 @@
 
 <button
   data-testid="auth-indicator"
-  class="flex items-center gap-2 px-3 py-1.5 rounded-lg transition-colors hover:bg-[var(--bg-surface-3)] {config.bgColor}"
+  class="flex items-center gap-2 px-3 py-1.5 rounded-lg transition-colors hover:bg-[var(--bg-surface-3)] whitespace-nowrap {config.bgColor}"
   title={config.tooltip}
   onclick={onclick}
 >

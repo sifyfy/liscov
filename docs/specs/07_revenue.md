@@ -10,10 +10,10 @@ SuperChat、メンバーシップ等の統計を分析し、CSV/JSON形式でエ
 
 | コマンド | 入力 | 出力 | 説明 |
 |---------|------|------|------|
-| `revenue_get_analytics` | なし | `RevenueAnalytics` | 現在セッションの分析 |
-| `revenue_get_session_analytics` | `session_id: String` | `RevenueAnalytics` | 過去セッションの分析 |
-| `revenue_export_session` | `session_id, file_path, config` | `()` | セッションデータエクスポート |
-| `revenue_export_current` | `file_path, config` | `()` | 現在メッセージエクスポート |
+| `get_revenue_analytics` | なし | `RevenueAnalytics` | 現在セッションの分析 |
+| `get_session_analytics` | `session_id: String` | `RevenueAnalytics` | 過去セッションの分析 |
+| `export_session_data` | `session_id, file_path, config` | `()` | セッションデータエクスポート |
+| `export_current_messages` | `file_path, config` | `()` | 現在メッセージエクスポート（多接続時は全接続のメッセージを対象） |
 
 ## データモデル
 
@@ -36,8 +36,8 @@ pub struct RevenueAnalytics {
 | `super_chat_by_tier` | SuperChatTierStats | tier別SuperChat件数 |
 | `super_sticker_count` | usize | SuperSticker総件数 |
 | `membership_gains` | usize | メンバーシップ獲得数 |
-| `hourly_stats` | Vec | 時間別統計データ |
-| `top_contributors` | Vec | 上位貢献者（件数ベース） |
+| `hourly_stats` | Vec | 時間別統計データ（現在は常に空。将来実装予定） |
+| `top_contributors` | Vec | 上位貢献者（件数ベース、`get_revenue_analytics`のみで集計） |
 
 ### SuperChatTierStats
 
@@ -171,27 +171,15 @@ fn determine_tier(header_background_color: u64) -> SuperChatTier {
 
 ```rust
 pub struct ExportConfig {
-    pub format: ExportFormat,
+    pub format: String,                    // "csv" or "json"
     pub include_metadata: bool,
-    pub date_range: Option<(DateTime, DateTime)>,
-    pub include_system_messages: bool,
+    pub include_system_messages: bool,     // 現在未使用（将来用）
     pub max_records: Option<usize>,
-    pub sort_order: SortOrder,
-}
-
-pub enum ExportFormat {
-    Csv,
-    Json,
-}
-
-pub enum SortOrder {
-    Chronological,          // 古い順
-    ReverseChronological,   // 新しい順
-    ByAuthor,               // 著者でソート
-    ByMessageType,          // メッセージタイプでソート
-    ByTier,                 // tier順（高い順）
+    pub sort_order: Option<String>,        // 現在未使用（将来用）
 }
 ```
+
+> **未実装フィールド**: `date_range`（日付範囲フィルタ）、`sort_order`（ソート順）、`include_system_messages`（システムメッセージ除外）は将来の実装予定。現在のエクスポートは全メッセージを時系列順で出力する。
 
 ### エクスポート対象データ
 
@@ -270,8 +258,8 @@ id,timestamp,author,author_id,content,message_type,amount_display,tier,is_modera
 
 | ユーザー操作 | 期待動作 |
 |-------------|---------|
-| 画面表示 | `revenue_get_analytics`呼び出し、統計表示 |
-| 「更新」クリック | `revenue_get_analytics`呼び出し、統計更新 |
+| 画面表示 | `get_revenue_analytics`呼び出し、統計表示 |
+| 「更新」クリック | `get_revenue_analytics`呼び出し、統計更新 |
 
 ### 表示項目
 
@@ -341,12 +329,11 @@ interface ContributorInfo {
 }
 
 interface ExportConfig {
-    format: 'csv' | 'json';
+    format: string;
     include_metadata: boolean;
-    date_range: [string, string] | null;
     include_system_messages: boolean;
     max_records: number | null;
-    sort_order: 'chronological' | 'reverse_chronological' | 'by_author' | 'by_message_type' | 'by_tier';
+    sort_order: string | null;
 }
 ```
 

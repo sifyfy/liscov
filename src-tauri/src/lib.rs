@@ -2,6 +2,7 @@
 //! Tauri backend implementation
 
 pub mod commands;
+pub mod connection;
 pub mod core;
 pub mod database;
 pub mod errors;
@@ -22,7 +23,8 @@ use commands::{
     auth_delete_credentials, auth_clear_webview_cookies, auth_validate_credentials,
     auth_open_window, auth_check_session_validity, auth_use_fallback_storage,
     // Chat (spec: 02_chat.md)
-    connect_to_stream, disconnect_stream, get_chat_messages, set_chat_mode,
+    connect_to_stream, disconnect_stream, disconnect_all_streams, get_connections,
+    set_chat_mode,
     // Config (spec: 09_config.md)
     config_load, config_save, config_get_value, config_set_value, ConfigState,
     // WebSocket (spec: 03_websocket.md) - auto-start, no manual start/stop
@@ -133,7 +135,8 @@ pub fn run() {
             // Chat (spec: 02_chat.md)
             connect_to_stream,
             disconnect_stream,
-            get_chat_messages,
+            disconnect_all_streams,
+            get_connections,
             set_chat_mode,
             // Config (spec: 09_config.md)
             config_load,
