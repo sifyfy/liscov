@@ -578,7 +578,7 @@ export async function teardownTestEnvironment(browser?: Browser): Promise<void> 
  */
 export async function disconnectAndInitialize(page: Page): Promise<void> {
   // Step 1: 全接続を切断
-  const disconnectAllBtn = page.locator('.disconnect-all-btn');
+  const disconnectAllBtn = page.locator('button:has-text("全切断")');
   if (await disconnectAllBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
     await disconnectAllBtn.click();
     await expect(page.locator('.connection-item')).toHaveCount(0, { timeout: 10000 });

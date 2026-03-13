@@ -344,6 +344,35 @@ function createChatStore() {
     }
   }
 
+  // バックエンドのアクティブ接続をフロントエンドに復元（F5リロード対応）
+  async function restoreConnections(): Promise<void> {
+    try {
+      const backendConnections = await chatApi.getConnections();
+      if (backendConnections.length === 0) return;
+
+      const next = new Map(connections);
+      for (const info of backendConnections) {
+        const connId = Number(info.id);
+        // 既にフロントエンドに存在する接続はスキップ
+        if (next.has(connId)) continue;
+
+        next.set(connId, {
+          id: connId,
+          platform: info.platform.toLowerCase() as FrontendConnectionState['platform'],
+          streamUrl: info.stream_url,
+          streamTitle: info.stream_title,
+          broadcasterName: info.broadcaster_name,
+          broadcasterChannelId: info.broadcaster_channel_id,
+          connectionState: info.is_monitoring ? 'connected' : 'disconnecting',
+          color: getConnectionColor(info.broadcaster_channel_id || String(connId))
+        });
+      }
+      connections = next;
+    } catch (e) {
+      console.warn('接続状態の復元に失敗:', e);
+    }
+  }
+
   // コンフィグからディスプレイ設定を初期化 (spec: 09_config.md)
   function initDisplaySettings(): void {
     if (configStore.isLoaded) {
@@ -448,7 +477,8 @@ function createChatStore() {
     getMessagesForChannel,
     setupEventListeners,
     cleanup,
-    initDisplaySettings
+    initDisplaySettings,
+    restoreConnections
   };
 }
 

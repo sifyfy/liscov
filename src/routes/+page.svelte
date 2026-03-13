@@ -11,6 +11,7 @@
       authStore.checkSessionValidity();
     }
     await chatStore.setupEventListeners();
+    await chatStore.restoreConnections();
     await websocketStore.init();
   });
 

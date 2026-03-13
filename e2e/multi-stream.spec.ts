@@ -214,7 +214,7 @@ test.describe('Multi-Stream Connection', () => {
       await expect(mainPage.locator('.connection-item')).toHaveCount(2);
 
       // 全切断ボタンは2件以上の接続時に表示される
-      const disconnectAllBtn = mainPage.locator('.disconnect-all-btn');
+      const disconnectAllBtn = mainPage.locator('button:has-text("全切断")');
       await expect(disconnectAllBtn).toBeVisible({ timeout: 5000 });
 
       await disconnectAllBtn.click();
@@ -231,7 +231,7 @@ test.describe('Multi-Stream Connection', () => {
       await expect(mainPage.locator('.connection-item')).toHaveCount(1);
 
       // 1件の場合は全切断ボタンは表示されない
-      const disconnectAllBtn = mainPage.locator('.disconnect-all-btn');
+      const disconnectAllBtn = mainPage.locator('button:has-text("全切断")');
       await expect(disconnectAllBtn).not.toBeVisible();
     });
   });
@@ -241,7 +241,7 @@ test.describe('Multi-Stream Connection', () => {
       await connectStream(mainPage, 'test_video_123', 'Mock Live');
       await connectStream(mainPage, 'test_video_456', 'Mock Live 2');
 
-      const disconnectAllBtn = mainPage.locator('.disconnect-all-btn');
+      const disconnectAllBtn = mainPage.locator('button:has-text("全切断")');
       await disconnectAllBtn.click();
       await expect(mainPage.locator('.connection-item')).toHaveCount(0, { timeout: 10000 });
 
@@ -254,7 +254,7 @@ test.describe('Multi-Stream Connection', () => {
       await connectStream(mainPage, 'test_video_123', 'Mock Live');
       await connectStream(mainPage, 'test_video_456', 'Mock Live 2');
 
-      const disconnectAllBtn = mainPage.locator('.disconnect-all-btn');
+      const disconnectAllBtn = mainPage.locator('button:has-text("全切断")');
       await disconnectAllBtn.click();
       await expect(mainPage.locator('.connection-item')).toHaveCount(0, { timeout: 10000 });
 

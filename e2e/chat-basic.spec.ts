@@ -77,8 +77,7 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
       const connectButton = mainPage.locator('button:has-text("開始")');
       await connectButton.click();
 
-      // Wait for connection - should show stream title (use first() to avoid strict mode violation)
-      // UI prioritizes streamTitle over broadcasterName, so only streamTitle is displayed
+      // Wait for connection - stream title appears in connection list (use first() to avoid strict mode violation)
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       // Disconnect after test

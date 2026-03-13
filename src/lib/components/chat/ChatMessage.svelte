@@ -337,9 +337,7 @@
     font-size: 0.7em;
     color: var(--text-secondary);
     white-space: nowrap;
-    max-width: 60px;
     overflow: hidden;
     text-overflow: ellipsis;
-    flex-shrink: 0;
   }
 </style>

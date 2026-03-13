@@ -1,6 +1,5 @@
 <script lang="ts">
   import { chatStore } from '$lib/stores';
-  import ConnectionList from './ConnectionList.svelte';
 
   let streamUrl = $state('');
 
@@ -43,13 +42,9 @@
 
 <!-- 接続設定セクション -->
 <div class="p-3 rounded-lg bg-[var(--bg-surface-2)] border border-[var(--border-default)]">
-  <!-- Header -->
-  <div class="flex items-center gap-2 mb-2">
-    <span class="font-semibold text-[var(--text-primary)]">接続設定</span>
-  </div>
-
   <!-- URL入力フォーム（常に表示: 多接続のエントリーポイント） -->
   <div class="flex items-center gap-2">
+    <span class="flex-shrink-0 font-semibold text-sm text-[var(--text-primary)]">接続設定</span>
     <input
       type="text"
       bind:value={streamUrl}
@@ -101,10 +96,4 @@
     <p class="mt-2 text-[var(--error)] text-xs">{chatStore.error}</p>
   {/if}
 
-  <!-- 接続リスト（1つ以上接続時に表示） -->
-  {#if chatStore.connections.size > 0}
-    <div class="mt-2">
-      <ConnectionList />
-    </div>
-  {/if}
 </div>

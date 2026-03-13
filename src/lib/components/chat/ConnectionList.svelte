@@ -5,19 +5,10 @@
     chatStore.disconnect(connectionId);
   }
 
-  function handleDisconnectAll() {
-    chatStore.disconnectAll();
-  }
 </script>
 
 {#if chatStore.connections.size > 0}
   <div class="connection-list">
-    <div class="connection-list-header">
-      <span class="connection-count">接続中: {chatStore.connections.size}</span>
-      {#if chatStore.connections.size > 1}
-        <button class="disconnect-all-btn" onclick={handleDisconnectAll}>全切断</button>
-      {/if}
-    </div>
     {#each [...chatStore.connections.values()] as conn (conn.id)}
       <div class="connection-item">
         <div class="color-indicator" style="background-color: {conn.color}"></div>
@@ -43,29 +34,9 @@
   .connection-list {
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    padding: 8px;
+    gap: 2px;
+    padding: 0 8px 4px;
     background: var(--bg-surface-1);
-    border-radius: 6px;
-  }
-  .connection-list-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 0.8em;
-    color: var(--text-secondary);
-  }
-  .disconnect-all-btn {
-    font-size: 0.75em;
-    padding: 2px 8px;
-    border-radius: 4px;
-    background: var(--bg-surface-2);
-    color: var(--text-secondary);
-    border: 1px solid var(--border-color, rgba(255,255,255,0.1));
-    cursor: pointer;
-  }
-  .disconnect-all-btn:hover {
-    background: var(--bg-surface-3);
   }
   .connection-item {
     display: flex;
