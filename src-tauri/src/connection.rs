@@ -1,7 +1,8 @@
 //! 配信接続の管理
 
-use crate::core::models::Platform;
+use crate::core::models::{ChatMode, Platform};
 use serde::{Deserialize, Serialize};
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use ts_rs::TS;
@@ -13,6 +14,8 @@ pub const MAX_CONNECTIONS: usize = 32;
 ///
 /// InnerTube クライアントは監視タスク内の Arc<RwLock> で管理され、
 /// この構造体には含まれない（ライフタイムが異なるため）。
+/// チャットモードの変更は `chat_mode_tx` (watch チャネル) を通じて
+/// 監視タスクに非同期で伝達される。
 pub struct StreamConnection {
     pub id: u64,
     pub platform: Platform,
@@ -24,6 +27,8 @@ pub struct StreamConnection {
     pub session_id: Option<String>,
     pub cancellation_token: CancellationToken,
     pub task_handle: Option<JoinHandle<()>>,
+    /// チャットモード変更要求を監視タスクに伝達する watch チャネル
+    pub chat_mode_tx: watch::Sender<ChatMode>,
 }
 
 /// フロントエンドに公開する接続情報（シリアライズ可能）
@@ -62,6 +67,7 @@ mod tests {
 
     /// テスト用のStreamConnectionを作成するヘルパー
     fn make_connection(id: u64) -> StreamConnection {
+        let (chat_mode_tx, _) = watch::channel(ChatMode::TopChat);
         StreamConnection {
             id,
             platform: Platform::YouTube,
@@ -73,6 +79,7 @@ mod tests {
             session_id: None,
             cancellation_token: CancellationToken::new(),
             task_handle: None,
+            chat_mode_tx,
         }
     }
 

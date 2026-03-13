@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Emitter, State};
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, watch};
 use tokio_util::sync::CancellationToken;
 use ts_rs::TS;
 
@@ -325,6 +325,9 @@ pub async fn connect_to_stream(
         // キャンセレーショントークンを生成
         let cancellation_token = CancellationToken::new();
 
+        // チャットモード制御用の watch チャネルを生成
+        let (chat_mode_tx, chat_mode_rx) = watch::channel(mode);
+
         // 監視タスクの共有依存を構築
         let deps = MonitoringDeps::from_state(&state);
 
@@ -355,6 +358,7 @@ pub async fn connect_to_stream(
             session_id: session_id.clone(),
             cancellation_token: cancellation_token.clone(),
             task_handle: None, // spawn後に設定
+            chat_mode_tx,
         };
 
         {
@@ -378,6 +382,7 @@ pub async fn connect_to_stream(
                 broadcaster_id,
                 token_for_task,
                 save_config,
+                chat_mode_rx,
                 move |app, msg| {
                     // ChatMessage を接続情報付き GUI メッセージに変換してフロントエンドへ emit
                     let gui_msg = GuiChatMessage::from_with_connection(
@@ -549,30 +554,36 @@ pub async fn get_connections(
     Ok(connections.values().map(ConnectionInfo::from).collect())
 }
 
-/// Set chat mode (TopChat or AllChat) for a specific connection
+/// チャットモード（TopChat/AllChat）を変更する
+///
+/// watch チャネル経由で監視タスクにモード変更要求を送信する。
+/// 実際の適用は次回ポーリング時に行われる（非同期）。
 #[tauri::command]
 pub async fn set_chat_mode(
     state: State<'_, AppState>,
     connection_id: u64,
     mode: String,
 ) -> Result<bool, CommandError> {
-    let _chat_mode = match mode.as_str() {
+    let chat_mode = match mode.as_str() {
         "all" | "AllChat" => ChatMode::AllChat,
         _ => ChatMode::TopChat,
     };
 
-    // クライアントは監視タスク内の Arc<RwLock> で管理されているため、
-    // connections マップからは直接アクセスできない。
-    // チャットモード変更には接続の再作成が必要（Phase 2 で改善予定）。
+    // connections ロックを短時間で解放するため、send() 完了後すぐ drop
     let connections = state.connections.read().await;
-    if connections.contains_key(&connection_id) {
-        Err(CommandError::InvalidInput(
-            "チャットモードの動的切り替えは未実装です。切断して再接続してください。".to_string()
-        ))
-    } else {
-        Err(CommandError::NotConnected(format!(
-            "接続 {} が見つかりません",
-            connection_id
-        )))
-    }
+    let conn = connections.get(&connection_id).ok_or_else(|| {
+        CommandError::NotConnected(format!("接続 {} が見つかりません", connection_id))
+    })?;
+
+    conn.chat_mode_tx.send(chat_mode).map_err(|_| {
+        CommandError::Internal("監視タスクが既に終了しています".to_string())
+    })?;
+
+    tracing::info!(
+        "チャットモード変更要求を送信: connection_id={}, mode={:?}",
+        connection_id,
+        chat_mode
+    );
+
+    Ok(true)
 }

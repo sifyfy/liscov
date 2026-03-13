@@ -233,13 +233,12 @@ function createChatStore() {
 
   async function setChatModeAction(mode: ChatMode): Promise<void> {
     chatMode = mode;
-    // チャットモード動的切り替えは未実装（Phase 2）
-    // エラーはログに出力し、ユーザーには chatMode の UI 状態のみ更新する
+    // 全接続にチャットモード変更要求を送信（watch チャネル経由で次回ポーリング時に適用）
     for (const [connId] of connections) {
       try {
         await chatApi.setChatMode(connId, mode);
-      } catch {
-        // 未実装エラーは想定内 — 切断・再接続で反映される
+      } catch (e) {
+        console.warn(`チャットモード変更失敗 (connection ${connId}):`, e);
       }
     }
   }

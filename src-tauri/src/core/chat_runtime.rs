@@ -5,13 +5,13 @@
 
 use std::collections::VecDeque;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, watch};
 use tokio_util::sync::CancellationToken;
 
 use tauri::AppHandle;
 
 use crate::core::api::{InnerTubeClient, WebSocketServer};
-use crate::core::models::ChatMessage;
+use crate::core::models::{ChatMessage, ChatMode};
 use crate::core::raw_response::{RawResponseSaver, SaveConfig};
 use crate::database::{self, Database};
 use crate::state::MAX_MESSAGES;
@@ -59,6 +59,7 @@ impl MonitoringDeps {
 /// - `broadcaster_id` — 配信者チャンネル ID
 /// - `cancellation_token` — この接続のキャンセレーショントークン
 /// - `save_config` — レスポンス保存設定
+/// - `chat_mode_rx` — チャットモード変更要求を受信する watch チャネル
 /// - `emit_gui_message` — ChatMessage を GUI 用に変換して emit するコールバック
 #[allow(clippy::too_many_arguments)]
 pub async fn run_monitoring_loop<F>(
@@ -71,6 +72,7 @@ pub async fn run_monitoring_loop<F>(
     broadcaster_id: Option<String>,
     cancellation_token: CancellationToken,
     save_config: SaveConfig,
+    mut chat_mode_rx: watch::Receiver<ChatMode>,
     emit_gui_message: F,
 ) where
     F: Fn(&AppHandle, &ChatMessage) + Send + Sync + 'static,
@@ -145,6 +147,24 @@ pub async fn run_monitoring_loop<F>(
                 connection_id
             );
             break;
+        }
+
+        // チャットモード変更要求があれば適用（クライアントを戻す前に処理）
+        if chat_mode_rx.has_changed().unwrap_or(false) {
+            let new_mode = *chat_mode_rx.borrow_and_update();
+            if client.set_chat_mode(new_mode) {
+                tracing::info!(
+                    "チャットモード変更適用: connection_id={}, mode={:?}",
+                    connection_id,
+                    new_mode
+                );
+            } else {
+                tracing::warn!(
+                    "チャットモード変更失敗: connection_id={}, mode={:?}",
+                    connection_id,
+                    new_mode
+                );
+            }
         }
 
         {
