@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/plan-guidelines.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
