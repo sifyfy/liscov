@@ -1,6 +1,13 @@
-# CLAUDE.md
+# liscov-tauri
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+YouTube Live配信のチャットをリアルタイムでモニタリング・管理するTauriデスクトップアプリケーション。
+
+## 技術スタック
+
+- バックエンド: Rust + Tauri v2
+- フロントエンド: Svelte 5 (Runes) + TypeScript + Vite
+- データベース: SQLite (rusqlite)
+- テスト: Vitest (フロントエンド) / cargo test (Rust) / Playwright (E2E)
 
 ## コマンドリファレンス
 
@@ -20,7 +27,41 @@ pnpm check                                  # svelte-check
 cargo check --manifest-path src-tauri/Cargo.toml
 ```
 
-## アーキテクチャナビゲーション
+## ディレクトリ構成
+
+- `src/` — フロントエンド（Svelte 5）
+  - `src/lib/components/` — UIコンポーネント
+  - `src/lib/stores/` — ストア (Svelte 5 Runes)
+  - `src/lib/tauri/` — Tauriコマンドラッパー
+- `src-tauri/` — バックエンド（Rust + Tauri）
+  - `src-tauri/src/commands/` — Tauriコマンド
+  - `src-tauri/src/state.rs` — AppState定義
+- `crates/mock-server/` — E2Eテスト用モックサーバー
+- `e2e/` — E2Eテスト（Playwright）
+- `docs/` — ドキュメント
+  - `docs/specs/` — 機能仕様書
+  - `docs/decisions/` — ADR
+
+## 必読ドキュメント
+
+- [constitution.md](./constitution.md) — 開発ルール・規約。**必ず従うこと。**
+- [docs/SPECIFICATION_GUIDE.md](./docs/SPECIFICATION_GUIDE.md) — 仕様書・ドキュメント運用ルール。
+- [docs/specs/](./docs/specs/) — 機能仕様書。**実装前に該当する仕様を確認すること。**
+
+### コマンド → 仕様書マッピング
+
+| コマンド | 仕様書 |
+| --- | --- |
+| `commands/auth.rs`, `auth_window.rs` | `docs/specs/01_auth.md` |
+| `commands/chat.rs` | `docs/specs/02_chat.md` |
+| `commands/websocket.rs` | `docs/specs/03_websocket.md` |
+| `commands/tts.rs` | `docs/specs/04_tts.md` |
+| `commands/raw_response.rs` | `docs/specs/05_raw_response.md` |
+| `commands/viewer.rs` | `docs/specs/06_viewer.md` |
+| `commands/viewer.rs` | `docs/specs/06_viewer.md` |
+| `commands/analytics.rs` | `docs/specs/07_revenue.md` |
+| `commands/database.rs` | `docs/specs/08_database.md` |
+| `commands/config.rs` | `docs/specs/09_config.md` |
 
 ### 新機能追加の流れ
 
@@ -32,27 +73,10 @@ cargo check --manifest-path src-tauri/Cargo.toml
 6. `src/lib/components/` にUIコンポーネントを作成
 7. `e2e/` にE2Eテストを追加
 
-### コマンド → 仕様書マッピング
+## 作業開始前チェックリスト
 
-各コマンドモジュールには対応する仕様書がある。実装前に必ず仕様書を確認すること。
+1. [constitution.md](./constitution.md) を読み、プロジェクトのルールを把握する
+2. 該当する機能の仕様書 ([docs/specs/](./docs/specs/)) を確認する
+3. 仕様書の「制約・不変条件」に従う。変更が必要な場合は実装せずに報告する
 
-| コマンド | 仕様書 |
-| --- | --- |
-| `commands/auth.rs`, `auth_window.rs` | `docs/specs/01_auth.md` |
-| `commands/chat.rs` | `docs/specs/02_chat.md` |
-| `commands/websocket.rs` | `docs/specs/03_websocket.md` |
-| `commands/tts.rs` | `docs/specs/04_tts.md` |
-| `commands/raw_response.rs` | `docs/specs/05_raw_response.md` |
-| `commands/viewer.rs` | `docs/specs/06_viewer.md` |
-| `commands/analytics.rs` | `docs/specs/07_revenue.md` |
-| `commands/database.rs` | `docs/specs/08_database.md` |
-| `commands/config.rs` | `docs/specs/09_config.md` |
-
-## 非自明な規約
-
-- **Svelte 5 Runes**: `$state`, `$derived`, `$effect` を使用（旧Svelte storeパターンではない）
-- **CSS変数テーマ**: `app.css` でダーク/ライトテーマをCSS変数で定義（`--bg-base`, `--bg-surface-1`〜`3`, `--accent`, `--text-primary` 等）。`data-theme` 属性で切替
-- **AppState**: `Arc<RwLock<T>>` パターンで並行アクセス。`state.rs` で定義
-- **Tauri Events**: `chat:message`, `chat:connection` でバックエンド→フロントエンド通知
-- **Cargo workspace**: `src-tauri/`（メインアプリ）+ `crates/mock-server/`（E2Eモックサーバー）
-- **E2Eテスト分離**: 環境変数 `LISCOV_APP_NAME=liscov-test` 等で本番データと分離。詳細はREADMEのE2Eテストセクション参照
+ルールの詳細は constitution.md、ドキュメントの書き方は [docs/SPECIFICATION_GUIDE.md](./docs/SPECIFICATION_GUIDE.md) を参照。

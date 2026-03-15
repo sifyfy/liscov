@@ -1,8 +1,42 @@
 # データベース・セッション管理
 
-## 概要
+## 目的（Why）
 
-チャットセッション、メッセージ、視聴者情報をSQLiteに永続化する。
+チャットセッション、メッセージ、視聴者情報をSQLiteに永続化し、アプリ再起動後もデータを保持する。セッション履歴の参照、視聴者統計の蓄積、エクスポート機能の基盤となる。
+
+## 振る舞い（What）
+
+### セッションライフサイクル
+
+| イベント | 結果 |
+|---------|------|
+| 配信に接続 | UUID v4でセッションIDを生成し、sessionsテーブルにINSERT（end_time = NULL） |
+| メッセージ受信 | messagesテーブルにINSERT + viewer_profilesをUPSERT |
+| 配信から切断 | sessionsテーブルのend_timeを更新、統計（total_messages, total_revenue）を最終集計 |
+
+### メッセージ重複排除
+
+| 状況 | 結果 |
+|------|------|
+| 同一セッション内で同じmessage_idのメッセージ | INSERT OR IGNORE（重複を無視） |
+| 異なるセッションで同じmessage_id | 別レコードとして保存（session_id + message_idの複合ユニーク） |
+
+### マイグレーション
+
+| 変更種別 | 方法 |
+|---------|------|
+| 新規カラム追加 | ALTER TABLE + DEFAULT値（既存データに影響なし） |
+| 新規テーブル追加 | CREATE TABLE IF NOT EXISTS（既存DBに影響なし） |
+| キー削除 | 未知のキーは無視（エラーにならない） |
+
+## 制約・不変条件（Boundaries）
+
+| 制約 | 理由 |
+|------|------|
+| メッセージの重複排除は `(session_id, message_id)` の複合ユニークインデックスで保証する | YouTubeのmessage_idはセッションをまたぐと一意性が保証されないため、session_idとの複合で管理 |
+| 外部キー制約にCASCADE削除を使用する（sessions→messages, viewer_profiles→viewer_custom_info等） | 親レコード削除時に関連データが孤立することを防ぐ |
+| セッションIDはUUID v4形式（36文字） | 衝突確率が実質ゼロであり、セッション間の独立性を保証する |
+| DBファイルパスは環境変数 `LISCOV_APP_NAME` で分離可能 | E2Eテストが本番DBを破壊することを防ぐ |
 
 ## 永続化
 
