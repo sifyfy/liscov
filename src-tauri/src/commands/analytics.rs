@@ -1474,6 +1474,59 @@ mod tests {
         assert_eq!(analytics.membership_gains, 1);
     }
 
+    #[test]
+    fn compute_revenue_analytics_tier_escalation() {
+        // 同一コントリビューターがBlue(低tier)→Red(高tier)の順で送信した場合、
+        // 最高tierはRedに更新されること
+        let messages = vec![
+            // 1件目: Blue tier（メタデータなし = デフォルトBlue）
+            make_chat_message(
+                "UC_x", "UserX",
+                MessageType::SuperChat { amount: "$1.00".to_string() },
+                None,
+            ),
+            // 2件目: Red tier
+            make_chat_message(
+                "UC_x", "UserX",
+                MessageType::SuperChat { amount: "$200.00".to_string() },
+                Some(MessageMetadata {
+                    superchat_colors: Some(SuperChatColors {
+                        header_background: "#e62117".to_string(),
+                        header_text: "#ffffff".to_string(),
+                        body_background: "#e62117".to_string(),
+                        body_text: "#ffffff".to_string(),
+                    }),
+                    amount: Some("$200.00".to_string()),
+                    badges: vec![],
+                    badge_info: vec![],
+                    color: None,
+                    is_moderator: false,
+                    is_verified: false,
+                }),
+            ),
+        ];
+
+        let analytics = compute_revenue_analytics(&messages);
+        assert_eq!(analytics.top_contributors.len(), 1);
+        assert_eq!(analytics.top_contributors[0].highest_tier, Some(SuperChatTier::Red));
+    }
+
+    #[test]
+    fn compute_revenue_analytics_supersticker_contributor_count() {
+        // SuperStickerもcontributor件数にカウントされること
+        let messages = vec![
+            make_chat_message(
+                "UC_s", "StickerUser",
+                MessageType::SuperSticker { amount: "$5.00".to_string() },
+                None,
+            ),
+        ];
+
+        let analytics = compute_revenue_analytics(&messages);
+        assert_eq!(analytics.top_contributors.len(), 1);
+        assert_eq!(analytics.top_contributors[0].super_chat_count, 1);
+    }
+
     // ========================================================================
     // compute_session_analytics_from_rows (07_revenue.md: DB行データから集計)
     // ========================================================================
