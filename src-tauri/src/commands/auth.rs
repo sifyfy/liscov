@@ -389,10 +389,11 @@ fn delete_credentials_file() -> Result<(), String> {
 pub(crate) fn load_cookies_with_storage(
     storage_mode: &StorageMode,
     secure_storage: &dyn CredentialStorage,
+    cache: &RwLock<Option<YouTubeCookies>>,
 ) -> Result<YouTubeCookies, String> {
     // まずインメモリキャッシュを確認（keyring Windows問題のワークアラウンド）
-    if let Ok(cache) = CREDENTIALS_CACHE.read() {
-        if let Some(ref cached_cookies) = *cache {
+    if let Ok(guard) = cache.read() {
+        if let Some(ref cached_cookies) = *guard {
             log::info!("📦 Returning credentials from memory cache");
             return Ok(cached_cookies.clone());
         }
@@ -402,8 +403,8 @@ pub(crate) fn load_cookies_with_storage(
         StorageMode::Fallback => {
             let cookies = load_cookies_from_file()?;
             // キャッシュ更新
-            if let Ok(mut cache) = CREDENTIALS_CACHE.write() {
-                *cache = Some(cookies.clone());
+            if let Ok(mut guard) = cache.write() {
+                *guard = Some(cookies.clone());
             }
             Ok(cookies)
         }
@@ -412,8 +413,8 @@ pub(crate) fn load_cookies_with_storage(
             match secure_storage.load() {
                 Ok(cookies) => {
                     // キャッシュ更新
-                    if let Ok(mut cache) = CREDENTIALS_CACHE.write() {
-                        *cache = Some(cookies.clone());
+                    if let Ok(mut guard) = cache.write() {
+                        *guard = Some(cookies.clone());
                     }
                     Ok(cookies)
                 }
@@ -430,8 +431,8 @@ pub(crate) fn load_cookies_with_storage(
                                 let _ = delete_credentials_file();
                             }
                             // キャッシュ更新
-                            if let Ok(mut cache) = CREDENTIALS_CACHE.write() {
-                                *cache = Some(cookies.clone());
+                            if let Ok(mut guard) = cache.write() {
+                                *guard = Some(cookies.clone());
                             }
                             return Ok(cookies);
                         }
@@ -452,10 +453,11 @@ pub(crate) fn save_cookies_with_storage(
     cookies: &YouTubeCookies,
     storage_mode: &StorageMode,
     secure_storage: &dyn CredentialStorage,
+    cache: &RwLock<Option<YouTubeCookies>>,
 ) -> Result<(), String> {
     // まずインメモリキャッシュを更新（keyring Windows問題のワークアラウンド）
-    if let Ok(mut cache) = CREDENTIALS_CACHE.write() {
-        *cache = Some(cookies.clone());
+    if let Ok(mut guard) = cache.write() {
+        *guard = Some(cookies.clone());
         log::info!("📦 Credentials cached in memory");
     }
 
@@ -479,10 +481,11 @@ pub(crate) fn save_cookies_with_storage(
 pub(crate) fn delete_credentials_with_storage(
     storage_mode: &StorageMode,
     secure_storage: &dyn CredentialStorage,
+    cache: &RwLock<Option<YouTubeCookies>>,
 ) -> Result<(), String> {
     // インメモリキャッシュをクリア
-    if let Ok(mut cache) = CREDENTIALS_CACHE.write() {
-        *cache = None;
+    if let Ok(mut guard) = cache.write() {
+        *guard = None;
         log::info!("📦 Credentials cache cleared");
     }
 
@@ -499,17 +502,17 @@ pub(crate) fn delete_credentials_with_storage(
 
 /// Load cookies based on storage mode（本番用ラッパー）
 pub(crate) fn load_cookies(storage_mode: &StorageMode) -> Result<YouTubeCookies, String> {
-    load_cookies_with_storage(storage_mode, &KeyringStorage)
+    load_cookies_with_storage(storage_mode, &KeyringStorage, &CREDENTIALS_CACHE)
 }
 
 /// Save cookies based on storage mode（本番用ラッパー）
 fn save_cookies(cookies: &YouTubeCookies, storage_mode: &StorageMode) -> Result<(), String> {
-    save_cookies_with_storage(cookies, storage_mode, &KeyringStorage)
+    save_cookies_with_storage(cookies, storage_mode, &KeyringStorage, &CREDENTIALS_CACHE)
 }
 
 /// Delete credentials based on storage mode（本番用ラッパー）
 fn delete_credentials(storage_mode: &StorageMode) -> Result<(), String> {
-    delete_credentials_with_storage(storage_mode, &KeyringStorage)
+    delete_credentials_with_storage(storage_mode, &KeyringStorage, &CREDENTIALS_CACHE)
 }
 
 // =============================================================================
@@ -1113,13 +1116,6 @@ mod tests {
         }
     }
 
-    /// テスト間のキャッシュ干渉を防ぐためにグローバルキャッシュをクリアするヘルパー
-    fn clear_credentials_cache() {
-        if let Ok(mut cache) = CREDENTIALS_CACHE.write() {
-            *cache = None;
-        }
-    }
-
     /// テスト用のサンプルCookieを作成するヘルパー
     fn sample_cookies() -> YouTubeCookies {
         YouTubeCookies {
@@ -1139,11 +1135,11 @@ mod tests {
     #[test]
     fn load_cookies_with_storage_secure_mode_returns_stored_cookies() {
         // Secureモード + ストレージにデータあり → cookies返却
-        clear_credentials_cache();
         let cookies = sample_cookies();
         let storage = InMemoryStorage::with_data(cookies.clone());
+        let cache = RwLock::new(None);
 
-        let result = load_cookies_with_storage(&StorageMode::Secure, &storage);
+        let result = load_cookies_with_storage(&StorageMode::Secure, &storage, &cache);
         assert!(result.is_ok());
         let loaded = result.unwrap();
         assert_eq!(loaded.sapisid, cookies.sapisid);
@@ -1153,10 +1149,10 @@ mod tests {
     #[test]
     fn load_cookies_with_storage_secure_mode_no_entry() {
         // Secureモード + ストレージにデータなし + ファイルもなし → Err
-        clear_credentials_cache();
         let storage = InMemoryStorage::empty();
+        let cache = RwLock::new(None);
 
-        let result = load_cookies_with_storage(&StorageMode::Secure, &storage);
+        let result = load_cookies_with_storage(&StorageMode::Secure, &storage, &cache);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("No credentials found"));
     }
@@ -1164,15 +1160,13 @@ mod tests {
     #[test]
     fn load_cookies_with_storage_fallback_mode_ignores_secure_storage() {
         // Fallbackモード → セキュアストレージにデータがあっても使用せずファイルパスに委譲する
-        // 注: CREDENTIALS_CACHEはグローバルstaticのため、テスト並行実行でキャッシュヒットする可能性がある。
-        //     ここではFallbackモード時にsecure_storage.load()が呼ばれない（= ファイルパス経由）ことを
-        //     load呼び出し回数の追跡で検証する。
-        clear_credentials_cache();
-
+        // ここではFallbackモード時にsecure_storage.load()が呼ばれない（= ファイルパス経由）ことを
+        // load呼び出し回数の追跡で検証する。
         // load()呼び出しを追跡するストレージ
         let storage = CountingStorage::new(Some(sample_cookies()));
+        let cache = RwLock::new(None);
 
-        let _result = load_cookies_with_storage(&StorageMode::Fallback, &storage);
+        let _result = load_cookies_with_storage(&StorageMode::Fallback, &storage, &cache);
 
         // Fallbackモードではsecure_storage.load()は呼ばれない
         assert_eq!(storage.load_count(), 0, "Fallbackモードではsecure_storage.load()は呼ばれない");
@@ -1185,11 +1179,11 @@ mod tests {
     #[test]
     fn save_cookies_with_storage_secure_mode() {
         // Secureモード → InMemoryStorage に保存確認
-        clear_credentials_cache();
         let cookies = sample_cookies();
         let storage = InMemoryStorage::empty();
+        let cache = RwLock::new(None);
 
-        let result = save_cookies_with_storage(&cookies, &StorageMode::Secure, &storage);
+        let result = save_cookies_with_storage(&cookies, &StorageMode::Secure, &storage, &cache);
         assert!(result.is_ok());
 
         // ストレージに保存されていることを確認
@@ -1202,13 +1196,13 @@ mod tests {
     fn save_cookies_with_storage_fallback_mode() {
         // Fallbackモード → ファイルパスに委譲
         // ファイルI/Oが発生するため、ストレージには委譲されないことを確認
-        clear_credentials_cache();
         let cookies = sample_cookies();
         let storage = InMemoryStorage::empty();
+        let cache = RwLock::new(None);
 
         // Fallbackモードではsecure_storageは使用されない
         // ファイルパスへの保存が試みられる（パスが存在しない環境ではエラーになりうる）
-        let _result = save_cookies_with_storage(&cookies, &StorageMode::Fallback, &storage);
+        let _result = save_cookies_with_storage(&cookies, &StorageMode::Fallback, &storage, &cache);
 
         // InMemoryStorageには保存されないことを確認（Fallbackモードはファイルに委譲）
         assert!(storage.get_stored().is_none());
@@ -1221,14 +1215,14 @@ mod tests {
     #[test]
     fn delete_credentials_with_storage_secure_mode() {
         // Secureモード → InMemoryStorage から削除確認
-        clear_credentials_cache();
         let cookies = sample_cookies();
         let storage = InMemoryStorage::with_data(cookies);
+        let cache = RwLock::new(None);
 
         // 削除前にデータがあることを確認
         assert!(storage.get_stored().is_some());
 
-        let result = delete_credentials_with_storage(&StorageMode::Secure, &storage);
+        let result = delete_credentials_with_storage(&StorageMode::Secure, &storage, &cache);
         assert!(result.is_ok());
 
         // ストレージからデータが削除されていることを確認
@@ -1240,18 +1234,83 @@ mod tests {
         // 削除時にインメモリキャッシュもクリアされることを確認
         let cookies = sample_cookies();
         // キャッシュにデータをセット
-        if let Ok(mut cache) = CREDENTIALS_CACHE.write() {
-            *cache = Some(cookies.clone());
-        }
+        let cache = RwLock::new(Some(cookies.clone()));
         let storage = InMemoryStorage::with_data(cookies);
 
-        let result = delete_credentials_with_storage(&StorageMode::Secure, &storage);
+        let result = delete_credentials_with_storage(&StorageMode::Secure, &storage, &cache);
         assert!(result.is_ok());
 
         // キャッシュがクリアされていることを確認
-        if let Ok(cache) = CREDENTIALS_CACHE.read() {
-            assert!(cache.is_none());
-        }
+        assert!(cache.read().unwrap().is_none());
+    }
+
+    // =========================================================================
+    // キャッシュパラメータ化の振る舞い検証テスト
+    // =========================================================================
+
+    #[test]
+    fn load_cookies_with_storage_cache_hit() {
+        // キャッシュにデータあり → storage.load() を呼ばない
+        let cookies = sample_cookies();
+        let cache = RwLock::new(Some(cookies.clone()));
+        // CountingStorage: load() が呼ばれたかを追跡
+        let storage = CountingStorage::new(None);
+
+        let result = load_cookies_with_storage(&StorageMode::Secure, &storage, &cache);
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().sapisid, cookies.sapisid);
+        // キャッシュヒットのためstorage.load()は呼ばれない
+        assert_eq!(storage.load_count(), 0, "キャッシュヒット時はstorage.load()を呼ばない");
+    }
+
+    #[test]
+    fn load_cookies_with_storage_cache_miss_updates_cache() {
+        // キャッシュ空 → storage.load()成功後にキャッシュが更新される
+        let cookies = sample_cookies();
+        let cache = RwLock::new(None);
+        let storage = InMemoryStorage::with_data(cookies.clone());
+
+        let result = load_cookies_with_storage(&StorageMode::Secure, &storage, &cache);
+
+        assert!(result.is_ok());
+        // ロード後にキャッシュが更新されていることを確認
+        let cached = cache.read().unwrap().clone();
+        assert!(cached.is_some());
+        assert_eq!(cached.unwrap().sapisid, cookies.sapisid);
+    }
+
+    #[test]
+    fn save_cookies_with_storage_updates_cache() {
+        // save後にキャッシュが更新される
+        let cookies = sample_cookies();
+        let cache = RwLock::new(None);
+        let storage = InMemoryStorage::empty();
+
+        let result = save_cookies_with_storage(&cookies, &StorageMode::Secure, &storage, &cache);
+
+        assert!(result.is_ok());
+        // save後にキャッシュが更新されていることを確認
+        let cached = cache.read().unwrap().clone();
+        assert!(cached.is_some());
+        assert_eq!(cached.unwrap().sapisid, cookies.sapisid);
+    }
+
+    #[test]
+    fn delete_credentials_with_storage_clears_cache_verified() {
+        // delete後にキャッシュがNoneになる
+        let cookies = sample_cookies();
+        let cache = RwLock::new(Some(cookies.clone()));
+        let storage = InMemoryStorage::with_data(cookies);
+
+        // delete前はキャッシュにデータがある
+        assert!(cache.read().unwrap().is_some());
+
+        let result = delete_credentials_with_storage(&StorageMode::Secure, &storage, &cache);
+
+        assert!(result.is_ok());
+        // delete後にキャッシュがNoneになっていることを確認
+        assert!(cache.read().unwrap().is_none());
     }
 }
 
