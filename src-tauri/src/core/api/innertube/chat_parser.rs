@@ -852,6 +852,46 @@ mod tests {
         assert_eq!(colors.body_text, "#FFFFFF", "body_text は白");
     }
 
+    // parse_message_content の直接テスト
+    // 変異: 関数全体 → (String::new(), vec![]) / ("xyzzy".into(), vec![]) を検出する
+
+    #[test]
+    fn test_parse_message_content_text_run() {
+        // runs 配列のテキストランが正しく content と runs に変換されること
+        let msg = serde_json::json!({"runs": [{"text": "hello world"}]});
+        let (content, runs) = parse_message_content(&msg);
+        assert_eq!(content, "hello world");
+        assert_eq!(runs.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_message_content_empty() {
+        // runs がない場合は空の content と空の runs を返すこと
+        let msg = serde_json::json!({});
+        let (content, runs) = parse_message_content(&msg);
+        assert_eq!(content, "");
+        assert!(runs.is_empty());
+    }
+
+    // format_timestamp のテスト
+    // 変異: 関数全体 → String::new() / "xyzzy", / 1_000_000 → % 1_000_000 を検出する
+
+    #[test]
+    fn test_format_timestamp_valid() {
+        // マイクロ秒タイムスタンプを RFC3339 文字列に変換できること
+        // 1234567890000000 usec = 1234567890 sec = 2009-02-13T...(UTC)
+        let result = format_timestamp("1234567890000000");
+        assert!(result.contains("2009"), "2009年のタイムスタンプであること");
+        assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn test_format_timestamp_invalid() {
+        // 数値でない文字列は空文字列を返すこと
+        let result = format_timestamp("not_a_number");
+        assert_eq!(result, "");
+    }
+
     #[test]
     fn test_parse_supersticker_with_money_chip_color() {
         // moneyChipBackgroundColor を持つ SuperSticker メッセージのパース

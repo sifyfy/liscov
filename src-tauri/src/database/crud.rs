@@ -1305,4 +1305,259 @@ mod tests {
         assert_eq!(counts.get("UC_sys"), None, "System messages should not be counted");
         assert_eq!(counts.get("UC_a"), Some(&1u32));
     }
+
+    // ========================================================================
+    // SuperSticker の amount 保存 (08_database.md: L164 SuperSticker{amount} matchアーム)
+    // ========================================================================
+
+    /// spec: SuperSticker の amount フィールドが messages テーブルに正しく保存・取得される
+    #[tokio::test]
+    async fn supersticker_amount_saved_and_retrieved() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let session_id = create_session(&conn, None, None, None, None).unwrap();
+
+        let msg = ChatMessage {
+            id: "ss1".to_string(),
+            timestamp: "12:00:00".to_string(),
+            timestamp_usec: "1000000".to_string(),
+            message_type: MessageType::SuperSticker { amount: "$5.00".to_string() },
+            author: "Fan".to_string(),
+            author_icon_url: None,
+            channel_id: "UC_fan".to_string(),
+            content: "".to_string(),
+            runs: vec![],
+            metadata: None,
+            is_member: false,
+            is_first_time_viewer: false,
+            in_stream_comment_count: None,
+        };
+        save_message(&conn, &session_id, None, &msg, None).unwrap();
+
+        let messages = get_session_messages(&conn, &session_id, 100).unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].message_type, "supersticker");
+        assert_eq!(messages[0].amount.as_deref(), Some("$5.00"));
+    }
+
+    // ========================================================================
+    // is_member フラグ変換 (08_database.md: L237 != 0 判定)
+    // ========================================================================
+
+    /// spec: is_member=true で保存したメッセージは get_session_messages で is_member=true として取得される
+    #[tokio::test]
+    async fn is_member_true_preserved_on_retrieval() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let session_id = create_session(&conn, None, None, None, None).unwrap();
+
+        let msg = ChatMessage {
+            id: "mem1".to_string(),
+            timestamp: "12:00:00".to_string(),
+            timestamp_usec: "1000000".to_string(),
+            message_type: MessageType::Text,
+            author: "Member".to_string(),
+            author_icon_url: None,
+            channel_id: "UC_member".to_string(),
+            content: "メンバーです".to_string(),
+            runs: vec![],
+            metadata: None,
+            is_member: true,
+            is_first_time_viewer: false,
+            in_stream_comment_count: None,
+        };
+        save_message(&conn, &session_id, None, &msg, None).unwrap();
+
+        let messages = get_session_messages(&conn, &session_id, 100).unwrap();
+        assert_eq!(messages.len(), 1);
+        assert!(messages[0].is_member);
+    }
+
+    // ========================================================================
+    // delete_viewer_custom_info / update_viewer_tags の返り値 (L488-508)
+    // ========================================================================
+
+    /// spec: 存在するレコードを delete_viewer_custom_info すると true が返る
+    #[tokio::test]
+    async fn delete_viewer_custom_info_returns_true_when_exists() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "User", "UC_u", "hi"), None).unwrap();
+        let profile = get_viewer_profile(&conn, "UC_bc", "UC_u").unwrap().unwrap();
+
+        let info = ViewerCustomInfo::new(profile.id).with_reading("テスト");
+        upsert_viewer_custom_info(&conn, &info).unwrap();
+
+        let result = delete_viewer_custom_info(&conn, profile.id).unwrap();
+        assert!(result);
+    }
+
+    /// spec: 存在しないIDに delete_viewer_custom_info すると false が返る
+    #[tokio::test]
+    async fn delete_viewer_custom_info_returns_false_when_not_exists() {
+        let db = setup_db();
+        let conn = db.connection().await;
+
+        let result = delete_viewer_custom_info(&conn, 99999).unwrap();
+        assert!(!result);
+    }
+
+    /// spec: 存在する viewer_profile に update_viewer_tags すると true が返る
+    #[tokio::test]
+    async fn update_viewer_tags_returns_true_when_profile_exists() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "User", "UC_u", "hi"), None).unwrap();
+        let profile = get_viewer_profile(&conn, "UC_bc", "UC_u").unwrap().unwrap();
+
+        let result = update_viewer_tags(&conn, profile.id, Some(vec!["常連".to_string()])).unwrap();
+        assert!(result);
+    }
+
+    /// spec: 存在しないIDに update_viewer_tags すると false が返る
+    #[tokio::test]
+    async fn update_viewer_tags_returns_false_when_not_exists() {
+        let db = setup_db();
+        let conn = db.connection().await;
+
+        let result = update_viewer_tags(&conn, 99999, Some(vec!["tag".to_string()])).unwrap();
+        assert!(!result);
+    }
+
+    // ========================================================================
+    // delete_broadcaster / delete_viewer_profile の返り値 (L528, L540)
+    // ========================================================================
+
+    /// spec: broadcaster 作成後に delete_broadcaster すると (true, _) が返る
+    #[tokio::test]
+    async fn delete_broadcaster_returns_true_when_broadcaster_exists() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+
+        let (deleted, _) = delete_broadcaster(&conn, "UC_bc").unwrap();
+        assert!(deleted);
+    }
+
+    /// spec: 存在しない channel_id に delete_broadcaster すると (false, _) が返る
+    #[tokio::test]
+    async fn delete_broadcaster_returns_false_when_not_exists() {
+        let db = setup_db();
+        let conn = db.connection().await;
+
+        let (deleted, _) = delete_broadcaster(&conn, "UC_nonexistent").unwrap();
+        assert!(!deleted);
+    }
+
+    /// spec: viewer_profile 作成後に delete_viewer_profile すると true が返る
+    #[tokio::test]
+    async fn delete_viewer_profile_returns_true_when_exists() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "User", "UC_u", "hi"), None).unwrap();
+        let profile = get_viewer_profile(&conn, "UC_bc", "UC_u").unwrap().unwrap();
+
+        let result = delete_viewer_profile(&conn, profile.id).unwrap();
+        assert!(result);
+    }
+
+    /// spec: 存在しないIDに delete_viewer_profile すると false が返る
+    #[tokio::test]
+    async fn delete_viewer_profile_returns_false_when_not_exists() {
+        let db = setup_db();
+        let conn = db.connection().await;
+
+        let result = delete_viewer_profile(&conn, 99999).unwrap();
+        assert!(!result);
+    }
+
+    // ========================================================================
+    // get_viewers_for_broadcaster / get_viewer_count / get_distinct_broadcaster_channels (L555, L616, L674)
+    // ========================================================================
+
+    /// spec: get_viewer_count_for_broadcaster は登録済み視聴者数を返す
+    #[tokio::test]
+    async fn get_viewer_count_for_broadcaster_returns_correct_count() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "Viewer1", "UC_v1", "hi"), None).unwrap();
+
+        let count = get_viewer_count_for_broadcaster(&conn, "UC_bc").unwrap();
+        assert_eq!(count, 1);
+    }
+
+    /// spec: get_viewers_for_broadcaster は登録済み視聴者のVecを返す
+    #[tokio::test]
+    async fn get_viewers_for_broadcaster_returns_non_empty_vec() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "Viewer1", "UC_v1", "hi"), None).unwrap();
+
+        let viewers = get_viewers_for_broadcaster(&conn, "UC_bc", None, 100, 0).unwrap();
+        assert!(!viewers.is_empty());
+        assert_eq!(viewers[0].channel_id, "UC_v1");
+    }
+
+    /// spec: get_distinct_broadcaster_channels は登録済み配信者のVecを返す
+    #[tokio::test]
+    async fn get_distinct_broadcaster_channels_returns_non_empty_vec() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+
+        let broadcasters = get_distinct_broadcaster_channels(&conn).unwrap();
+        assert!(!broadcasters.is_empty());
+        assert_eq!(broadcasters[0].channel_id, "UC_bc");
+    }
+
+    // ========================================================================
+    // get_viewer_profile_by_id (06_viewer.md: IDによるプロフィール取得)
+    // ========================================================================
+
+    /// spec: DBに挿入済みの viewer_profile を get_viewer_profile_by_id で取得すると Some(data) が返る
+    #[tokio::test]
+    async fn get_viewer_profile_by_id_returns_some_when_exists() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+
+        // メッセージ保存により viewer_profile が生成される
+        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "Viewer1", "UC_v1", "hello"), None).unwrap();
+        let profile = get_viewer_profile(&conn, "UC_bc", "UC_v1").unwrap().unwrap();
+
+        // IDで再取得して Some が返ることを確認
+        let by_id = get_viewer_profile_by_id(&conn, profile.id).unwrap();
+        assert!(by_id.is_some());
+        let by_id = by_id.unwrap();
+        assert_eq!(by_id.id, profile.id);
+        assert_eq!(by_id.channel_id, "UC_v1");
+        assert_eq!(by_id.display_name, "Viewer1");
+    }
+
+    // ========================================================================
+    // get_top_contributors (08_database.md: トップ貢献者取得)
+    // ========================================================================
+
+    /// spec: セッションにスパチャメッセージを含む場合、get_top_contributors は非空 Vec を返す
+    #[tokio::test]
+    async fn get_top_contributors_returns_non_empty_vec_when_messages_exist() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+
+        // スパチャメッセージを挿入
+        let sc = make_superchat_message("sc1", "BigFan", "UC_fan", "$100.00");
+        save_message(&conn, &session_id, Some("UC_bc"), &sc, None).unwrap();
+
+        let contributors = get_top_contributors(&conn, &session_id, 10).unwrap();
+        assert!(!contributors.is_empty());
+        assert_eq!(contributors[0].channel_id, "UC_fan");
+        assert_eq!(contributors[0].display_name, "BigFan");
+        assert!(contributors[0].total_contribution > 0.0);
+    }
 }

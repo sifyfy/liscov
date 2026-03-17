@@ -1070,6 +1070,170 @@ mod tests {
     }
 
     // ========================================================================
+    // SuperChatTierStats::increment - 全Tier個別検証 (07_revenue.md: Tier統計)
+    // 対象mutant: L49-53 の += が *= / -= に置換されるケースを検出
+    // ========================================================================
+
+    #[test]
+    fn tier_stats_increment_magenta() {
+        // 07_revenue.md: Magenta tierのincrementが正しく加算されること
+        let mut stats = SuperChatTierStats::default();
+        stats.increment(SuperChatTier::Magenta);
+        assert_eq!(stats.tier_magenta, 1);
+    }
+
+    #[test]
+    fn tier_stats_increment_orange() {
+        // 07_revenue.md: Orange tierのincrementが正しく加算されること
+        let mut stats = SuperChatTierStats::default();
+        stats.increment(SuperChatTier::Orange);
+        assert_eq!(stats.tier_orange, 1);
+    }
+
+    #[test]
+    fn tier_stats_increment_green() {
+        // 07_revenue.md: Green tierのincrementが正しく加算されること
+        let mut stats = SuperChatTierStats::default();
+        stats.increment(SuperChatTier::Green);
+        assert_eq!(stats.tier_green, 1);
+    }
+
+    #[test]
+    fn tier_stats_increment_cyan() {
+        // 07_revenue.md: Cyan tierのincrementが正しく加算されること
+        let mut stats = SuperChatTierStats::default();
+        stats.increment(SuperChatTier::Cyan);
+        assert_eq!(stats.tier_cyan, 1);
+    }
+
+    // ========================================================================
+    // SuperChatTierStats::total - 全加算項独立検証 (07_revenue.md: Tier統計)
+    // 対象mutant: L59-60 の + が - / * に置換されるケースを検出
+    // ========================================================================
+
+    #[test]
+    fn tier_stats_total_magenta_and_orange() {
+        // 07_revenue.md: Magenta×1 + Orange×1 の合計が2になること（L59の加算パス検証）
+        let mut stats = SuperChatTierStats::default();
+        stats.increment(SuperChatTier::Magenta);
+        stats.increment(SuperChatTier::Orange);
+        assert_eq!(stats.total(), 2);
+    }
+
+    #[test]
+    fn tier_stats_total_green_and_cyan() {
+        // 07_revenue.md: Green×1 + Cyan×1 の合計が2になること（L60の加算パス検証）
+        let mut stats = SuperChatTierStats::default();
+        stats.increment(SuperChatTier::Green);
+        stats.increment(SuperChatTier::Cyan);
+        assert_eq!(stats.total(), 2);
+    }
+
+    // ========================================================================
+    // calculate_session_statistics (07_revenue.md: セッション統計集計)
+    // 対象mutant:
+    //   L615: delete match arm "superchat" → super_chat_count がインクリメントされない
+    //   L616: super_chat_count += 1 → -= 1 / *= 1
+    //   L622: membership_count += 1 → -= 1 / *= 1
+    // ========================================================================
+
+    fn make_export_message(id: &str, author_id: &str, message_type: &str, tier: Option<SuperChatTier>) -> ExportMessage {
+        ExportMessage {
+            id: id.to_string(),
+            timestamp: "2025-01-14T14:00:00Z".to_string(),
+            author: "TestUser".to_string(),
+            author_id: author_id.to_string(),
+            content: "test content".to_string(),
+            message_type: message_type.to_string(),
+            amount_display: None,
+            tier,
+            is_moderator: false,
+            is_member: false,
+            is_verified: false,
+            badges: vec![],
+        }
+    }
+
+    #[test]
+    fn session_stats_super_chat_count_increments() {
+        // 07_revenue.md: "superchat" メッセージが super_chat_count を1増やすこと
+        // L615 (match arm削除mutant) と L616 (+= 1 → -= 1 / *= 1 mutant) を殺す
+        let messages = vec![
+            make_export_message("sc1", "UC_user1", "superchat", Some(SuperChatTier::Yellow)),
+            make_export_message("sc2", "UC_user2", "superchat", Some(SuperChatTier::Red)),
+            make_export_message("sc3", "UC_user3", "superchat", Some(SuperChatTier::Blue)),
+        ];
+
+        let stats = calculate_session_statistics(&messages);
+
+        // 3件のsuperchatが正しく集計される
+        assert_eq!(stats.super_chat_count, 3);
+    }
+
+    #[test]
+    fn session_stats_super_chat_count_not_incremented_for_non_superchat() {
+        // 07_revenue.md: "chat" / "text" メッセージは super_chat_count に影響しないこと
+        let messages = vec![
+            make_export_message("msg1", "UC_user1", "text", None),
+            make_export_message("msg2", "UC_user2", "text", None),
+        ];
+
+        let stats = calculate_session_statistics(&messages);
+
+        assert_eq!(stats.super_chat_count, 0);
+    }
+
+    #[test]
+    fn session_stats_membership_count_increments() {
+        // 07_revenue.md: "membership" メッセージが membership_count を1増やすこと
+        // L622 (+= 1 → -= 1 / *= 1 mutant) を殺す
+        let messages = vec![
+            make_export_message("m1", "UC_user1", "membership", None),
+            make_export_message("m2", "UC_user2", "membership", None),
+        ];
+
+        let stats = calculate_session_statistics(&messages);
+
+        // 2件のmembershipが正しく集計される
+        assert_eq!(stats.membership_count, 2);
+    }
+
+    #[test]
+    fn session_stats_membership_gift_count_increments() {
+        // 07_revenue.md: "membership_gift" メッセージが membership_count を1増やすこと
+        // L622 の "membership" | "membership_gift" パターン検証
+        let messages = vec![
+            make_export_message("mg1", "UC_user1", "membership_gift", None),
+            make_export_message("mg2", "UC_user2", "membership_gift", None),
+            make_export_message("mg3", "UC_user3", "membership_gift", None),
+        ];
+
+        let stats = calculate_session_statistics(&messages);
+
+        assert_eq!(stats.membership_count, 3);
+    }
+
+    #[test]
+    fn session_stats_mixed_message_types() {
+        // 07_revenue.md: superchat/membership/textが混在するとき各カウントが正しいこと
+        // L615, L616, L622 の全mutantを同時に殺す
+        let messages = vec![
+            make_export_message("sc1", "UC_a", "superchat", Some(SuperChatTier::Red)),
+            make_export_message("sc2", "UC_b", "superchat", Some(SuperChatTier::Yellow)),
+            make_export_message("m1", "UC_c", "membership", None),
+            make_export_message("t1", "UC_d", "text", None),
+            make_export_message("t2", "UC_d", "text", None), // 同一ユーザーの重複
+        ];
+
+        let stats = calculate_session_statistics(&messages);
+
+        assert_eq!(stats.super_chat_count, 2);
+        assert_eq!(stats.membership_count, 1);
+        assert_eq!(stats.total_messages, 5);
+        assert_eq!(stats.unique_viewers, 4); // UC_dは1人
+    }
+
+    // ========================================================================
     // SuperChatTier ordering (07_revenue.md: Blue < ... < Red)
     // ========================================================================
 

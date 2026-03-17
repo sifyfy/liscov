@@ -422,6 +422,95 @@ mod tests {
     // Backup cleanup (05_raw_response.md: 古いバックアップ削除)
     // ========================================================================
 
+    // spec: 05_raw_response.md - 小さなファイルでは回転しない (サイズ計算の `/` mutant対策)
+    // ファイルサイズ計算に `/ 1024 / 1024` を使うため、
+    // 変異で `* 1024` になるとサイズが巨大になり誤って回転が発動する
+    #[tokio::test]
+    async fn no_rotation_for_small_file() {
+        let dir = temp_dir_for_test("no_rotation_small");
+        let file_path = dir.join("responses.ndjson");
+
+        // 数KB (1MB未満) のファイルを作成
+        {
+            let mut file = fs::File::create(&file_path).unwrap();
+            // 10行 × 100バイト = 約1KB
+            let line = "x".repeat(100);
+            for _ in 0..10 {
+                writeln!(file, "{}", line).unwrap();
+            }
+        }
+
+        let saver = RawResponseSaver::new(SaveConfig {
+            enabled: true,
+            file_path: file_path.to_string_lossy().to_string(),
+            max_file_size_mb: 1,
+            enable_rotation: true,
+            max_backup_files: 5,
+        });
+
+        saver.save_response(r#"{"check": "no_rotate"}"#).await.unwrap();
+
+        // バックアップファイルが作成されていないことを確認
+        let backup_count = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                name.starts_with("responses_") && name.ends_with(".ndjson")
+            })
+            .count();
+        assert_eq!(backup_count, 0, "小さなファイルで回転が発動してはいけない");
+    }
+
+    // spec: 05_raw_response.md - ちょうどmax件のバックアップは削除されない (`>` mutant対策)
+    #[tokio::test]
+    async fn cleanup_keeps_exactly_max_backups() {
+        let dir = temp_dir_for_test("cleanup_exact_max");
+        let file_path = dir.join("responses.ndjson");
+
+        // ちょうど max_backup_files 件のバックアップファイルを作成
+        for i in 0..3 {
+            let backup_name = format!("responses_20250101_{:06}.ndjson", i);
+            fs::write(dir.join(&backup_name), "old data").unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+
+        // 大きなファイルを作成してローテーション発動
+        {
+            let mut file = fs::File::create(&file_path).unwrap();
+            let line = "x".repeat(1024);
+            for _ in 0..1100 {
+                writeln!(file, "{}", line).unwrap();
+            }
+        }
+
+        let saver = RawResponseSaver::new(SaveConfig {
+            enabled: true,
+            file_path: file_path.to_string_lossy().to_string(),
+            max_file_size_mb: 1,
+            enable_rotation: true,
+            max_backup_files: 3, // ちょうど既存件数と同じ
+        });
+
+        saver.save_response(r#"{"test": true}"#).await.unwrap();
+
+        // ローテーション後は既存3件 + 新しく1件 = 4件になるので max=3 を超える
+        // → 古い1件が削除されて3件になるはず
+        let backup_count = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                name.starts_with("responses_") && name.ends_with(".ndjson")
+            })
+            .count();
+        assert!(
+            backup_count <= 3,
+            "max_backup_files=3 のとき3件以下でなければならない, got {}",
+            backup_count
+        );
+    }
+
     #[tokio::test]
     async fn cleanup_removes_old_backups() {
         let dir = temp_dir_for_test("cleanup");

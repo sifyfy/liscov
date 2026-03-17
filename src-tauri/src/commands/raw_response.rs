@@ -165,4 +165,36 @@ mod tests {
         assert!(validate_file_path("raw_responses.ndjson").is_ok());
         assert!(validate_file_path("D:\\data\\responses.ndjson").is_ok());
     }
+
+    // spec: 05_raw_response.md パス検証 - ちょうど4096文字はOK (`>` mutant対策)
+    #[test]
+    fn validate_accepts_path_exactly_4096_chars() {
+        let path = "a".repeat(4096);
+        assert!(validate_file_path(&path).is_ok());
+    }
+
+    // spec: 05_raw_response.md パス検証 - 4097文字はエラー
+    #[test]
+    fn validate_rejects_path_4097_chars() {
+        let path = "a".repeat(4097);
+        assert!(validate_file_path(&path).is_err());
+    }
+
+    // spec: 05_raw_response.md - From<GuiSaveConfig> for SaveConfig は全フィールドを保持する
+    #[test]
+    fn from_gui_save_config_preserves_all_fields() {
+        let gui = GuiSaveConfig {
+            enabled: true,
+            file_path: "custom.ndjson".to_string(),
+            max_file_size_mb: 50,
+            enable_rotation: false,
+            max_backup_files: 10,
+        };
+        let config = SaveConfig::from(gui);
+        assert!(config.enabled);
+        assert_eq!(config.file_path, "custom.ndjson");
+        assert_eq!(config.max_file_size_mb, 50);
+        assert!(!config.enable_rotation);
+        assert_eq!(config.max_backup_files, 10);
+    }
 }
