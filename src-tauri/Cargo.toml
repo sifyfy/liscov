@@ -72,6 +72,12 @@ rust_xlsxwriter = "0.78"
 tauri-plugin-dialog = "2.5.0"
 rodio = "0.21.1"
 
+[dev-dependencies]
+# シリアル実行が必要なテスト（環境変数を操作するもの）に使用
+serial_test = "3"
+# Tauri コマンドの統合テスト用 mock API
+tauri = { version = "2.9.5", features = ["test"] }
+
 [features]
 default = []
 
