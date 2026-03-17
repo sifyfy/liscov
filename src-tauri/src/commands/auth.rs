@@ -138,6 +138,15 @@ impl CredentialStorage for KeyringStorage {
 /// the same Entry instance. This cache provides a reliable fallback.
 static CREDENTIALS_CACHE: RwLock<Option<YouTubeCookies>> = RwLock::new(None);
 
+/// テスト用: CREDENTIALS_CACHE をクリアする
+/// テスト間のキャッシュ汚染を防ぐためにのみ使用する
+#[doc(hidden)]
+pub fn clear_credentials_cache_for_test() {
+    if let Ok(mut guard) = CREDENTIALS_CACHE.write() {
+        *guard = None;
+    }
+}
+
 /// Storage type for credentials
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "lowercase")]
