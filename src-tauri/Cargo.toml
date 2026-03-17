@@ -77,6 +77,8 @@ rodio = "0.21.1"
 serial_test = "3"
 # Tauri コマンドの統合テスト用 mock API
 tauri = { version = "2.9.5", features = ["test"] }
+# ファイル書き込みテストの一時ディレクトリ管理
+tempfile = "3"
 
 [features]
 default = []
