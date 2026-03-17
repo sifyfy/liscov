@@ -521,6 +521,46 @@ async fn check_session_validity_internal(cookies: &YouTubeCookies) -> SessionVal
 }
 
 // =============================================================================
+// 純粋関数（テスト可能なロジック）
+// =============================================================================
+
+/// Raw cookie文字列のバリデーション（純粋関数）
+pub(crate) fn validate_raw_cookies(raw_cookies: &str) -> Result<(), CommandError> {
+    if raw_cookies.is_empty() {
+        return Err(CommandError::InvalidInput("Cookie string is empty".to_string()));
+    }
+    if !raw_cookies.contains("SAPISID=") {
+        return Err(CommandError::InvalidInput("Cookie string must contain SAPISID".to_string()));
+    }
+    Ok(())
+}
+
+/// ストレージモードとcredentials有無からAuthStatusを構築する純粋関数
+pub(crate) fn build_auth_status(
+    storage_mode: &StorageMode,
+    secure_storage_available: bool,
+    has_credentials: bool,
+) -> AuthStatus {
+    let storage_type = match storage_mode {
+        StorageMode::Secure => StorageType::Secure,
+        StorageMode::Fallback => StorageType::Fallback,
+    };
+
+    let storage_error = if *storage_mode == StorageMode::Secure && !secure_storage_available {
+        Some("Secure storage is not available".to_string())
+    } else {
+        None
+    };
+
+    AuthStatus {
+        is_authenticated: has_credentials,
+        has_saved_credentials: has_credentials,
+        storage_type,
+        storage_error,
+    }
+}
+
+// =============================================================================
 // Tauri Commands
 // =============================================================================
 
@@ -535,36 +575,19 @@ pub async fn auth_get_status(
     let storage_mode = &config.storage.mode;
     log::info!("📦 Storage mode: {:?}", storage_mode);
 
-    // Check for storage errors in secure mode
-    let storage_error = if *storage_mode == StorageMode::Secure && !is_secure_storage_available() {
-        Some("Secure storage is not available".to_string())
-    } else {
-        None
-    };
+    let secure_storage_available = is_secure_storage_available();
+    let has_credentials = load_cookies(storage_mode).is_ok();
 
-    let storage_type = match storage_mode {
-        StorageMode::Secure => StorageType::Secure,
-        StorageMode::Fallback => StorageType::Fallback,
-    };
-
-    // Try to load credentials
-    let credentials_result = load_cookies(storage_mode);
-    let has_saved = credentials_result.is_ok();
-    let is_authenticated = has_saved;
+    let status = build_auth_status(storage_mode, secure_storage_available, has_credentials);
 
     log::info!(
         "🔐 Auth status: is_authenticated={}, has_saved={}, storage_error={:?}",
-        is_authenticated,
-        has_saved,
-        storage_error
+        status.is_authenticated,
+        status.has_saved_credentials,
+        status.storage_error
     );
 
-    Ok(AuthStatus {
-        is_authenticated,
-        has_saved_credentials: has_saved,
-        storage_type,
-        storage_error,
-    })
+    Ok(status)
 }
 
 /// Load credentials from storage
@@ -593,13 +616,7 @@ pub async fn auth_save_raw_cookies(
     raw_cookies: String,
     config_state: State<'_, ConfigState>,
 ) -> Result<(), CommandError> {
-    if raw_cookies.is_empty() {
-        return Err(CommandError::InvalidInput("Cookie string is empty".to_string()));
-    }
-
-    if !raw_cookies.contains("SAPISID=") {
-        return Err(CommandError::InvalidInput("Cookie string must contain SAPISID".to_string()));
-    }
+    validate_raw_cookies(&raw_cookies)?;
 
     let cookies = parse_raw_cookies(&raw_cookies);
     let config = config_state.get();
@@ -869,6 +886,68 @@ mod tests {
         let restored: CredentialsConfig = toml::from_str(&toml_str).unwrap();
         let restored_cookies: YouTubeCookies = restored.youtube.into();
         assert_eq!(restored_cookies.raw_cookie_string, cookies.raw_cookie_string);
+    }
+
+    // =========================================================================
+    // validate_raw_cookies テスト
+    // =========================================================================
+
+    #[test]
+    fn validate_raw_cookies_empty_string_returns_error() {
+        let result = validate_raw_cookies("");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_raw_cookies_without_sapisid_returns_error() {
+        let result = validate_raw_cookies("SID=xxx; HSID=yyy");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_raw_cookies_with_sapisid_returns_ok() {
+        let result = validate_raw_cookies("SID=xxx; SAPISID=yyy; HSID=zzz");
+        assert!(result.is_ok());
+    }
+
+    // =========================================================================
+    // build_auth_status テスト
+    // =========================================================================
+
+    #[test]
+    fn build_auth_status_secure_available_with_credentials() {
+        let status = build_auth_status(&StorageMode::Secure, true, true);
+        assert!(status.is_authenticated);
+        assert!(status.has_saved_credentials);
+        assert_eq!(status.storage_type, StorageType::Secure);
+        assert!(status.storage_error.is_none());
+    }
+
+    #[test]
+    fn build_auth_status_secure_unavailable_without_credentials() {
+        let status = build_auth_status(&StorageMode::Secure, false, false);
+        assert!(!status.is_authenticated);
+        assert!(!status.has_saved_credentials);
+        assert_eq!(status.storage_type, StorageType::Secure);
+        assert!(status.storage_error.is_some());
+    }
+
+    #[test]
+    fn build_auth_status_fallback_with_credentials() {
+        let status = build_auth_status(&StorageMode::Fallback, false, true);
+        assert!(status.is_authenticated);
+        assert!(status.has_saved_credentials);
+        assert_eq!(status.storage_type, StorageType::Fallback);
+        assert!(status.storage_error.is_none());
+    }
+
+    #[test]
+    fn build_auth_status_fallback_without_credentials() {
+        let status = build_auth_status(&StorageMode::Fallback, false, false);
+        assert!(!status.is_authenticated);
+        assert!(!status.has_saved_credentials);
+        assert_eq!(status.storage_type, StorageType::Fallback);
+        assert!(status.storage_error.is_none());
     }
 }
 
