@@ -132,22 +132,14 @@ fn get_config_path() -> Result<PathBuf, String> {
     crate::paths::config_path()
 }
 
-/// Load config from file
-fn load_config_from_file() -> Config {
-    let path = match get_config_path() {
-        Ok(p) => p,
-        Err(e) => {
-            log::warn!("Failed to get config path: {}", e);
-            return Config::default();
-        }
-    };
-
+/// 指定パスから設定を読み込む純粋関数。ファイル不在・パースエラー時はデフォルト値を返す。
+fn load_config_from_path(path: &std::path::Path) -> Config {
     if !path.exists() {
         log::info!("Config file not found, using defaults");
         return Config::default();
     }
 
-    let content = match fs::read_to_string(&path) {
+    let content = match fs::read_to_string(path) {
         Ok(c) => c,
         Err(e) => {
             log::warn!("Failed to read config file: {}", e);
@@ -167,11 +159,8 @@ fn load_config_from_file() -> Config {
     }
 }
 
-/// Save config to file
-pub fn save_config_to_file(config: &Config) -> Result<(), String> {
-    let path = get_config_path()?;
-
-    // Create parent directory if needed
+/// 指定パスへ設定を書き込む純粋関数。親ディレクトリが存在しない場合は自動作成する。
+fn save_config_to_path(path: &std::path::Path, config: &Config) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|e| format!("Failed to create config directory: {}", e))?;
@@ -180,11 +169,28 @@ pub fn save_config_to_file(config: &Config) -> Result<(), String> {
     let toml_string = toml::to_string_pretty(config)
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
 
-    fs::write(&path, toml_string)
+    fs::write(path, toml_string)
         .map_err(|e| format!("Failed to write config file: {}", e))?;
 
     log::info!("Config saved to {:?}", path);
     Ok(())
+}
+
+/// Load config from file
+fn load_config_from_file() -> Config {
+    match get_config_path() {
+        Ok(p) => load_config_from_path(&p),
+        Err(e) => {
+            log::warn!("Failed to get config path: {}", e);
+            Config::default()
+        }
+    }
+}
+
+/// Save config to file
+pub fn save_config_to_file(config: &Config) -> Result<(), String> {
+    let path = get_config_path()?;
+    save_config_to_path(&path, config)
 }
 
 /// Load configuration
@@ -589,5 +595,127 @@ future_setting = true
             &config, "chat_display", "message_font_size", serde_json::json!(20),
         ).unwrap();
         assert_eq!(config.chat_display.message_font_size, 13);
+    }
+
+    // ========================================================================
+    // load_config_from_path / save_config_to_path (09_config.md: ファイルI/O)
+    // ========================================================================
+
+    /// テスト用一時ディレクトリパスを生成する（std::env::temp_dir() + UUID風サフィックス）
+    fn temp_config_path(suffix: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("liscov_test_config_{}.toml", suffix))
+    }
+
+    #[test]
+    fn load_config_from_path_file_not_exists_returns_default() {
+        // 存在しないパスを渡すとデフォルト値が返る
+        let path = temp_config_path("not_exists_abc123");
+        // 万一残っていたら削除
+        let _ = fs::remove_file(&path);
+
+        let config = load_config_from_path(&path);
+        assert_eq!(config.storage.mode, StorageMode::Secure);
+        assert_eq!(config.chat_display.message_font_size, 13);
+        assert_eq!(config.ui.theme, Theme::Dark);
+    }
+
+    #[test]
+    fn load_config_from_path_valid_toml_returns_parsed() {
+        // 有効なTOMLファイルを書き込んで読み込めることを確認
+        let path = temp_config_path("valid_toml_def456");
+        let toml = r#"
+[storage]
+mode = "fallback"
+
+[chat_display]
+message_font_size = 18
+show_timestamps = false
+auto_scroll_enabled = false
+
+[ui]
+theme = "light"
+"#;
+        fs::write(&path, toml).unwrap();
+
+        let config = load_config_from_path(&path);
+        assert_eq!(config.storage.mode, StorageMode::Fallback);
+        assert_eq!(config.chat_display.message_font_size, 18);
+        assert!(!config.chat_display.show_timestamps);
+        assert!(!config.chat_display.auto_scroll_enabled);
+        assert_eq!(config.ui.theme, Theme::Light);
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn load_config_from_path_invalid_toml_returns_default() {
+        // 不正なTOMLはデフォルト値にフォールバックする
+        let path = temp_config_path("invalid_toml_ghi789");
+        fs::write(&path, "this is not valid toml ][[[").unwrap();
+
+        let config = load_config_from_path(&path);
+        assert_eq!(config.storage.mode, StorageMode::Secure);
+        assert_eq!(config.chat_display.message_font_size, 13);
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn load_config_from_path_partial_keys_fills_defaults() {
+        // 一部キーのみのTOML → 不足分はデフォルト値で補完する
+        let path = temp_config_path("partial_keys_jkl012");
+        let toml = r#"
+[storage]
+mode = "fallback"
+"#;
+        fs::write(&path, toml).unwrap();
+
+        let config = load_config_from_path(&path);
+        assert_eq!(config.storage.mode, StorageMode::Fallback);
+        assert_eq!(config.chat_display.message_font_size, 13);
+        assert!(config.chat_display.show_timestamps);
+        assert_eq!(config.ui.theme, Theme::Dark);
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn save_config_to_path_creates_parent_and_writes() {
+        // 親ディレクトリが存在しない場合でも自動作成してファイルを書き込める
+        let parent = std::env::temp_dir().join("liscov_test_nested_mno345");
+        let path = parent.join("config.toml");
+        // 念のためディレクトリを削除しておく
+        let _ = fs::remove_dir_all(&parent);
+
+        let config = Config::default();
+        save_config_to_path(&path, &config).unwrap();
+
+        assert!(path.exists());
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(content.contains("mode"));
+
+        let _ = fs::remove_dir_all(&parent);
+    }
+
+    #[test]
+    fn save_load_config_roundtrip() {
+        // save → load でフィールド値が保持される（往復一貫性）
+        let path = temp_config_path("roundtrip_pqr678");
+
+        let mut config = Config::default();
+        config.storage.mode = StorageMode::Fallback;
+        config.chat_display.message_font_size = 20;
+        config.chat_display.show_timestamps = false;
+        config.ui.theme = Theme::Light;
+
+        save_config_to_path(&path, &config).unwrap();
+        let loaded = load_config_from_path(&path);
+
+        assert_eq!(loaded.storage.mode, StorageMode::Fallback);
+        assert_eq!(loaded.chat_display.message_font_size, 20);
+        assert!(!loaded.chat_display.show_timestamps);
+        assert_eq!(loaded.ui.theme, Theme::Light);
+
+        let _ = fs::remove_file(&path);
     }
 }

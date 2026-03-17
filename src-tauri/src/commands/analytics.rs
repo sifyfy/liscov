@@ -1760,4 +1760,105 @@ mod tests {
         assert_eq!(exports[4].message_type, "membership_gift");
         assert_eq!(exports[5].message_type, "system");
     }
+
+    // ========================================================================
+    // 追加テスト: 残存missed mutantsを殺す
+    // ========================================================================
+
+    #[test]
+    fn compute_revenue_analytics_supersticker_multiple_count() {
+        // 07_revenue.md: 同一コントリビューターが複数SuperStickerを送信した場合、
+        // contributor件数が正しく加算されること
+        // 対象mutant: L278 `entry.1 += 1` → `*= 1`
+        // (*= 1 の場合、2件目以降で count が 1×1=1 のままになる)
+        let messages = vec![
+            make_chat_message(
+                "UC_s", "StickerUser",
+                MessageType::SuperSticker { amount: "$5.00".to_string() },
+                None,
+            ),
+            make_chat_message(
+                "UC_s", "StickerUser",
+                MessageType::SuperSticker { amount: "$5.00".to_string() },
+                None,
+            ),
+            make_chat_message(
+                "UC_s", "StickerUser",
+                MessageType::SuperSticker { amount: "$5.00".to_string() },
+                None,
+            ),
+        ];
+
+        let analytics = compute_revenue_analytics(&messages);
+
+        // 3件のSuperStickerで件数は3になるべき (*= 1 mutantでは1になる)
+        assert_eq!(analytics.top_contributors.len(), 1);
+        assert_eq!(analytics.top_contributors[0].super_chat_count, 3);
+    }
+
+    #[test]
+    fn export_to_csv_without_metadata_data_rows_present() {
+        // 07_revenue.md: include_metadata=false のCSVにはメタデータヘッダなし、
+        // データ行は正しく出力されること
+        // 対象mutant: export_to_csv内のinclude_metadataブランチ
+        let data = make_test_export_data();
+        let config = ExportConfig {
+            format: "csv".to_string(),
+            include_metadata: false,
+            include_system_messages: false,
+            max_records: None,
+            sort_order: None,
+        };
+
+        let csv = export_to_csv(&data, &config).unwrap();
+
+        // メタデータヘッダは含まれない
+        assert!(!csv.contains("# Metadata"));
+        assert!(!csv.contains("# Session ID"));
+        // カラムヘッダから始まる
+        assert!(csv.starts_with("id,timestamp,author"));
+        // データ行が含まれる (msg1, msg2 の両方)
+        assert!(csv.contains("\"msg1\""));
+        assert!(csv.contains("\"msg2\""));
+        // SuperChatのtier情報が含まれる
+        assert!(csv.contains("yellow"));
+        assert!(csv.contains("$10.00"));
+    }
+
+    #[test]
+    fn export_to_json_messages_only_content_verified() {
+        // 07_revenue.md: include_metadata=false のJSONはmessagesの配列のみ返し、
+        // 各要素のフィールドが正しいこと
+        // 対象mutant: export_to_json内のinclude_metadataブランチ
+        let data = make_test_export_data();
+        let config = ExportConfig {
+            format: "json".to_string(),
+            include_metadata: false,
+            include_system_messages: false,
+            max_records: None,
+            sort_order: None,
+        };
+
+        let json = export_to_json(&data, &config).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        // トップレベルは配列
+        assert!(parsed.is_array());
+        let arr = parsed.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+
+        // metadata/statistics フィールドは含まれない (配列なので存在しない)
+        assert!(parsed.get("metadata").is_none());
+        assert!(parsed.get("statistics").is_none());
+
+        // 各メッセージのフィールドを検証
+        let first = &arr[0];
+        assert_eq!(first["id"], "msg1");
+        assert_eq!(first["message_type"], "text");
+
+        let second = &arr[1];
+        assert_eq!(second["id"], "msg2");
+        assert_eq!(second["message_type"], "superchat");
+        assert_eq!(second["amount_display"], "$10.00");
+    }
 }
