@@ -3,15 +3,16 @@
 //! AppState を直接構築して Tauri IPC コマンドレイヤーをテストする。
 //! ファイル書き込みテストは tempdir を使用し、本番データと分離する。
 
+mod common;
+
 use app_lib::commands::analytics::RevenueAnalytics;
 use app_lib::core::{ChatMessage, MessageType};
 use app_lib::state::AppState;
+use common::{invoke_no_args, invoke_with_args};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
-use tauri::ipc::{CallbackFn, InvokeBody};
-use tauri::test::{INVOKE_KEY, get_ipc_response, mock_builder, mock_context, noop_assets};
-use tauri::webview::InvokeRequest;
+use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets};
 use tokio::sync::RwLock;
 
 // ============================================================================
@@ -52,32 +53,6 @@ fn build_test_app(app_state: AppState) -> tauri::App<tauri::test::MockRuntime> {
         ])
         .build(mock_context(noop_assets()))
         .expect("テスト用アプリのビルドに失敗")
-}
-
-/// IPC リクエストを組み立てるヘルパー（引数なし）
-fn invoke_no_args(cmd: &str) -> InvokeRequest {
-    InvokeRequest {
-        cmd: cmd.into(),
-        callback: CallbackFn(0),
-        error: CallbackFn(1),
-        url: "http://tauri.localhost".parse().unwrap(),
-        body: InvokeBody::default(),
-        headers: Default::default(),
-        invoke_key: INVOKE_KEY.to_string(),
-    }
-}
-
-/// IPC リクエストを組み立てるヘルパー（JSON 引数あり）
-fn invoke_with_args(cmd: &str, args: serde_json::Value) -> InvokeRequest {
-    InvokeRequest {
-        cmd: cmd.into(),
-        callback: CallbackFn(0),
-        error: CallbackFn(1),
-        url: "http://tauri.localhost".parse().unwrap(),
-        body: InvokeBody::Json(args),
-        headers: Default::default(),
-        invoke_key: INVOKE_KEY.to_string(),
-    }
 }
 
 // ============================================================================

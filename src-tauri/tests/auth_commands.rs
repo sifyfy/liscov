@@ -3,13 +3,14 @@
 //! Fallbackモード + LISCOV_APP_NAME によるテストディレクトリ分離でkeyring不要のテストを実現する。
 //! CREDENTIALS_CACHE はグローバルstaticだが、各テストで save/delete/load の順序制御で対処する。
 
+mod common;
+
 use app_lib::commands::config::{Config, ConfigState, StorageConfig, StorageMode};
 use app_lib::state::AppState;
+use common::{invoke_no_args, invoke_with_args};
 use serial_test::serial;
 use std::fs;
-use tauri::ipc::{CallbackFn, InvokeBody};
-use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
-use tauri::webview::InvokeRequest;
+use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets};
 
 // ============================================================================
 // テストヘルパー
@@ -39,32 +40,6 @@ fn build_test_app() -> tauri::App<tauri::test::MockRuntime> {
         ])
         .build(mock_context(noop_assets()))
         .expect("テスト用アプリのビルドに失敗")
-}
-
-/// IPC リクエストを組み立てるヘルパー（引数なし）
-fn invoke_no_args(cmd: &str) -> InvokeRequest {
-    InvokeRequest {
-        cmd: cmd.into(),
-        callback: CallbackFn(0),
-        error: CallbackFn(1),
-        url: "http://tauri.localhost".parse().unwrap(),
-        body: InvokeBody::default(),
-        headers: Default::default(),
-        invoke_key: INVOKE_KEY.to_string(),
-    }
-}
-
-/// IPC リクエストを組み立てるヘルパー（JSON 引数あり）
-fn invoke_with_args(cmd: &str, args: serde_json::Value) -> InvokeRequest {
-    InvokeRequest {
-        cmd: cmd.into(),
-        callback: CallbackFn(0),
-        error: CallbackFn(1),
-        url: "http://tauri.localhost".parse().unwrap(),
-        body: InvokeBody::Json(args),
-        headers: Default::default(),
-        invoke_key: INVOKE_KEY.to_string(),
-    }
 }
 
 /// テスト用の app_name を設定し、テスト後にクリーンアップするガード。

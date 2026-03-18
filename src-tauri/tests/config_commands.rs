@@ -3,22 +3,21 @@
 //! Tauri mock ランタイムを使って IPC コマンドレイヤーをテストする。
 //! 環境変数 LISCOV_APP_NAME でテスト用の設定ディレクトリを分離し、本番データを保護する。
 
+mod common;
+
 use app_lib::commands::config::{ConfigState, Config, StorageMode, Theme};
+use common::{invoke_no_args, invoke_with_args};
 use serial_test::serial;
 use std::fs;
-use tauri::test::{mock_builder, mock_context, noop_assets, get_ipc_response, INVOKE_KEY};
-use tauri::webview::InvokeRequest;
-use tauri::ipc::{InvokeBody, CallbackFn};
+use tauri::test::{mock_builder, mock_context, noop_assets, get_ipc_response};
 
 // ============================================================================
 // テストヘルパー
 // ============================================================================
 
-/// テスト用に Tauri app + webview を構築するヘルパー
-fn build_test_app() -> (
-    tauri::App<tauri::test::MockRuntime>,
-) {
-    let app = mock_builder()
+/// テスト用に Tauri app を構築するヘルパー
+fn build_test_app() -> tauri::App<tauri::test::MockRuntime> {
+    mock_builder()
         .manage(ConfigState::new())
         .invoke_handler(tauri::generate_handler![
             app_lib::commands::config::config_load,
@@ -27,34 +26,7 @@ fn build_test_app() -> (
             app_lib::commands::config::config_set_value,
         ])
         .build(mock_context(noop_assets()))
-        .expect("failed to build test app");
-    (app,)
-}
-
-/// IPC リクエストを組み立てるヘルパー（引数なし）
-fn invoke_no_args(cmd: &str) -> InvokeRequest {
-    InvokeRequest {
-        cmd: cmd.into(),
-        callback: CallbackFn(0),
-        error: CallbackFn(1),
-        url: "http://tauri.localhost".parse().unwrap(),
-        body: InvokeBody::default(),
-        headers: Default::default(),
-        invoke_key: INVOKE_KEY.to_string(),
-    }
-}
-
-/// IPC リクエストを組み立てるヘルパー（JSON 引数あり）
-fn invoke_with_args(cmd: &str, args: serde_json::Value) -> InvokeRequest {
-    InvokeRequest {
-        cmd: cmd.into(),
-        callback: CallbackFn(0),
-        error: CallbackFn(1),
-        url: "http://tauri.localhost".parse().unwrap(),
-        body: InvokeBody::Json(args),
-        headers: Default::default(),
-        invoke_key: INVOKE_KEY.to_string(),
-    }
+        .expect("failed to build test app")
 }
 
 /// テスト用の app_name を設定し、テスト後に環境変数を削除するガード。
@@ -90,7 +62,7 @@ fn config_load_returns_defaults_when_no_file() {
     // 仕様: config.toml が存在しない場合はデフォルト値を使用
     let _guard = AppNameGuard::new();
 
-    let (app,) = build_test_app();
+    let app = build_test_app();
     let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
         .build()
         .unwrap();
@@ -140,7 +112,7 @@ theme = "light"
 "#;
     fs::write(&config_path, toml).expect("failed to write config file");
 
-    let (app,) = build_test_app();
+    let app = build_test_app();
     let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
         .build()
         .unwrap();
@@ -174,7 +146,7 @@ fn config_save_updates_state_and_writes_file() {
     // 仕様: config_save は State を更新し config.toml に書き込む
     let _guard = AppNameGuard::new();
 
-    let (app,) = build_test_app();
+    let app = build_test_app();
     let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
         .build()
         .unwrap();
@@ -221,7 +193,7 @@ fn config_get_value_returns_default_storage_mode() {
     // 仕様: config_get_value は State の値を返す
     let _guard = AppNameGuard::new();
 
-    let (app,) = build_test_app();
+    let app = build_test_app();
     let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
         .build()
         .unwrap();
@@ -250,7 +222,7 @@ fn config_get_value_returns_default_font_size() {
     // 仕様: デフォルトのフォントサイズは 13
     let _guard = AppNameGuard::new();
 
-    let (app,) = build_test_app();
+    let app = build_test_app();
     let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
         .build()
         .unwrap();
@@ -274,7 +246,7 @@ fn config_get_value_unknown_section_returns_none() {
     // 仕様: 未知のセクション → None
     let _guard = AppNameGuard::new();
 
-    let (app,) = build_test_app();
+    let app = build_test_app();
     let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
         .build()
         .unwrap();
@@ -302,7 +274,7 @@ fn config_set_value_updates_state_and_saves() {
     // 仕様: config_set_value は State を更新し、ファイルに保存する
     let _guard = AppNameGuard::new();
 
-    let (app,) = build_test_app();
+    let app = build_test_app();
     let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
         .build()
         .unwrap();
@@ -340,7 +312,7 @@ fn config_set_value_font_size_valid_boundary() {
     // 仕様: フォントサイズ 10-24 が有効
     let _guard = AppNameGuard::new();
 
-    let (app,) = build_test_app();
+    let app = build_test_app();
     let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
         .build()
         .unwrap();
@@ -368,7 +340,7 @@ fn config_set_value_font_size_out_of_range_returns_error() {
     // 仕様: フォントサイズ範囲外（9, 25）はエラー
     let _guard = AppNameGuard::new();
 
-    let (app,) = build_test_app();
+    let app = build_test_app();
     let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
         .build()
         .unwrap();
@@ -395,7 +367,7 @@ fn config_set_value_unknown_section_returns_error() {
     // 仕様: 未知のセクションはエラー
     let _guard = AppNameGuard::new();
 
-    let (app,) = build_test_app();
+    let app = build_test_app();
     let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
         .build()
         .unwrap();

@@ -62,7 +62,7 @@ impl SuperChatTierStats {
 }
 
 /// Revenue analytics data (07_revenue.md)
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/lib/types/generated/")]
 pub struct RevenueAnalytics {
     pub super_chat_count: usize,
@@ -71,19 +71,6 @@ pub struct RevenueAnalytics {
     pub membership_gains: usize,
     pub hourly_stats: Vec<HourlyStats>,
     pub top_contributors: Vec<ContributorInfo>,
-}
-
-impl Default for RevenueAnalytics {
-    fn default() -> Self {
-        Self {
-            super_chat_count: 0,
-            super_chat_by_tier: SuperChatTierStats::default(),
-            super_sticker_count: 0,
-            membership_gains: 0,
-            hourly_stats: vec![],
-            top_contributors: vec![],
-        }
-    }
 }
 
 /// Contributor information (07_revenue.md)
@@ -264,7 +251,7 @@ pub(crate) fn compute_revenue_analytics(messages: &[ChatMessage]) -> RevenueAnal
                     .or_insert((message.author.clone(), 0, None));
                 entry.1 += 1;
                 // より高いtierがあれば更新
-                if entry.2.is_none() || tier > entry.2.unwrap() {
+                if entry.2.is_none_or(|existing| tier > existing) {
                     entry.2 = Some(tier);
                 }
             }
@@ -451,10 +438,8 @@ pub async fn export_session_data(
             let tier = if message_type == "superchat" {
                 if let Some(ref color) = header_color {
                     Some(determine_tier_from_color(color))
-                } else if let Some(ref amt) = amount {
-                    Some(determine_tier_from_amount(amt))
                 } else {
-                    None
+                    amount.as_deref().map(determine_tier_from_amount)
                 }
             } else {
                 None
@@ -574,21 +559,19 @@ pub async fn export_current_messages(
 ) -> Result<(), CommandError> {
     let messages = state.messages.read().await;
 
-    // 多接続モデル: 全接続のセッションID・配信者IDを収集
-    let (session_ids, broadcaster_ids): (Vec<String>, Vec<String>) = {
+    // 多接続モデル: 最初の接続からセッションID・配信者IDを取得（エクスポートヘッダ用）
+    let (session_id, broadcaster_id) = {
         let connections = state.connections.read().await;
-        let sids: Vec<String> = connections.values()
-            .filter_map(|c| c.session_id.clone())
-            .collect();
-        let bids: Vec<String> = connections.values()
-            .map(|c| c.broadcaster_channel_id.clone())
-            .filter(|id| !id.is_empty())
-            .collect();
-        (sids, bids)
+        let session_id = connections.values()
+            .find_map(|c| c.session_id.clone())
+            .unwrap_or_else(|| "current".to_string());
+        let broadcaster_id = connections.values()
+            .map(|c| &c.broadcaster_channel_id)
+            .find(|id| !id.is_empty())
+            .cloned()
+            .unwrap_or_default();
+        (session_id, broadcaster_id)
     };
-    // 後方互換: 単一値として最初の要素を使用（エクスポートヘッダ用）
-    let session_id = session_ids.first().cloned().unwrap_or_else(|| "current".to_string());
-    let broadcaster_id = broadcaster_ids.first().cloned().unwrap_or_default();
 
     // VecDequeをVecに変換して純粋関数に渡す
     let messages_vec: Vec<ChatMessage> = messages

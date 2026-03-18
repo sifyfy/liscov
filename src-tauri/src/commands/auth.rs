@@ -105,30 +105,20 @@ impl CredentialStorage for KeyringStorage {
             .map_err(|e| format!("Failed to access secure storage: {}", e))?;
 
         match entry.delete_credential() {
-            Ok(_) => {
-                log::info!("Credentials deleted from secure storage");
-                Ok(())
-            }
-            Err(keyring::Error::NoEntry) => {
-                log::info!("No credentials to delete from secure storage");
-                Ok(())
-            }
-            Err(e) => Err(format!("Failed to delete from secure storage: {}", e)),
+            Ok(_) => log::info!("Credentials deleted from secure storage"),
+            Err(keyring::Error::NoEntry) => log::info!("No credentials to delete from secure storage"),
+            Err(e) => return Err(format!("Failed to delete from secure storage: {}", e)),
         }
+        Ok(())
     }
 
     fn is_available(&self) -> bool {
-        match keyring::Entry::new(&crate::paths::keyring_service(), KEYRING_USER) {
-            Ok(entry) => {
-                // エントリへのアクセスを試行（読み込みテスト）
-                match entry.get_password() {
-                    Ok(_) => true,
-                    Err(keyring::Error::NoEntry) => true, // エントリなしでもストレージ自体は利用可能
-                    Err(_) => false,
-                }
-            }
-            Err(_) => false,
-        }
+        let Ok(entry) = keyring::Entry::new(&crate::paths::keyring_service(), KEYRING_USER) else {
+            return false;
+        };
+        // エントリへのアクセスを試行（読み込みテスト）
+        // エントリなしでもストレージ自体は利用可能
+        matches!(entry.get_password(), Ok(_) | Err(keyring::Error::NoEntry))
     }
 }
 
@@ -622,11 +612,8 @@ pub(crate) fn build_auth_status(
         StorageMode::Fallback => StorageType::Fallback,
     };
 
-    let storage_error = if *storage_mode == StorageMode::Secure && !secure_storage_available {
-        Some("Secure storage is not available".to_string())
-    } else {
-        None
-    };
+    let storage_error = (*storage_mode == StorageMode::Secure && !secure_storage_available)
+        .then(|| "Secure storage is not available".to_string());
 
     AuthStatus {
         is_authenticated: has_credentials,
@@ -697,7 +684,7 @@ pub async fn auth_save_raw_cookies(
     let cookies = parse_raw_cookies(&raw_cookies);
     let config = config_state.get();
     save_cookies(&cookies, &config.storage.mode)
-        .map_err(|e| CommandError::StorageError(e))?;
+        .map_err(CommandError::StorageError)?;
 
     log::info!("Credentials saved from raw cookies");
     Ok(())
@@ -728,7 +715,7 @@ pub async fn auth_save_credentials(
 
     let config = config_state.get();
     save_cookies(&cookies, &config.storage.mode)
-        .map_err(|e| CommandError::StorageError(e))?;
+        .map_err(CommandError::StorageError)?;
 
     log::info!("Credentials saved");
     Ok(())
@@ -741,7 +728,7 @@ pub async fn auth_delete_credentials(
 ) -> Result<(), CommandError> {
     let config = config_state.get();
     delete_credentials(&config.storage.mode)
-        .map_err(|e| CommandError::StorageError(e))?;
+        .map_err(CommandError::StorageError)?;
     log::info!("Credentials deleted");
     Ok(())
 }
@@ -776,7 +763,7 @@ pub async fn auth_validate_credentials(
 ) -> Result<bool, CommandError> {
     let config = config_state.get();
     let cookies = load_cookies(&config.storage.mode)
-        .map_err(|e| CommandError::AuthRequired(e))?;
+        .map_err(CommandError::AuthRequired)?;
 
     // SAPISIDが存在し空でないことをチェック
     Ok(!cookies.sapisid.is_empty())
@@ -790,7 +777,7 @@ pub async fn auth_check_session_validity(
     log::info!("🔍 auth_check_session_validity called");
     let config = config_state.get();
     let cookies = load_cookies(&config.storage.mode)
-        .map_err(|e| CommandError::AuthRequired(e))?;
+        .map_err(CommandError::AuthRequired)?;
     log::info!("🔍 Checking session validity...");
 
     let result = check_session_validity_internal(&cookies).await;
@@ -848,7 +835,7 @@ pub async fn auth_open_window(
             // 現在のストレージモードでCookieを保存
             let config = config_state.get();
             save_cookies(&cookies, &config.storage.mode)
-                .map_err(|e| CommandError::StorageError(e))?;
+                .map_err(CommandError::StorageError)?;
 
             // Windows資格情報マネージャーへの永続化を待機
             // 参照: https://docs.rs/keyring/latest/x86_64-pc-windows-msvc/keyring/windows/index.html
