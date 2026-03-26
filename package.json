@@ -8,6 +8,7 @@
 		"build": "vite build",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
+		"lint": "eslint src/",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"tauri": "tauri",
@@ -24,6 +25,7 @@
 		"test:e2e:ci": "playwright test --config e2e/playwright.config.ts --grep-invert @external"
 	},
 	"devDependencies": {
+		"@eslint/js": "^10.0.1",
 		"@playwright/test": "^1.57.0",
 		"@stryker-mutator/core": "^9.6.0",
 		"@stryker-mutator/typescript-checker": "^9.6.0",
@@ -37,11 +39,15 @@
 		"@testing-library/svelte": "^5.3.1",
 		"@types/node": "^25.0.7",
 		"@types/ws": "^8.18.1",
+		"eslint": "^10.1.0",
+		"eslint-plugin-svelte": "^3.16.0",
+		"globals": "^17.4.0",
 		"jsdom": "^27.4.0",
 		"svelte": "^5.45.6",
 		"svelte-check": "^4.3.4",
 		"tailwindcss": "^4.1.18",
 		"typescript": "^5.9.3",
+		"typescript-eslint": "^8.57.2",
 		"vite": "^7.2.6",
 		"vitest": "^4.0.17",
 		"ws": "^8.19.0"
