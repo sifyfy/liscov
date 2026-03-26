@@ -140,3 +140,123 @@ fn parse_amount(amount: &str) -> Option<f64> {
         .collect();
     cleaned.parse().ok()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_message(message_type: MessageType) -> ChatMessage {
+        ChatMessage {
+            message_type,
+            ..Default::default()
+        }
+    }
+
+    // spec: 02_chat.md - Text メッセージは total_messages と text_messages をインクリメントする
+    #[test]
+    fn update_text_message_increments_total_and_text() {
+        let mut stats = ChatStats::default();
+        stats.update(&make_message(MessageType::Text));
+        assert_eq!(stats.total_messages, 1);
+        assert_eq!(stats.text_messages, 1);
+        assert_eq!(stats.super_chats, 0);
+        assert_eq!(stats.super_stickers, 0);
+        assert_eq!(stats.memberships, 0);
+        assert_eq!(stats.membership_gifts, 0);
+        assert_eq!(stats.total_revenue, 0.0);
+    }
+
+    // spec: 02_chat.md - SuperChat メッセージは total_messages, super_chats をインクリメントし total_revenue に金額を加算する
+    #[test]
+    fn update_superchat_message_increments_total_super_chats_and_revenue() {
+        let mut stats = ChatStats::default();
+        stats.update(&make_message(MessageType::SuperChat { amount: "$10.00".to_string() }));
+        assert_eq!(stats.total_messages, 1);
+        assert_eq!(stats.super_chats, 1);
+        assert_eq!(stats.text_messages, 0);
+        assert_eq!(stats.super_stickers, 0);
+        assert_eq!(stats.memberships, 0);
+        assert_eq!(stats.membership_gifts, 0);
+        assert!((stats.total_revenue - 10.0).abs() < f64::EPSILON);
+    }
+
+    // spec: 02_chat.md - SuperSticker メッセージは total_messages, super_stickers をインクリメントし total_revenue に金額を加算する
+    #[test]
+    fn update_supersticker_message_increments_total_super_stickers_and_revenue() {
+        let mut stats = ChatStats::default();
+        stats.update(&make_message(MessageType::SuperSticker { amount: "$5.00".to_string() }));
+        assert_eq!(stats.total_messages, 1);
+        assert_eq!(stats.super_stickers, 1);
+        assert_eq!(stats.text_messages, 0);
+        assert_eq!(stats.super_chats, 0);
+        assert_eq!(stats.memberships, 0);
+        assert_eq!(stats.membership_gifts, 0);
+        assert!((stats.total_revenue - 5.0).abs() < f64::EPSILON);
+    }
+
+    // spec: 02_chat.md - Membership メッセージは total_messages と memberships をインクリメントする
+    #[test]
+    fn update_membership_message_increments_total_and_memberships() {
+        let mut stats = ChatStats::default();
+        stats.update(&make_message(MessageType::Membership { milestone_months: None }));
+        assert_eq!(stats.total_messages, 1);
+        assert_eq!(stats.memberships, 1);
+        assert_eq!(stats.text_messages, 0);
+        assert_eq!(stats.super_chats, 0);
+        assert_eq!(stats.super_stickers, 0);
+        assert_eq!(stats.membership_gifts, 0);
+        assert_eq!(stats.total_revenue, 0.0);
+    }
+
+    // spec: 02_chat.md - MembershipGift メッセージは total_messages と membership_gifts をインクリメントする
+    #[test]
+    fn update_membership_gift_message_increments_total_and_membership_gifts() {
+        let mut stats = ChatStats::default();
+        stats.update(&make_message(MessageType::MembershipGift { gift_count: 1 }));
+        assert_eq!(stats.total_messages, 1);
+        assert_eq!(stats.membership_gifts, 1);
+        assert_eq!(stats.text_messages, 0);
+        assert_eq!(stats.super_chats, 0);
+        assert_eq!(stats.super_stickers, 0);
+        assert_eq!(stats.memberships, 0);
+        assert_eq!(stats.total_revenue, 0.0);
+    }
+
+    // spec: 02_chat.md - 複数メッセージを処理すると各フィールドが正しく累積される
+    #[test]
+    fn update_multiple_messages_accumulates_counts_correctly() {
+        let mut stats = ChatStats::default();
+        stats.update(&make_message(MessageType::Text));
+        stats.update(&make_message(MessageType::SuperChat { amount: "$10.00".to_string() }));
+        stats.update(&make_message(MessageType::SuperSticker { amount: "$5.00".to_string() }));
+        assert_eq!(stats.total_messages, 3);
+        assert_eq!(stats.text_messages, 1);
+        assert_eq!(stats.super_chats, 1);
+        assert_eq!(stats.super_stickers, 1);
+        assert!((stats.total_revenue - 15.0).abs() < f64::EPSILON);
+    }
+
+    // spec: 02_chat.md - 円記号付き金額文字列をパースできる
+    #[test]
+    fn parse_amount_yen_with_comma_returns_correct_value() {
+        assert_eq!(parse_amount("¥1,000"), Some(1000.0));
+    }
+
+    // spec: 02_chat.md - ドル記号付き小数金額文字列をパースできる
+    #[test]
+    fn parse_amount_dollar_with_decimal_returns_correct_value() {
+        assert_eq!(parse_amount("$10.50"), Some(10.5));
+    }
+
+    // spec: 02_chat.md - 空文字列はNoneを返す
+    #[test]
+    fn parse_amount_empty_string_returns_none() {
+        assert_eq!(parse_amount(""), None);
+    }
+
+    // spec: 02_chat.md - 数字を含まない文字列はNoneを返す
+    #[test]
+    fn parse_amount_non_numeric_string_returns_none() {
+        assert_eq!(parse_amount("free"), None);
+    }
+}

@@ -1,6 +1,7 @@
 // Chat state management using Svelte 5 runes
 import { listen } from '@tauri-apps/api/event';
-import type { ChatMessage, ConnectionResult, ConnectionInfo, ChatMode, ChatFilter, FrontendConnectionState } from '$lib/types';
+import type { ChatMessage, ConnectionResult, ChatMode, ChatFilter, FrontendConnectionState } from '$lib/types';
+import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import * as chatApi from '$lib/tauri/chat';
 import { getConnectionColor } from '$lib/utils/connection-colors';
 import { configStore } from './config.svelte';
@@ -10,7 +11,8 @@ function createChatStore() {
   // リアクティブ状態
   let messages = $state<ChatMessage[]>([]);
   // 多接続状態マップ（キー: connection_id as number）
-  let connections = $state<Map<number, FrontendConnectionState>>(new Map());
+  // eslint-disable-next-line svelte/no-unnecessary-state-wrap -- 再代入パターン (connections = new SvelteMap(...)) でリアクティビティをトリガーするため$state必須
+  let connections = $state<SvelteMap<number, FrontendConnectionState>>(new SvelteMap());
   let chatMode = $state<ChatMode>('top');
   let error = $state<string | null>(null);
 
@@ -37,10 +39,10 @@ function createChatStore() {
   let scrollToLatestTrigger = $state(0); // インクリメントでスクロールをトリガー
 
   // O(1)検索のための重複チェック用セット（複合キー: connection_id:message_id）
-  let messageIds = new Set<string>();
+  let messageIds = new SvelteSet<string>();
 
   // O(1)ビューワーメッセージ検索のためのチャンネルIDインデックス
-  let messagesByChannel = new Map<string, ChatMessage[]>();
+  let messagesByChannel = new SvelteMap<string, ChatMessage[]>();
 
   // フィルターがデフォルト状態かどうか（全タイプ表示かつ検索クエリなし）
   let isDefaultFilter = $derived(
@@ -124,15 +126,38 @@ function createChatStore() {
   }
 
   // アクション
+  // 接続中エントリの仮IDカウンタ（API応答前に一意なキーが必要）
+  let nextTempConnId = -1;
+
   async function connect(url: string, mode?: ChatMode): Promise<ConnectionResult> {
     error = null;
+
+    // connecting 中間状態をセット（UI: 開始ボタン無効化 + 「接続中...」表示）
+    const tempId = nextTempConnId--;
+    const connectingConn: FrontendConnectionState = {
+      id: tempId,
+      platform: 'youtube',
+      streamUrl: url,
+      streamTitle: '',
+      broadcasterName: '',
+      broadcasterChannelId: '',
+      connectionState: 'connecting',
+      color: getConnectionColor(String(tempId))
+    };
+    const beforeConnect = new SvelteMap(connections);
+    beforeConnect.set(tempId, connectingConn);
+    connections = beforeConnect;
 
     try {
       const result = await chatApi.connectToStream(url, mode);
 
+      // 仮エントリを削除
+      const next = new SvelteMap(connections);
+      next.delete(tempId);
+
       if (result.success) {
         const connId = Number(result.connection_id);
-        const newConn: FrontendConnectionState = {
+        next.set(connId, {
           id: connId,
           platform: 'youtube', // TODO: Rustから返ってきたときに更新
           streamUrl: url,
@@ -141,17 +166,19 @@ function createChatStore() {
           broadcasterChannelId: result.broadcaster_channel_id ?? '',
           connectionState: 'connected',
           color: getConnectionColor(result.broadcaster_channel_id ?? String(connId))
-        };
-        // イミュータブルに新しいMapを作成して置き換え
-        const next = new Map(connections);
-        next.set(connId, newConn);
-        connections = next;
+        });
       } else {
         error = result.error;
       }
 
+      connections = next;
       return result;
     } catch (e) {
+      // 仮エントリを削除
+      const next = new SvelteMap(connections);
+      next.delete(tempId);
+      connections = next;
+
       error = e instanceof Error ? e.message : String(e);
       return {
         success: false,
@@ -171,7 +198,7 @@ function createChatStore() {
     // 切断中状態に更新
     const conn = connections.get(connectionId);
     if (conn) {
-      const next = new Map(connections);
+      const next = new SvelteMap(connections);
       next.set(connectionId, { ...conn, connectionState: 'disconnecting' });
       connections = next;
     }
@@ -180,7 +207,7 @@ function createChatStore() {
       await chatApi.disconnectStream(connectionId);
     } finally {
       // 接続マップから削除
-      const next = new Map(connections);
+      const next = new SvelteMap(connections);
       next.delete(connectionId);
       connections = next;
     }
@@ -191,7 +218,7 @@ function createChatStore() {
     try {
       await chatApi.disconnectAllStreams();
     } finally {
-      connections = new Map();
+      connections = new SvelteMap();
     }
   }
 
@@ -222,7 +249,7 @@ function createChatStore() {
     } catch {
       // クリーンアップ中のエラーは無視
     } finally {
-      connections = new Map();
+      connections = new SvelteMap();
       messages = [];
       messageIds.clear();
       messagesByChannel.clear();
@@ -311,7 +338,7 @@ function createChatStore() {
 
       if (result.success) {
         // 接続情報を更新
-        const next = new Map(connections);
+        const next = new SvelteMap(connections);
         next.set(connId, {
           ...conn,
           connectionState: 'connected',
@@ -324,7 +351,7 @@ function createChatStore() {
         // 意図的切断 — disconnect() の finally で処理されるため何もしない
       } else {
         // 監視タスクの異常終了等 — 接続を削除してエラーを表示
-        const next = new Map(connections);
+        const next = new SvelteMap(connections);
         next.delete(connId);
         connections = next;
         error = result.error;
@@ -350,7 +377,7 @@ function createChatStore() {
       const backendConnections = await chatApi.getConnections();
       if (backendConnections.length === 0) return;
 
-      const next = new Map(connections);
+      const next = new SvelteMap(connections);
       for (const info of backendConnections) {
         const connId = Number(info.id);
         // 既にフロントエンドに存在する接続はスキップ

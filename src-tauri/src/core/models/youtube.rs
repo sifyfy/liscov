@@ -302,4 +302,31 @@ mod tests {
             Some("test_video_123".to_string())
         );
     }
+
+    // extract_video_id 境界テスト
+    // 変異: `&&`→`||`, `||`→`&&`, `=='-'`→`!='-'`, `=='_'`→`!='_'` を検出する
+
+    #[test]
+    fn test_extract_video_id_plain_id_with_special_chars_returns_none() {
+        // 英数字・ハイフン・アンダースコア以外の文字を含む11文字は None を返すこと
+        assert_eq!(extract_video_id("AAAA*AAAAAA"), None);
+    }
+
+    #[test]
+    fn test_extract_video_id_plain_id_with_hyphen() {
+        // ハイフンを含む11文字の ID は Some を返すこと
+        assert_eq!(
+            extract_video_id("abc-defg-ij"),
+            Some("abc-defg-ij".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_video_id_plain_id_with_underscore() {
+        // アンダースコアを含む11文字の ID は Some を返すこと
+        assert_eq!(
+            extract_video_id("abc_defg_ij"),
+            Some("abc_defg_ij".to_string())
+        );
+    }
 }

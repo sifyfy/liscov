@@ -1,6 +1,5 @@
 // WebSocket state management using Svelte 5 runes
 // WebSocketサーバーはアプリ起動時に自動起動するため、手動での開始・停止は不要
-import type { WebSocketStatus } from '$lib/types';
 import * as wsApi from '$lib/tauri/websocket';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 

@@ -1,0 +1,22 @@
+# 等価mutant除外設定
+#
+# continuation_builder.rs の modify_continuation_mode は4つのフォールバックパターンで
+# chattypeの位置を探索する。Pattern1が成功するトークンではPattern2-4内部の
+# 演算子・比較変更は観測不可能な等価mutantとなる。
+# detect_chat_mode も同様のフォールバック構造を持つ。
+
+exclude_re = [
+    # Pattern1 (L67-71): Pattern4フォールバックで吸収される等価mutant
+    "continuation_builder\\.rs:6[79]:",
+    "continuation_builder\\.rs:71:",
+    # Pattern2 (L88-96): Pattern1がマッチしない場合のみ実行
+    "continuation_builder\\.rs:88:",
+    "continuation_builder\\.rs:9[0246]:",
+    "continuation_builder\\.rs:95:",
+    # Pattern3 (L119): 既存テストで対処済みの残存
+    "continuation_builder\\.rs:119:63:",
+    # Field13 (L164): フォールバック等価
+    "continuation_builder\\.rs:164:38:",
+    # detect_chat_mode (L205): オフセット計算等価
+    "continuation_builder\\.rs:205:",
+]

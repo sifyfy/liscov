@@ -4,15 +4,6 @@ import type { TtsConfig, TtsStatus, TtsPriority, TtsLaunchStatus } from '$lib/ty
 import { defaultTtsConfig } from '$lib/types';
 import * as ttsApi from '$lib/tauri/tts';
 
-interface TtsStore {
-  config: TtsConfig;
-  status: TtsStatus;
-  launchStatus: TtsLaunchStatus;
-  isLoading: boolean;
-  error: string | null;
-  connectionTestResult: boolean | null;
-  testingBackend: string | null;
-}
 
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error) {

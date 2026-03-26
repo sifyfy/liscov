@@ -78,7 +78,7 @@
 
     <!-- 右: タブナビゲーション -->
     <nav class="flex gap-0.5 flex-shrink-0 p-0.5 rounded-lg bg-[var(--bg-surface-2)]">
-      {#each (['chat', 'viewers', 'analytics', 'settings'] as const) as tab}
+      {#each (['chat', 'viewers', 'analytics', 'settings'] as const) as tab (tab)}
         <button
           onclick={() => (activeTab = tab)}
           class="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all"

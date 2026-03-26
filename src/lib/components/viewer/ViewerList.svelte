@@ -1,6 +1,5 @@
 <script lang="ts">
   import { viewerStore } from '$lib/stores';
-  import type { ViewerWithCustomInfo } from '$lib/types';
 
   interface Props {
     broadcasterId: string;
@@ -137,7 +136,7 @@
               <td class="px-4 py-3 text-[var(--text-secondary)] text-sm">
                 {#if viewer.tags && viewer.tags.length > 0}
                   <div class="flex flex-wrap gap-1">
-                    {#each viewer.tags.slice(0, 3) as tag}
+                    {#each viewer.tags.slice(0, 3) as tag (tag)}
                       <span class="px-1.5 py-0.5 text-xs bg-[var(--accent)]/10 text-[var(--accent)] rounded">{tag}</span>
                     {/each}
                     {#if viewer.tags.length > 3}

@@ -1,6 +1,6 @@
 // チャット関連の Tauri コマンドラッパー
 import { invoke } from '@tauri-apps/api/core';
-import type { ChatMessage, ConnectionResult, ConnectionInfo, ChatMode } from '$lib/types';
+import type { ConnectionResult, ConnectionInfo, ChatMode } from '$lib/types';
 import { normalizeError } from './errors';
 
 /**

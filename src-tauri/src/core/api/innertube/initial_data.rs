@@ -130,6 +130,40 @@ mod tests {
         );
     }
 
+    // extract_yt_initial_data: マーカーなしの場合は None を返すこと (L8: FnValue mutant)
+    #[test]
+    fn test_extract_yt_initial_data_no_marker() {
+        let html = "<html>no data here</html>";
+        assert_eq!(extract_yt_initial_data(html), None);
+    }
+
+    // extract_yt_initial_data: 正常ケースで JSON オブジェクトを返すこと (L8: FnValue, L9: +/-/*, L10: +/-/*)
+    #[test]
+    fn test_extract_yt_initial_data_basic() {
+        let html = r#"var ytInitialData = {"key":"val"};</script>"#;
+        assert_eq!(
+            extract_yt_initial_data(html),
+            Some(serde_json::json!({"key": "val"}))
+        );
+    }
+
+    // extract_yt_initial_data: HTML に埋め込まれている場合も正しく抽出できること (L9: start_marker.len() のオフセット, L10: start オフセット)
+    #[test]
+    fn test_extract_yt_initial_data_embedded_in_html() {
+        let html = r#"<html><script>var ytInitialData = {"test":123};</script></html>"#;
+        assert_eq!(
+            extract_yt_initial_data(html),
+            Some(serde_json::json!({"test": 123}))
+        );
+    }
+
+    // extract_yt_initial_data: JSON が不正な場合は None を返すこと (L8: FnValue mutant)
+    #[test]
+    fn test_extract_yt_initial_data_invalid_json() {
+        let html = "var ytInitialData = invalid;</script>";
+        assert_eq!(extract_yt_initial_data(html), None);
+    }
+
     #[test]
     fn test_parse_title_single_run() {
         // シンプルなタイトル（1つの run）が正しくパースされること
