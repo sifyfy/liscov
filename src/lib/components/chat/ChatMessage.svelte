@@ -227,7 +227,7 @@
 
     <!-- Badge images from metadata -->
     {#if message.metadata?.badge_info}
-      {#each message.metadata.badge_info as badge}
+      {#each message.metadata.badge_info as badge, i (i)}
         {#if badge.image_url}
           <img
             src={badge.image_url}
@@ -299,7 +299,7 @@
   <div class="mt-1 ml-8">
     <p class="break-words leading-relaxed" style="font-size: {fontSize}px; color: {superchatColors() && (message.message_type === 'superchat' || message.message_type === 'supersticker') ? superchatColors()!.body_text : 'var(--text-secondary)'};">
       {#if message.runs && message.runs.length > 0}
-        {#each message.runs as run, index}
+        {#each message.runs as run, i (i)}
           {#if run.type === 'Text'}
             <span>{run.content}</span>
           {:else if run.type === 'Emoji'}

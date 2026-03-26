@@ -74,6 +74,10 @@
       selected={selectedBroadcasterId}
       onSelect={handleBroadcasterSelect}
     />
+    <!-- 配信者削除エラー表示 -->
+    {#if deleteError}
+      <p class="mt-2 text-sm text-[var(--error)]">{deleteError}</p>
+    {/if}
   </div>
 
   <!-- Content -->
@@ -92,7 +96,6 @@
 {#if showEditModal && viewerStore.selectedViewer && selectedBroadcasterId}
   <ViewerEditModal
     viewer={viewerStore.selectedViewer}
-    broadcasterId={selectedBroadcasterId}
     onClose={handleCloseModal}
   />
 {/if}

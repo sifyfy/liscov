@@ -6,6 +6,7 @@
   // 初期サブタブ（外部から指定可能、デフォルトは 'auth'）
   let { initialTab = 'auth' }: { initialTab?: SettingsSubTab } = $props();
 
+  // eslint-disable-next-line svelte/prefer-writable-derived -- ユーザー操作で直接代入するため $derived は不可
   let activeSettingsTab = $state<SettingsSubTab>(initialTab);
 
   // 設定サブタブ一覧
@@ -28,7 +29,7 @@
   <div class="w-48 bg-[var(--bg-surface-1)] border-r p-4 flex-shrink-0" style="border-color: var(--border-subtle);">
     <h3 class="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-3">Settings</h3>
     <nav class="space-y-0.5">
-      {#each settingsTabs as item}
+      {#each settingsTabs as item (item.id)}
         <button
           onclick={() => (activeSettingsTab = item.id)}
           class="w-full text-left px-3 py-2 rounded-md text-sm transition-all"

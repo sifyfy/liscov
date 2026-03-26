@@ -13,7 +13,6 @@ function createViewerStore() {
   let searchQuery = $state('');
   let isLoading = $state(false);
   let error = $state<string | null>(null);
-  let totalViewers = $state(0);
   let currentPage = $state(0);
   const pageSize = 50;
 

@@ -55,7 +55,7 @@ describe('chatStore パフォーマンス最適化', () => {
 		vi.mocked(listen).mockReset();
 
 		// listen モックでコールバックをキャプチャ
-		vi.mocked(listen).mockImplementation(async (event: string, handler: any) => {
+		vi.mocked(listen).mockImplementation(async (event: string, handler: (e: { payload: ChatMessage }) => void) => {
 			if (event === 'chat:message') {
 				emitMessage = (msg: ChatMessage) => handler({ payload: msg });
 			}

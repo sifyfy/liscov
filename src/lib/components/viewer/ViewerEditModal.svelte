@@ -5,11 +5,10 @@
 
   interface Props {
     viewer: ViewerWithCustomInfo;
-    broadcasterId: string;
     onClose: () => void;
   }
 
-  let { viewer, broadcasterId, onClose }: Props = $props();
+  let { viewer, onClose }: Props = $props();
 
   let reading = $state(viewer.reading || '');
   let notes = $state(viewer.notes || '');
