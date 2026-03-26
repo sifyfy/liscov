@@ -264,7 +264,7 @@ fn parse_superchat_message(renderer: &Value) -> Option<ChatMessage> {
 
     let (content, runs) = renderer
         .get("message")
-        .map(|m| parse_message_content(m))
+        .map(parse_message_content)
         .unwrap_or_default();
 
     // YouTube API から SuperChat の色情報をパース

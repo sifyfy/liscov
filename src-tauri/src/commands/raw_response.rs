@@ -110,7 +110,7 @@ pub fn raw_response_resolve_path(file_path: String) -> Result<String, CommandErr
 
     // パスのバリデーション（内部関数は Result<(), String> を返す）
     validate_file_path(&file_path)
-        .map_err(|e| CommandError::InvalidInput(e))?;
+        .map_err(CommandError::InvalidInput)?;
 
     if Path::new(&file_path).is_absolute() {
         Ok(file_path)

@@ -11,17 +11,12 @@ use std::sync::RwLock;
 use tauri::State;
 
 /// Storage mode for credentials
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum StorageMode {
+    #[default]
     Secure,
     Fallback,
-}
-
-impl Default for StorageMode {
-    fn default() -> Self {
-        StorageMode::Secure
-    }
 }
 
 /// Storage configuration section
@@ -40,17 +35,12 @@ impl Default for StorageConfig {
 }
 
 /// UI theme
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum Theme {
+    #[default]
     Dark,
     Light,
-}
-
-impl Default for Theme {
-    fn default() -> Self {
-        Theme::Dark
-    }
 }
 
 /// UI configuration section
@@ -206,7 +196,7 @@ pub async fn config_load(state: State<'_, ConfigState>) -> Result<Config, Comman
 pub async fn config_save(config: Config, state: State<'_, ConfigState>) -> Result<(), CommandError> {
     state.set(config.clone());
     save_config_to_file(&config)
-        .map_err(|e| CommandError::IoError(e))
+        .map_err(CommandError::IoError)
 }
 
 /// Config構造体から section/key で値を取得する純粋関数
@@ -418,14 +408,14 @@ future_setting = true
     #[test]
     fn font_size_valid_range_boundaries() {
         for size in [10u32, 13, 24] {
-            assert!(size >= 10 && size <= 24, "Size {} should be valid", size);
+            assert!((10..=24).contains(&size), "Size {} should be valid", size);
         }
     }
 
     #[test]
     fn font_size_invalid_range() {
         for size in [9u32, 25, 0, 100] {
-            assert!(size < 10 || size > 24, "Size {} should be invalid", size);
+            assert!(!(10..=24).contains(&size), "Size {} should be invalid", size);
         }
     }
 
