@@ -1,0 +1,17 @@
+{
+  "$schema": "https://raw.githubusercontent.com/stryker-mutator/stryker/master/packages/core/schema/stryker-core.json",
+  "testRunner": "vitest",
+  "vitest": {
+    "configFile": "vitest.config.ts"
+  },
+  "mutate": [
+    "src/lib/tauri/errors.ts",
+    "src/lib/utils/connection-colors.ts",
+    "src/lib/stores/chat.svelte.ts"
+  ],
+  "reporters": ["clear-text", "json", "html"],
+  "coverageAnalysis": "all",
+  "timeoutMS": 30000,
+  "concurrency": 4,
+  "inPlace": true
+}

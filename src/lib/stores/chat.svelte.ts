@@ -124,15 +124,38 @@ function createChatStore() {
   }
 
   // アクション
+  // 接続中エントリの仮IDカウンタ（API応答前に一意なキーが必要）
+  let nextTempConnId = -1;
+
   async function connect(url: string, mode?: ChatMode): Promise<ConnectionResult> {
     error = null;
+
+    // connecting 中間状態をセット（UI: 開始ボタン無効化 + 「接続中...」表示）
+    const tempId = nextTempConnId--;
+    const connectingConn: FrontendConnectionState = {
+      id: tempId,
+      platform: 'youtube',
+      streamUrl: url,
+      streamTitle: '',
+      broadcasterName: '',
+      broadcasterChannelId: '',
+      connectionState: 'connecting',
+      color: getConnectionColor(String(tempId))
+    };
+    const beforeConnect = new Map(connections);
+    beforeConnect.set(tempId, connectingConn);
+    connections = beforeConnect;
 
     try {
       const result = await chatApi.connectToStream(url, mode);
 
+      // 仮エントリを削除
+      const next = new Map(connections);
+      next.delete(tempId);
+
       if (result.success) {
         const connId = Number(result.connection_id);
-        const newConn: FrontendConnectionState = {
+        next.set(connId, {
           id: connId,
           platform: 'youtube', // TODO: Rustから返ってきたときに更新
           streamUrl: url,
@@ -141,17 +164,19 @@ function createChatStore() {
           broadcasterChannelId: result.broadcaster_channel_id ?? '',
           connectionState: 'connected',
           color: getConnectionColor(result.broadcaster_channel_id ?? String(connId))
-        };
-        // イミュータブルに新しいMapを作成して置き換え
-        const next = new Map(connections);
-        next.set(connId, newConn);
-        connections = next;
+        });
       } else {
         error = result.error;
       }
 
+      connections = next;
       return result;
     } catch (e) {
+      // 仮エントリを削除
+      const next = new Map(connections);
+      next.delete(tempId);
+      connections = next;
+
       error = e instanceof Error ? e.message : String(e);
       return {
         success: false,

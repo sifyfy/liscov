@@ -25,6 +25,9 @@
 	},
 	"devDependencies": {
 		"@playwright/test": "^1.57.0",
+		"@stryker-mutator/core": "^9.6.0",
+		"@stryker-mutator/typescript-checker": "^9.6.0",
+		"@stryker-mutator/vitest-runner": "^9.6.0",
 		"@sveltejs/adapter-auto": "^7.0.0",
 		"@sveltejs/adapter-static": "^3.0.10",
 		"@sveltejs/kit": "^2.49.1",

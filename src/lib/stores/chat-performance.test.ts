@@ -312,4 +312,237 @@ describe('chatStore パフォーマンス最適化', () => {
 			expect(chatStore.messages[1].id).toBe('batch2_1');
 		});
 	});
+
+	describe('フィルタ追加ケース', () => {
+		// showText=false のとき text タイプのメッセージが除外される
+		it('showText=false で text タイプが filteredMessages から除外される', () => {
+			chatStore.setFilter({ showText: false });
+			addAndFlush([createMessage('1', { message_type: 'text' })]);
+
+			expect(chatStore.filteredMessages).toHaveLength(0);
+		});
+
+		// showMembership=false のとき membership タイプが除外される
+		it('showMembership=false で membership タイプが filteredMessages から除外される', () => {
+			chatStore.setFilter({ showMembership: false });
+			addAndFlush([createMessage('1', { message_type: 'membership' })]);
+
+			expect(chatStore.filteredMessages).toHaveLength(0);
+		});
+
+		// showMembership=false のとき membership_gift タイプが除外される
+		it('showMembership=false で membership_gift タイプが filteredMessages から除外される', () => {
+			chatStore.setFilter({ showMembership: false });
+			addAndFlush([createMessage('1', { message_type: 'membership_gift' })]);
+
+			expect(chatStore.filteredMessages).toHaveLength(0);
+		});
+
+		// showSuperchat=false のとき supersticker タイプが除外される
+		it('showSuperchat=false で supersticker タイプが filteredMessages から除外される', () => {
+			chatStore.setFilter({ showSuperchat: false });
+			addAndFlush([createMessage('1', { message_type: 'supersticker' })]);
+
+			expect(chatStore.filteredMessages).toHaveLength(0);
+		});
+	});
+
+	describe('setFontSize クランプロジック', () => {
+		// MIN_FONT_SIZE=10 未満の値はクランプされる
+		it('MIN(10)未満の値を渡すと messageFontSize が 10 にクランプされる', () => {
+			chatStore.setFontSize(5);
+
+			expect(chatStore.messageFontSize).toBe(10);
+		});
+
+		// MAX_FONT_SIZE=24 超の値はクランプされる
+		it('MAX(24)超の値を渡すと messageFontSize が 24 にクランプされる', () => {
+			chatStore.setFontSize(30);
+
+			expect(chatStore.messageFontSize).toBe(24);
+		});
+
+		// 範囲内の値はそのまま設定される
+		it('範囲内の値を渡すと messageFontSize がその値になる', () => {
+			chatStore.setFontSize(13);
+
+			expect(chatStore.messageFontSize).toBe(13);
+		});
+	});
+
+	describe('increaseFontSize / decreaseFontSize', () => {
+		// increaseFontSize は messageFontSize を 1 増やす
+		it('increaseFontSize で messageFontSize が 1 増加する', () => {
+			chatStore.setFontSize(13);
+			chatStore.increaseFontSize();
+
+			expect(chatStore.messageFontSize).toBe(14);
+		});
+
+		// decreaseFontSize は messageFontSize を 1 減らす
+		it('decreaseFontSize で messageFontSize が 1 減少する', () => {
+			chatStore.setFontSize(13);
+			chatStore.decreaseFontSize();
+
+			expect(chatStore.messageFontSize).toBe(12);
+		});
+	});
+
+	describe('scrollToLatest トリガー', () => {
+		// scrollToLatest を呼ぶたびに scrollToLatestTrigger が単調増加する
+		it('scrollToLatest を呼ぶたびに scrollToLatestTrigger がインクリメントされる', () => {
+			const initial = chatStore.scrollToLatestTrigger;
+			chatStore.scrollToLatest();
+			expect(chatStore.scrollToLatestTrigger).toBe(initial + 1);
+
+			chatStore.scrollToLatest();
+			expect(chatStore.scrollToLatestTrigger).toBe(initial + 2);
+		});
+	});
+
+	describe('フィルタ初期値', () => {
+		// デフォルト状態でフィルタが全タイプ表示・検索クエリなしであることを確認
+		it('デフォルト状態の filter が showText=true, showSuperchat=true, showMembership=true, searchQuery="" である', () => {
+			expect(chatStore.filter.showText).toBe(true);
+			expect(chatStore.filter.showSuperchat).toBe(true);
+			expect(chatStore.filter.showMembership).toBe(true);
+			expect(chatStore.filter.searchQuery).toBe('');
+		});
+	});
+
+	// spec: showTimestamps/autoScroll/chatMode の初期値
+	describe('初期値', () => {
+		it('showTimestamps の初期値は true', () => {
+			expect(chatStore.showTimestamps).toBe(true);
+		});
+		it('autoScroll の初期値は true', () => {
+			expect(chatStore.autoScroll).toBe(true);
+		});
+		it('chatMode の初期値は top', () => {
+			expect(chatStore.chatMode).toBe('top');
+		});
+	});
+
+	// spec: setShowTimestamps/setAutoScroll がストア状態を変更すること
+	describe('setShowTimestamps / setAutoScroll', () => {
+		it('setShowTimestamps(false) で showTimestamps が false になる', () => {
+			chatStore.setShowTimestamps(false);
+			expect(chatStore.showTimestamps).toBe(false);
+		});
+		it('setAutoScroll(false) で autoScroll が false になる', () => {
+			chatStore.setAutoScroll(false);
+			expect(chatStore.autoScroll).toBe(false);
+		});
+	});
+
+	// spec: フィルタ論理の境界ケース
+	describe('フィルタ境界ケース', () => {
+		it('showText=false のとき superchat は filteredMessages に残る', () => {
+			chatStore.setFilter({ showText: false });
+			addAndFlush([
+				createMessage('1', { message_type: 'superchat' }),
+				createMessage('2', { message_type: 'text' }),
+			]);
+			expect(chatStore.filteredMessages).toHaveLength(1);
+			expect(chatStore.filteredMessages[0].id).toBe('1');
+		});
+
+		it('showMembership=true のとき membership は filteredMessages に含まれる', () => {
+			chatStore.setFilter({ showMembership: true });
+			addAndFlush([createMessage('1', { message_type: 'membership' })]);
+			expect(chatStore.filteredMessages).toHaveLength(1);
+		});
+
+		it('showMembership=false のとき text は filteredMessages に残る', () => {
+			chatStore.setFilter({ showMembership: false });
+			addAndFlush([
+				createMessage('1', { message_type: 'text' }),
+				createMessage('2', { message_type: 'membership' }),
+			]);
+			expect(chatStore.filteredMessages).toHaveLength(1);
+			expect(chatStore.filteredMessages[0].id).toBe('1');
+		});
+	});
+
+	// spec: 検索クエリは大文字小文字を区別しない
+	describe('検索クエリ大文字小文字非区別', () => {
+		it('大文字クエリで小文字コンテンツがヒットする', () => {
+			chatStore.setFilter({ searchQuery: 'ABC' });
+			addAndFlush([
+				createMessage('1', { content: 'abc text' }),
+				createMessage('2', { content: 'xyz' }),
+			]);
+			expect(chatStore.filteredMessages).toHaveLength(1);
+			expect(chatStore.filteredMessages[0].id).toBe('1');
+		});
+
+		it('小文字クエリで大文字authorがヒットする', () => {
+			chatStore.setFilter({ searchQuery: 'alice' });
+			addAndFlush([
+				createMessage('1', { author: 'ALICE' }),
+				createMessage('2', { author: 'Bob' }),
+			]);
+			expect(chatStore.filteredMessages).toHaveLength(1);
+			expect(chatStore.filteredMessages[0].id).toBe('1');
+		});
+	});
+
+	// spec: 多接続モードの初期状態確認
+	describe('多接続モード初期値', () => {
+		// isPaused は多接続では常に false（グローバルpauseなし）
+		it('isPaused の初期値は false', () => {
+			expect(chatStore.isPaused).toBe(false);
+		});
+
+		// connections は初期状態で空のMap
+		it('connections の初期値は空のMap', () => {
+			expect(chatStore.connections).toBeInstanceOf(Map);
+			expect(chatStore.connections.size).toBe(0);
+		});
+
+		// isConnected は connections.size === 0 なので false
+		it('isConnected の初期値は false', () => {
+			expect(chatStore.isConnected).toBe(false);
+		});
+
+		// isReplay は後方互換のため常に false
+		it('isReplay は常に false', () => {
+			expect(chatStore.isReplay).toBe(false);
+		});
+
+		// cleanup() を複数回呼んでも安全であること
+		it('cleanup を複数回呼んでも安全', () => {
+			chatStore.cleanup();
+			chatStore.cleanup();
+			// エラーが発生しなければOK
+		});
+
+		// isConnecting は connections が空のため false
+		it('isConnecting の初期値は false', () => {
+			expect(chatStore.isConnecting).toBe(false);
+		});
+
+		// error は初期状態で null
+		it('error の初期値は null', () => {
+			expect(chatStore.error).toBeNull();
+		});
+
+		// connectionState は connections.size === 0 のとき 'idle'
+		it('connectionState の初期値は idle', () => {
+			expect(chatStore.connectionState).toBe('idle');
+		});
+	});
+
+	// spec: displayLimit getter が setDisplayLimit の値を反映する
+	describe('displayLimit getter', () => {
+		it('setDisplayLimit(5) 後に displayLimit が 5 を返す', () => {
+			chatStore.setDisplayLimit(5);
+			expect(chatStore.displayLimit).toBe(5);
+		});
+
+		it('setDisplayLimit(null) 後に displayLimit が null を返す', () => {
+			chatStore.setDisplayLimit(null);
+			expect(chatStore.displayLimit).toBeNull();
+		});
+	});
 });

@@ -23,4 +23,10 @@ describe('getConnectionColor', () => {
     const color = getConnectionColor('');
     expect(CONNECTION_COLORS).toContain(color);
   });
+
+  it('既知の入力に対して安定した色を返す（ハッシュ関数のピン留め）', () => {
+    expect(getConnectionColor('UC12345')).toBe('#ff6d01');
+    expect(getConnectionColor('UC67890')).toBe('#fbbc04');
+    expect(getConnectionColor('UCabcdef')).toBe('#ab47bc');
+  });
 });
