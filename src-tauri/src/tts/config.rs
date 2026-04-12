@@ -100,6 +100,12 @@ pub struct TtsConfig {
     pub read_superchat_amount: bool,
     pub max_text_length: usize,
     pub queue_size_limit: usize,
+    #[serde(default)]
+    pub first_comment_prefix_enabled: bool,
+    #[serde(default)]
+    pub first_comment_prefix: String,
+    #[serde(default)]
+    pub first_comment_only: bool,
 }
 
 impl Default for TtsConfig {
@@ -116,6 +122,9 @@ impl Default for TtsConfig {
             read_superchat_amount: true,
             max_text_length: 200,
             queue_size_limit: 50,
+            first_comment_prefix_enabled: false,
+            first_comment_prefix: String::new(),
+            first_comment_only: false,
         }
     }
 }

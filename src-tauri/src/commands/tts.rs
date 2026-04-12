@@ -19,6 +19,9 @@ pub struct TtsConfigDto {
     pub read_superchat_amount: bool,
     pub max_text_length: usize,
     pub queue_size_limit: usize,
+    pub first_comment_prefix_enabled: bool,
+    pub first_comment_prefix: String,
+    pub first_comment_only: bool,
     // Bouyomichan settings
     pub bouyomichan_host: String,
     pub bouyomichan_port: u16,
@@ -58,6 +61,9 @@ impl From<TtsConfig> for TtsConfigDto {
             read_superchat_amount: config.read_superchat_amount,
             max_text_length: config.max_text_length,
             queue_size_limit: config.queue_size_limit,
+            first_comment_prefix_enabled: config.first_comment_prefix_enabled,
+            first_comment_prefix: config.first_comment_prefix,
+            first_comment_only: config.first_comment_only,
             bouyomichan_host: config.bouyomichan.host,
             bouyomichan_port: config.bouyomichan.port,
             bouyomichan_voice: config.bouyomichan.voice,
@@ -122,6 +128,9 @@ impl From<TtsConfigDto> for TtsConfig {
             read_superchat_amount: dto.read_superchat_amount,
             max_text_length: dto.max_text_length,
             queue_size_limit: dto.queue_size_limit,
+            first_comment_prefix_enabled: dto.first_comment_prefix_enabled,
+            first_comment_prefix: dto.first_comment_prefix,
+            first_comment_only: dto.first_comment_only,
         }
     }
 }
