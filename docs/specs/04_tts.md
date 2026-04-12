@@ -36,6 +36,32 @@
 | Membership（マイルストーン） | `{months}ヶ月のメンバーシップ` |
 | MembershipGift | `{gift_count}人へのメンバーシップギフト` |
 
+### 初回コメント読み上げ
+
+配信内で各視聴者の最初のコメントに対する読み上げ制御。`in_stream_comment_count`（video_id単位）で判定する。`is_first_time_viewer`（全配信通じての初見さん判定）とは別の機能。
+
+#### 初回コメントプレフィックス
+
+| 条件 | 結果 |
+|------|------|
+| `first_comment_prefix_enabled=true` かつ `in_stream_comment_count == 1` | 読み上げテキスト全体の先頭にプレフィックス文言を付加 |
+| `first_comment_prefix_enabled=true` かつ `in_stream_comment_count > 1` | プレフィックスなし |
+| `first_comment_prefix_enabled=false` | プレフィックスなし |
+
+プレフィックス文言: 設定値が空の場合は「1回目のコメント。」をフォールバックとして使用。
+
+読み上げ例:
+- 入力: 投稿者 `@山田太郎-xyz`, 本文 `こんにちは`（初回コメント、プレフィックスON）
+- 出力: `1回目のコメント。山田太郎さん、こんにちは`
+
+#### 初回コメントのみ読み上げ
+
+| 条件 | 結果 |
+|------|------|
+| `first_comment_only=true` かつ `in_stream_comment_count == 1` | 読み上げる |
+| `first_comment_only=true` かつ `in_stream_comment_count > 1` | 読み上げをスキップ |
+| `first_comment_only=false` | 通常通り読み上げる |
+
 ### キュー処理
 
 | 状況 | 結果 |
@@ -112,6 +138,9 @@ strip_handle_suffix = true
 read_superchat_amount = true
 max_text_length = 200
 queue_size_limit = 50
+first_comment_prefix_enabled = false
+first_comment_prefix = ""  # 空の場合は「1回目のコメント。」がデフォルト
+first_comment_only = false
 
 [bouyomichan]
 host = "localhost"
@@ -152,6 +181,9 @@ auto_close = true
 | `read_superchat_amount` | bool | `true` | スーパーチャット金額を読み上げる |
 | `max_text_length` | u32 | `200` | 最大読み上げ文字数 |
 | `queue_size_limit` | u32 | `50` | キューサイズ上限 |
+| `first_comment_prefix_enabled` | bool | `false` | 初回コメントにプレフィックスを付加 |
+| `first_comment_prefix` | string | `""` | プレフィックス文言（空=デフォルト「1回目のコメント。」） |
+| `first_comment_only` | bool | `false` | 初回コメントのみ読み上げる |
 
 ### 棒読みちゃん設定
 
@@ -546,6 +578,8 @@ TTS設定
 │   ├─ @を除去
 │   ├─ ハンドルサフィックスを除去
 │   ├─ スーパーチャット金額を読む
+│   ├─ 初回コメントプレフィックス（トグル + テキスト入力）
+│   ├─ 初回コメントのみ読み上げ（トグル）
 │   ├─ 最大文字数
 │   └─ キューサイズ上限
 ├─ バックエンド固有設定
@@ -580,6 +614,9 @@ pub struct TtsConfig {
     pub read_superchat_amount: bool,
     pub max_text_length: u32,
     pub queue_size_limit: u32,
+    pub first_comment_prefix_enabled: bool,
+    pub first_comment_prefix: String,
+    pub first_comment_only: bool,
     pub bouyomichan: BouyomichanConfig,
     pub voicevox: VoicevoxConfig,
 }
@@ -629,6 +666,9 @@ interface TtsConfigDto {
     read_superchat_amount: boolean;
     max_text_length: number;
     queue_size_limit: number;
+    first_comment_prefix_enabled: boolean;
+    first_comment_prefix: string;
+    first_comment_only: boolean;
     bouyomichan: BouyomichanConfig;
     voicevox: VoicevoxConfig;
 }
