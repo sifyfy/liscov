@@ -33,6 +33,8 @@ pub struct TtsQueueItem {
     pub priority: TtsPriority,
     pub author_name: Option<String>,
     pub amount: Option<String>,
+    /// 配信内コメント回数（初回コメント判定に使用）
+    pub in_stream_comment_count: Option<u32>,
 }
 
 /// TTS Manager handles TTS operations
@@ -579,6 +581,9 @@ mod tests {
         assert!(config.read_superchat_amount);
         assert_eq!(config.max_text_length, 200);
         assert_eq!(config.queue_size_limit, 50);
+        assert!(!config.first_comment_prefix_enabled);
+        assert_eq!(config.first_comment_prefix, "");
+        assert!(!config.first_comment_only);
     }
 
     #[test]
