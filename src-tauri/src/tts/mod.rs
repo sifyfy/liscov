@@ -134,6 +134,15 @@ impl TtsManager {
             return;
         }
 
+        // 初回コメントのみ読み上げ: 2回目以降はスキップ
+        if should_skip_tts(config.first_comment_only, item.in_stream_comment_count) {
+            log::debug!(
+                "TTS skipped: first_comment_only enabled, count={:?}",
+                item.in_stream_comment_count
+            );
+            return;
+        }
+
         let mut queue = self.queue.lock().await;
 
         // Check queue size limit
@@ -199,7 +208,7 @@ impl TtsManager {
                             // Format text using shared helper
                             let text = {
                                 let cfg = config.read().await;
-                                build_tts_text(
+                                let base = build_tts_text(
                                     item.author_name.as_deref(),
                                     item.amount.as_deref(),
                                     &item.text,
@@ -209,7 +218,16 @@ impl TtsManager {
                                     cfg.add_honorific,
                                     cfg.read_superchat_amount,
                                     cfg.max_text_length,
-                                )
+                                );
+                                // 初回コメントプレフィックス
+                                match build_first_comment_prefix(
+                                    cfg.first_comment_prefix_enabled,
+                                    &cfg.first_comment_prefix,
+                                    item.in_stream_comment_count,
+                                ) {
+                                    Some(prefix) => format!("{}{}", prefix, base),
+                                    None => base,
+                                }
                             };
 
                             // Speak
