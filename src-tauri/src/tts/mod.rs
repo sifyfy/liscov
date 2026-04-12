@@ -772,4 +772,62 @@ mod tests {
         };
         assert_eq!(result, "1回目のコメント。山田太郎さん、¥500の、こんにちは");
     }
+
+    // ========================================================================
+    // TtsManager::enqueue 統合テスト（スキップ判定の配線確認）
+    // ========================================================================
+
+    /// テスト用: enabled=true, backend=None の TtsConfig を生成
+    fn test_config_with_first_comment(first_comment_only: bool) -> TtsConfig {
+        TtsConfig {
+            enabled: true,
+            first_comment_only,
+            ..TtsConfig::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn enqueue_skips_second_comment_when_first_comment_only() {
+        // first_comment_only=true の場合、count=2 のメッセージはキューに入らない
+        let manager = TtsManager::new(test_config_with_first_comment(true));
+        let item = TtsQueueItem {
+            text: "テスト".to_string(),
+            priority: TtsPriority::Normal,
+            author_name: Some("テスター".to_string()),
+            amount: None,
+            in_stream_comment_count: Some(2),
+        };
+        manager.enqueue(item).await;
+        assert_eq!(manager.queue_size().await, 0);
+    }
+
+    #[tokio::test]
+    async fn enqueue_allows_first_comment_when_first_comment_only() {
+        // first_comment_only=true の場合、count=1 のメッセージはキューに入る
+        let manager = TtsManager::new(test_config_with_first_comment(true));
+        let item = TtsQueueItem {
+            text: "テスト".to_string(),
+            priority: TtsPriority::Normal,
+            author_name: Some("テスター".to_string()),
+            amount: None,
+            in_stream_comment_count: Some(1),
+        };
+        manager.enqueue(item).await;
+        assert_eq!(manager.queue_size().await, 1);
+    }
+
+    #[tokio::test]
+    async fn enqueue_allows_all_when_first_comment_only_off() {
+        // first_comment_only=false の場合、全てキューに入る
+        let manager = TtsManager::new(test_config_with_first_comment(false));
+        let item = TtsQueueItem {
+            text: "テスト".to_string(),
+            priority: TtsPriority::Normal,
+            author_name: Some("テスター".to_string()),
+            amount: None,
+            in_stream_comment_count: Some(5),
+        };
+        manager.enqueue(item).await;
+        assert_eq!(manager.queue_size().await, 1);
+    }
 }

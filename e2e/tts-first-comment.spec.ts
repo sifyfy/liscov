@@ -135,4 +135,46 @@ test.describe('TTS First Comment Settings', () => {
     await firstCommentOnlyToggle.click();
     await expect(firstCommentOnlyToggle).toHaveAttribute('aria-pressed', 'false');
   });
+
+  test('settings round-trip: toggles and prefix text persist after reload', async () => {
+    // プレフィックストグルをONにする
+    const prefixToggle = mainPage.locator('[data-testid="first-comment-prefix-toggle"]');
+    await prefixToggle.click();
+    await expect(prefixToggle).toHaveAttribute('aria-pressed', 'true');
+
+    // カスタムプレフィックスを入力
+    const prefixInput = mainPage.locator('[data-testid="first-comment-prefix-input"]');
+    await expect(prefixInput).toBeVisible({ timeout: 5000 });
+    await prefixInput.fill('初コメ！');
+
+    // 初回コメントのみ読み上げトグルをONにする
+    const firstCommentOnlyToggle = mainPage.locator('[data-testid="first-comment-only-toggle"]');
+    await firstCommentOnlyToggle.click();
+    await expect(firstCommentOnlyToggle).toHaveAttribute('aria-pressed', 'true');
+
+    // デバウンス保存を待つ
+    await mainPage.waitForTimeout(500);
+
+    // ページリロード
+    await mainPage.reload();
+    await waitForAppReady(mainPage);
+    await navigateToTtsSettings(mainPage);
+
+    // 設定が永続化されていることを確認
+    const prefixToggleAfter = mainPage.locator('[data-testid="first-comment-prefix-toggle"]');
+    await expect(prefixToggleAfter).toHaveAttribute('aria-pressed', 'true');
+
+    const prefixInputAfter = mainPage.locator('[data-testid="first-comment-prefix-input"]');
+    await expect(prefixInputAfter).toBeVisible({ timeout: 5000 });
+    await expect(prefixInputAfter).toHaveValue('初コメ！');
+
+    const firstCommentOnlyAfter = mainPage.locator('[data-testid="first-comment-only-toggle"]');
+    await expect(firstCommentOnlyAfter).toHaveAttribute('aria-pressed', 'true');
+
+    // テスト後のクリーンアップ: 設定を戻す
+    await prefixToggleAfter.click();
+    await firstCommentOnlyAfter.click();
+    await prefixInputAfter.fill('');
+    await mainPage.waitForTimeout(500);
+  });
 });
