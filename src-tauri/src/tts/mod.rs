@@ -273,6 +273,45 @@ impl Default for TtsManager {
 // Pure helper functions for TTS text generation (04_tts.md)
 // ============================================================================
 
+/// デフォルトの初回コメントプレフィックス
+const DEFAULT_FIRST_COMMENT_PREFIX: &str = "1回目のコメント。";
+
+/// プレフィックス文言を解決する。空文字列の場合はデフォルトにフォールバック。
+pub(crate) fn resolve_first_comment_prefix(configured: &str) -> &str {
+    if configured.is_empty() {
+        DEFAULT_FIRST_COMMENT_PREFIX
+    } else {
+        configured
+    }
+}
+
+/// 初回コメントのみ読み上げ設定に基づき、このメッセージをスキップすべきか判定する
+pub(crate) fn should_skip_tts(first_comment_only: bool, in_stream_comment_count: Option<u32>) -> bool {
+    if !first_comment_only {
+        return false;
+    }
+    match in_stream_comment_count {
+        Some(count) => count > 1,
+        // システムメッセージ等（カウントなし）はスキップしない
+        None => false,
+    }
+}
+
+/// 初回コメントプレフィックスを生成する。付加不要な場合は None を返す。
+pub(crate) fn build_first_comment_prefix(
+    enabled: bool,
+    configured_prefix: &str,
+    in_stream_comment_count: Option<u32>,
+) -> Option<String> {
+    if !enabled {
+        return None;
+    }
+    match in_stream_comment_count {
+        Some(1) => Some(resolve_first_comment_prefix(configured_prefix).to_string()),
+        _ => None,
+    }
+}
+
 /// Process author name: strip @prefix, strip -xxx handle suffix, add honorific
 ///
 /// Spec (04_tts.md):
@@ -623,5 +662,90 @@ mod tests {
     fn priority_ordering() {
         assert!(TtsPriority::Normal < TtsPriority::Membership);
         assert!(TtsPriority::Membership < TtsPriority::SuperChat);
+    }
+
+    // ========================================================================
+    // resolve_first_comment_prefix (04_tts.md: 初回コメントプレフィックス解決)
+    // ========================================================================
+
+    #[test]
+    fn resolve_prefix_custom_text() {
+        assert_eq!(resolve_first_comment_prefix("カスタム。"), "カスタム。");
+    }
+
+    #[test]
+    fn resolve_prefix_empty_falls_back_to_default() {
+        // AC-8: 空の場合はデフォルト「1回目のコメント。」
+        assert_eq!(resolve_first_comment_prefix(""), "1回目のコメント。");
+    }
+
+    // ========================================================================
+    // should_skip_tts / build_first_comment_prefix (04_tts.md: 初回コメント判定)
+    // ========================================================================
+
+    #[test]
+    fn first_comment_only_skips_second_message() {
+        // AC-5: first_comment_only=ON, 2回目 → スキップ
+        assert!(should_skip_tts(true, Some(2)));
+    }
+
+    #[test]
+    fn first_comment_only_allows_first_message() {
+        // AC-4: first_comment_only=ON, 1回目 → 読み上げ
+        assert!(!should_skip_tts(true, Some(1)));
+    }
+
+    #[test]
+    fn first_comment_only_off_allows_all() {
+        // AC-6: first_comment_only=OFF → 通常通り
+        assert!(!should_skip_tts(false, Some(5)));
+    }
+
+    #[test]
+    fn first_comment_only_none_count_allows() {
+        // in_stream_comment_count=None（システムメッセージ等）→ スキップしない
+        assert!(!should_skip_tts(true, None));
+    }
+
+    #[test]
+    fn prefix_on_first_comment() {
+        // AC-1: プレフィックスON + 初回 → プレフィックス付加
+        let result = build_first_comment_prefix(true, "", Some(1));
+        assert_eq!(result, Some("1回目のコメント。".to_string()));
+    }
+
+    #[test]
+    fn prefix_on_second_comment() {
+        // AC-2: プレフィックスON + 2回目 → なし
+        let result = build_first_comment_prefix(true, "", Some(2));
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn prefix_off() {
+        // AC-3: プレフィックスOFF → なし
+        let result = build_first_comment_prefix(false, "", Some(1));
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn prefix_custom_text_on_first() {
+        let result = build_first_comment_prefix(true, "初コメ！", Some(1));
+        assert_eq!(result, Some("初コメ！".to_string()));
+    }
+
+    #[test]
+    fn prefix_with_superchat_first_comment() {
+        // Edge Case: スーパーチャットが初回コメント
+        let prefix = build_first_comment_prefix(true, "", Some(1));
+        let tts_text = build_tts_text(
+            Some("@山田太郎-xyz"), Some("¥500"), "こんにちは",
+            true, true, true, true, true, 200,
+        );
+        let result = match prefix {
+            Some(p) => format!("{}{}", p, tts_text),
+            None => tts_text,
+        };
+        assert_eq!(result, "1回目のコメント。山田太郎さん、¥500の、こんにちは");
     }
 }
