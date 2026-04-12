@@ -294,9 +294,9 @@ impl Default for TtsManager {
 /// デフォルトの初回コメントプレフィックス
 const DEFAULT_FIRST_COMMENT_PREFIX: &str = "1回目のコメント。";
 
-/// プレフィックス文言を解決する。空文字列の場合はデフォルトにフォールバック。
+/// プレフィックス文言を解決する。空または空白のみの場合はデフォルトにフォールバック。
 pub(crate) fn resolve_first_comment_prefix(configured: &str) -> &str {
-    if configured.is_empty() {
+    if configured.trim().is_empty() {
         DEFAULT_FIRST_COMMENT_PREFIX
     } else {
         configured
@@ -695,6 +695,12 @@ mod tests {
     fn resolve_prefix_empty_falls_back_to_default() {
         // AC-8: 空の場合はデフォルト「1回目のコメント。」
         assert_eq!(resolve_first_comment_prefix(""), "1回目のコメント。");
+    }
+
+    #[test]
+    fn resolve_prefix_whitespace_only_falls_back_to_default() {
+        // 空白のみの場合もデフォルトにフォールバック
+        assert_eq!(resolve_first_comment_prefix("   "), "1回目のコメント。");
     }
 
     // ========================================================================
