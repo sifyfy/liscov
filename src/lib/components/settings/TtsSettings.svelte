@@ -602,6 +602,54 @@
         </label>
       </div>
 
+      <!-- 初回コメント設定 -->
+      <div class="pt-3 mt-3 border-t border-[var(--border-default)] space-y-3">
+        <div class="flex items-center justify-between">
+          <div>
+            <span class="text-[var(--text-primary)] text-sm">初回コメントにプレフィックスを付ける</span>
+            <p class="text-xs text-[var(--text-muted)]">配信内で初めてコメントした視聴者のメッセージに文言を付加</p>
+          </div>
+          <button
+            onclick={() => { if (config) { config.first_comment_prefix_enabled = !config.first_comment_prefix_enabled; handleConfigChange(); } }}
+            data-testid="first-comment-prefix-toggle"
+            aria-pressed={config.first_comment_prefix_enabled}
+            class="{config.first_comment_prefix_enabled ? 'bg-[var(--success)]' : 'bg-[var(--bg-surface-3)]'} relative inline-flex h-5 w-9 items-center rounded-full transition-colors"
+          >
+            <span class="{config.first_comment_prefix_enabled ? 'translate-x-5' : 'translate-x-1'} inline-block h-3 w-3 transform rounded-full bg-white transition-transform shadow"></span>
+          </button>
+        </div>
+
+        {#if config.first_comment_prefix_enabled}
+          <div class="ml-6">
+            <label for="first-comment-prefix" class="block text-xs text-[var(--text-muted)] mb-1">プレフィックス文言</label>
+            <input
+              id="first-comment-prefix"
+              type="text"
+              bind:value={config.first_comment_prefix}
+              oninput={handleConfigChange}
+              placeholder="1回目のコメント。"
+              data-testid="first-comment-prefix-input"
+              class="w-full px-3 py-2 rounded-lg bg-[var(--bg-surface-3)] text-[var(--text-primary)] placeholder-[var(--text-muted)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+            />
+          </div>
+        {/if}
+
+        <div class="flex items-center justify-between">
+          <div>
+            <span class="text-[var(--text-primary)] text-sm">初回コメントのみ読み上げる</span>
+            <p class="text-xs text-[var(--text-muted)]">各視聴者の配信内1回目のコメントだけを読み上げ</p>
+          </div>
+          <button
+            onclick={() => { if (config) { config.first_comment_only = !config.first_comment_only; handleConfigChange(); } }}
+            data-testid="first-comment-only-toggle"
+            aria-pressed={config.first_comment_only}
+            class="{config.first_comment_only ? 'bg-[var(--success)]' : 'bg-[var(--bg-surface-3)]'} relative inline-flex h-5 w-9 items-center rounded-full transition-colors"
+          >
+            <span class="{config.first_comment_only ? 'translate-x-5' : 'translate-x-1'} inline-block h-3 w-3 transform rounded-full bg-white transition-transform shadow"></span>
+          </button>
+        </div>
+      </div>
+
       <div class="grid grid-cols-2 gap-4">
         <div>
           <label for="max-length" class="block text-xs text-[var(--text-muted)] mb-1">最大文字数</label>
