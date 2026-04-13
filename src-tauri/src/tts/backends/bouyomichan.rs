@@ -2,7 +2,8 @@
 
 use std::time::Duration;
 
-use super::TtsError;
+use async_trait::async_trait;
+use super::{TtsBackend, TtsError};
 use crate::tts::config::BouyomichanConfig;
 
 /// Bouyomichan backend
@@ -21,11 +22,6 @@ impl BouyomichanBackend {
         Self { config, client }
     }
 
-    /// Update configuration
-    pub fn update_config(&mut self, config: BouyomichanConfig) {
-        self.config = config;
-    }
-
     /// Build Talk API URL
     fn build_talk_url(&self, text: &str) -> String {
         format!(
@@ -39,9 +35,11 @@ impl BouyomichanBackend {
             self.config.tone,
         )
     }
+}
 
-    /// Test connection to the backend
-    pub async fn test_connection(&self) -> Result<bool, TtsError> {
+#[async_trait]
+impl TtsBackend for BouyomichanBackend {
+    async fn test_connection(&self) -> Result<bool, TtsError> {
         let url = format!("http://{}:{}/Talk?text=", self.config.host, self.config.port);
 
         match self.client.get(&url).send().await {
@@ -64,8 +62,7 @@ impl BouyomichanBackend {
         }
     }
 
-    /// Speak the given text
-    pub async fn speak(&self, text: &str) -> Result<(), TtsError> {
+    async fn speak(&self, text: &str) -> Result<(), TtsError> {
         if text.is_empty() {
             return Ok(());
         }
@@ -85,5 +82,9 @@ impl BouyomichanBackend {
                 status
             )))
         }
+    }
+
+    fn name(&self) -> &'static str {
+        "Bouyomichan"
     }
 }

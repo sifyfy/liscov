@@ -2,7 +2,8 @@
 
 use std::time::Duration;
 
-use super::TtsError;
+use async_trait::async_trait;
+use super::{TtsBackend, TtsError};
 use crate::tts::config::VoicevoxConfig;
 
 /// VOICEVOX backend
@@ -20,11 +21,6 @@ impl VoicevoxBackend {
             .expect("Failed to create HTTP client");
 
         Self { config, client }
-    }
-
-    /// Update configuration
-    pub fn update_config(&mut self, config: VoicevoxConfig) {
-        self.config = config;
     }
 
     /// Get audio query
@@ -84,7 +80,7 @@ impl VoicevoxBackend {
         let stream = OutputStreamBuilder::open_default_stream()
             .map_err(|e| TtsError::AudioOutput(format!("Failed to initialize audio output: {}", e)))?;
 
-        let sink = Sink::connect_new(&stream.mixer());
+        let sink = Sink::connect_new(stream.mixer());
 
         let cursor = Cursor::new(wav_bytes);
         let source = Decoder::new(cursor)
@@ -95,9 +91,11 @@ impl VoicevoxBackend {
 
         Ok(())
     }
+}
 
-    /// Test connection to the backend
-    pub async fn test_connection(&self) -> Result<bool, TtsError> {
+#[async_trait]
+impl TtsBackend for VoicevoxBackend {
+    async fn test_connection(&self) -> Result<bool, TtsError> {
         let url = format!("http://{}:{}/version", self.config.host, self.config.port);
 
         match self.client.get(&url).send().await {
@@ -124,8 +122,7 @@ impl VoicevoxBackend {
         }
     }
 
-    /// Speak the given text
-    pub async fn speak(&self, text: &str) -> Result<(), TtsError> {
+    async fn speak(&self, text: &str) -> Result<(), TtsError> {
         if text.is_empty() {
             return Ok(());
         }
@@ -177,5 +174,9 @@ impl VoicevoxBackend {
 
         log::debug!("VOICEVOX speak completed");
         Ok(())
+    }
+
+    fn name(&self) -> &'static str {
+        "VOICEVOX"
     }
 }

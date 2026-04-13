@@ -1,4 +1,9 @@
 //! TTS backend implementations
+//!
+//! 新しいバックエンドを追加する場合:
+//! 1. `TtsBackend` トレイトを実装した構造体を作成
+//! 2. `create_backend` ファクトリ関数にマッチアームを追加
+//! 3. `TtsBackendType` に新しいバリアントを追加
 
 pub mod bouyomichan;
 pub mod voicevox;
@@ -6,6 +11,7 @@ pub mod voicevox;
 pub use bouyomichan::BouyomichanBackend;
 pub use voicevox::VoicevoxBackend;
 
+use async_trait::async_trait;
 use crate::tts::config::{BouyomichanConfig, TtsBackendType, VoicevoxConfig};
 
 /// TTS backend error
@@ -24,51 +30,33 @@ pub enum TtsError {
     Http(#[from] reqwest::Error),
 }
 
-/// TTS backend enum (static dispatch)
-pub enum TtsBackendEnum {
-    Bouyomichan(BouyomichanBackend),
-    Voicevox(VoicevoxBackend),
+/// TTS バックエンドの共通インターフェース
+///
+/// 新しいバックエンドを追加する際はこのトレイトを実装し、
+/// `create_backend` ファクトリ関数に登録する。
+#[async_trait]
+pub trait TtsBackend: Send + Sync {
+    /// バックエンドへの接続テスト
+    async fn test_connection(&self) -> Result<bool, TtsError>;
+    /// テキストを読み上げる
+    async fn speak(&self, text: &str) -> Result<(), TtsError>;
+    /// バックエンド名を返す
+    fn name(&self) -> &'static str;
 }
 
-impl TtsBackendEnum {
-    /// Create a backend from config
-    pub fn from_config(
-        backend_type: &TtsBackendType,
-        bouyomichan: &BouyomichanConfig,
-        voicevox: &VoicevoxConfig,
-    ) -> Option<Self> {
-        match backend_type {
-            TtsBackendType::None => None,
-            TtsBackendType::Bouyomichan => {
-                Some(Self::Bouyomichan(BouyomichanBackend::new(bouyomichan.clone())))
-            }
-            TtsBackendType::Voicevox => {
-                Some(Self::Voicevox(VoicevoxBackend::new(voicevox.clone())))
-            }
+/// 設定からバックエンドインスタンスを生成する
+pub fn create_backend(
+    backend_type: &TtsBackendType,
+    bouyomichan: &BouyomichanConfig,
+    voicevox: &VoicevoxConfig,
+) -> Option<Box<dyn TtsBackend>> {
+    match backend_type {
+        TtsBackendType::None => None,
+        TtsBackendType::Bouyomichan => {
+            Some(Box::new(BouyomichanBackend::new(bouyomichan.clone())))
         }
-    }
-
-    /// Test connection to the backend
-    pub async fn test_connection(&self) -> Result<bool, TtsError> {
-        match self {
-            Self::Bouyomichan(b) => b.test_connection().await,
-            Self::Voicevox(b) => b.test_connection().await,
-        }
-    }
-
-    /// Speak the given text
-    pub async fn speak(&self, text: &str) -> Result<(), TtsError> {
-        match self {
-            Self::Bouyomichan(b) => b.speak(text).await,
-            Self::Voicevox(b) => b.speak(text).await,
-        }
-    }
-
-    /// Get the backend name
-    pub fn name(&self) -> &'static str {
-        match self {
-            Self::Bouyomichan(_) => "Bouyomichan",
-            Self::Voicevox(_) => "VOICEVOX",
+        TtsBackendType::Voicevox => {
+            Some(Box::new(VoicevoxBackend::new(voicevox.clone())))
         }
     }
 }

@@ -11,7 +11,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, RwLock};
 
-pub use backends::{BouyomichanBackend, TtsBackendEnum, TtsError, VoicevoxBackend};
+pub use backends::{BouyomichanBackend, TtsBackend, TtsError, VoicevoxBackend};
 pub use config::{BouyomichanConfig, TtsBackendType, TtsConfig, VoicevoxConfig};
 pub use process::TtsProcessManager;
 
@@ -40,7 +40,7 @@ pub struct TtsQueueItem {
 /// TTS Manager handles TTS operations
 pub struct TtsManager {
     config: Arc<RwLock<TtsConfig>>,
-    backend: Arc<RwLock<Option<TtsBackendEnum>>>,
+    backend: Arc<RwLock<Option<Box<dyn TtsBackend>>>>,
     queue: Arc<Mutex<VecDeque<TtsQueueItem>>>,
     is_processing: Arc<RwLock<bool>>,
     shutdown_tx: Arc<Mutex<Option<mpsc::Sender<()>>>>,
@@ -49,12 +49,16 @@ pub struct TtsManager {
 impl TtsManager {
     /// Create a new TTS manager
     pub fn new(config: TtsConfig) -> Self {
-        let backend = TtsBackendEnum::from_config(
+        let backend = backends::create_backend(
             &config.backend,
             &config.bouyomichan,
             &config.voicevox,
         );
+        Self::with_backend(config, backend)
+    }
 
+    /// 指定されたバックエンドで TtsManager を作成する
+    pub fn with_backend(config: TtsConfig, backend: Option<Box<dyn TtsBackend>>) -> Self {
         Self {
             config: Arc::new(RwLock::new(config)),
             backend: Arc::new(RwLock::new(backend)),
@@ -71,7 +75,7 @@ impl TtsManager {
             log::error!("Failed to save TTS config: {}", e);
         }
 
-        let backend = TtsBackendEnum::from_config(
+        let backend = backends::create_backend(
             &config.backend,
             &config.bouyomichan,
             &config.voicevox,
@@ -97,7 +101,7 @@ impl TtsManager {
     /// Test connection to a specific backend type
     pub async fn test_backend_connection(&self, backend_type: TtsBackendType) -> Result<bool, TtsError> {
         let config = self.config.read().await;
-        let test_backend = TtsBackendEnum::from_config(
+        let test_backend = backends::create_backend(
             &backend_type,
             &config.bouyomichan,
             &config.voicevox,
@@ -342,23 +346,9 @@ pub(crate) fn process_author_name(
     strip_handle: bool,
     honorific: bool,
 ) -> String {
-    let mut result = name.to_string();
-
-    if strip_at && result.starts_with('@') {
-        result = result[1..].to_string();
-    }
-
-    if strip_handle {
-        if let Some(pos) = result.rfind('-') {
-            result = result[..pos].to_string();
-        }
-    }
-
-    if honorific {
-        result.push_str("さん");
-    }
-
-    result
+    let s = if strip_at { name.strip_prefix('@').unwrap_or(name) } else { name };
+    let s = if strip_handle { s.rfind('-').map_or(s, |pos| &s[..pos]) } else { s };
+    if honorific { format!("{}さん", s) } else { s.to_string() }
 }
 
 /// Truncate text to max_length (by chars), appending "、以下省略" if truncated
@@ -373,6 +363,7 @@ pub(crate) fn truncate_text(text: &str, max_length: usize) -> String {
 }
 
 /// Build complete TTS text from parts
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_tts_text(
     author_name: Option<&str>,
     amount: Option<&str>,
@@ -829,5 +820,410 @@ mod tests {
         };
         manager.enqueue(item).await;
         assert_eq!(manager.queue_size().await, 1);
+    }
+
+    // ========================================================================
+    // TtsManager::get_config（L85のmutantをkill）
+    // ========================================================================
+
+    #[tokio::test]
+    async fn get_config_returns_initial_config() {
+        // spec: TtsManager::new に渡した設定が get_config で取得できる
+        let manager = TtsManager::new(TtsConfig {
+            enabled: true,
+            ..TtsConfig::default()
+        });
+        let config = manager.get_config().await;
+        assert!(config.enabled);
+    }
+
+    // ========================================================================
+    // TtsManager::update_config（L70のmutantをkill）
+    // ========================================================================
+
+    #[tokio::test]
+    async fn update_config_reflects_changes_in_get_config() {
+        // spec: update_config 後に get_config でフィールドが反映される
+        let manager = TtsManager::new(TtsConfig::default());
+        let new_config = TtsConfig {
+            enabled: true,
+            queue_size_limit: 10,
+            ..TtsConfig::default()
+        };
+        manager.update_config(new_config).await;
+        let config = manager.get_config().await;
+        assert!(config.enabled);
+        assert_eq!(config.queue_size_limit, 10);
+    }
+
+    // ========================================================================
+    // TtsManager::format_text（L114のmutantをkill）
+    // ========================================================================
+
+    #[tokio::test]
+    async fn format_text_uses_config_to_build_text() {
+        // spec: add_honorific=true の設定で format_text は著者名に「さん」を付与する
+        let manager = TtsManager::new(TtsConfig {
+            add_honorific: true,
+            read_author_name: true,
+            ..TtsConfig::default()
+        });
+        let item = TtsQueueItem {
+            text: "こんにちは".to_string(),
+            priority: TtsPriority::Normal,
+            author_name: Some("田中".to_string()),
+            amount: None,
+            in_stream_comment_count: None,
+        };
+        let result = manager.format_text(&item).await;
+        // 空文字でもなく、元テキストそのままでもない（著者名が付加される）
+        assert!(!result.is_empty());
+        assert_ne!(result, "");
+        // add_honorific=true なので「田中さん」が含まれる
+        assert!(result.contains("田中さん"));
+    }
+
+    // ========================================================================
+    // enqueue がキュー満杯時に最古を破棄する（L149のmutantをkill）
+    // ========================================================================
+
+    #[tokio::test]
+    async fn enqueue_drops_oldest_when_queue_full() {
+        // spec: queue_size_limit=2 で 3件enqueue すると最古が破棄されてサイズは2
+        let manager = TtsManager::new(TtsConfig {
+            enabled: true,
+            queue_size_limit: 2,
+            ..TtsConfig::default()
+        });
+        for i in 0..3 {
+            manager.enqueue(TtsQueueItem {
+                text: format!("メッセージ{}", i),
+                priority: TtsPriority::Normal,
+                author_name: None,
+                amount: None,
+                in_stream_comment_count: None,
+            }).await;
+        }
+        assert_eq!(manager.queue_size().await, 2);
+    }
+
+    #[tokio::test]
+    async fn enqueue_oldest_is_dropped_not_newest() {
+        // spec: 満杯時に破棄されるのは最古（先頭）のアイテム
+        let manager = TtsManager::new(TtsConfig {
+            enabled: true,
+            queue_size_limit: 2,
+            ..TtsConfig::default()
+        });
+        manager.enqueue(TtsQueueItem {
+            text: "最古".to_string(),
+            priority: TtsPriority::Normal,
+            author_name: None,
+            amount: None,
+            in_stream_comment_count: None,
+        }).await;
+        manager.enqueue(TtsQueueItem {
+            text: "2番目".to_string(),
+            priority: TtsPriority::Normal,
+            author_name: None,
+            amount: None,
+            in_stream_comment_count: None,
+        }).await;
+        manager.enqueue(TtsQueueItem {
+            text: "最新".to_string(),
+            priority: TtsPriority::Normal,
+            author_name: None,
+            amount: None,
+            in_stream_comment_count: None,
+        }).await;
+        // 最古「最古」が破棄され、「2番目」と「最新」が残る
+        let queue = manager.queue.lock().await;
+        assert_eq!(queue.len(), 2);
+        assert_eq!(queue[0].text, "2番目");
+        assert_eq!(queue[1].text, "最新");
+    }
+
+    // ========================================================================
+    // enqueue が優先度を正しく挿入する（L157の3つのmutantをkill）
+    // ========================================================================
+
+    #[tokio::test]
+    async fn enqueue_superchat_goes_before_normal() {
+        // spec: Normal enqueue後に SuperChat を enqueue → 先頭が SuperChat
+        let manager = TtsManager::new(TtsConfig {
+            enabled: true,
+            ..TtsConfig::default()
+        });
+        manager.enqueue(TtsQueueItem {
+            text: "ノーマル".to_string(),
+            priority: TtsPriority::Normal,
+            author_name: None,
+            amount: None,
+            in_stream_comment_count: None,
+        }).await;
+        manager.enqueue(TtsQueueItem {
+            text: "スーパーチャット".to_string(),
+            priority: TtsPriority::SuperChat,
+            author_name: None,
+            amount: None,
+            in_stream_comment_count: None,
+        }).await;
+        let queue = manager.queue.lock().await;
+        assert_eq!(queue[0].priority, TtsPriority::SuperChat);
+        assert_eq!(queue[0].text, "スーパーチャット");
+    }
+
+    #[tokio::test]
+    async fn enqueue_normal_messages_are_fifo() {
+        // spec: Normal 2件は挿入順（FIFO）で並ぶ
+        let manager = TtsManager::new(TtsConfig {
+            enabled: true,
+            ..TtsConfig::default()
+        });
+        manager.enqueue(TtsQueueItem {
+            text: "a".to_string(),
+            priority: TtsPriority::Normal,
+            author_name: None,
+            amount: None,
+            in_stream_comment_count: None,
+        }).await;
+        manager.enqueue(TtsQueueItem {
+            text: "b".to_string(),
+            priority: TtsPriority::Normal,
+            author_name: None,
+            amount: None,
+            in_stream_comment_count: None,
+        }).await;
+        let queue = manager.queue.lock().await;
+        assert_eq!(queue[0].text, "a");
+        assert_eq!(queue[1].text, "b");
+    }
+
+    // ========================================================================
+    // is_processing が初期状態で false を返す（L272のmutantをkill）
+    // ========================================================================
+
+    #[tokio::test]
+    async fn is_processing_returns_false_initially() {
+        // spec: 新規作成した TtsManager は is_processing=false
+        let manager = TtsManager::new(TtsConfig::default());
+        assert!(!manager.is_processing().await);
+    }
+
+    // ========================================================================
+    // backend_name がバックエンド種別を正しく返す（L277のmutantをkill）
+    // ========================================================================
+
+    #[tokio::test]
+    async fn backend_name_returns_bouyomichan_for_bouyomichan_config() {
+        // spec: Bouyomichan 設定では backend_name が Some("Bouyomichan") を返す
+        let manager = TtsManager::new(TtsConfig {
+            backend: TtsBackendType::Bouyomichan,
+            ..TtsConfig::default()
+        });
+        assert_eq!(manager.backend_name().await, Some("Bouyomichan"));
+    }
+
+    #[tokio::test]
+    async fn backend_name_returns_voicevox_for_voicevox_config() {
+        // spec: Voicevox 設定では backend_name が Some("VOICEVOX") を返す
+        let manager = TtsManager::new(TtsConfig {
+            backend: TtsBackendType::Voicevox,
+            ..TtsConfig::default()
+        });
+        assert_eq!(manager.backend_name().await, Some("VOICEVOX"));
+    }
+
+    #[tokio::test]
+    async fn backend_name_returns_none_for_none_config() {
+        // spec: None 設定では backend_name が None を返す
+        let manager = TtsManager::new(TtsConfig {
+            backend: TtsBackendType::None,
+            ..TtsConfig::default()
+        });
+        assert_eq!(manager.backend_name().await, None);
+    }
+
+    // ========================================================================
+    // TtsManager::clear_queue（L262のmutantをkill）
+    // ========================================================================
+
+    #[tokio::test]
+    async fn clear_queue_removes_all_items() {
+        // spec: clear_queue 後は queue_size が 0 になる
+        let manager = TtsManager::new(TtsConfig {
+            enabled: true,
+            ..TtsConfig::default()
+        });
+        for i in 0..3 {
+            manager.enqueue(TtsQueueItem {
+                text: format!("アイテム{}", i),
+                priority: TtsPriority::Normal,
+                author_name: None,
+                amount: None,
+                in_stream_comment_count: None,
+            }).await;
+        }
+        assert_eq!(manager.queue_size().await, 3);
+        manager.clear_queue().await;
+        assert_eq!(manager.queue_size().await, 0);
+    }
+
+    // ========================================================================
+    // default_true が auto_close のデフォルト値として true を返す（L35のmutantをkill）
+    // ========================================================================
+
+    #[test]
+    fn bouyomichan_auto_close_defaults_to_true_via_serde() {
+        // spec: TOML に auto_close が未指定の場合、serde default により true になる
+        let config: BouyomichanConfig = toml::from_str(
+            "host=\"localhost\"\nport=50080\nvoice=0\nvolume=-1\nspeed=-1\ntone=-1"
+        ).expect("TOMLパース失敗");
+        assert!(config.auto_close);
+    }
+
+    // ========================================================================
+    // MockTtsBackend（TtsBackend トレイトのテスト用実装）
+    // ========================================================================
+
+    struct MockTtsBackend {
+        speak_calls: Arc<Mutex<Vec<String>>>,
+        connection_ok: bool,
+    }
+
+    impl MockTtsBackend {
+        fn connected() -> Self {
+            Self {
+                speak_calls: Arc::new(Mutex::new(Vec::new())),
+                connection_ok: true,
+            }
+        }
+
+        fn disconnected() -> Self {
+            Self {
+                speak_calls: Arc::new(Mutex::new(Vec::new())),
+                connection_ok: false,
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl TtsBackend for MockTtsBackend {
+        async fn test_connection(&self) -> Result<bool, backends::TtsError> {
+            Ok(self.connection_ok)
+        }
+        async fn speak(&self, text: &str) -> Result<(), backends::TtsError> {
+            self.speak_calls.lock().await.push(text.to_string());
+            Ok(())
+        }
+        fn name(&self) -> &'static str {
+            "Mock"
+        }
+    }
+
+    // ========================================================================
+    // TtsManager::test_connection（L90のmutantをkill: Ok(true)/Ok(false)）
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_connection_delegates_to_backend_connected() {
+        // spec: バックエンドが接続成功を返す → test_connection は true を返す
+        let manager = TtsManager::with_backend(
+            TtsConfig::default(),
+            Some(Box::new(MockTtsBackend::connected())),
+        );
+        let result = manager.test_connection().await.unwrap();
+        assert!(result);
+    }
+
+    #[tokio::test]
+    async fn test_connection_delegates_to_backend_disconnected() {
+        // spec: バックエンドが接続失敗を返す → test_connection は false を返す
+        let manager = TtsManager::with_backend(
+            TtsConfig::default(),
+            Some(Box::new(MockTtsBackend::disconnected())),
+        );
+        let result = manager.test_connection().await.unwrap();
+        assert!(!result);
+    }
+
+    #[tokio::test]
+    async fn test_connection_returns_false_when_no_backend() {
+        // spec: バックエンドが None → test_connection は false を返す
+        let manager = TtsManager::with_backend(TtsConfig::default(), None);
+        let result = manager.test_connection().await.unwrap();
+        assert!(!result);
+    }
+
+    // ========================================================================
+    // TtsManager::test_backend_connection（L99のmutantをkill: Ok(true)）
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_backend_connection_returns_false_for_none_type() {
+        // spec: TtsBackendType::None → test_backend_connection は false を返す
+        let manager = TtsManager::new(TtsConfig::default());
+        let result = manager.test_backend_connection(TtsBackendType::None).await.unwrap();
+        assert!(!result);
+    }
+
+    // ========================================================================
+    // TtsManager::speak_direct（L166のmutantをkill: Ok(())）
+    // ========================================================================
+
+    #[tokio::test]
+    async fn speak_direct_delegates_to_backend() {
+        // spec: speak_direct はバックエンドの speak を呼び出す
+        let mock = MockTtsBackend::connected();
+        let speak_calls = Arc::clone(&mock.speak_calls);
+        let manager = TtsManager::with_backend(
+            TtsConfig::default(),
+            Some(Box::new(mock)),
+        );
+        manager.speak_direct("テスト発話").await.unwrap();
+        let calls = speak_calls.lock().await;
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0], "テスト発話");
+    }
+
+    #[tokio::test]
+    async fn speak_direct_returns_error_when_no_backend() {
+        // spec: バックエンドが None → speak_direct はエラーを返す
+        let manager = TtsManager::with_backend(TtsConfig::default(), None);
+        let result = manager.speak_direct("テスト").await;
+        assert!(result.is_err());
+    }
+
+    // ========================================================================
+    // TtsManager::start_processing / stop_processing（L175, L255のmutantをkill）
+    // ========================================================================
+
+    #[tokio::test]
+    async fn start_processing_sets_is_processing_true() {
+        // spec: start_processing 後は is_processing が true になる
+        let manager = TtsManager::with_backend(
+            TtsConfig::default(),
+            Some(Box::new(MockTtsBackend::connected())),
+        );
+        assert!(!manager.is_processing().await);
+        manager.start_processing().await;
+        assert!(manager.is_processing().await);
+        // cleanup
+        manager.stop_processing().await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+    }
+
+    #[tokio::test]
+    async fn stop_processing_sets_is_processing_false() {
+        // spec: start_processing → stop_processing 後は is_processing が false になる
+        let manager = TtsManager::with_backend(
+            TtsConfig::default(),
+            Some(Box::new(MockTtsBackend::connected())),
+        );
+        manager.start_processing().await;
+        assert!(manager.is_processing().await);
+        manager.stop_processing().await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+        assert!(!manager.is_processing().await);
     }
 }
