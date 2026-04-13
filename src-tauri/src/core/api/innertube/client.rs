@@ -62,6 +62,7 @@ pub fn extract_continuation(data: &Value) -> Option<String> {
 /// InnerTube `next` API 経由でウォッチページの初期データを取得する。
 /// SAPISIDHASH 認証を使用し、5つの cookie で動作する。
 /// ウォッチページが chat データを返さないメンバー限定配信のフォールバック。
+#[allow(clippy::too_many_arguments)]
 pub async fn fetch_initial_data_via_api(
     http_client: &reqwest::Client,
     video_id: &str,

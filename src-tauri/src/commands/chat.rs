@@ -272,10 +272,8 @@ pub async fn connect_to_stream(
         .map_err(|e| CommandError::ConnectionFailed(format!("Failed to connect: {}", e)))?;
 
     // 初期化後にチャットモードを設定（continuation token が必要）
-    if status.is_connected {
-        if !client.set_chat_mode(mode) {
-            tracing::warn!("Failed to set chat mode to {:?}, using default", mode);
-        }
+    if status.is_connected && !client.set_chat_mode(mode) {
+        tracing::warn!("Failed to set chat mode to {:?}, using default", mode);
     }
 
     tracing::info!(

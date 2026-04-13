@@ -23,6 +23,7 @@ pub enum ClientEvent {
 /// Server to client message
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
+#[allow(clippy::large_enum_variant)]
 pub enum ServerMessage {
     ChatMessage(ChatMessage),
     Connected { client_id: ClientId },

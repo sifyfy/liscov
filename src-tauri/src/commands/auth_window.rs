@@ -98,7 +98,7 @@ pub async fn open_auth_window(app: AppHandle) -> AuthResult {
         if let tauri::WindowEvent::CloseRequested { .. } = event {
             tracing::info!("🚪 Auth window closed by user");
             let state = state_clone.clone();
-            let _ = tauri::async_runtime::block_on(async {
+            tauri::async_runtime::block_on(async {
                 let mut s = state.lock().await;
                 if !s.completed {
                     s.completed = true;

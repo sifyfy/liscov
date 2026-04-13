@@ -98,7 +98,7 @@ impl YouTubeCookies {
 }
 
 /// Connection status
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ConnectionStatus {
     pub is_connected: bool,
     pub stream_title: Option<String>,
@@ -109,19 +109,6 @@ pub struct ConnectionStatus {
     pub error: Option<String>,
 }
 
-impl Default for ConnectionStatus {
-    fn default() -> Self {
-        Self {
-            is_connected: false,
-            stream_title: None,
-            broadcaster_channel_id: None,
-            broadcaster_name: None,
-            chat_mode: ChatMode::default(),
-            is_replay: false,
-            error: None,
-        }
-    }
-}
 
 /// Extract video ID from YouTube URL
 pub fn extract_video_id(url: &str) -> Option<String> {

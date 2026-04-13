@@ -3,8 +3,9 @@
 use serde::{Deserialize, Serialize};
 
 /// Chat message type
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub enum MessageType {
+    #[default]
     Text,
     SuperChat { amount: String },
     SuperSticker { amount: String },
@@ -13,11 +14,6 @@ pub enum MessageType {
     System,
 }
 
-impl Default for MessageType {
-    fn default() -> Self {
-        Self::Text
-    }
-}
 
 /// Message run (text or emoji)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,7 +53,7 @@ pub struct MessageMetadata {
 }
 
 /// Chat message
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub id: String,
     pub timestamp: String,
@@ -74,25 +70,6 @@ pub struct ChatMessage {
     pub in_stream_comment_count: Option<u32>,
 }
 
-impl Default for ChatMessage {
-    fn default() -> Self {
-        Self {
-            id: String::new(),
-            timestamp: String::new(),
-            timestamp_usec: String::new(),
-            message_type: MessageType::default(),
-            author: String::new(),
-            author_icon_url: None,
-            channel_id: String::new(),
-            content: String::new(),
-            runs: vec![],
-            metadata: None,
-            is_member: false,
-            is_first_time_viewer: false,
-            in_stream_comment_count: None,
-        }
-    }
-}
 
 /// Chat statistics
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
