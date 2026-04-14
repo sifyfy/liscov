@@ -592,6 +592,35 @@ mod tests {
         assert_eq!(sanitize_message(""), "");
     }
 
+    #[test]
+    fn sanitize_compresses_consecutive_spaces() {
+        // spec: 連続空白を1つに圧縮
+        assert_eq!(sanitize_message("こんにちは    世界"), "こんにちは 世界");
+    }
+
+    #[test]
+    fn sanitize_compresses_mixed_whitespace() {
+        assert_eq!(
+            sanitize_message("タブ\t改行\nスペース  混在"),
+            "タブ 改行 スペース 混在"
+        );
+    }
+
+    #[test]
+    fn sanitize_url_removal_then_whitespace_compression() {
+        // URL除去後に生まれた連続空白も圧縮される
+        assert_eq!(
+            sanitize_message("前 http://example.com 後"),
+            "前 後"
+        );
+    }
+
+    #[test]
+    fn sanitize_only_url() {
+        // テキスト全体がURLの場合 → 空文字
+        assert_eq!(sanitize_message("https://example.com"), "");
+    }
+
     // ========================================================================
     // build_tts_text (04_tts.md: 完全なTTSテキスト生成)
     // ========================================================================
