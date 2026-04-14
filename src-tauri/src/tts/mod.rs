@@ -357,7 +357,6 @@ pub(crate) fn process_author_name(
 /// 仕様 (04_tts.md: テキストサニタイズ):
 /// 1. URLを除去（https?://\S+）
 /// 2. 連続空白を1つに圧縮
-#[allow(dead_code)] // Task 4 で build_tts_text に統合時に除去
 pub(crate) fn sanitize_message(text: &str) -> String {
     let url_re = Regex::new(r"https?://\S+").expect("正規表現コンパイル失敗");
     let result = url_re.replace_all(text, "");
@@ -409,7 +408,8 @@ pub(crate) fn build_tts_text(
         }
     }
 
-    parts.push(truncate_text(message, max_text_length));
+    let sanitized = sanitize_message(message);
+    parts.push(truncate_text(&sanitized, max_text_length));
 
     parts.join("、")
 }
@@ -703,6 +703,29 @@ mod tests {
             true, true, true, true, true, 200,
         );
         assert_eq!(result, "山田太郎さん、¥500の、こんにちは！");
+    }
+
+    #[test]
+    fn build_text_sanitizes_url_in_message() {
+        // spec: メッセージ内のURLが除去される
+        let result = build_tts_text(
+            None, None,
+            "見て https://example.com ね",
+            true, true, true, true, true, 200,
+        );
+        assert_eq!(result, "見て ね");
+    }
+
+    #[test]
+    fn build_text_sanitize_then_truncate() {
+        // spec: サニタイズ後のテキストに対してmax_text_lengthが適用される
+        let long_msg = format!("https://example.com/long {}", "あ".repeat(201));
+        let result = build_tts_text(
+            None, None, &long_msg,
+            true, true, true, true, true, 200,
+        );
+        let expected = format!("{}、以下省略", "あ".repeat(200));
+        assert_eq!(result, expected);
     }
 
     #[test]
