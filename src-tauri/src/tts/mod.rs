@@ -490,6 +490,27 @@ mod tests {
         );
     }
 
+    #[test]
+    fn author_name_empty_string_with_honorific() {
+        // エッジケース: 空文字に「さん」付与
+        assert_eq!(process_author_name("", true, true, true), "さん");
+    }
+
+    #[test]
+    fn author_name_only_at_sign() {
+        // エッジケース: "@"のみ → strip_at後は空文字
+        assert_eq!(process_author_name("@", true, true, true), "さん");
+    }
+
+    #[test]
+    fn author_name_at_with_handle_suffix() {
+        // エッジケース: "@user-handle" → @除去 → ハンドル除去 → "user" + さん
+        assert_eq!(
+            process_author_name("@user-handle", true, true, true),
+            "userさん"
+        );
+    }
+
     // ========================================================================
     // truncate_text (04_tts.md: テキスト切り詰め)
     // ========================================================================
