@@ -9,6 +9,7 @@ pub mod process;
 
 use std::collections::VecDeque;
 use std::sync::Arc;
+use regex::Regex;
 use tokio::sync::{mpsc, Mutex, RwLock};
 
 pub use backends::{BouyomichanBackend, TtsBackend, TtsError, VoicevoxBackend};
@@ -351,6 +352,20 @@ pub(crate) fn process_author_name(
     if honorific { format!("{}さん", s) } else { s.to_string() }
 }
 
+/// メッセージテキストをサニタイズする
+///
+/// 仕様 (04_tts.md: テキストサニタイズ):
+/// 1. URLを除去（https?://\S+）
+/// 2. 連続空白を1つに圧縮
+#[allow(dead_code)] // Task 4 で build_tts_text に統合時に除去
+pub(crate) fn sanitize_message(text: &str) -> String {
+    let url_re = Regex::new(r"https?://\S+").expect("正規表現コンパイル失敗");
+    let result = url_re.replace_all(text, "");
+    let whitespace_re = Regex::new(r"\s+").expect("正規表現コンパイル失敗");
+    let result = whitespace_re.replace_all(&result, " ");
+    result.trim().to_string()
+}
+
 /// Truncate text to max_length (by chars), appending "、以下省略" if truncated
 pub(crate) fn truncate_text(text: &str, max_length: usize) -> String {
     if text.chars().count() > max_length {
@@ -536,6 +551,45 @@ mod tests {
     #[test]
     fn truncate_empty() {
         assert_eq!(truncate_text("", 200), "");
+    }
+
+    // ========================================================================
+    // sanitize_message (04_tts.md: テキストサニタイズ)
+    // ========================================================================
+
+    #[test]
+    fn sanitize_removes_http_url() {
+        // spec: URLを除去（https?://\S+）
+        assert_eq!(
+            sanitize_message("チェックして http://example.com ください"),
+            "チェックして ください"
+        );
+    }
+
+    #[test]
+    fn sanitize_removes_https_url() {
+        assert_eq!(
+            sanitize_message("見て https://example.com/path?q=1 ね"),
+            "見て ね"
+        );
+    }
+
+    #[test]
+    fn sanitize_removes_multiple_urls() {
+        assert_eq!(
+            sanitize_message("http://a.com と https://b.com です"),
+            "と です"
+        );
+    }
+
+    #[test]
+    fn sanitize_no_url_unchanged() {
+        assert_eq!(sanitize_message("URLなしテキスト"), "URLなしテキスト");
+    }
+
+    #[test]
+    fn sanitize_empty_string() {
+        assert_eq!(sanitize_message(""), "");
     }
 
     // ========================================================================
