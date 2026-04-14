@@ -60,3 +60,41 @@ pub fn create_backend(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tts::config::{BouyomichanConfig, VoicevoxConfig};
+
+    #[test]
+    fn create_backend_none_returns_none() {
+        let result = create_backend(
+            &TtsBackendType::None,
+            &BouyomichanConfig::default(),
+            &VoicevoxConfig::default(),
+        );
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn create_backend_bouyomichan_returns_some() {
+        let result = create_backend(
+            &TtsBackendType::Bouyomichan,
+            &BouyomichanConfig::default(),
+            &VoicevoxConfig::default(),
+        );
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().name(), "Bouyomichan");
+    }
+
+    #[test]
+    fn create_backend_voicevox_returns_some() {
+        let result = create_backend(
+            &TtsBackendType::Voicevox,
+            &BouyomichanConfig::default(),
+            &VoicevoxConfig::default(),
+        );
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().name(), "VOICEVOX");
+    }
+}
