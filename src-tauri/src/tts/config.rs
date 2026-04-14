@@ -192,3 +192,88 @@ impl TtsConfig {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serial_test::serial;
+
+    struct ConfigTestGuard;
+
+    impl ConfigTestGuard {
+        fn new() -> Self {
+            // SAFETY: テスト環境でのみ実行。#[serial] で直列化済み
+            unsafe { std::env::set_var("LISCOV_APP_NAME", "liscov-test-config") };
+            // テスト前にディレクトリをクリーン
+            if let Ok(path) = TtsConfig::config_path() {
+                if let Some(parent) = path.parent() {
+                    let _ = fs::remove_dir_all(parent);
+                }
+            }
+            Self
+        }
+    }
+
+    impl Drop for ConfigTestGuard {
+        fn drop(&mut self) {
+            if let Ok(path) = TtsConfig::config_path() {
+                if let Some(parent) = path.parent() {
+                    let _ = fs::remove_dir_all(parent);
+                }
+            }
+            // SAFETY: テスト環境でのみ実行
+            unsafe { std::env::remove_var("LISCOV_APP_NAME") };
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn load_returns_default_when_file_missing() {
+        let _guard = ConfigTestGuard::new();
+        let config = TtsConfig::load();
+        assert_eq!(config.max_text_length, 200);
+        assert_eq!(config.queue_size_limit, 50);
+        assert!(!config.enabled);
+    }
+
+    #[test]
+    #[serial]
+    fn save_then_load_roundtrip() {
+        let _guard = ConfigTestGuard::new();
+        let config = TtsConfig {
+            enabled: true,
+            backend: TtsBackendType::Voicevox,
+            max_text_length: 100,
+            queue_size_limit: 25,
+            first_comment_prefix_enabled: true,
+            first_comment_prefix: "初コメ！".to_string(),
+            first_comment_only: true,
+            ..TtsConfig::default()
+        };
+        config.save().expect("save failed");
+
+        let loaded = TtsConfig::load();
+        assert!(loaded.enabled);
+        assert_eq!(loaded.backend, TtsBackendType::Voicevox);
+        assert_eq!(loaded.max_text_length, 100);
+        assert_eq!(loaded.queue_size_limit, 25);
+        assert!(loaded.first_comment_prefix_enabled);
+        assert_eq!(loaded.first_comment_prefix, "初コメ！");
+        assert!(loaded.first_comment_only);
+    }
+
+    #[test]
+    #[serial]
+    fn load_returns_default_for_corrupted_file() {
+        let _guard = ConfigTestGuard::new();
+        // 壊れたTOMLを書き込む
+        let path = TtsConfig::config_path().expect("config_path failed");
+        fs::create_dir_all(path.parent().unwrap()).expect("mkdir failed");
+        fs::write(&path, "this is not valid toml [[[").expect("write failed");
+
+        let config = TtsConfig::load();
+        // デフォルト値にフォールバック
+        assert_eq!(config.max_text_length, 200);
+        assert!(!config.enabled);
+    }
+}
