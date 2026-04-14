@@ -969,6 +969,23 @@ mod tests {
         assert_eq!(manager.queue_size().await, 1);
     }
 
+    #[tokio::test]
+    async fn enqueue_does_nothing_when_disabled() {
+        // spec: enabled=false の場合、メッセージはキューに入らない
+        let manager = TtsManager::new(TtsConfig {
+            enabled: false,
+            ..TtsConfig::default()
+        });
+        manager.enqueue(TtsQueueItem {
+            text: "テスト".to_string(),
+            priority: TtsPriority::Normal,
+            author_name: None,
+            amount: None,
+            in_stream_comment_count: None,
+        }).await;
+        assert_eq!(manager.queue_size().await, 0);
+    }
+
     // ========================================================================
     // TtsManager::get_config（L85のmutantをkill）
     // ========================================================================
@@ -1144,6 +1161,35 @@ mod tests {
         let queue = manager.queue.lock().await;
         assert_eq!(queue[0].text, "a");
         assert_eq!(queue[1].text, "b");
+    }
+
+    #[tokio::test]
+    async fn enqueue_membership_between_normal_and_superchat() {
+        // spec: Normal < Membership < SuperChat の3段階優先度
+        let manager = TtsManager::new(TtsConfig {
+            enabled: true,
+            ..TtsConfig::default()
+        });
+        manager.enqueue(TtsQueueItem {
+            text: "ノーマル".to_string(),
+            priority: TtsPriority::Normal,
+            author_name: None, amount: None, in_stream_comment_count: None,
+        }).await;
+        manager.enqueue(TtsQueueItem {
+            text: "メンバーシップ".to_string(),
+            priority: TtsPriority::Membership,
+            author_name: None, amount: None, in_stream_comment_count: None,
+        }).await;
+        manager.enqueue(TtsQueueItem {
+            text: "スーパーチャット".to_string(),
+            priority: TtsPriority::SuperChat,
+            author_name: None, amount: None, in_stream_comment_count: None,
+        }).await;
+        let queue = manager.queue.lock().await;
+        // SuperChat → Membership → Normal の順序で並ぶ
+        assert_eq!(queue[0].priority, TtsPriority::SuperChat);
+        assert_eq!(queue[1].priority, TtsPriority::Membership);
+        assert_eq!(queue[2].priority, TtsPriority::Normal);
     }
 
     // ========================================================================
