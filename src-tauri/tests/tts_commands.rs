@@ -99,6 +99,7 @@ fn build_test_app(state: AppState) -> tauri::App<tauri::test::MockRuntime> {
             app_lib::commands::tts::tts_clear_queue,
             app_lib::commands::tts::tts_get_status,
             app_lib::commands::tts::tts_discover_exe,
+            app_lib::commands::tts::tts_get_launch_status,
             // tts_launch_backend, tts_kill_backend, tts_select_exe は
             // AppHandle を要求するため MockRuntime では使用不可
         ])
@@ -418,6 +419,64 @@ fn tts_discover_exe_returns_none_for_invalid_backend() {
     assert!(response.is_ok());
     let result: Option<String> = response.unwrap().deserialize().unwrap();
     assert_eq!(result, None, "invalid backend should return None");
+}
+
+// ============================================================================
+// tts_get_launch_status
+// ============================================================================
+
+#[test]
+#[serial]
+fn tts_get_launch_status_returns_both_false_initially() {
+    // 仕様: 起動直後は両バックエンドとも launched=false
+    let _guard = AppNameGuard::new();
+    let app = build_test_app(app_state_tts_enabled());
+    let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+
+    let response = get_ipc_response(
+        &webview,
+        invoke_no_args("tts_get_launch_status"),
+    );
+    assert!(response.is_ok());
+    let status: app_lib::commands::tts::TtsLaunchStatus =
+        response.unwrap().deserialize().unwrap();
+    assert!(!status.bouyomichan_launched);
+    assert!(!status.voicevox_launched);
+}
+
+// ============================================================================
+// tts_speak with priority
+// ============================================================================
+
+#[test]
+#[serial]
+fn tts_speak_with_superchat_priority_enqueues() {
+    // 仕様: priority="superchat" で tts_speak を呼ぶとキューに追加される
+    let _guard = AppNameGuard::new();
+    let app = build_test_app(app_state_tts_enabled());
+    let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+
+    let response = get_ipc_response(
+        &webview,
+        invoke_with_args("tts_speak", serde_json::json!({
+            "text": "スーパーチャット",
+            "priority": "superchat",
+            "authorName": null,
+            "amount": null
+        })),
+    );
+    assert!(response.is_ok());
+
+    // キューサイズが1であることを確認
+    let status: TtsStatus = get_ipc_response(&webview, invoke_no_args("tts_get_status"))
+        .unwrap()
+        .deserialize()
+        .unwrap();
+    assert_eq!(status.queue_size, 1);
 }
 
 // tts_launch_backend / tts_kill_backend / tts_select_exe は
