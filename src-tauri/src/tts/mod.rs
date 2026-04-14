@@ -850,6 +850,12 @@ mod tests {
     }
 
     #[test]
+    fn first_comment_only_count_zero_does_not_skip() {
+        // エッジケース: count=0 は > 1 ではないのでスキップしない
+        assert!(!should_skip_tts(true, Some(0)));
+    }
+
+    #[test]
     fn prefix_on_first_comment() {
         // AC-1: プレフィックスON + 初回 → プレフィックス付加
         let result = build_first_comment_prefix(true, "", Some(1));
@@ -874,6 +880,20 @@ mod tests {
     fn prefix_custom_text_on_first() {
         let result = build_first_comment_prefix(true, "初コメ！", Some(1));
         assert_eq!(result, Some("初コメ！".to_string()));
+    }
+
+    #[test]
+    fn prefix_none_count_returns_none() {
+        // エッジケース: count=None → プレフィックスなし
+        let result = build_first_comment_prefix(true, "", None);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn prefix_count_zero_returns_none() {
+        // エッジケース: count=0 → プレフィックスなし（1回目ではない）
+        let result = build_first_comment_prefix(true, "", Some(0));
+        assert_eq!(result, None);
     }
 
     #[test]
