@@ -8,7 +8,7 @@ pub mod config;
 pub mod process;
 
 use std::collections::VecDeque;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use regex::Regex;
 use tokio::sync::{mpsc, Mutex, RwLock};
 
@@ -358,10 +358,12 @@ pub(crate) fn process_author_name(
 /// 1. URLを除去（https?://\S+）
 /// 2. 連続空白を1つに圧縮
 pub(crate) fn sanitize_message(text: &str) -> String {
-    let url_re = Regex::new(r"https?://\S+").expect("正規表現コンパイル失敗");
-    let result = url_re.replace_all(text, "");
-    let whitespace_re = Regex::new(r"\s+").expect("正規表現コンパイル失敗");
-    let result = whitespace_re.replace_all(&result, " ");
+    static URL_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"https?://\S+").expect("正規表現コンパイル失敗"));
+    static WHITESPACE_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\s+").expect("正規表現コンパイル失敗"));
+    let result = URL_RE.replace_all(text, "");
+    let result = WHITESPACE_RE.replace_all(&result, " ");
     result.trim().to_string()
 }
 
