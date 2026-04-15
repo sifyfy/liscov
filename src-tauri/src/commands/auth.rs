@@ -858,6 +858,7 @@ pub async fn auth_open_window(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     #[test]
     fn parse_raw_cookies_preserves_raw_string() {
@@ -1143,6 +1144,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn load_cookies_with_storage_secure_mode_no_entry() {
         // Secureモード + ストレージにデータなし + ファイルもなし → Err
         let storage = InMemoryStorage::empty();
@@ -1154,6 +1156,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn load_cookies_with_storage_fallback_mode_ignores_secure_storage() {
         // Fallbackモード → セキュアストレージにデータがあっても使用せずファイルパスに委譲する
         // ここではFallbackモード時にsecure_storage.load()が呼ばれない（= ファイルパス経由）ことを
@@ -1188,10 +1191,21 @@ mod tests {
         assert_eq!(stored.unwrap().sapisid, cookies.sapisid);
     }
 
+    /// Fallbackモードテストが実ファイルシステムに書き込むため、
+    /// panic時にもクリーンアップを保証するRAIIガード
+    struct CredentialsFileGuard;
+    impl Drop for CredentialsFileGuard {
+        fn drop(&mut self) {
+            let _ = delete_credentials_file();
+        }
+    }
+
     #[test]
+    #[serial]
     fn save_cookies_with_storage_fallback_mode() {
         // Fallbackモード → ファイルパスに委譲
         // ファイルI/Oが発生するため、ストレージには委譲されないことを確認
+        let _guard = CredentialsFileGuard;
         let cookies = sample_cookies();
         let storage = InMemoryStorage::empty();
         let cache = RwLock::new(None);
@@ -1209,6 +1223,7 @@ mod tests {
     // =========================================================================
 
     #[test]
+    #[serial]
     fn delete_credentials_with_storage_secure_mode() {
         // Secureモード → InMemoryStorage から削除確認
         let cookies = sample_cookies();
@@ -1226,6 +1241,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn delete_credentials_with_storage_clears_cache() {
         // 削除時にインメモリキャッシュもクリアされることを確認
         let cookies = sample_cookies();

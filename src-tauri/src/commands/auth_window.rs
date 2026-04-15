@@ -257,6 +257,7 @@ fn extract_youtube_cookies_from_map(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     #[test]
     fn test_parse_cookie_string_basic() {
@@ -364,9 +365,10 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_get_auth_url_default() {
         // Clear any existing env var
-        // SAFETY: This test runs with --test-threads=1 to avoid race conditions
+        // SAFETY: テスト環境でのみ実行。#[serial] で直列化済み
         unsafe { std::env::remove_var("LISCOV_AUTH_URL") };
 
         let url = get_auth_url();
@@ -374,8 +376,9 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_get_auth_url_with_env_var() {
-        // SAFETY: This test runs with --test-threads=1 to avoid race conditions
+        // SAFETY: テスト環境でのみ実行。#[serial] で直列化済み
         unsafe { std::env::set_var("LISCOV_AUTH_URL", "http://localhost:3456/") };
 
         let url = get_auth_url();
@@ -390,6 +393,7 @@ mod tests {
     // =========================================================================
 
     #[test]
+    #[serial]
     fn get_cookie_urls_returns_youtube_only_by_default() {
         // G3: デフォルトでYouTube URLのみ返す。Google URLを含まない。
         unsafe { std::env::remove_var("LISCOV_YOUTUBE_BASE_URL") };
@@ -401,6 +405,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn get_cookie_urls_returns_env_url_when_set() {
         // G3: 環境変数でURL切替可能（E2Eテスト用）
         unsafe { std::env::set_var("LISCOV_YOUTUBE_BASE_URL", "http://localhost:3456") };
