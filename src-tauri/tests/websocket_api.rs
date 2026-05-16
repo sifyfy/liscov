@@ -574,11 +574,9 @@ async fn test_chatmessage_json_format_matches_spec() {
         author_icon_url: Some("https://example.com/icon.png".to_string()),
         channel_id: "UCtest123".to_string(),
         content: "Hello World".to_string(),
-        runs: vec![
-            app_lib::core::models::MessageRun::Text {
-                content: "Hello World".to_string(),
-            },
-        ],
+        runs: vec![app_lib::core::models::MessageRun::Text {
+            content: "Hello World".to_string(),
+        }],
         metadata: Some(app_lib::core::models::MessageMetadata {
             amount: None,
             badges: vec!["Member".to_string()],
@@ -604,10 +602,16 @@ async fn test_chatmessage_json_format_matches_spec() {
     let json = parse_server_message(&msg).expect("Failed to parse");
 
     // Print actual JSON for debugging
-    println!("Actual JSON: {}", serde_json::to_string_pretty(&json).unwrap());
+    println!(
+        "Actual JSON: {}",
+        serde_json::to_string_pretty(&json).unwrap()
+    );
 
     // Verify top-level structure
-    assert_eq!(json["type"], "ChatMessage", "Top-level type should be 'ChatMessage'");
+    assert_eq!(
+        json["type"], "ChatMessage",
+        "Top-level type should be 'ChatMessage'"
+    );
     assert!(json["data"].is_object(), "Should have 'data' field");
 
     let data = &json["data"];
@@ -669,7 +673,10 @@ async fn test_connected_message_json_format_matches_spec() {
 
     let json = parse_server_message(&msg).expect("Failed to parse");
 
-    println!("Connected message: {}", serde_json::to_string_pretty(&json).unwrap());
+    println!(
+        "Connected message: {}",
+        serde_json::to_string_pretty(&json).unwrap()
+    );
 
     // Verify exact format matches spec
     assert_eq!(json["type"], "Connected");
@@ -702,7 +709,10 @@ async fn test_serverinfo_message_json_format_matches_spec() {
 
     let json = parse_server_message(&msg).expect("Failed to parse");
 
-    println!("ServerInfo message: {}", serde_json::to_string_pretty(&json).unwrap());
+    println!(
+        "ServerInfo message: {}",
+        serde_json::to_string_pretty(&json).unwrap()
+    );
 
     // Verify exact format matches spec
     assert_eq!(json["type"], "ServerInfo");
@@ -791,7 +801,7 @@ async fn test_broadcast_message_to_multiple_clients() {
     for (i, read) in [&mut r1, &mut r2, &mut r3].iter_mut().enumerate() {
         let msg = timeout(Duration::from_secs(5), read.next())
             .await
-            .expect(&format!("Timeout for client {}", i + 1))
+            .unwrap_or_else(|_| panic!("Timeout for client {}", i + 1))
             .expect("Stream ended")
             .expect("WebSocket error");
 
@@ -880,7 +890,10 @@ async fn test_new_client_does_not_receive_past_messages() {
         .expect("WebSocket error");
 
     let json = parse_server_message(&msg).unwrap();
-    assert_eq!(json["type"], "Connected", "New client should only receive Connected, not past messages");
+    assert_eq!(
+        json["type"], "Connected",
+        "New client should only receive Connected, not past messages"
+    );
 
     // Now broadcast a new message
     let msg2 = create_test_message("new-msg", "NewUser", "New message");

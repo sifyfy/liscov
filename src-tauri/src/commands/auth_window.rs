@@ -24,7 +24,11 @@ pub fn get_auth_url() -> String {
 fn get_cookie_urls() -> Vec<String> {
     match std::env::var("LISCOV_YOUTUBE_BASE_URL") {
         Ok(base) => {
-            let url = if base.ends_with('/') { base } else { format!("{}/", base) };
+            let url = if base.ends_with('/') {
+                base
+            } else {
+                format!("{}/", base)
+            };
             vec![url]
         }
         Err(_) => vec![
@@ -58,7 +62,6 @@ const AUTH_TIMEOUT_SECS: u64 = 300; // 5分
 
 /// Cookieポーリング間隔（ミリ秒）
 const POLL_INTERVAL_MS: u64 = 1000; // 1秒
-
 
 /// 認証ウィンドウの状態
 struct AuthState {
@@ -98,7 +101,7 @@ pub async fn open_auth_window(app: AppHandle) -> AuthResult {
         if let tauri::WindowEvent::CloseRequested { .. } = event {
             tracing::info!("🚪 Auth window closed by user");
             let state = state_clone.clone();
-            let _ = tauri::async_runtime::block_on(async {
+            tauri::async_runtime::block_on(async {
                 let mut s = state.lock().await;
                 if !s.completed {
                     s.completed = true;
@@ -177,10 +180,7 @@ pub async fn open_auth_window(app: AppHandle) -> AuthResult {
                     }
                 }
 
-                tracing::debug!(
-                    "🍪 Total cookies for extraction: {}",
-                    all_cookies.len()
-                );
+                tracing::debug!("🍪 Total cookies for extraction: {}", all_cookies.len());
 
                 if !all_cookies.is_empty() {
                     let cookie_names: Vec<&str> = all_cookies.iter().map(|c| c.name()).collect();
@@ -191,7 +191,8 @@ pub async fn open_auth_window(app: AppHandle) -> AuthResult {
 
                         let mut cookies_map = std::collections::HashMap::new();
                         for cookie in all_cookies {
-                            cookies_map.insert(cookie.name().to_string(), cookie.value().to_string());
+                            cookies_map
+                                .insert(cookie.name().to_string(), cookie.value().to_string());
                         }
 
                         if let Some(yt_cookies) = extract_youtube_cookies_from_map(&cookies_map) {
@@ -438,7 +439,9 @@ mod tests {
             assert!(
                 cookie_string.contains(&format!("{}={}", name, value)),
                 "Cookie {}={} not found in output: {}",
-                name, value, cookie_string
+                name,
+                value,
+                cookie_string
             );
         }
     }
@@ -463,9 +466,11 @@ mod tests {
         let raw = result.raw_cookie_string.unwrap();
         let output_count = raw.split("; ").count();
 
-        assert_eq!(input_count, output_count,
+        assert_eq!(
+            input_count, output_count,
             "Cookie count mismatch: input={}, output={}. raw={}",
-            input_count, output_count, raw);
+            input_count, output_count, raw
+        );
     }
 
     // =========================================================================
@@ -484,14 +489,23 @@ mod tests {
         // Base64値（末尾に=）
         cookies.insert("__Secure-1PSID".to_string(), "aGVsbG8gd29ybGQ=".to_string());
         // ドットやスラッシュを含む値
-        cookies.insert("VISITOR_INFO1_LIVE".to_string(), "abc.def/ghi_jkl-mno".to_string());
+        cookies.insert(
+            "VISITOR_INFO1_LIVE".to_string(),
+            "abc.def/ghi_jkl-mno".to_string(),
+        );
 
         let result = extract_youtube_cookies_from_map(&cookies).unwrap();
         let raw = result.raw_cookie_string.unwrap();
 
-        assert!(raw.contains("__Secure-1PSID=aGVsbG8gd29ybGQ="),
-            "Base64 value not preserved: {}", raw);
-        assert!(raw.contains("VISITOR_INFO1_LIVE=abc.def/ghi_jkl-mno"),
-            "Special chars not preserved: {}", raw);
+        assert!(
+            raw.contains("__Secure-1PSID=aGVsbG8gd29ybGQ="),
+            "Base64 value not preserved: {}",
+            raw
+        );
+        assert!(
+            raw.contains("VISITOR_INFO1_LIVE=abc.def/ghi_jkl-mno"),
+            "Special chars not preserved: {}",
+            raw
+        );
     }
 }

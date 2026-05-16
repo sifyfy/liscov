@@ -5,11 +5,11 @@
 
 mod common;
 
-use app_lib::commands::config::{ConfigState, Config, StorageMode, Theme};
+use app_lib::commands::config::{Config, ConfigState, StorageMode, Theme};
 use common::{invoke_no_args, invoke_with_args};
 use serial_test::serial;
 use std::fs;
-use tauri::test::{mock_builder, mock_context, noop_assets, get_ipc_response};
+use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets};
 
 // ============================================================================
 // テストヘルパー
@@ -67,12 +67,13 @@ fn config_load_returns_defaults_when_no_file() {
         .build()
         .unwrap();
 
-    let response = get_ipc_response(
-        &webview,
-        invoke_no_args("config_load"),
-    );
+    let response = get_ipc_response(&webview, invoke_no_args("config_load"));
 
-    assert!(response.is_ok(), "config_load should succeed: {:?}", response.err());
+    assert!(
+        response.is_ok(),
+        "config_load should succeed: {:?}",
+        response.err()
+    );
 
     let config: Config = response
         .unwrap()
@@ -117,10 +118,7 @@ theme = "light"
         .build()
         .unwrap();
 
-    let response = get_ipc_response(
-        &webview,
-        invoke_no_args("config_load"),
-    );
+    let response = get_ipc_response(&webview, invoke_no_args("config_load"));
 
     assert!(response.is_ok());
 
@@ -164,12 +162,13 @@ fn config_save_updates_state_and_writes_file() {
         }
     });
 
-    let response = get_ipc_response(
-        &webview,
-        invoke_with_args("config_save", config_to_save),
-    );
+    let response = get_ipc_response(&webview, invoke_with_args("config_save", config_to_save));
 
-    assert!(response.is_ok(), "config_save should succeed: {:?}", response.err());
+    assert!(
+        response.is_ok(),
+        "config_save should succeed: {:?}",
+        response.err()
+    );
 
     // ファイルが書き込まれたことを確認
     let config_path = app_lib::paths::config_path().expect("config_path should succeed");
@@ -177,7 +176,10 @@ fn config_save_updates_state_and_writes_file() {
 
     // ファイルの内容が正しいことを確認
     let content = fs::read_to_string(&config_path).expect("failed to read config file");
-    assert!(content.contains("fallback"), "file should contain storage mode");
+    assert!(
+        content.contains("fallback"),
+        "file should contain storage mode"
+    );
     assert!(content.contains("20"), "file should contain font size");
     assert!(content.contains("light"), "file should contain theme");
     // クリーンアップは AppNameGuard::Drop で行う
@@ -200,18 +202,19 @@ fn config_get_value_returns_default_storage_mode() {
 
     let response = get_ipc_response(
         &webview,
-        invoke_with_args("config_get_value", serde_json::json!({
-            "section": "storage",
-            "key": "mode"
-        })),
+        invoke_with_args(
+            "config_get_value",
+            serde_json::json!({
+                "section": "storage",
+                "key": "mode"
+            }),
+        ),
     );
 
     assert!(response.is_ok(), "config_get_value should succeed");
 
-    let value: Option<serde_json::Value> = response
-        .unwrap()
-        .deserialize()
-        .expect("deserialize failed");
+    let value: Option<serde_json::Value> =
+        response.unwrap().deserialize().expect("deserialize failed");
 
     assert_eq!(value, Some(serde_json::json!("secure")));
 }
@@ -229,10 +232,13 @@ fn config_get_value_returns_default_font_size() {
 
     let response = get_ipc_response(
         &webview,
-        invoke_with_args("config_get_value", serde_json::json!({
-            "section": "chat_display",
-            "key": "message_font_size"
-        })),
+        invoke_with_args(
+            "config_get_value",
+            serde_json::json!({
+                "section": "chat_display",
+                "key": "message_font_size"
+            }),
+        ),
     );
 
     assert!(response.is_ok());
@@ -253,10 +259,13 @@ fn config_get_value_unknown_section_returns_none() {
 
     let response = get_ipc_response(
         &webview,
-        invoke_with_args("config_get_value", serde_json::json!({
-            "section": "nonexistent",
-            "key": "key"
-        })),
+        invoke_with_args(
+            "config_get_value",
+            serde_json::json!({
+                "section": "nonexistent",
+                "key": "key"
+            }),
+        ),
     );
 
     assert!(response.is_ok());
@@ -282,22 +291,32 @@ fn config_set_value_updates_state_and_saves() {
     // テーマを light に変更
     let set_response = get_ipc_response(
         &webview,
-        invoke_with_args("config_set_value", serde_json::json!({
-            "section": "ui",
-            "key": "theme",
-            "value": "light"
-        })),
+        invoke_with_args(
+            "config_set_value",
+            serde_json::json!({
+                "section": "ui",
+                "key": "theme",
+                "value": "light"
+            }),
+        ),
     );
 
-    assert!(set_response.is_ok(), "config_set_value should succeed: {:?}", set_response.err());
+    assert!(
+        set_response.is_ok(),
+        "config_set_value should succeed: {:?}",
+        set_response.err()
+    );
 
     // State が更新されたことを config_get_value で確認
     let get_response = get_ipc_response(
         &webview,
-        invoke_with_args("config_get_value", serde_json::json!({
-            "section": "ui",
-            "key": "theme"
-        })),
+        invoke_with_args(
+            "config_get_value",
+            serde_json::json!({
+                "section": "ui",
+                "key": "theme"
+            }),
+        ),
     );
 
     assert!(get_response.is_ok());
@@ -320,15 +339,20 @@ fn config_set_value_font_size_valid_boundary() {
     for size in [10u32, 24] {
         let response = get_ipc_response(
             &webview,
-            invoke_with_args("config_set_value", serde_json::json!({
-                "section": "chat_display",
-                "key": "message_font_size",
-                "value": size
-            })),
+            invoke_with_args(
+                "config_set_value",
+                serde_json::json!({
+                    "section": "chat_display",
+                    "key": "message_font_size",
+                    "value": size
+                }),
+            ),
         );
         assert!(
             response.is_ok(),
-            "font size {} should be valid, got: {:?}", size, response.err()
+            "font size {} should be valid, got: {:?}",
+            size,
+            response.err()
         );
     }
     // クリーンアップは AppNameGuard::Drop で行う
@@ -348,16 +372,16 @@ fn config_set_value_font_size_out_of_range_returns_error() {
     for size in [9u32, 25] {
         let response = get_ipc_response(
             &webview,
-            invoke_with_args("config_set_value", serde_json::json!({
-                "section": "chat_display",
-                "key": "message_font_size",
-                "value": size
-            })),
+            invoke_with_args(
+                "config_set_value",
+                serde_json::json!({
+                    "section": "chat_display",
+                    "key": "message_font_size",
+                    "value": size
+                }),
+            ),
         );
-        assert!(
-            response.is_err(),
-            "font size {} should be rejected", size
-        );
+        assert!(response.is_err(), "font size {} should be rejected", size);
     }
 }
 
@@ -374,11 +398,14 @@ fn config_set_value_unknown_section_returns_error() {
 
     let response = get_ipc_response(
         &webview,
-        invoke_with_args("config_set_value", serde_json::json!({
-            "section": "nonexistent",
-            "key": "key",
-            "value": "value"
-        })),
+        invoke_with_args(
+            "config_set_value",
+            serde_json::json!({
+                "section": "nonexistent",
+                "key": "key",
+                "value": "value"
+            }),
+        ),
     );
 
     assert!(response.is_err(), "unknown section should return error");

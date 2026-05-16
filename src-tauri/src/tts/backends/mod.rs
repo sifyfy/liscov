@@ -39,9 +39,9 @@ impl TtsBackendEnum {
     ) -> Option<Self> {
         match backend_type {
             TtsBackendType::None => None,
-            TtsBackendType::Bouyomichan => {
-                Some(Self::Bouyomichan(BouyomichanBackend::new(bouyomichan.clone())))
-            }
+            TtsBackendType::Bouyomichan => Some(Self::Bouyomichan(BouyomichanBackend::new(
+                bouyomichan.clone(),
+            ))),
             TtsBackendType::Voicevox => {
                 Some(Self::Voicevox(VoicevoxBackend::new(voicevox.clone())))
             }

@@ -9,7 +9,7 @@ pub mod process;
 
 use std::collections::VecDeque;
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex, RwLock};
+use tokio::sync::{Mutex, RwLock, mpsc};
 
 pub use backends::{BouyomichanBackend, TtsBackendEnum, TtsError, VoicevoxBackend};
 pub use config::{BouyomichanConfig, TtsBackendType, TtsConfig, VoicevoxConfig};
@@ -47,11 +47,8 @@ pub struct TtsManager {
 impl TtsManager {
     /// Create a new TTS manager
     pub fn new(config: TtsConfig) -> Self {
-        let backend = TtsBackendEnum::from_config(
-            &config.backend,
-            &config.bouyomichan,
-            &config.voicevox,
-        );
+        let backend =
+            TtsBackendEnum::from_config(&config.backend, &config.bouyomichan, &config.voicevox);
 
         Self {
             config: Arc::new(RwLock::new(config)),
@@ -69,11 +66,8 @@ impl TtsManager {
             log::error!("Failed to save TTS config: {}", e);
         }
 
-        let backend = TtsBackendEnum::from_config(
-            &config.backend,
-            &config.bouyomichan,
-            &config.voicevox,
-        );
+        let backend =
+            TtsBackendEnum::from_config(&config.backend, &config.bouyomichan, &config.voicevox);
         *self.config.write().await = config;
         *self.backend.write().await = backend;
     }
@@ -93,13 +87,13 @@ impl TtsManager {
     }
 
     /// Test connection to a specific backend type
-    pub async fn test_backend_connection(&self, backend_type: TtsBackendType) -> Result<bool, TtsError> {
+    pub async fn test_backend_connection(
+        &self,
+        backend_type: TtsBackendType,
+    ) -> Result<bool, TtsError> {
         let config = self.config.read().await;
-        let test_backend = TtsBackendEnum::from_config(
-            &backend_type,
-            &config.bouyomichan,
-            &config.voicevox,
-        );
+        let test_backend =
+            TtsBackendEnum::from_config(&backend_type, &config.bouyomichan, &config.voicevox);
 
         match test_backend {
             Some(b) => b.test_connection().await,
@@ -391,10 +385,7 @@ mod tests {
 
     #[test]
     fn author_name_strip_at_only() {
-        assert_eq!(
-            process_author_name("@田中", true, false, false),
-            "田中"
-        );
+        assert_eq!(process_author_name("@田中", true, false, false), "田中");
     }
 
     #[test]
@@ -417,10 +408,7 @@ mod tests {
 
     #[test]
     fn author_name_honorific_false() {
-        assert_eq!(
-            process_author_name("田中-abc", true, true, false),
-            "田中"
-        );
+        assert_eq!(process_author_name("田中-abc", true, true, false), "田中");
     }
 
     #[test]
@@ -478,24 +466,19 @@ mod tests {
             Some("田中"),
             Some("¥500"),
             "こんにちは",
-            true,  // read_author_name
-            true,  // strip_at
-            true,  // strip_handle
-            true,  // add_honorific
-            true,  // read_superchat_amount
-            200,   // max_text_length
+            true, // read_author_name
+            true, // strip_at
+            true, // strip_handle
+            true, // add_honorific
+            true, // read_superchat_amount
+            200,  // max_text_length
         );
         assert_eq!(result, "田中さん、¥500の、こんにちは");
     }
 
     #[test]
     fn build_text_no_author() {
-        let result = build_tts_text(
-            None,
-            None,
-            "こんにちは",
-            true, true, true, true, true, 200,
-        );
+        let result = build_tts_text(None, None, "こんにちは", true, true, true, true, true, 200);
         assert_eq!(result, "こんにちは");
     }
 
@@ -506,7 +489,11 @@ mod tests {
             None,
             "こんにちは",
             false, // read_author_name disabled
-            true, true, true, true, 200,
+            true,
+            true,
+            true,
+            true,
+            200,
         );
         assert_eq!(result, "こんにちは");
     }
@@ -517,7 +504,10 @@ mod tests {
             Some("田中"),
             Some("¥500"),
             "テスト",
-            true, true, true, true,
+            true,
+            true,
+            true,
+            true,
             false, // read_superchat_amount disabled
             200,
         );
@@ -530,7 +520,12 @@ mod tests {
             Some("@user123"),
             None,
             "hello",
-            true, true, true, true, true, 200,
+            true,
+            true,
+            true,
+            true,
+            true,
+            200,
         );
         assert_eq!(result, "user123さん、hello");
     }
@@ -546,7 +541,12 @@ mod tests {
             Some("@山田太郎-xyz"),
             Some("¥500"),
             "こんにちは！",
-            true, true, true, true, true, 200,
+            true,
+            true,
+            true,
+            true,
+            true,
+            200,
         );
         assert_eq!(result, "山田太郎さん、¥500の、こんにちは！");
     }
@@ -558,7 +558,12 @@ mod tests {
             Some("@田中-abc"),
             None,
             "テスト",
-            true, true, true, true, false, 200,
+            true,
+            true,
+            true,
+            true,
+            false,
+            200,
         );
         assert_eq!(result, "田中さん、テスト");
     }

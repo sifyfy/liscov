@@ -627,9 +627,18 @@ mod tests {
     #[test]
     fn test_extract_milestone_months_from_badge_english() {
         // 英語フォーマット: "Member (6 months)"
-        assert_eq!(extract_milestone_months_from_badge("Member (6 months)"), Some(6));
-        assert_eq!(extract_milestone_months_from_badge("Member (1 month)"), Some(1));
-        assert_eq!(extract_milestone_months_from_badge("Member (12 months)"), Some(12));
+        assert_eq!(
+            extract_milestone_months_from_badge("Member (6 months)"),
+            Some(6)
+        );
+        assert_eq!(
+            extract_milestone_months_from_badge("Member (1 month)"),
+            Some(1)
+        );
+        assert_eq!(
+            extract_milestone_months_from_badge("Member (12 months)"),
+            Some(12)
+        );
     }
 
     #[test]
@@ -791,10 +800,7 @@ mod tests {
 
         match msg.message_type {
             MessageType::Membership { milestone_months } => {
-                assert_eq!(
-                    milestone_months, None,
-                    "新規メンバーは milestone なし"
-                );
+                assert_eq!(milestone_months, None, "新規メンバーは milestone なし");
             }
             _ => panic!("Membership メッセージタイプを期待"),
         }
@@ -844,9 +850,14 @@ mod tests {
         }
 
         let metadata = msg.metadata.expect("metadata が存在すること");
-        let colors = metadata.superchat_colors.expect("superchat_colors が存在すること");
+        let colors = metadata
+            .superchat_colors
+            .expect("superchat_colors が存在すること");
 
-        assert_eq!(colors.header_background, "#1565C0", "header_background は青");
+        assert_eq!(
+            colors.header_background, "#1565C0",
+            "header_background は青"
+        );
         assert_eq!(colors.header_text, "#FFFFFF", "header_text は白");
         assert_eq!(colors.body_background, "#1565C0", "body_background は青");
         assert_eq!(colors.body_text, "#FFFFFF", "body_text は白");
@@ -926,9 +937,14 @@ mod tests {
         }
 
         let metadata = msg.metadata.expect("metadata が存在すること");
-        let colors = metadata.superchat_colors.expect("superchat_colors が存在すること");
+        let colors = metadata
+            .superchat_colors
+            .expect("superchat_colors が存在すること");
 
-        assert_eq!(colors.header_background, "#1E88E5", "header_background は青");
+        assert_eq!(
+            colors.header_background, "#1E88E5",
+            "header_background は青"
+        );
         assert_eq!(colors.body_background, "#1E88E5", "body_background は青");
         assert_eq!(colors.header_text, "#FFFFFF", "header_text は白");
         assert_eq!(colors.body_text, "#FFFFFF", "body_text は白");

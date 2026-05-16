@@ -1,7 +1,7 @@
 //! HTTP クライアントのリクエスト構築・送信・cookie 管理
 
 use crate::core::models::*;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde_json::Value;
 
 use super::initial_data::parse_initial_data;
@@ -119,9 +119,7 @@ pub async fn fetch_initial_data_via_api(
     let data: Value = serde_json::from_str(&raw_json)?;
 
     let has_live_chat = data
-        .pointer(
-            "/contents/twoColumnWatchNextResults/conversationBar/liveChatRenderer",
-        )
+        .pointer("/contents/twoColumnWatchNextResults/conversationBar/liveChatRenderer")
         .is_some();
     tracing::info!("InnerTube next API: liveChatRenderer={}", has_live_chat);
 

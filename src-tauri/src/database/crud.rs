@@ -3,7 +3,7 @@
 use super::models::*;
 use crate::core::models::ChatMessage;
 use anyhow::Result;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 
 // ============================================================================
 // Session Operations
@@ -20,7 +20,10 @@ pub fn create_session(
     // Debug: Log session creation details
     tracing::info!(
         "Creating session: stream_url={:?}, stream_title={:?}, broadcaster_channel_id={:?}, broadcaster_name={:?}",
-        stream_url, stream_title, broadcaster_channel_id, broadcaster_name
+        stream_url,
+        stream_title,
+        broadcaster_channel_id,
+        broadcaster_name
     );
 
     let id = uuid::Uuid::new_v4().to_string();
@@ -293,7 +296,10 @@ pub fn upsert_viewer_stream(
 }
 
 /// Get in-stream comment counts per channel_id for a given video_id
-pub fn get_in_stream_comment_counts(conn: &Connection, video_id: &str) -> Result<std::collections::HashMap<String, u32>> {
+pub fn get_in_stream_comment_counts(
+    conn: &Connection,
+    video_id: &str,
+) -> Result<std::collections::HashMap<String, u32>> {
     let like_pattern = format!("%watch?v={}%", video_id);
     let mut stmt = conn.prepare(
         "SELECT m.channel_id, COUNT(*) as cnt
@@ -368,8 +374,7 @@ fn row_to_viewer_profile(row: &rusqlite::Row) -> rusqlite::Result<ViewerProfile>
     })
 }
 
-const VIEWER_PROFILE_COLUMNS: &str =
-    "id, broadcaster_channel_id, channel_id, display_name, first_seen, last_seen, \
+const VIEWER_PROFILE_COLUMNS: &str = "id, broadcaster_channel_id, channel_id, display_name, first_seen, last_seen, \
      message_count, total_contribution, membership_level, tags, created_at, updated_at";
 
 /// Get viewer profile
@@ -383,7 +388,11 @@ pub fn get_viewer_profile(
         VIEWER_PROFILE_COLUMNS
     );
     let profile = conn
-        .query_row(&sql, params![broadcaster_channel_id, channel_id], row_to_viewer_profile)
+        .query_row(
+            &sql,
+            params![broadcaster_channel_id, channel_id],
+            row_to_viewer_profile,
+        )
         .optional()?;
     Ok(profile)
 }
@@ -510,10 +519,7 @@ pub fn update_viewer_tags(
 
 /// Delete broadcaster and all associated viewer profiles (cascade deletes viewer_custom_info)
 /// Returns (broadcaster_deleted, viewers_deleted_count)
-pub fn delete_broadcaster(
-    conn: &Connection,
-    broadcaster_channel_id: &str,
-) -> Result<(bool, u32)> {
+pub fn delete_broadcaster(conn: &Connection, broadcaster_channel_id: &str) -> Result<(bool, u32)> {
     // Delete all viewer profiles for this broadcaster
     // (viewer_custom_info is cascade deleted via FK)
     let viewers_deleted = conn.execute(
@@ -580,9 +586,15 @@ pub fn get_viewers_for_broadcaster(
     let search_pattern = search_query.map(|q| format!("%{}%", q));
 
     let viewers = if let Some(pattern) = &search_pattern {
-        stmt.query_map(params![broadcaster_channel_id, pattern, limit, offset], row_to_viewer)?
+        stmt.query_map(
+            params![broadcaster_channel_id, pattern, limit, offset],
+            row_to_viewer,
+        )?
     } else {
-        stmt.query_map(params![broadcaster_channel_id, "", limit, offset], row_to_viewer)?
+        stmt.query_map(
+            params![broadcaster_channel_id, "", limit, offset],
+            row_to_viewer,
+        )?
     };
 
     viewers.collect::<Result<Vec<_>, _>>().map_err(Into::into)
@@ -612,7 +624,10 @@ fn row_to_viewer(row: &rusqlite::Row) -> rusqlite::Result<ViewerWithCustomInfo> 
 }
 
 /// Get viewer count for a broadcaster
-pub fn get_viewer_count_for_broadcaster(conn: &Connection, broadcaster_channel_id: &str) -> Result<i64> {
+pub fn get_viewer_count_for_broadcaster(
+    conn: &Connection,
+    broadcaster_channel_id: &str,
+) -> Result<i64> {
     let count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM viewer_profiles WHERE broadcaster_channel_id = ?1",
         params![broadcaster_channel_id],
@@ -647,7 +662,10 @@ pub fn upsert_broadcaster_profile(conn: &Connection, profile: &BroadcasterProfil
 }
 
 /// Get broadcaster profile
-pub fn get_broadcaster_profile(conn: &Connection, channel_id: &str) -> Result<Option<BroadcasterProfile>> {
+pub fn get_broadcaster_profile(
+    conn: &Connection,
+    channel_id: &str,
+) -> Result<Option<BroadcasterProfile>> {
     let profile = conn
         .query_row(
             "SELECT channel_id, channel_name, handle, thumbnail_url, created_at, updated_at
@@ -760,12 +778,19 @@ mod tests {
         }
     }
 
-    fn make_superchat_message(id: &str, author: &str, channel_id: &str, amount: &str) -> ChatMessage {
+    fn make_superchat_message(
+        id: &str,
+        author: &str,
+        channel_id: &str,
+        amount: &str,
+    ) -> ChatMessage {
         ChatMessage {
             id: id.to_string(),
             timestamp: "12:00:00".to_string(),
             timestamp_usec: "1000000".to_string(),
-            message_type: MessageType::SuperChat { amount: amount.to_string() },
+            message_type: MessageType::SuperChat {
+                amount: amount.to_string(),
+            },
             author: author.to_string(),
             author_icon_url: None,
             channel_id: channel_id.to_string(),
@@ -799,7 +824,14 @@ mod tests {
     async fn session_create_returns_uuid() {
         let db = setup_db();
         let conn = db.connection().await;
-        let id = create_session(&conn, Some("https://youtube.com/watch?v=test"), Some("Test Stream"), Some("UC_broadcaster"), Some("Broadcaster")).unwrap();
+        let id = create_session(
+            &conn,
+            Some("https://youtube.com/watch?v=test"),
+            Some("Test Stream"),
+            Some("UC_broadcaster"),
+            Some("Broadcaster"),
+        )
+        .unwrap();
 
         // UUID v4 format: 8-4-4-4-12
         assert_eq!(id.len(), 36);
@@ -810,7 +842,14 @@ mod tests {
     async fn session_create_sets_start_time() {
         let db = setup_db();
         let conn = db.connection().await;
-        let id = create_session(&conn, Some("https://youtube.com"), Some("Title"), None, None).unwrap();
+        let id = create_session(
+            &conn,
+            Some("https://youtube.com"),
+            Some("Title"),
+            None,
+            None,
+        )
+        .unwrap();
 
         let session = get_session(&conn, &id).unwrap().unwrap();
         assert!(!session.start_time.is_empty());
@@ -887,8 +926,22 @@ mod tests {
         let session1 = create_session(&conn, None, None, None, None).unwrap();
         let session2 = create_session(&conn, None, None, None, None).unwrap();
 
-        save_message(&conn, &session1, None, &make_text_message("m1", "A", "UC_a", "msg1"), None).unwrap();
-        save_message(&conn, &session2, None, &make_text_message("m2", "B", "UC_b", "msg2"), None).unwrap();
+        save_message(
+            &conn,
+            &session1,
+            None,
+            &make_text_message("m1", "A", "UC_a", "msg1"),
+            None,
+        )
+        .unwrap();
+        save_message(
+            &conn,
+            &session2,
+            None,
+            &make_text_message("m2", "B", "UC_b", "msg2"),
+            None,
+        )
+        .unwrap();
 
         let msgs1 = get_session_messages(&conn, &session1, 100).unwrap();
         let msgs2 = get_session_messages(&conn, &session2, 100).unwrap();
@@ -927,7 +980,9 @@ mod tests {
         let msg = make_text_message("m1", "Viewer1", "UC_viewer1", "hi");
         save_message(&conn, &session_id, Some("UC_bc"), &msg, None).unwrap();
 
-        let profile = get_viewer_profile(&conn, "UC_bc", "UC_viewer1").unwrap().unwrap();
+        let profile = get_viewer_profile(&conn, "UC_bc", "UC_viewer1")
+            .unwrap()
+            .unwrap();
         assert_eq!(profile.display_name, "Viewer1");
         assert_eq!(profile.message_count, 1);
         assert_eq!(profile.total_contribution, 0.0);
@@ -945,7 +1000,9 @@ mod tests {
         let msg2 = make_text_message("m2", "Viewer1", "UC_v1", "second");
         save_message(&conn, &session_id, Some("UC_bc"), &msg2, None).unwrap();
 
-        let profile = get_viewer_profile(&conn, "UC_bc", "UC_v1").unwrap().unwrap();
+        let profile = get_viewer_profile(&conn, "UC_bc", "UC_v1")
+            .unwrap()
+            .unwrap();
         assert_eq!(profile.message_count, 2);
     }
 
@@ -958,7 +1015,9 @@ mod tests {
         let sc = make_superchat_message("sc1", "BigFan", "UC_fan", "$50.00");
         save_message(&conn, &session_id, Some("UC_bc"), &sc, None).unwrap();
 
-        let profile = get_viewer_profile(&conn, "UC_bc", "UC_fan").unwrap().unwrap();
+        let profile = get_viewer_profile(&conn, "UC_bc", "UC_fan")
+            .unwrap()
+            .unwrap();
         assert_eq!(profile.message_count, 1);
         assert!(profile.total_contribution > 0.0);
     }
@@ -975,12 +1034,37 @@ mod tests {
         let s2 = create_session(&conn, None, None, Some("UC_bcB"), Some("BroadcasterB")).unwrap();
 
         // Same viewer on different broadcasters
-        save_message(&conn, &s1, Some("UC_bcA"), &make_text_message("m1", "CommonViewer", "UC_common", "hi"), None).unwrap();
-        save_message(&conn, &s1, Some("UC_bcA"), &make_text_message("m2", "CommonViewer", "UC_common", "hello"), None).unwrap();
-        save_message(&conn, &s2, Some("UC_bcB"), &make_text_message("m3", "CommonViewer", "UC_common", "hey"), None).unwrap();
+        save_message(
+            &conn,
+            &s1,
+            Some("UC_bcA"),
+            &make_text_message("m1", "CommonViewer", "UC_common", "hi"),
+            None,
+        )
+        .unwrap();
+        save_message(
+            &conn,
+            &s1,
+            Some("UC_bcA"),
+            &make_text_message("m2", "CommonViewer", "UC_common", "hello"),
+            None,
+        )
+        .unwrap();
+        save_message(
+            &conn,
+            &s2,
+            Some("UC_bcB"),
+            &make_text_message("m3", "CommonViewer", "UC_common", "hey"),
+            None,
+        )
+        .unwrap();
 
-        let profile_a = get_viewer_profile(&conn, "UC_bcA", "UC_common").unwrap().unwrap();
-        let profile_b = get_viewer_profile(&conn, "UC_bcB", "UC_common").unwrap().unwrap();
+        let profile_a = get_viewer_profile(&conn, "UC_bcA", "UC_common")
+            .unwrap()
+            .unwrap();
+        let profile_b = get_viewer_profile(&conn, "UC_bcB", "UC_common")
+            .unwrap()
+            .unwrap();
 
         assert_eq!(profile_a.message_count, 2);
         assert_eq!(profile_b.message_count, 1);
@@ -996,7 +1080,14 @@ mod tests {
         let conn = db.connection().await;
         let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
 
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "User", "UC_u", "hi"), None).unwrap();
+        save_message(
+            &conn,
+            &session_id,
+            Some("UC_bc"),
+            &make_text_message("m1", "User", "UC_u", "hi"),
+            None,
+        )
+        .unwrap();
         let profile = get_viewer_profile(&conn, "UC_bc", "UC_u").unwrap().unwrap();
 
         let info = ViewerCustomInfo::new(profile.id)
@@ -1015,7 +1106,14 @@ mod tests {
         let conn = db.connection().await;
         let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
 
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "User", "UC_u", "hi"), None).unwrap();
+        save_message(
+            &conn,
+            &session_id,
+            Some("UC_bc"),
+            &make_text_message("m1", "User", "UC_u", "hi"),
+            None,
+        )
+        .unwrap();
         let profile = get_viewer_profile(&conn, "UC_bc", "UC_u").unwrap().unwrap();
 
         let info = ViewerCustomInfo::new(profile.id).with_reading("test");
@@ -1036,9 +1134,18 @@ mod tests {
     async fn broadcaster_profile_created_with_session() {
         let db = setup_db();
         let conn = db.connection().await;
-        create_session(&conn, None, None, Some("UC_test_bc"), Some("TestBroadcaster")).unwrap();
+        create_session(
+            &conn,
+            None,
+            None,
+            Some("UC_test_bc"),
+            Some("TestBroadcaster"),
+        )
+        .unwrap();
 
-        let profile = get_broadcaster_profile(&conn, "UC_test_bc").unwrap().unwrap();
+        let profile = get_broadcaster_profile(&conn, "UC_test_bc")
+            .unwrap()
+            .unwrap();
         assert_eq!(profile.channel_name.as_deref(), Some("TestBroadcaster"));
     }
 
@@ -1048,8 +1155,22 @@ mod tests {
         let conn = db.connection().await;
         let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
 
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "V1", "UC_v1", "hi"), None).unwrap();
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m2", "V2", "UC_v2", "hello"), None).unwrap();
+        save_message(
+            &conn,
+            &session_id,
+            Some("UC_bc"),
+            &make_text_message("m1", "V1", "UC_v1", "hi"),
+            None,
+        )
+        .unwrap();
+        save_message(
+            &conn,
+            &session_id,
+            Some("UC_bc"),
+            &make_text_message("m2", "V2", "UC_v2", "hello"),
+            None,
+        )
+        .unwrap();
 
         let (deleted, viewer_count) = delete_broadcaster(&conn, "UC_bc").unwrap();
         assert!(deleted);
@@ -1070,8 +1191,22 @@ mod tests {
         let conn = db.connection().await;
         let session_id = create_session(&conn, None, None, None, None).unwrap();
 
-        save_message(&conn, &session_id, None, &make_text_message("m1", "U", "UC_u", "hi"), None).unwrap();
-        save_message(&conn, &session_id, None, &make_superchat_message("sc1", "U", "UC_u", "$10.00"), None).unwrap();
+        save_message(
+            &conn,
+            &session_id,
+            None,
+            &make_text_message("m1", "U", "UC_u", "hi"),
+            None,
+        )
+        .unwrap();
+        save_message(
+            &conn,
+            &session_id,
+            None,
+            &make_superchat_message("sc1", "U", "UC_u", "$10.00"),
+            None,
+        )
+        .unwrap();
 
         update_session_stats(&conn, &session_id).unwrap();
 
@@ -1091,8 +1226,17 @@ mod tests {
         let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
 
         // Create viewer profile via save_message
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "Viewer", "UC_viewer", "hi"), None).unwrap();
-        let profile = get_viewer_profile(&conn, "UC_bc", "UC_viewer").unwrap().unwrap();
+        save_message(
+            &conn,
+            &session_id,
+            Some("UC_bc"),
+            &make_text_message("m1", "Viewer", "UC_viewer", "hi"),
+            None,
+        )
+        .unwrap();
+        let profile = get_viewer_profile(&conn, "UC_bc", "UC_viewer")
+            .unwrap()
+            .unwrap();
 
         // Upsert viewer stream
         upsert_viewer_stream(&conn, profile.id, "video_abc").unwrap();
@@ -1112,8 +1256,17 @@ mod tests {
         let conn = db.connection().await;
         let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
 
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "Viewer", "UC_viewer", "hi"), None).unwrap();
-        let profile = get_viewer_profile(&conn, "UC_bc", "UC_viewer").unwrap().unwrap();
+        save_message(
+            &conn,
+            &session_id,
+            Some("UC_bc"),
+            &make_text_message("m1", "Viewer", "UC_viewer", "hi"),
+            None,
+        )
+        .unwrap();
+        let profile = get_viewer_profile(&conn, "UC_bc", "UC_viewer")
+            .unwrap()
+            .unwrap();
 
         upsert_viewer_stream(&conn, profile.id, "video_abc").unwrap();
         upsert_viewer_stream(&conn, profile.id, "video_abc").unwrap();
@@ -1132,17 +1285,28 @@ mod tests {
         let conn = db.connection().await;
         let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
 
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "Viewer", "UC_viewer", "hi"), None).unwrap();
-        let profile = get_viewer_profile(&conn, "UC_bc", "UC_viewer").unwrap().unwrap();
+        save_message(
+            &conn,
+            &session_id,
+            Some("UC_bc"),
+            &make_text_message("m1", "Viewer", "UC_viewer", "hi"),
+            None,
+        )
+        .unwrap();
+        let profile = get_viewer_profile(&conn, "UC_bc", "UC_viewer")
+            .unwrap()
+            .unwrap();
 
         upsert_viewer_stream(&conn, profile.id, "video_1").unwrap();
         upsert_viewer_stream(&conn, profile.id, "video_2").unwrap();
 
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM viewer_streams WHERE viewer_profile_id = ?1",
-            params![profile.id],
-            |row| row.get(0),
-        ).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM viewer_streams WHERE viewer_profile_id = ?1",
+                params![profile.id],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(count, 2);
     }
 
@@ -1153,7 +1317,14 @@ mod tests {
         let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
 
         // Save message with video_id → creates viewer_profile + viewer_stream
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "Viewer", "UC_viewer", "hi"), Some("video_abc")).unwrap();
+        save_message(
+            &conn,
+            &session_id,
+            Some("UC_bc"),
+            &make_text_message("m1", "Viewer", "UC_viewer", "hi"),
+            Some("video_abc"),
+        )
+        .unwrap();
 
         // Oldest video_id == current_video_id → first-time viewer
         assert!(is_first_time_viewer(&conn, "UC_bc", "UC_viewer", "video_abc").unwrap());
@@ -1166,10 +1337,24 @@ mod tests {
         let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
 
         // Viewer first commented in video_old
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "Viewer", "UC_viewer", "hi"), Some("video_old")).unwrap();
+        save_message(
+            &conn,
+            &session_id,
+            Some("UC_bc"),
+            &make_text_message("m1", "Viewer", "UC_viewer", "hi"),
+            Some("video_old"),
+        )
+        .unwrap();
 
         // Then commented in video_new
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m2", "Viewer", "UC_viewer", "hello"), Some("video_new")).unwrap();
+        save_message(
+            &conn,
+            &session_id,
+            Some("UC_bc"),
+            &make_text_message("m2", "Viewer", "UC_viewer", "hello"),
+            Some("video_new"),
+        )
+        .unwrap();
 
         // Oldest video_id is "video_old", not "video_new" → not first-time
         assert!(!is_first_time_viewer(&conn, "UC_bc", "UC_viewer", "video_new").unwrap());
@@ -1194,10 +1379,24 @@ mod tests {
         let s2 = create_session(&conn, None, None, Some("UC_bcB"), Some("BcB")).unwrap();
 
         // Viewer first seen on bcA in video_old
-        save_message(&conn, &s1, Some("UC_bcA"), &make_text_message("m1", "Viewer", "UC_viewer", "hi"), Some("video_old")).unwrap();
+        save_message(
+            &conn,
+            &s1,
+            Some("UC_bcA"),
+            &make_text_message("m1", "Viewer", "UC_viewer", "hi"),
+            Some("video_old"),
+        )
+        .unwrap();
 
         // Viewer first seen on bcB in video_new (different broadcaster)
-        save_message(&conn, &s2, Some("UC_bcB"), &make_text_message("m2", "Viewer", "UC_viewer", "hello"), Some("video_new")).unwrap();
+        save_message(
+            &conn,
+            &s2,
+            Some("UC_bcB"),
+            &make_text_message("m2", "Viewer", "UC_viewer", "hello"),
+            Some("video_new"),
+        )
+        .unwrap();
 
         // For bcA: oldest is video_old → first-time in video_old
         assert!(is_first_time_viewer(&conn, "UC_bcA", "UC_viewer", "video_old").unwrap());
@@ -1212,13 +1411,22 @@ mod tests {
         let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
 
         // save_message with video_id should auto-create viewer_stream
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "Viewer", "UC_viewer", "hi"), Some("video_xyz")).unwrap();
+        save_message(
+            &conn,
+            &session_id,
+            Some("UC_bc"),
+            &make_text_message("m1", "Viewer", "UC_viewer", "hi"),
+            Some("video_xyz"),
+        )
+        .unwrap();
 
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM viewer_streams WHERE video_id = 'video_xyz'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM viewer_streams WHERE video_id = 'video_xyz'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(count, 1);
     }
 
@@ -1229,13 +1437,18 @@ mod tests {
         let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
 
         // save_message without video_id should not create viewer_stream
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "Viewer", "UC_viewer", "hi"), None).unwrap();
+        save_message(
+            &conn,
+            &session_id,
+            Some("UC_bc"),
+            &make_text_message("m1", "Viewer", "UC_viewer", "hi"),
+            None,
+        )
+        .unwrap();
 
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM viewer_streams",
-            [],
-            |row| row.get(0),
-        ).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM viewer_streams", [], |row| row.get(0))
+            .unwrap();
         assert_eq!(count, 0);
     }
 
@@ -1257,14 +1470,56 @@ mod tests {
         let conn = db.connection().await;
         let video_id = "dQw4w9WgXcQ";
         let stream_url = format!("https://www.youtube.com/watch?v={}", video_id);
-        let session_id = create_session(&conn, Some(&stream_url), Some("Test Stream"), Some("UC_bc"), Some("BC")).unwrap();
+        let session_id = create_session(
+            &conn,
+            Some(&stream_url),
+            Some("Test Stream"),
+            Some("UC_bc"),
+            Some("BC"),
+        )
+        .unwrap();
 
         // User A sends 3 messages, User B sends 2
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "A", "UC_a", "hi1"), None).unwrap();
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m2", "A", "UC_a", "hi2"), None).unwrap();
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m3", "A", "UC_a", "hi3"), None).unwrap();
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m4", "B", "UC_b", "hey1"), None).unwrap();
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m5", "B", "UC_b", "hey2"), None).unwrap();
+        save_message(
+            &conn,
+            &session_id,
+            Some("UC_bc"),
+            &make_text_message("m1", "A", "UC_a", "hi1"),
+            None,
+        )
+        .unwrap();
+        save_message(
+            &conn,
+            &session_id,
+            Some("UC_bc"),
+            &make_text_message("m2", "A", "UC_a", "hi2"),
+            None,
+        )
+        .unwrap();
+        save_message(
+            &conn,
+            &session_id,
+            Some("UC_bc"),
+            &make_text_message("m3", "A", "UC_a", "hi3"),
+            None,
+        )
+        .unwrap();
+        save_message(
+            &conn,
+            &session_id,
+            Some("UC_bc"),
+            &make_text_message("m4", "B", "UC_b", "hey1"),
+            None,
+        )
+        .unwrap();
+        save_message(
+            &conn,
+            &session_id,
+            Some("UC_bc"),
+            &make_text_message("m5", "B", "UC_b", "hey2"),
+            None,
+        )
+        .unwrap();
 
         let counts = get_in_stream_comment_counts(&conn, video_id).unwrap();
         assert_eq!(counts.get("UC_a"), Some(&3u32));
@@ -1277,7 +1532,8 @@ mod tests {
         let conn = db.connection().await;
         let video_id = "testVideo123";
         let stream_url = format!("https://www.youtube.com/watch?v={}", video_id);
-        let session_id = create_session(&conn, Some(&stream_url), None, Some("UC_bc"), Some("BC")).unwrap();
+        let session_id =
+            create_session(&conn, Some(&stream_url), None, Some("UC_bc"), Some("BC")).unwrap();
 
         let sys_msg = ChatMessage {
             id: "sys1".to_string(),
@@ -1295,14 +1551,25 @@ mod tests {
             in_stream_comment_count: None,
         };
         save_message(&conn, &session_id, Some("UC_bc"), &sys_msg, None).unwrap();
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "A", "UC_a", "hi"), None).unwrap();
+        save_message(
+            &conn,
+            &session_id,
+            Some("UC_bc"),
+            &make_text_message("m1", "A", "UC_a", "hi"),
+            None,
+        )
+        .unwrap();
 
         let counts = get_in_stream_comment_counts(&conn, video_id).unwrap();
         // system messages are saved as message_type="system", but counted only for non-system?
         // spec says count all messages in session, system messages included in DB but here we count text
         // Per spec: in_stream_comment_count = count of messages by channel_id in stream
         // System messages have a channel_id, but per spec only user messages should count
-        assert_eq!(counts.get("UC_sys"), None, "System messages should not be counted");
+        assert_eq!(
+            counts.get("UC_sys"),
+            None,
+            "System messages should not be counted"
+        );
         assert_eq!(counts.get("UC_a"), Some(&1u32));
     }
 
@@ -1321,7 +1588,9 @@ mod tests {
             id: "ss1".to_string(),
             timestamp: "12:00:00".to_string(),
             timestamp_usec: "1000000".to_string(),
-            message_type: MessageType::SuperSticker { amount: "$5.00".to_string() },
+            message_type: MessageType::SuperSticker {
+                amount: "$5.00".to_string(),
+            },
             author: "Fan".to_string(),
             author_icon_url: None,
             channel_id: "UC_fan".to_string(),
@@ -1383,7 +1652,14 @@ mod tests {
         let db = setup_db();
         let conn = db.connection().await;
         let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "User", "UC_u", "hi"), None).unwrap();
+        save_message(
+            &conn,
+            &session_id,
+            Some("UC_bc"),
+            &make_text_message("m1", "User", "UC_u", "hi"),
+            None,
+        )
+        .unwrap();
         let profile = get_viewer_profile(&conn, "UC_bc", "UC_u").unwrap().unwrap();
 
         let info = ViewerCustomInfo::new(profile.id).with_reading("テスト");
@@ -1409,7 +1685,14 @@ mod tests {
         let db = setup_db();
         let conn = db.connection().await;
         let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "User", "UC_u", "hi"), None).unwrap();
+        save_message(
+            &conn,
+            &session_id,
+            Some("UC_bc"),
+            &make_text_message("m1", "User", "UC_u", "hi"),
+            None,
+        )
+        .unwrap();
         let profile = get_viewer_profile(&conn, "UC_bc", "UC_u").unwrap().unwrap();
 
         let result = update_viewer_tags(&conn, profile.id, Some(vec!["常連".to_string()])).unwrap();
@@ -1457,7 +1740,14 @@ mod tests {
         let db = setup_db();
         let conn = db.connection().await;
         let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "User", "UC_u", "hi"), None).unwrap();
+        save_message(
+            &conn,
+            &session_id,
+            Some("UC_bc"),
+            &make_text_message("m1", "User", "UC_u", "hi"),
+            None,
+        )
+        .unwrap();
         let profile = get_viewer_profile(&conn, "UC_bc", "UC_u").unwrap().unwrap();
 
         let result = delete_viewer_profile(&conn, profile.id).unwrap();
@@ -1484,7 +1774,14 @@ mod tests {
         let db = setup_db();
         let conn = db.connection().await;
         let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "Viewer1", "UC_v1", "hi"), None).unwrap();
+        save_message(
+            &conn,
+            &session_id,
+            Some("UC_bc"),
+            &make_text_message("m1", "Viewer1", "UC_v1", "hi"),
+            None,
+        )
+        .unwrap();
 
         let count = get_viewer_count_for_broadcaster(&conn, "UC_bc").unwrap();
         assert_eq!(count, 1);
@@ -1496,7 +1793,14 @@ mod tests {
         let db = setup_db();
         let conn = db.connection().await;
         let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "Viewer1", "UC_v1", "hi"), None).unwrap();
+        save_message(
+            &conn,
+            &session_id,
+            Some("UC_bc"),
+            &make_text_message("m1", "Viewer1", "UC_v1", "hi"),
+            None,
+        )
+        .unwrap();
 
         let viewers = get_viewers_for_broadcaster(&conn, "UC_bc", None, 100, 0).unwrap();
         assert!(!viewers.is_empty());
@@ -1527,8 +1831,17 @@ mod tests {
         let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
 
         // メッセージ保存により viewer_profile が生成される
-        save_message(&conn, &session_id, Some("UC_bc"), &make_text_message("m1", "Viewer1", "UC_v1", "hello"), None).unwrap();
-        let profile = get_viewer_profile(&conn, "UC_bc", "UC_v1").unwrap().unwrap();
+        save_message(
+            &conn,
+            &session_id,
+            Some("UC_bc"),
+            &make_text_message("m1", "Viewer1", "UC_v1", "hello"),
+            None,
+        )
+        .unwrap();
+        let profile = get_viewer_profile(&conn, "UC_bc", "UC_v1")
+            .unwrap()
+            .unwrap();
 
         // IDで再取得して Some が返ることを確認
         let by_id = get_viewer_profile_by_id(&conn, profile.id).unwrap();

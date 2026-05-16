@@ -3,7 +3,7 @@
 //! YouTubeライブチャットのcontinuation tokenを変更・構築するモジュール。
 //! 既存トークンのchattypeフィールドを変更することでモード切替を実現。
 
-use base64::{engine::general_purpose, Engine as _};
+use base64::{Engine as _, engine::general_purpose};
 
 use crate::core::models::ChatMode;
 
@@ -247,7 +247,9 @@ mod tests {
         assert!(modified.is_some());
 
         let modified_token = modified.unwrap();
-        let decoded = general_purpose::URL_SAFE_NO_PAD.decode(&modified_token).unwrap();
+        let decoded = general_purpose::URL_SAFE_NO_PAD
+            .decode(&modified_token)
+            .unwrap();
         // chattype is at offset 11 (i=7, i+4=11)
         assert_eq!(decoded[11], 0x01); // chattype should be 1 now
 
@@ -256,7 +258,9 @@ mod tests {
         assert!(reverted.is_some());
 
         let reverted_token = reverted.unwrap();
-        let decoded = general_purpose::URL_SAFE_NO_PAD.decode(&reverted_token).unwrap();
+        let decoded = general_purpose::URL_SAFE_NO_PAD
+            .decode(&reverted_token)
+            .unwrap();
         assert_eq!(decoded[11], 0x04); // chattype should be 4 again
     }
 
@@ -264,9 +268,8 @@ mod tests {
     fn test_detect_chat_mode() {
         // TopChat token
         let inner_top = vec![
-            0xd2, 0x87, 0xcc, 0xc8, 0x03,
-            0x10, 0x00,
-            0x82, 0x01, 0x02, 0x08, 0x04, // chattype=4 (TopChat)
+            0xd2, 0x87, 0xcc, 0xc8, 0x03, 0x10, 0x00, 0x82, 0x01, 0x02, 0x08,
+            0x04, // chattype=4 (TopChat)
             0x20, 0x00,
         ];
         let top_token = general_purpose::URL_SAFE_NO_PAD.encode(&inner_top);
@@ -274,9 +277,8 @@ mod tests {
 
         // AllChat token
         let inner_all = vec![
-            0xd2, 0x87, 0xcc, 0xc8, 0x03,
-            0x10, 0x00,
-            0x82, 0x01, 0x02, 0x08, 0x01, // chattype=1 (AllChat)
+            0xd2, 0x87, 0xcc, 0xc8, 0x03, 0x10, 0x00, 0x82, 0x01, 0x02, 0x08,
+            0x01, // chattype=1 (AllChat)
             0x20, 0x00,
         ];
         let all_token = general_purpose::URL_SAFE_NO_PAD.encode(&inner_all);
@@ -301,14 +303,16 @@ mod tests {
             0x82, 0x01, // Field 16 marker
             0x82, 0x02, // 2-byte varint length (high bit set)
             0x08, 0x04, // chattype = 4 (TopChat)
-            0x00,       // padding
+            0x00, // padding
         ];
         let token = general_purpose::URL_SAFE_NO_PAD.encode(&inner);
 
         let result = modify_continuation_mode(&token, ChatMode::AllChat);
         assert!(result.is_some());
 
-        let decoded = general_purpose::URL_SAFE_NO_PAD.decode(result.unwrap()).unwrap();
+        let decoded = general_purpose::URL_SAFE_NO_PAD
+            .decode(result.unwrap())
+            .unwrap();
         // i=0, chattype at i+5=5
         assert_eq!(decoded[5], 0x01);
     }
@@ -317,9 +321,7 @@ mod tests {
     #[test]
     fn test_modify_pattern2_allchat_to_topchat() {
         let inner = vec![
-            0x82, 0x01,
-            0x82, 0x02,
-            0x08, 0x01, // chattype = 1 (AllChat)
+            0x82, 0x01, 0x82, 0x02, 0x08, 0x01, // chattype = 1 (AllChat)
             0x00,
         ];
         let token = general_purpose::URL_SAFE_NO_PAD.encode(&inner);
@@ -327,7 +329,9 @@ mod tests {
         let result = modify_continuation_mode(&token, ChatMode::TopChat);
         assert!(result.is_some());
 
-        let decoded = general_purpose::URL_SAFE_NO_PAD.decode(result.unwrap()).unwrap();
+        let decoded = general_purpose::URL_SAFE_NO_PAD
+            .decode(result.unwrap())
+            .unwrap();
         assert_eq!(decoded[5], 0x04);
     }
 
@@ -346,7 +350,9 @@ mod tests {
         let result = modify_continuation_mode(&token, ChatMode::AllChat);
         assert!(result.is_some());
 
-        let decoded = general_purpose::URL_SAFE_NO_PAD.decode(result.unwrap()).unwrap();
+        let decoded = general_purpose::URL_SAFE_NO_PAD
+            .decode(result.unwrap())
+            .unwrap();
         // i=2, chattype at i+1=3
         assert_eq!(decoded[3], 0x01);
     }
@@ -355,8 +361,7 @@ mod tests {
     #[test]
     fn test_modify_pattern3_allchat_to_topchat() {
         let inner = vec![
-            0xCC, 0xDD,
-            0x08, 0x01, // chattype = 1 (AllChat)
+            0xCC, 0xDD, 0x08, 0x01, // chattype = 1 (AllChat)
             0x10, 0x00,
         ];
         let token = general_purpose::URL_SAFE_NO_PAD.encode(&inner);
@@ -364,7 +369,9 @@ mod tests {
         let result = modify_continuation_mode(&token, ChatMode::TopChat);
         assert!(result.is_some());
 
-        let decoded = general_purpose::URL_SAFE_NO_PAD.decode(result.unwrap()).unwrap();
+        let decoded = general_purpose::URL_SAFE_NO_PAD
+            .decode(result.unwrap())
+            .unwrap();
         assert_eq!(decoded[3], 0x04);
     }
 
@@ -374,16 +381,18 @@ mod tests {
         // Pattern1/2/3 に一致しない構造、前バイト=0x02, i >= 3 を満たす
         let inner = vec![
             0xFF, 0xEE, 0xDD, // パディング (i >= 3 を満たす)
-            0x02,             // prev byte = 0x02 (length)
-            0x08, 0x01,       // chattype = 1 (AllChat)
-            0x00,             // ダミー
+            0x02, // prev byte = 0x02 (length)
+            0x08, 0x01, // chattype = 1 (AllChat)
+            0x00, // ダミー
         ];
         let token = general_purpose::URL_SAFE_NO_PAD.encode(&inner);
 
         let result = modify_continuation_mode(&token, ChatMode::TopChat);
         assert!(result.is_some());
 
-        let decoded = general_purpose::URL_SAFE_NO_PAD.decode(result.unwrap()).unwrap();
+        let decoded = general_purpose::URL_SAFE_NO_PAD
+            .decode(result.unwrap())
+            .unwrap();
         // i=4, chattype at i+1=5
         assert_eq!(decoded[5], 0x04);
     }
@@ -392,9 +401,7 @@ mod tests {
     #[test]
     fn test_modify_pattern4_topchat_prev_byte_0x03() {
         let inner = vec![
-            0xFF, 0xEE, 0xDD,
-            0x03,
-            0x08, 0x04, // chattype = 4 (TopChat)
+            0xFF, 0xEE, 0xDD, 0x03, 0x08, 0x04, // chattype = 4 (TopChat)
             0x00,
         ];
         let token = general_purpose::URL_SAFE_NO_PAD.encode(&inner);
@@ -402,25 +409,24 @@ mod tests {
         let result = modify_continuation_mode(&token, ChatMode::AllChat);
         assert!(result.is_some());
 
-        let decoded = general_purpose::URL_SAFE_NO_PAD.decode(result.unwrap()).unwrap();
+        let decoded = general_purpose::URL_SAFE_NO_PAD
+            .decode(result.unwrap())
+            .unwrap();
         assert_eq!(decoded[5], 0x01);
     }
 
     // spec: Pattern4 で前バイトが 0x04 の場合もchattypeを変更できる
     #[test]
     fn test_modify_pattern4_prev_byte_0x04() {
-        let inner = vec![
-            0xFF, 0xEE, 0xDD,
-            0x04,
-            0x08, 0x01,
-            0x00,
-        ];
+        let inner = vec![0xFF, 0xEE, 0xDD, 0x04, 0x08, 0x01, 0x00];
         let token = general_purpose::URL_SAFE_NO_PAD.encode(&inner);
 
         let result = modify_continuation_mode(&token, ChatMode::TopChat);
         assert!(result.is_some());
 
-        let decoded = general_purpose::URL_SAFE_NO_PAD.decode(result.unwrap()).unwrap();
+        let decoded = general_purpose::URL_SAFE_NO_PAD
+            .decode(result.unwrap())
+            .unwrap();
         assert_eq!(decoded[5], 0x04);
     }
 
@@ -429,10 +435,8 @@ mod tests {
     fn test_modify_pattern4_invalid_prev_byte_returns_none() {
         // Pattern1/2/3 に一致せず、前バイトが 0x01 (条件外)
         let inner = vec![
-            0xFF, 0xEE, 0xDD,
-            0x01, // prev byte = 0x01 (条件外)
-            0x08, 0x04,
-            0x00,
+            0xFF, 0xEE, 0xDD, 0x01, // prev byte = 0x01 (条件外)
+            0x08, 0x04, 0x00,
         ];
         let token = general_purpose::URL_SAFE_NO_PAD.encode(&inner);
 
@@ -446,15 +450,17 @@ mod tests {
         // Pattern1 (Field 16) と Field 13 の両方を含むトークン
         let inner = vec![
             0x82, 0x01, 0x02, 0x08, 0x04, // Field 16: chattype=4 (TopChat)
-            0x68, 0x04,                    // Field 13: chattype=4 (TopChat)
-            0x10, 0x00,                    // ダミー
+            0x68, 0x04, // Field 13: chattype=4 (TopChat)
+            0x10, 0x00, // ダミー
         ];
         let token = general_purpose::URL_SAFE_NO_PAD.encode(&inner);
 
         let result = modify_continuation_mode(&token, ChatMode::AllChat);
         assert!(result.is_some());
 
-        let decoded = general_purpose::URL_SAFE_NO_PAD.decode(result.unwrap()).unwrap();
+        let decoded = general_purpose::URL_SAFE_NO_PAD
+            .decode(result.unwrap())
+            .unwrap();
         // Field 16 の chattype (offset 4) が変更されている
         assert_eq!(decoded[4], 0x01);
         // Field 13 の chattype (offset 6) も変更されている
@@ -466,7 +472,7 @@ mod tests {
     fn test_modify_field13_allchat_to_topchat() {
         let inner = vec![
             0x82, 0x01, 0x02, 0x08, 0x01, // Field 16: chattype=1 (AllChat)
-            0x68, 0x01,                    // Field 13: chattype=1 (AllChat)
+            0x68, 0x01, // Field 13: chattype=1 (AllChat)
             0x10, 0x00,
         ];
         let token = general_purpose::URL_SAFE_NO_PAD.encode(&inner);
@@ -474,7 +480,9 @@ mod tests {
         let result = modify_continuation_mode(&token, ChatMode::TopChat);
         assert!(result.is_some());
 
-        let decoded = general_purpose::URL_SAFE_NO_PAD.decode(result.unwrap()).unwrap();
+        let decoded = general_purpose::URL_SAFE_NO_PAD
+            .decode(result.unwrap())
+            .unwrap();
         assert_eq!(decoded[4], 0x04);
         assert_eq!(decoded[6], 0x04);
     }
@@ -484,8 +492,7 @@ mod tests {
     fn test_detect_chat_mode_0x82_without_0x01_returns_none() {
         let inner = vec![
             0x82, 0x02, // 0x82 の後が 0x01 でない
-            0x02, 0x08, 0x04,
-            0x00,
+            0x02, 0x08, 0x04, 0x00,
         ];
         let token = general_purpose::URL_SAFE_NO_PAD.encode(&inner);
 

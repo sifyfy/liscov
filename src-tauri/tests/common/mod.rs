@@ -1,8 +1,8 @@
 //! 統合テスト共通ヘルパー
 
+use tauri::ipc::{CallbackFn, InvokeBody};
 use tauri::test::INVOKE_KEY;
 use tauri::webview::InvokeRequest;
-use tauri::ipc::{InvokeBody, CallbackFn};
 
 /// IPC リクエストを組み立てるヘルパー（引数なし）
 pub fn invoke_no_args(cmd: &str) -> InvokeRequest {

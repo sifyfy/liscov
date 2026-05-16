@@ -1,8 +1,8 @@
 //! Viewer management commands
 
+use crate::AppState;
 use crate::database::{self, ContributorStats, ViewerCustomInfo};
 use crate::errors::CommandError;
-use crate::AppState;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use ts_rs::TS;
@@ -206,8 +206,9 @@ pub async fn viewer_get_custom_info(
         .ok_or_else(|| CommandError::DatabaseError("Database not initialized".to_string()))?;
 
     let conn = db.connection().await;
-    database::get_viewer_custom_info(&conn, viewer_profile_id)
-        .map_err(|e| CommandError::DatabaseError(format!("Failed to get viewer custom info: {}", e)))
+    database::get_viewer_custom_info(&conn, viewer_profile_id).map_err(|e| {
+        CommandError::DatabaseError(format!("Failed to get viewer custom info: {}", e))
+    })
 }
 
 /// Upsert viewer custom info
@@ -276,8 +277,10 @@ pub async fn broadcaster_get_list(
 
     let mut result = Vec::new();
     for broadcaster in broadcasters {
-        let viewer_count = database::get_viewer_count_for_broadcaster(&conn, &broadcaster.channel_id)
-            .map_err(|e| CommandError::DatabaseError(format!("Failed to get viewer count: {}", e)))?;
+        let viewer_count =
+            database::get_viewer_count_for_broadcaster(&conn, &broadcaster.channel_id).map_err(
+                |e| CommandError::DatabaseError(format!("Failed to get viewer count: {}", e)),
+            )?;
 
         result.push(GuiBroadcasterChannel {
             channel_id: broadcaster.channel_id,
@@ -302,8 +305,10 @@ pub async fn broadcaster_delete(
         .ok_or_else(|| CommandError::DatabaseError("Database not initialized".to_string()))?;
 
     let conn = db.connection().await;
-    let (broadcaster_deleted, viewers_deleted) = database::delete_broadcaster(&conn, &broadcaster_id)
-        .map_err(|e| CommandError::DatabaseError(format!("Failed to delete broadcaster: {}", e)))?;
+    let (broadcaster_deleted, viewers_deleted) =
+        database::delete_broadcaster(&conn, &broadcaster_id).map_err(|e| {
+            CommandError::DatabaseError(format!("Failed to delete broadcaster: {}", e))
+        })?;
 
     Ok((broadcaster_deleted, viewers_deleted))
 }

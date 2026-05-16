@@ -42,7 +42,10 @@ impl BouyomichanBackend {
 
     /// Test connection to the backend
     pub async fn test_connection(&self) -> Result<bool, TtsError> {
-        let url = format!("http://{}:{}/Talk?text=", self.config.host, self.config.port);
+        let url = format!(
+            "http://{}:{}/Talk?text=",
+            self.config.host, self.config.port
+        );
 
         match self.client.get(&url).send().await {
             Ok(response) => {
@@ -50,7 +53,10 @@ impl BouyomichanBackend {
                     log::info!("Bouyomichan connection successful");
                     Ok(true)
                 } else {
-                    log::warn!("Bouyomichan connection failed: status {}", response.status());
+                    log::warn!(
+                        "Bouyomichan connection failed: status {}",
+                        response.status()
+                    );
                     Ok(false)
                 }
             }

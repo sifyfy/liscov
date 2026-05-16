@@ -128,9 +128,11 @@ impl TtsConfig {
 
     /// Get the config file path
     fn config_path() -> Result<PathBuf, String> {
-        let config_dir = dirs::config_dir()
-            .ok_or_else(|| "Failed to determine config directory".to_string())?;
-        Ok(config_dir.join(Self::get_app_name()).join("tts_config.toml"))
+        let config_dir =
+            dirs::config_dir().ok_or_else(|| "Failed to determine config directory".to_string())?;
+        Ok(config_dir
+            .join(Self::get_app_name())
+            .join("tts_config.toml"))
     }
 
     /// Load config from file, or return default if file doesn't exist
@@ -139,17 +141,15 @@ impl TtsConfig {
             Ok(path) => {
                 if path.exists() {
                     match fs::read_to_string(&path) {
-                        Ok(content) => {
-                            match toml::from_str(&content) {
-                                Ok(config) => {
-                                    log::info!("TTS config loaded from {:?}", path);
-                                    return config;
-                                }
-                                Err(e) => {
-                                    log::warn!("Failed to parse TTS config: {}", e);
-                                }
+                        Ok(content) => match toml::from_str(&content) {
+                            Ok(config) => {
+                                log::info!("TTS config loaded from {:?}", path);
+                                return config;
                             }
-                        }
+                            Err(e) => {
+                                log::warn!("Failed to parse TTS config: {}", e);
+                            }
+                        },
                         Err(e) => {
                             log::warn!("Failed to read TTS config: {}", e);
                         }
@@ -176,8 +176,7 @@ impl TtsConfig {
         let toml_str = toml::to_string_pretty(self)
             .map_err(|e| format!("Failed to serialize TTS config: {}", e))?;
 
-        fs::write(&path, toml_str)
-            .map_err(|e| format!("Failed to write TTS config: {}", e))?;
+        fs::write(&path, toml_str).map_err(|e| format!("Failed to write TTS config: {}", e))?;
 
         log::info!("TTS config saved to {:?}", path);
         Ok(())

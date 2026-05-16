@@ -10,11 +10,11 @@ mod client;
 mod initial_data;
 
 use crate::core::models::*;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use reqwest::Client;
 
 pub use chat_parser::parse_chat_actions;
-pub use client::{get_youtube_base_url, get_innertube_api_url};
+pub use client::{get_innertube_api_url, get_youtube_base_url};
 
 /// InnerTube API クライアント
 pub struct InnerTubeClient {
@@ -88,10 +88,7 @@ impl InnerTubeClient {
             self.chat_mode = mode;
             true
         } else {
-            tracing::warn!(
-                "Failed to modify continuation token for mode {:?}",
-                mode
-            );
+            tracing::warn!("Failed to modify continuation token for mode {:?}", mode);
             false
         }
     }
@@ -123,13 +120,10 @@ impl InnerTubeClient {
             self.video_id
         );
 
-        let mut request = self
-            .http_client
-            .get(&page_url)
-            .header(
-                "User-Agent",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            );
+        let mut request = self.http_client.get(&page_url).header(
+            "User-Agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        );
 
         // ページ取得時は Cookie ヘッダーのみ送信（SAPISIDHASH Authorization は不要）
         if let Some(cookies) = &self.auth_cookies {
@@ -141,11 +135,12 @@ impl InnerTubeClient {
 
         if let Some(data) = initial_data::extract_yt_initial_data(&html) {
             let has_chat = data
-                .pointer(
-                    "/contents/twoColumnWatchNextResults/conversationBar/liveChatRenderer",
-                )
+                .pointer("/contents/twoColumnWatchNextResults/conversationBar/liveChatRenderer")
                 .is_some();
-            tracing::info!("Watch page: ytInitialData found, liveChatRenderer={}", has_chat);
+            tracing::info!(
+                "Watch page: ytInitialData found, liveChatRenderer={}",
+                has_chat
+            );
             initial_data::parse_initial_data(
                 &data,
                 &mut self.broadcaster_channel_id,
@@ -185,9 +180,7 @@ impl InnerTubeClient {
             .await
             {
                 Ok(()) => {
-                    tracing::info!(
-                        "InnerTube API fallback succeeded, continuation token obtained"
-                    );
+                    tracing::info!("InnerTube API fallback succeeded, continuation token obtained");
                 }
                 Err(e) => {
                     tracing::warn!("InnerTube API fallback failed: {}", e);
@@ -223,11 +216,8 @@ impl InnerTubeClient {
             .as_ref()
             .ok_or_else(|| anyhow!("No continuation token"))?;
 
-        let request_body = client::build_request_body(
-            &self.video_id,
-            continuation,
-            &self.client_version,
-        );
+        let request_body =
+            client::build_request_body(&self.video_id, continuation, &self.client_version);
         let url = format!(
             "{}?key={}&prettyPrint=false",
             client::get_innertube_api_url(),
@@ -304,7 +294,7 @@ mod tests {
 
     #[test]
     fn test_set_chat_mode_with_valid_token() {
-        use base64::{engine::general_purpose, Engine as _};
+        use base64::{Engine as _, engine::general_purpose};
 
         // 有効な chattype フィールド構造を持つトークンを作成する
         // Field 16 (0x82 0x01) + length(2) + Field 1 (0x08) + value(4=TopChat)
@@ -327,7 +317,10 @@ mod tests {
         // トークンが変更されていることを確認する
         let new_token = client.continuation.as_ref().unwrap();
         let decoded = general_purpose::URL_SAFE_NO_PAD.decode(new_token).unwrap();
-        assert_eq!(decoded[11], 0x01, "chattype が 1 (AllChat) になっていること");
+        assert_eq!(
+            decoded[11], 0x01,
+            "chattype が 1 (AllChat) になっていること"
+        );
 
         // TopChat に戻す
         let result = client.set_chat_mode(ChatMode::TopChat);
@@ -336,18 +329,20 @@ mod tests {
 
         let new_token = client.continuation.as_ref().unwrap();
         let decoded = general_purpose::URL_SAFE_NO_PAD.decode(new_token).unwrap();
-        assert_eq!(decoded[11], 0x04, "chattype が 4 (TopChat) になっていること");
+        assert_eq!(
+            decoded[11], 0x04,
+            "chattype が 4 (TopChat) になっていること"
+        );
     }
 
     #[test]
     fn test_detect_chat_mode() {
-        use base64::{engine::general_purpose, Engine as _};
+        use base64::{Engine as _, engine::general_purpose};
 
         // TopChat トークン
         let inner_top = vec![
-            0xd2, 0x87, 0xcc, 0xc8, 0x03,
-            0x10, 0x00,
-            0x82, 0x01, 0x02, 0x08, 0x04, // chattype=4 (TopChat)
+            0xd2, 0x87, 0xcc, 0xc8, 0x03, 0x10, 0x00, 0x82, 0x01, 0x02, 0x08,
+            0x04, // chattype=4 (TopChat)
             0x20, 0x00,
         ];
         let top_token = general_purpose::URL_SAFE_NO_PAD.encode(&inner_top);
@@ -359,9 +354,8 @@ mod tests {
 
         // AllChat トークン
         let inner_all = vec![
-            0xd2, 0x87, 0xcc, 0xc8, 0x03,
-            0x10, 0x00,
-            0x82, 0x01, 0x02, 0x08, 0x01, // chattype=1 (AllChat)
+            0xd2, 0x87, 0xcc, 0xc8, 0x03, 0x10, 0x00, 0x82, 0x01, 0x02, 0x08,
+            0x01, // chattype=1 (AllChat)
             0x20, 0x00,
         ];
         let all_token = general_purpose::URL_SAFE_NO_PAD.encode(&inner_all);

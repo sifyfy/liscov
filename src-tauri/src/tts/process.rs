@@ -59,7 +59,12 @@ impl TtsProcessManager {
 
         // %LOCALAPPDATA%\Programs\VOICEVOX\VOICEVOX.exe
         if let Some(local_app_data) = dirs::data_local_dir() {
-            paths.push(local_app_data.join("Programs").join("VOICEVOX").join("VOICEVOX.exe"));
+            paths.push(
+                local_app_data
+                    .join("Programs")
+                    .join("VOICEVOX")
+                    .join("VOICEVOX.exe"),
+            );
         }
 
         paths.push(PathBuf::from(r"C:\Program Files\VOICEVOX\VOICEVOX.exe"));
@@ -117,7 +122,10 @@ impl TtsProcessManager {
         log::info!("{:?} launched with PID {}", backend, pid);
 
         // Store the process
-        self.processes.lock().await.push(LaunchedProcess { backend, child });
+        self.processes
+            .lock()
+            .await
+            .push(LaunchedProcess { backend, child });
 
         Ok(pid)
     }
@@ -130,7 +138,10 @@ impl TtsProcessManager {
         if let Some(idx) = pos {
             let mut process = processes.remove(idx);
             log::info!("Killing {:?} process (PID {})", backend, process.child.id());
-            process.child.kill().map_err(|e| format!("Failed to kill {:?}: {}", backend, e))?;
+            process
+                .child
+                .kill()
+                .map_err(|e| format!("Failed to kill {:?}: {}", backend, e))?;
             Ok(())
         } else {
             Err(format!("{:?} was not launched by this app", backend))
@@ -160,7 +171,11 @@ impl TtsProcessManager {
         processes.retain_mut(|p| match p.child.try_wait() {
             Ok(None) => true, // Still running
             Ok(Some(status)) => {
-                log::info!("{:?} process has exited with status: {:?}", p.backend, status);
+                log::info!(
+                    "{:?} process has exited with status: {:?}",
+                    p.backend,
+                    status
+                );
                 false
             }
             Err(e) => {

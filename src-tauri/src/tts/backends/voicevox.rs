@@ -81,10 +81,11 @@ impl VoicevoxBackend {
         use rodio::{Decoder, OutputStreamBuilder, Sink};
         use std::io::Cursor;
 
-        let stream = OutputStreamBuilder::open_default_stream()
-            .map_err(|e| TtsError::AudioOutput(format!("Failed to initialize audio output: {}", e)))?;
+        let stream = OutputStreamBuilder::open_default_stream().map_err(|e| {
+            TtsError::AudioOutput(format!("Failed to initialize audio output: {}", e))
+        })?;
 
-        let sink = Sink::connect_new(&stream.mixer());
+        let sink = Sink::connect_new(stream.mixer());
 
         let cursor = Cursor::new(wav_bytes);
         let source = Decoder::new(cursor)
@@ -104,7 +105,10 @@ impl VoicevoxBackend {
             Ok(response) => {
                 if response.status().is_success() {
                     if let Ok(version) = response.text().await {
-                        log::info!("VOICEVOX connection successful (version: {})", version.trim());
+                        log::info!(
+                            "VOICEVOX connection successful (version: {})",
+                            version.trim()
+                        );
                     } else {
                         log::info!("VOICEVOX connection successful");
                     }

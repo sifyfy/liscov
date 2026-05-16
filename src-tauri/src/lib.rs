@@ -18,32 +18,71 @@ use tauri_plugin_window_state::StateFlags;
 
 // Re-export command functions for registration
 use commands::{
+    ConfigState,
+    SaveConfigState,
+    auth_check_session_validity,
+    auth_clear_webview_cookies,
+    auth_delete_credentials,
     // Auth (spec: 01_auth.md)
-    auth_get_status, auth_load_credentials, auth_save_raw_cookies, auth_save_credentials,
-    auth_delete_credentials, auth_clear_webview_cookies, auth_validate_credentials,
-    auth_open_window, auth_check_session_validity, auth_use_fallback_storage,
-    // Chat (spec: 02_chat.md)
-    connect_to_stream, disconnect_stream, disconnect_all_streams, get_connections,
-    set_chat_mode,
+    auth_get_status,
+    auth_load_credentials,
+    auth_open_window,
+    auth_save_credentials,
+    auth_save_raw_cookies,
+    auth_use_fallback_storage,
+    auth_validate_credentials,
+    broadcaster_delete,
+    broadcaster_get_list,
+    config_get_value,
     // Config (spec: 09_config.md)
-    config_load, config_save, config_get_value, config_set_value, ConfigState,
+    config_load,
+    config_save,
+    config_set_value,
+    // Chat (spec: 02_chat.md)
+    connect_to_stream,
+    disconnect_all_streams,
+    disconnect_stream,
+    export_current_messages,
+    export_session_data,
+    get_connections,
+    // Analytics (spec: 07_revenue.md)
+    get_revenue_analytics,
+    get_session_analytics,
+    get_session_messages,
+    // Database (spec: 08_database.md)
+    get_sessions,
+    get_top_contributors,
+    // Raw Response (spec: 05_raw_response.md)
+    raw_response_get_config,
+    raw_response_resolve_path,
+    raw_response_update_config,
+    set_chat_mode,
+    tts_clear_queue,
+    tts_discover_exe,
+    tts_get_config,
+    tts_get_launch_status,
+    tts_get_status,
+    tts_kill_backend,
+    tts_launch_backend,
+    tts_select_exe,
+    // TTS (spec: 04_tts.md)
+    tts_speak,
+    tts_speak_direct,
+    tts_start,
+    tts_stop,
+    tts_test_connection,
+    tts_update_config,
+    viewer_delete,
+    viewer_get_custom_info,
+    viewer_get_list,
+    // Viewer (spec: 06_viewer.md)
+    viewer_get_profile,
+    viewer_search,
+    viewer_update_info,
+    viewer_upsert_custom_info,
+    websocket::start_websocket_server_auto,
     // WebSocket (spec: 03_websocket.md) - auto-start, no manual start/stop
     websocket_get_status,
-    websocket::start_websocket_server_auto,
-    // Database (spec: 08_database.md)
-    get_sessions, get_session_messages, viewer_update_info,
-    // Analytics (spec: 07_revenue.md)
-    get_revenue_analytics, get_session_analytics, export_session_data, export_current_messages,
-    // TTS (spec: 04_tts.md)
-    tts_speak, tts_speak_direct, tts_update_config, tts_get_config, tts_test_connection,
-    tts_start, tts_stop, tts_clear_queue, tts_get_status,
-    tts_discover_exe, tts_select_exe, tts_launch_backend, tts_kill_backend, tts_get_launch_status,
-    // Viewer (spec: 06_viewer.md)
-    viewer_get_profile, viewer_get_list, viewer_search, viewer_get_custom_info,
-    viewer_upsert_custom_info,
-    viewer_delete, broadcaster_get_list, broadcaster_delete, get_top_contributors,
-    // Raw Response (spec: 05_raw_response.md)
-    raw_response_get_config, raw_response_update_config, raw_response_resolve_path, SaveConfigState,
 };
 
 // Simple greet command for testing
@@ -75,7 +114,9 @@ pub fn run() {
             }
 
             // Show window after state restoration (window starts hidden)
-            let window = app.get_webview_window("main").expect("main window not found");
+            let window = app
+                .get_webview_window("main")
+                .expect("main window not found");
             window.show().expect("failed to show window");
 
             // Auto-start WebSocket server
@@ -216,8 +257,9 @@ pub fn run() {
                             .is_launched(&tts::TtsBackendType::Voicevox)
                             .await
                     {
-                        if let Err(e) =
-                            tts_process_manager.kill(&tts::TtsBackendType::Voicevox).await
+                        if let Err(e) = tts_process_manager
+                            .kill(&tts::TtsBackendType::Voicevox)
+                            .await
                         {
                             log::error!("Failed to kill VOICEVOX on exit: {}", e);
                         }

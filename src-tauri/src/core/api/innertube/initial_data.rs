@@ -51,7 +51,9 @@ pub fn parse_initial_data(
     }
 
     // continuation token を抽出
-    if let Some(chat) = data.pointer("/contents/twoColumnWatchNextResults/conversationBar/liveChatRenderer") {
+    if let Some(chat) =
+        data.pointer("/contents/twoColumnWatchNextResults/conversationBar/liveChatRenderer")
+    {
         if let Some(continuations) = chat.get("continuations") {
             if let Some(cont) = continuations.get(0) {
                 let token = cont

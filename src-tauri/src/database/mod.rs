@@ -1,11 +1,11 @@
 //! Database module for Liscov
 
-pub mod models;
 mod crud;
 mod migrations;
+pub mod models;
 
-pub use models::*;
 pub use crud::*;
+pub use models::*;
 
 use anyhow::Result;
 use rusqlite::Connection;

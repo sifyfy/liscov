@@ -22,7 +22,9 @@ fn build_test_app() -> tauri::App<tauri::test::MockRuntime> {
     let config_state = {
         let state = ConfigState::new();
         let mut config = Config::default();
-        config.storage = StorageConfig { mode: StorageMode::Fallback };
+        config.storage = StorageConfig {
+            mode: StorageMode::Fallback,
+        };
         state.set(config);
         state
     };
@@ -93,7 +95,11 @@ async fn auth_save_raw_cookies_valid_cookies_saves_to_file() {
             serde_json::json!({ "rawCookies": "SID=s; HSID=h; SSID=ss; APISID=a; SAPISID=sa" }),
         ),
     );
-    assert!(save_resp.is_ok(), "auth_save_raw_cookies should succeed: {:?}", save_resp.err());
+    assert!(
+        save_resp.is_ok(),
+        "auth_save_raw_cookies should succeed: {:?}",
+        save_resp.err()
+    );
 
     // ファイルが作成されたことを確認
     let cred_path = app_lib::paths::credentials_path().expect("credentials_path should succeed");
@@ -101,7 +107,10 @@ async fn auth_save_raw_cookies_valid_cookies_saves_to_file() {
 
     // auth_load_credentials で読み戻せることを確認
     let load_resp = get_ipc_response(&webview, invoke_no_args("auth_load_credentials"));
-    assert!(load_resp.is_ok(), "auth_load_credentials should succeed after save");
+    assert!(
+        load_resp.is_ok(),
+        "auth_load_credentials should succeed after save"
+    );
     let loaded: bool = load_resp.unwrap().deserialize().unwrap();
     assert!(loaded, "auth_load_credentials should return true");
 }
@@ -176,11 +185,18 @@ async fn auth_save_credentials_valid_saves() {
             }),
         ),
     );
-    assert!(save_resp.is_ok(), "auth_save_credentials should succeed: {:?}", save_resp.err());
+    assert!(
+        save_resp.is_ok(),
+        "auth_save_credentials should succeed: {:?}",
+        save_resp.err()
+    );
 
     // auth_validate_credentials で検証
     let validate_resp = get_ipc_response(&webview, invoke_no_args("auth_validate_credentials"));
-    assert!(validate_resp.is_ok(), "auth_validate_credentials should succeed");
+    assert!(
+        validate_resp.is_ok(),
+        "auth_validate_credentials should succeed"
+    );
     let is_valid: bool = validate_resp.unwrap().deserialize().unwrap();
     assert!(is_valid, "保存後は validate が true を返すべき");
 }
@@ -202,7 +218,10 @@ async fn auth_load_credentials_no_file_returns_error() {
 
     // ファイルが存在しないことを確認（ガードのコンストラクタで削除済み）
     let cred_path = app_lib::paths::credentials_path().expect("credentials_path should succeed");
-    assert!(!cred_path.exists(), "テスト開始時はファイルが存在しないはず");
+    assert!(
+        !cred_path.exists(),
+        "テスト開始時はファイルが存在しないはず"
+    );
 
     let resp = get_ipc_response(&webview, invoke_no_args("auth_load_credentials"));
     // ファイルなし → AuthRequired エラー
@@ -264,7 +283,11 @@ async fn auth_delete_credentials_removes_file() {
 
     // 削除
     let delete_resp = get_ipc_response(&webview, invoke_no_args("auth_delete_credentials"));
-    assert!(delete_resp.is_ok(), "auth_delete_credentials should succeed: {:?}", delete_resp.err());
+    assert!(
+        delete_resp.is_ok(),
+        "auth_delete_credentials should succeed: {:?}",
+        delete_resp.err()
+    );
 
     // ファイルが削除されたことを確認
     let cred_path = app_lib::paths::credentials_path().expect("credentials_path should succeed");
@@ -323,7 +346,10 @@ async fn auth_validate_credentials_with_valid_credentials_returns_true() {
 
     // バリデーション
     let validate_resp = get_ipc_response(&webview, invoke_no_args("auth_validate_credentials"));
-    assert!(validate_resp.is_ok(), "auth_validate_credentials should succeed");
+    assert!(
+        validate_resp.is_ok(),
+        "auth_validate_credentials should succeed"
+    );
     let is_valid: bool = validate_resp.unwrap().deserialize().unwrap();
     assert!(is_valid, "保存後は validate が true を返すべき");
 }
