@@ -36,6 +36,10 @@ pub struct TtsQueueItem {
     pub amount: Option<String>,
     /// 配信内コメント回数（初回コメント判定に使用）
     pub in_stream_comment_count: Option<u32>,
+    /// 由来のチャットメッセージID（障害解析時のトレーサビリティ用）。
+    /// `tts_speak` 等の直接呼び出し経由ではキューアイテムにメッセージIDが
+    /// 紐付かないため `None`。
+    pub message_id: Option<String>,
 }
 
 /// TTS Manager handles TTS operations
@@ -233,7 +237,11 @@ impl TtsManager {
                             let b = backend.read().await;
                             if let Some(ref backend) = *b {
                                 if let Err(e) = backend.speak(&text).await {
-                                    log::error!("TTS speak error: {}", e);
+                                    log::error!(
+                                        "TTS speak error (message_id={:?}): {}",
+                                        item.message_id,
+                                        e
+                                    );
                                 }
                             }
                         } else {
@@ -963,6 +971,7 @@ mod tests {
             author_name: Some("テスター".to_string()),
             amount: None,
             in_stream_comment_count: Some(2),
+            message_id: None,
         };
         manager.enqueue(item).await;
         assert_eq!(manager.queue_size().await, 0);
@@ -978,6 +987,7 @@ mod tests {
             author_name: Some("テスター".to_string()),
             amount: None,
             in_stream_comment_count: Some(1),
+            message_id: None,
         };
         manager.enqueue(item).await;
         assert_eq!(manager.queue_size().await, 1);
@@ -993,6 +1003,7 @@ mod tests {
             author_name: Some("テスター".to_string()),
             amount: None,
             in_stream_comment_count: Some(5),
+            message_id: None,
         };
         manager.enqueue(item).await;
         assert_eq!(manager.queue_size().await, 1);
@@ -1012,6 +1023,7 @@ mod tests {
                 author_name: None,
                 amount: None,
                 in_stream_comment_count: None,
+                message_id: None,
             })
             .await;
         assert_eq!(manager.queue_size().await, 0);
@@ -1069,6 +1081,7 @@ mod tests {
             author_name: Some("田中".to_string()),
             amount: None,
             in_stream_comment_count: None,
+            message_id: None,
         };
         let result = manager.format_text(&item).await;
         // 空文字でもなく、元テキストそのままでもない（著者名が付加される）
@@ -1098,6 +1111,7 @@ mod tests {
                     author_name: None,
                     amount: None,
                     in_stream_comment_count: None,
+                    message_id: None,
                 })
                 .await;
         }
@@ -1119,6 +1133,7 @@ mod tests {
                 author_name: None,
                 amount: None,
                 in_stream_comment_count: None,
+                message_id: None,
             })
             .await;
         manager
@@ -1128,6 +1143,7 @@ mod tests {
                 author_name: None,
                 amount: None,
                 in_stream_comment_count: None,
+                message_id: None,
             })
             .await;
         manager
@@ -1137,6 +1153,7 @@ mod tests {
                 author_name: None,
                 amount: None,
                 in_stream_comment_count: None,
+                message_id: None,
             })
             .await;
         // 最古「最古」が破棄され、「2番目」と「最新」が残る
@@ -1164,6 +1181,7 @@ mod tests {
                 author_name: None,
                 amount: None,
                 in_stream_comment_count: None,
+                message_id: None,
             })
             .await;
         manager
@@ -1173,6 +1191,7 @@ mod tests {
                 author_name: None,
                 amount: None,
                 in_stream_comment_count: None,
+                message_id: None,
             })
             .await;
         let queue = manager.queue.lock().await;
@@ -1194,6 +1213,7 @@ mod tests {
                 author_name: None,
                 amount: None,
                 in_stream_comment_count: None,
+                message_id: None,
             })
             .await;
         manager
@@ -1203,6 +1223,7 @@ mod tests {
                 author_name: None,
                 amount: None,
                 in_stream_comment_count: None,
+                message_id: None,
             })
             .await;
         let queue = manager.queue.lock().await;
@@ -1224,6 +1245,7 @@ mod tests {
                 author_name: None,
                 amount: None,
                 in_stream_comment_count: None,
+                message_id: None,
             })
             .await;
         manager
@@ -1233,6 +1255,7 @@ mod tests {
                 author_name: None,
                 amount: None,
                 in_stream_comment_count: None,
+                message_id: None,
             })
             .await;
         manager
@@ -1242,6 +1265,7 @@ mod tests {
                 author_name: None,
                 amount: None,
                 in_stream_comment_count: None,
+                message_id: None,
             })
             .await;
         let queue = manager.queue.lock().await;
@@ -1315,6 +1339,7 @@ mod tests {
                     author_name: None,
                     amount: None,
                     in_stream_comment_count: None,
+                    message_id: None,
                 })
                 .await;
         }

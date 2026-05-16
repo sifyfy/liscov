@@ -318,6 +318,7 @@ async fn enqueue_tts(tts_manager: &TtsManager, msg: &ChatMessage) {
         author_name: Some(msg.author.clone()),
         amount,
         in_stream_comment_count: msg.in_stream_comment_count,
+        message_id: Some(msg.id.clone()),
     };
     tts_manager.enqueue(item).await;
 }

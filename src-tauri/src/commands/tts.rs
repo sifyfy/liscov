@@ -166,6 +166,7 @@ pub async fn tts_speak(
         author_name,
         amount,
         in_stream_comment_count: None,
+        message_id: None,
     };
 
     state.tts_manager.enqueue(item).await;
