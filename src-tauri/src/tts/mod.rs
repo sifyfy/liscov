@@ -7,10 +7,10 @@ pub mod backends;
 pub mod config;
 pub mod process;
 
+use regex::Regex;
 use std::collections::VecDeque;
 use std::sync::{Arc, LazyLock};
-use regex::Regex;
-use tokio::sync::{mpsc, Mutex, RwLock};
+use tokio::sync::{Mutex, RwLock, mpsc};
 
 pub use backends::{BouyomichanBackend, TtsBackend, TtsError, VoicevoxBackend};
 pub use config::{BouyomichanConfig, TtsBackendType, TtsConfig, VoicevoxConfig};
@@ -50,11 +50,8 @@ pub struct TtsManager {
 impl TtsManager {
     /// Create a new TTS manager
     pub fn new(config: TtsConfig) -> Self {
-        let backend = backends::create_backend(
-            &config.backend,
-            &config.bouyomichan,
-            &config.voicevox,
-        );
+        let backend =
+            backends::create_backend(&config.backend, &config.bouyomichan, &config.voicevox);
         Self::with_backend(config, backend)
     }
 
@@ -76,11 +73,8 @@ impl TtsManager {
             log::error!("Failed to save TTS config: {}", e);
         }
 
-        let backend = backends::create_backend(
-            &config.backend,
-            &config.bouyomichan,
-            &config.voicevox,
-        );
+        let backend =
+            backends::create_backend(&config.backend, &config.bouyomichan, &config.voicevox);
         *self.config.write().await = config;
         *self.backend.write().await = backend;
     }
@@ -100,13 +94,13 @@ impl TtsManager {
     }
 
     /// Test connection to a specific backend type
-    pub async fn test_backend_connection(&self, backend_type: TtsBackendType) -> Result<bool, TtsError> {
+    pub async fn test_backend_connection(
+        &self,
+        backend_type: TtsBackendType,
+    ) -> Result<bool, TtsError> {
         let config = self.config.read().await;
-        let test_backend = backends::create_backend(
-            &backend_type,
-            &config.bouyomichan,
-            &config.voicevox,
-        );
+        let test_backend =
+            backends::create_backend(&backend_type, &config.bouyomichan, &config.voicevox);
 
         match test_backend {
             Some(b) => b.test_connection().await,
@@ -309,7 +303,10 @@ pub(crate) fn resolve_first_comment_prefix(configured: &str) -> &str {
 }
 
 /// 初回コメントのみ読み上げ設定に基づき、このメッセージをスキップすべきか判定する
-pub(crate) fn should_skip_tts(first_comment_only: bool, in_stream_comment_count: Option<u32>) -> bool {
+pub(crate) fn should_skip_tts(
+    first_comment_only: bool,
+    in_stream_comment_count: Option<u32>,
+) -> bool {
     if !first_comment_only {
         return false;
     }
@@ -347,9 +344,21 @@ pub(crate) fn process_author_name(
     strip_handle: bool,
     honorific: bool,
 ) -> String {
-    let s = if strip_at { name.strip_prefix('@').unwrap_or(name) } else { name };
-    let s = if strip_handle { s.rfind('-').map_or(s, |pos| &s[..pos]) } else { s };
-    if honorific { format!("{}さん", s) } else { s.to_string() }
+    let s = if strip_at {
+        name.strip_prefix('@').unwrap_or(name)
+    } else {
+        name
+    };
+    let s = if strip_handle {
+        s.rfind('-').map_or(s, |pos| &s[..pos])
+    } else {
+        s
+    };
+    if honorific {
+        format!("{}さん", s)
+    } else {
+        s.to_string()
+    }
 }
 
 /// メッセージテキストをサニタイズする
@@ -458,10 +467,7 @@ mod tests {
 
     #[test]
     fn author_name_strip_at_only() {
-        assert_eq!(
-            process_author_name("@田中", true, false, false),
-            "田中"
-        );
+        assert_eq!(process_author_name("@田中", true, false, false), "田中");
     }
 
     #[test]
@@ -484,10 +490,7 @@ mod tests {
 
     #[test]
     fn author_name_honorific_false() {
-        assert_eq!(
-            process_author_name("田中-abc", true, true, false),
-            "田中"
-        );
+        assert_eq!(process_author_name("田中-abc", true, true, false), "田中");
     }
 
     #[test]
@@ -611,10 +614,7 @@ mod tests {
     #[test]
     fn sanitize_url_removal_then_whitespace_compression() {
         // URL除去後に生まれた連続空白も圧縮される
-        assert_eq!(
-            sanitize_message("前 http://example.com 後"),
-            "前 後"
-        );
+        assert_eq!(sanitize_message("前 http://example.com 後"), "前 後");
     }
 
     #[test]
@@ -634,24 +634,19 @@ mod tests {
             Some("田中"),
             Some("¥500"),
             "こんにちは",
-            true,  // read_author_name
-            true,  // strip_at
-            true,  // strip_handle
-            true,  // add_honorific
-            true,  // read_superchat_amount
-            200,   // max_text_length
+            true, // read_author_name
+            true, // strip_at
+            true, // strip_handle
+            true, // add_honorific
+            true, // read_superchat_amount
+            200,  // max_text_length
         );
         assert_eq!(result, "田中さん、¥500の、こんにちは");
     }
 
     #[test]
     fn build_text_no_author() {
-        let result = build_tts_text(
-            None,
-            None,
-            "こんにちは",
-            true, true, true, true, true, 200,
-        );
+        let result = build_tts_text(None, None, "こんにちは", true, true, true, true, true, 200);
         assert_eq!(result, "こんにちは");
     }
 
@@ -662,7 +657,11 @@ mod tests {
             None,
             "こんにちは",
             false, // read_author_name disabled
-            true, true, true, true, 200,
+            true,
+            true,
+            true,
+            true,
+            200,
         );
         assert_eq!(result, "こんにちは");
     }
@@ -673,7 +672,10 @@ mod tests {
             Some("田中"),
             Some("¥500"),
             "テスト",
-            true, true, true, true,
+            true,
+            true,
+            true,
+            true,
             false, // read_superchat_amount disabled
             200,
         );
@@ -686,7 +688,12 @@ mod tests {
             Some("@user123"),
             None,
             "hello",
-            true, true, true, true, true, 200,
+            true,
+            true,
+            true,
+            true,
+            true,
+            200,
         );
         assert_eq!(result, "user123さん、hello");
     }
@@ -702,7 +709,12 @@ mod tests {
             Some("@山田太郎-xyz"),
             Some("¥500"),
             "こんにちは！",
-            true, true, true, true, true, 200,
+            true,
+            true,
+            true,
+            true,
+            true,
+            200,
         );
         assert_eq!(result, "山田太郎さん、¥500の、こんにちは！");
     }
@@ -711,9 +723,15 @@ mod tests {
     fn build_text_sanitizes_url_in_message() {
         // spec: メッセージ内のURLが除去される
         let result = build_tts_text(
-            None, None,
+            None,
+            None,
             "見て https://example.com ね",
-            true, true, true, true, true, 200,
+            true,
+            true,
+            true,
+            true,
+            true,
+            200,
         );
         assert_eq!(result, "見て ね");
     }
@@ -722,10 +740,7 @@ mod tests {
     fn build_text_sanitize_then_truncate() {
         // spec: サニタイズ後のテキストに対してmax_text_lengthが適用される
         let long_msg = format!("https://example.com/long {}", "あ".repeat(201));
-        let result = build_tts_text(
-            None, None, &long_msg,
-            true, true, true, true, true, 200,
-        );
+        let result = build_tts_text(None, None, &long_msg, true, true, true, true, true, 200);
         let expected = format!("{}、以下省略", "あ".repeat(200));
         assert_eq!(result, expected);
     }
@@ -737,7 +752,12 @@ mod tests {
             Some("@田中-abc"),
             None,
             "テスト",
-            true, true, true, true, false, 200,
+            true,
+            true,
+            true,
+            true,
+            false,
+            200,
         );
         assert_eq!(result, "田中さん、テスト");
     }
@@ -903,8 +923,15 @@ mod tests {
         // Edge Case: スーパーチャットが初回コメント
         let prefix = build_first_comment_prefix(true, "", Some(1));
         let tts_text = build_tts_text(
-            Some("@山田太郎-xyz"), Some("¥500"), "こんにちは",
-            true, true, true, true, true, 200,
+            Some("@山田太郎-xyz"),
+            Some("¥500"),
+            "こんにちは",
+            true,
+            true,
+            true,
+            true,
+            true,
+            200,
         );
         let result = match prefix {
             Some(p) => format!("{}{}", p, tts_text),
@@ -978,13 +1005,15 @@ mod tests {
             enabled: false,
             ..TtsConfig::default()
         });
-        manager.enqueue(TtsQueueItem {
-            text: "テスト".to_string(),
-            priority: TtsPriority::Normal,
-            author_name: None,
-            amount: None,
-            in_stream_comment_count: None,
-        }).await;
+        manager
+            .enqueue(TtsQueueItem {
+                text: "テスト".to_string(),
+                priority: TtsPriority::Normal,
+                author_name: None,
+                amount: None,
+                in_stream_comment_count: None,
+            })
+            .await;
         assert_eq!(manager.queue_size().await, 0);
     }
 
@@ -1062,13 +1091,15 @@ mod tests {
             ..TtsConfig::default()
         });
         for i in 0..3 {
-            manager.enqueue(TtsQueueItem {
-                text: format!("メッセージ{}", i),
-                priority: TtsPriority::Normal,
-                author_name: None,
-                amount: None,
-                in_stream_comment_count: None,
-            }).await;
+            manager
+                .enqueue(TtsQueueItem {
+                    text: format!("メッセージ{}", i),
+                    priority: TtsPriority::Normal,
+                    author_name: None,
+                    amount: None,
+                    in_stream_comment_count: None,
+                })
+                .await;
         }
         assert_eq!(manager.queue_size().await, 2);
     }
@@ -1081,27 +1112,33 @@ mod tests {
             queue_size_limit: 2,
             ..TtsConfig::default()
         });
-        manager.enqueue(TtsQueueItem {
-            text: "最古".to_string(),
-            priority: TtsPriority::Normal,
-            author_name: None,
-            amount: None,
-            in_stream_comment_count: None,
-        }).await;
-        manager.enqueue(TtsQueueItem {
-            text: "2番目".to_string(),
-            priority: TtsPriority::Normal,
-            author_name: None,
-            amount: None,
-            in_stream_comment_count: None,
-        }).await;
-        manager.enqueue(TtsQueueItem {
-            text: "最新".to_string(),
-            priority: TtsPriority::Normal,
-            author_name: None,
-            amount: None,
-            in_stream_comment_count: None,
-        }).await;
+        manager
+            .enqueue(TtsQueueItem {
+                text: "最古".to_string(),
+                priority: TtsPriority::Normal,
+                author_name: None,
+                amount: None,
+                in_stream_comment_count: None,
+            })
+            .await;
+        manager
+            .enqueue(TtsQueueItem {
+                text: "2番目".to_string(),
+                priority: TtsPriority::Normal,
+                author_name: None,
+                amount: None,
+                in_stream_comment_count: None,
+            })
+            .await;
+        manager
+            .enqueue(TtsQueueItem {
+                text: "最新".to_string(),
+                priority: TtsPriority::Normal,
+                author_name: None,
+                amount: None,
+                in_stream_comment_count: None,
+            })
+            .await;
         // 最古「最古」が破棄され、「2番目」と「最新」が残る
         let queue = manager.queue.lock().await;
         assert_eq!(queue.len(), 2);
@@ -1120,20 +1157,24 @@ mod tests {
             enabled: true,
             ..TtsConfig::default()
         });
-        manager.enqueue(TtsQueueItem {
-            text: "ノーマル".to_string(),
-            priority: TtsPriority::Normal,
-            author_name: None,
-            amount: None,
-            in_stream_comment_count: None,
-        }).await;
-        manager.enqueue(TtsQueueItem {
-            text: "スーパーチャット".to_string(),
-            priority: TtsPriority::SuperChat,
-            author_name: None,
-            amount: None,
-            in_stream_comment_count: None,
-        }).await;
+        manager
+            .enqueue(TtsQueueItem {
+                text: "ノーマル".to_string(),
+                priority: TtsPriority::Normal,
+                author_name: None,
+                amount: None,
+                in_stream_comment_count: None,
+            })
+            .await;
+        manager
+            .enqueue(TtsQueueItem {
+                text: "スーパーチャット".to_string(),
+                priority: TtsPriority::SuperChat,
+                author_name: None,
+                amount: None,
+                in_stream_comment_count: None,
+            })
+            .await;
         let queue = manager.queue.lock().await;
         assert_eq!(queue[0].priority, TtsPriority::SuperChat);
         assert_eq!(queue[0].text, "スーパーチャット");
@@ -1146,20 +1187,24 @@ mod tests {
             enabled: true,
             ..TtsConfig::default()
         });
-        manager.enqueue(TtsQueueItem {
-            text: "a".to_string(),
-            priority: TtsPriority::Normal,
-            author_name: None,
-            amount: None,
-            in_stream_comment_count: None,
-        }).await;
-        manager.enqueue(TtsQueueItem {
-            text: "b".to_string(),
-            priority: TtsPriority::Normal,
-            author_name: None,
-            amount: None,
-            in_stream_comment_count: None,
-        }).await;
+        manager
+            .enqueue(TtsQueueItem {
+                text: "a".to_string(),
+                priority: TtsPriority::Normal,
+                author_name: None,
+                amount: None,
+                in_stream_comment_count: None,
+            })
+            .await;
+        manager
+            .enqueue(TtsQueueItem {
+                text: "b".to_string(),
+                priority: TtsPriority::Normal,
+                author_name: None,
+                amount: None,
+                in_stream_comment_count: None,
+            })
+            .await;
         let queue = manager.queue.lock().await;
         assert_eq!(queue[0].text, "a");
         assert_eq!(queue[1].text, "b");
@@ -1172,21 +1217,33 @@ mod tests {
             enabled: true,
             ..TtsConfig::default()
         });
-        manager.enqueue(TtsQueueItem {
-            text: "ノーマル".to_string(),
-            priority: TtsPriority::Normal,
-            author_name: None, amount: None, in_stream_comment_count: None,
-        }).await;
-        manager.enqueue(TtsQueueItem {
-            text: "メンバーシップ".to_string(),
-            priority: TtsPriority::Membership,
-            author_name: None, amount: None, in_stream_comment_count: None,
-        }).await;
-        manager.enqueue(TtsQueueItem {
-            text: "スーパーチャット".to_string(),
-            priority: TtsPriority::SuperChat,
-            author_name: None, amount: None, in_stream_comment_count: None,
-        }).await;
+        manager
+            .enqueue(TtsQueueItem {
+                text: "ノーマル".to_string(),
+                priority: TtsPriority::Normal,
+                author_name: None,
+                amount: None,
+                in_stream_comment_count: None,
+            })
+            .await;
+        manager
+            .enqueue(TtsQueueItem {
+                text: "メンバーシップ".to_string(),
+                priority: TtsPriority::Membership,
+                author_name: None,
+                amount: None,
+                in_stream_comment_count: None,
+            })
+            .await;
+        manager
+            .enqueue(TtsQueueItem {
+                text: "スーパーチャット".to_string(),
+                priority: TtsPriority::SuperChat,
+                author_name: None,
+                amount: None,
+                in_stream_comment_count: None,
+            })
+            .await;
         let queue = manager.queue.lock().await;
         // SuperChat → Membership → Normal の順序で並ぶ
         assert_eq!(queue[0].priority, TtsPriority::SuperChat);
@@ -1251,13 +1308,15 @@ mod tests {
             ..TtsConfig::default()
         });
         for i in 0..3 {
-            manager.enqueue(TtsQueueItem {
-                text: format!("アイテム{}", i),
-                priority: TtsPriority::Normal,
-                author_name: None,
-                amount: None,
-                in_stream_comment_count: None,
-            }).await;
+            manager
+                .enqueue(TtsQueueItem {
+                    text: format!("アイテム{}", i),
+                    priority: TtsPriority::Normal,
+                    author_name: None,
+                    amount: None,
+                    in_stream_comment_count: None,
+                })
+                .await;
         }
         assert_eq!(manager.queue_size().await, 3);
         manager.clear_queue().await;
@@ -1271,9 +1330,9 @@ mod tests {
     #[test]
     fn bouyomichan_auto_close_defaults_to_true_via_serde() {
         // spec: TOML に auto_close が未指定の場合、serde default により true になる
-        let config: BouyomichanConfig = toml::from_str(
-            "host=\"localhost\"\nport=50080\nvoice=0\nvolume=-1\nspeed=-1\ntone=-1"
-        ).expect("TOMLパース失敗");
+        let config: BouyomichanConfig =
+            toml::from_str("host=\"localhost\"\nport=50080\nvoice=0\nvolume=-1\nspeed=-1\ntone=-1")
+                .expect("TOMLパース失敗");
         assert!(config.auto_close);
     }
 
@@ -1358,7 +1417,10 @@ mod tests {
     async fn test_backend_connection_returns_false_for_none_type() {
         // spec: TtsBackendType::None → test_backend_connection は false を返す
         let manager = TtsManager::new(TtsConfig::default());
-        let result = manager.test_backend_connection(TtsBackendType::None).await.unwrap();
+        let result = manager
+            .test_backend_connection(TtsBackendType::None)
+            .await
+            .unwrap();
         assert!(!result);
     }
 
@@ -1371,10 +1433,7 @@ mod tests {
         // spec: speak_direct はバックエンドの speak を呼び出す
         let mock = MockTtsBackend::connected();
         let speak_calls = Arc::clone(&mock.speak_calls);
-        let manager = TtsManager::with_backend(
-            TtsConfig::default(),
-            Some(Box::new(mock)),
-        );
+        let manager = TtsManager::with_backend(TtsConfig::default(), Some(Box::new(mock)));
         manager.speak_direct("テスト発話").await.unwrap();
         let calls = speak_calls.lock().await;
         assert_eq!(calls.len(), 1);

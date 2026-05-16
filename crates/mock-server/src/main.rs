@@ -5,10 +5,14 @@
 //!   POST /set_auth_state                    - Control auth behavior
 //!   GET  /auth_status                       - Get current auth state
 
-use base64::{engine::general_purpose, Engine as _};
+// YouTube API の略称 (AMR / SAR / SSR 等) は仕様側の命名を尊重する。
+// deserialize 専用のフィールドは将来の挙動切替のため保持する。
+#![allow(clippy::upper_case_acronyms, dead_code)]
+
+use base64::{Engine as _, engine::general_purpose};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
@@ -33,7 +37,8 @@ fn detect_chat_mode_from_token(token: &str) -> Option<String> {
     for i in 0..decoded.len().saturating_sub(4) {
         if decoded[i] == 0x82 && decoded[i + 1] == 0x01 {
             let len = decoded[i + 2] as usize;
-            if decoded[i + 2] & 0x80 == 0 && i + 3 + len <= decoded.len() && decoded[i + 3] == 0x08 {
+            if decoded[i + 2] & 0x80 == 0 && i + 3 + len <= decoded.len() && decoded[i + 3] == 0x08
+            {
                 let chattype = decoded[i + 4];
                 return match chattype {
                     4 => Some("TopChat".to_string()),
@@ -152,7 +157,10 @@ struct Args {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct ResponseEntry { timestamp: u64, response: Value }
+struct ResponseEntry {
+    timestamp: u64,
+    response: Value,
+}
 
 /// Token validation result for testing
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -211,19 +219,19 @@ struct ServerState {
     replay_state: Mutex<ReplayState>,
     request_count: AtomicU64,
     message_counter: AtomicU64,
-    login_page_visits: AtomicU64,  // Track login page visits for cookie clearing verification
+    login_page_visits: AtomicU64, // Track login page visits for cookie clearing verification
     auth_state: Mutex<AuthState>,
     stream_state: Mutex<StreamState>,
-    last_chat_mode: Mutex<Option<String>>,  // Track chat mode from continuation token
-    token_validation: Mutex<TokenValidation>,  // Detailed token validation results
-    auto_message: Mutex<AutoMessageState>,  // Auto-generate messages for stress testing
-    last_request_cookies: Mutex<LastRequestCookies>,  // Track cookies received in API requests
+    last_chat_mode: Mutex<Option<String>>, // Track chat mode from continuation token
+    token_validation: Mutex<TokenValidation>, // Detailed token validation results
+    auto_message: Mutex<AutoMessageState>, // Auto-generate messages for stress testing
+    last_request_cookies: Mutex<LastRequestCookies>, // Track cookies received in API requests
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct StreamState {
-    member_only: bool,           // Member-only stream
-    require_auth: bool,          // Require authentication for chat
+    member_only: bool,  // Member-only stream
+    require_auth: bool, // Require authentication for chat
     /// Force /watch to return HTML without liveChatRenderer (regardless of auth).
     /// Used to test /next API fallback path.
     watch_force_no_chat: bool,
@@ -257,21 +265,6 @@ impl Default for AuthState {
     }
 }
 
-impl Default for StreamState {
-    fn default() -> Self {
-        Self {
-            member_only: false,
-            require_auth: false,
-            watch_force_no_chat: false,
-            title_override: None,
-            channel_id_override: None,
-            channel_name_override: None,
-            watch_delay_ms: 0,
-            chat_delay_ms: 0,
-        }
-    }
-}
-
 struct ServerConfig {
     video_id: String,
     channel_id: String,
@@ -294,26 +287,46 @@ async fn main() {
     env_logger::init();
     let args = Args::parse();
     if let Some(path) = args.generate {
-        if let Err(e) = generate_sample_ndjson(&path) { eprintln!("Error: {}", e); std::process::exit(1); }
+        if let Err(e) = generate_sample_ndjson(&path) {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
         println!("Generated: {}", path);
         return;
     }
     let replay_entries = if let Some(ref fp) = args.file {
         match load_ndjson(fp) {
-            Ok(e) => { println!("Loaded {} entries", e.len()); e }
-            Err(e) => { eprintln!("Error: {}", e); std::process::exit(1); }
+            Ok(e) => {
+                println!("Loaded {} entries", e.len());
+                e
+            }
+            Err(e) => {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
         }
-    } else { Vec::new() };
+    } else {
+        Vec::new()
+    };
 
     let state = Arc::new(ServerState {
         config: ServerConfig {
-            video_id: args.video_id.clone(), channel_id: "UC_mock".into(),
-            channel_name: args.channel_name.clone(), stream_title: "Mock Live".into(),
-            replay_entries, replay_speed: args.speed, replay_loop: args.r#loop,
+            video_id: args.video_id.clone(),
+            channel_id: "UC_mock".into(),
+            channel_name: args.channel_name.clone(),
+            stream_title: "Mock Live".into(),
+            replay_entries,
+            replay_speed: args.speed,
+            replay_loop: args.r#loop,
         },
         message_queue: Mutex::new(VecDeque::new()),
-        replay_state: Mutex::new(ReplayState { current_index: 0, start_time: None, base_timestamp: None }),
-        request_count: AtomicU64::new(0), message_counter: AtomicU64::new(0),
+        replay_state: Mutex::new(ReplayState {
+            current_index: 0,
+            start_time: None,
+            base_timestamp: None,
+        }),
+        request_count: AtomicU64::new(0),
+        message_counter: AtomicU64::new(0),
         login_page_visits: AtomicU64::new(0),
         auth_state: Mutex::new(AuthState::default()),
         stream_state: Mutex::new(StreamState::default()),
@@ -328,14 +341,20 @@ async fn main() {
     warp::serve(routes).run(addr).await;
 }
 
-fn build_routes(state: Arc<ServerState>) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+fn build_routes(
+    state: Arc<ServerState>,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
     // ログインページ（認証ウィンドウE2Eテスト用）
     // GET / または GET /login でアクセス
     let slp = Arc::clone(&state);
-    let login_page = warp::path::end().or(warp::path("login")).unify().and(warp::get()).map(move || {
-        slp.login_page_visits.fetch_add(1, Ordering::SeqCst);
-        warp::reply::html(gen_login_html())
-    });
+    let login_page = warp::path::end()
+        .or(warp::path("login"))
+        .unify()
+        .and(warp::get())
+        .map(move || {
+            slp.login_page_visits.fetch_add(1, Ordering::SeqCst);
+            warp::reply::html(gen_login_html())
+        });
 
     // ログイン処理（Set-Cookieでブラウザにcookieを設定してリダイレクト）
     let sdl = Arc::clone(&state);
@@ -357,16 +376,16 @@ fn build_routes(state: Arc<ServerState>) -> impl Filter<Extract = impl warp::Rep
 
         let mut resp = warp::reply::Response::new(warp::hyper::Body::empty());
         *resp.status_mut() = warp::http::StatusCode::SEE_OTHER;
-        resp.headers_mut().insert(
-            "Location",
-            "/logged_in".parse().unwrap(),
-        );
+        resp.headers_mut()
+            .insert("Location", "/logged_in".parse().unwrap());
 
         // Set-Cookie ヘッダーでブラウザのCookieストアに保存
         for (name, value) in cookies {
             resp.headers_mut().append(
                 "Set-Cookie",
-                format!("{}={}; Path=/; SameSite=Lax", name, value).parse().unwrap(),
+                format!("{}={}; Path=/; SameSite=Lax", name, value)
+                    .parse()
+                    .unwrap(),
             );
         }
 
@@ -374,58 +393,69 @@ fn build_routes(state: Arc<ServerState>) -> impl Filter<Extract = impl warp::Rep
     });
 
     // ログイン完了ページ
-    let logged_in = warp::path("logged_in").and(warp::get()).map(|| {
-        warp::reply::html(gen_logged_in_html())
-    });
+    let logged_in = warp::path("logged_in")
+        .and(warp::get())
+        .map(|| warp::reply::html(gen_logged_in_html()));
 
     let sw = Arc::clone(&state);
     let watch = warp::path("watch")
         .and(warp::query::<WQ>())
         .and(warp::header::optional::<String>("cookie"))
         .and_then(move |q: WQ, cookie_header: Option<String>| {
-        let sw = Arc::clone(&sw);
-        async move {
-            let delay = {
-                let ss = sw.stream_state.lock().unwrap();
-                ss.watch_delay_ms
-            };
-            if delay > 0 {
-                tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+            let sw = Arc::clone(&sw);
+            async move {
+                let delay = {
+                    let ss = sw.stream_state.lock().unwrap();
+                    ss.watch_delay_ms
+                };
+                if delay > 0 {
+                    tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+                }
+                let vid = q.v.as_deref().unwrap_or(&sw.config.video_id);
+                let stream_state = sw.stream_state.lock().unwrap();
+                let require_auth = stream_state.require_auth;
+                // video_idに応じてデフォルトのタイトルとチャンネル名を決定する（複数ストリーム対応）
+                let (default_title, default_channel_name) = match vid {
+                    "test_video_456" => ("Mock Live 2".to_string(), "MockBroadcaster2".to_string()),
+                    _ => (
+                        sw.config.stream_title.clone(),
+                        sw.config.channel_name.clone(),
+                    ),
+                };
+                let title_owned = stream_state.title_override.clone().unwrap_or(default_title);
+                let title = &title_owned;
+                let channel_id = stream_state
+                    .channel_id_override
+                    .as_ref()
+                    .unwrap_or(&sw.config.channel_id);
+                let channel_name_owned = stream_state
+                    .channel_name_override
+                    .clone()
+                    .unwrap_or(default_channel_name);
+                let channel_name = &channel_name_owned;
+                // Cookie記録（E2E cookie pipeline検証用）
+                if let Some(ref cookies) = cookie_header {
+                    sw.last_request_cookies.lock().unwrap().watch = Some(cookies.clone());
+                }
+                // 認証チェック: SAPISIDとSecurePSID(=__Secure-1PSID代替)の両方が必要
+                let secure_check = format!("{}=", MOCK_SECURE_COOKIE);
+                let has_auth_cookie = cookie_header
+                    .as_deref()
+                    .map(|c| c.contains("SAPISID=") && c.contains(&secure_check))
+                    .unwrap_or(false);
+                let force_no_chat = stream_state.watch_force_no_chat;
+                let html = if force_no_chat || (require_auth && !has_auth_cookie) {
+                    gen_html_no_chat(vid, channel_id, channel_name, title)
+                } else {
+                    gen_html(vid, channel_id, channel_name, title)
+                };
+                Ok::<_, warp::Rejection>(warp::reply::html(html))
             }
-            let vid = q.v.as_deref().unwrap_or(&sw.config.video_id);
-            let stream_state = sw.stream_state.lock().unwrap();
-            let require_auth = stream_state.require_auth;
-            // video_idに応じてデフォルトのタイトルとチャンネル名を決定する（複数ストリーム対応）
-            let (default_title, default_channel_name) = match vid {
-                "test_video_456" => ("Mock Live 2".to_string(), "MockBroadcaster2".to_string()),
-                _ => (sw.config.stream_title.clone(), sw.config.channel_name.clone()),
-            };
-            let title_owned = stream_state.title_override.clone().unwrap_or(default_title);
-            let title = &title_owned;
-            let channel_id = stream_state.channel_id_override.as_ref().unwrap_or(&sw.config.channel_id);
-            let channel_name_owned = stream_state.channel_name_override.clone().unwrap_or(default_channel_name);
-            let channel_name = &channel_name_owned;
-            // Cookie記録（E2E cookie pipeline検証用）
-            if let Some(ref cookies) = cookie_header {
-                sw.last_request_cookies.lock().unwrap().watch = Some(cookies.clone());
-            }
-            // 認証チェック: SAPISIDとSecurePSID(=__Secure-1PSID代替)の両方が必要
-            let secure_check = format!("{}=", MOCK_SECURE_COOKIE);
-            let has_auth_cookie = cookie_header
-                .as_deref()
-                .map(|c| c.contains("SAPISID=") && c.contains(&secure_check))
-                .unwrap_or(false);
-            let force_no_chat = stream_state.watch_force_no_chat;
-            let html = if force_no_chat || (require_auth && !has_auth_cookie) {
-                gen_html_no_chat(vid, channel_id, channel_name, title)
-            } else {
-                gen_html(vid, channel_id, channel_name, title)
-            };
-            Ok::<_, warp::Rejection>(warp::reply::html(html))
-        }
-    });
+        });
     let sa = Arc::clone(&state);
-    let chat = warp::path!("youtubei" / "v1" / "live_chat" / "get_live_chat").and(warp::post()).and(warp::body::json())
+    let chat = warp::path!("youtubei" / "v1" / "live_chat" / "get_live_chat")
+        .and(warp::post())
+        .and(warp::body::json())
         .and_then(move |body: Value| {
             let sa = Arc::clone(&sa);
             async move {
@@ -491,16 +521,29 @@ fn build_routes(state: Arc<ServerState>) -> impl Filter<Extract = impl warp::Rep
             warp::reply::with_status(warp::reply::json(&json!({"responseContext":{},"actions":[{"openPopupAction":{"popup":{"multiPageMenuRenderer":{"header":{"activeAccountHeaderRenderer":{"accountName":{"simpleText":&a.auth_channel_name}}}}}}}]})), warp::http::StatusCode::OK)
         });
     let ssa = Arc::clone(&state);
-    let setauth = warp::path("set_auth_state").and(warp::post()).and(warp::body::json())
-        .map(move |b: SAR| { let mut a = ssa.auth_state.lock().unwrap();
-            if let Some(v) = b.session_valid { a.session_valid = v; }
-            if let Some(s) = b.expected_sapisid { a.expected_sapisid = if s.is_empty() { None } else { Some(s) }; }
-            if let Some(e) = b.simulate_error { a.simulate_error = e; }
-            if let Some(n) = b.auth_channel_name { a.auth_channel_name = n; }
+    let setauth = warp::path("set_auth_state")
+        .and(warp::post())
+        .and(warp::body::json())
+        .map(move |b: SAR| {
+            let mut a = ssa.auth_state.lock().unwrap();
+            if let Some(v) = b.session_valid {
+                a.session_valid = v;
+            }
+            if let Some(s) = b.expected_sapisid {
+                a.expected_sapisid = if s.is_empty() { None } else { Some(s) };
+            }
+            if let Some(e) = b.simulate_error {
+                a.simulate_error = e;
+            }
+            if let Some(n) = b.auth_channel_name {
+                a.auth_channel_name = n;
+            }
             warp::reply::json(&json!({"status":"ok","auth":&*a}))
         });
     let sas = Arc::clone(&state);
-    let authst = warp::path("auth_status").and(warp::get()).map(move || warp::reply::json(&*sas.auth_state.lock().unwrap()));
+    let authst = warp::path("auth_status")
+        .and(warp::get())
+        .map(move || warp::reply::json(&*sas.auth_state.lock().unwrap()));
     let sst = Arc::clone(&state);
     let status = warp::path("status").and(warp::get()).map(move || {
         let c = sst.request_count.load(Ordering::SeqCst);
@@ -513,37 +556,71 @@ fn build_routes(state: Arc<ServerState>) -> impl Filter<Extract = impl warp::Rep
         warp::reply::json(&json!({"request_count":c,"login_page_visits":lpv,"queued_messages":q,"replay_progress":rp,"video_id":sst.config.video_id,"auth":{"session_valid":a.session_valid},"stream":{"member_only":ss.member_only,"require_auth":ss.require_auth}}))
     });
     let sad = Arc::clone(&state);
-    let add = warp::path("add_message").and(warp::post()).and(warp::body::json())
-        .map(move |b: AMR| { sad.message_queue.lock().unwrap().push_back(gen_msg(&sad, &b)); warp::reply::json(&json!({"status":"ok"})) });
+    let add = warp::path("add_message")
+        .and(warp::post())
+        .and(warp::body::json())
+        .map(move |b: AMR| {
+            sad.message_queue
+                .lock()
+                .unwrap()
+                .push_back(gen_msg(&sad, &b));
+            warp::reply::json(&json!({"status":"ok"}))
+        });
     // Set stream state (member_only, require_auth, channel_id, channel_name, delays)
     let sss = Arc::clone(&state);
-    let setstream = warp::path("set_stream_state").and(warp::post()).and(warp::body::json())
+    let setstream = warp::path("set_stream_state")
+        .and(warp::post())
+        .and(warp::body::json())
         .map(move |b: SSR| {
             let mut ss = sss.stream_state.lock().unwrap();
-            if let Some(v) = b.member_only { ss.member_only = v; }
-            if let Some(v) = b.require_auth { ss.require_auth = v; }
-            if let Some(v) = b.watch_force_no_chat { ss.watch_force_no_chat = v; }
-            if let Some(t) = b.title { ss.title_override = if t.is_empty() { None } else { Some(t) }; }
-            if let Some(c) = b.channel_id { ss.channel_id_override = if c.is_empty() { None } else { Some(c) }; }
-            if let Some(n) = b.channel_name { ss.channel_name_override = if n.is_empty() { None } else { Some(n) }; }
-            if let Some(d) = b.watch_delay_ms { ss.watch_delay_ms = d; }
-            if let Some(d) = b.chat_delay_ms { ss.chat_delay_ms = d; }
+            if let Some(v) = b.member_only {
+                ss.member_only = v;
+            }
+            if let Some(v) = b.require_auth {
+                ss.require_auth = v;
+            }
+            if let Some(v) = b.watch_force_no_chat {
+                ss.watch_force_no_chat = v;
+            }
+            if let Some(t) = b.title {
+                ss.title_override = if t.is_empty() { None } else { Some(t) };
+            }
+            if let Some(c) = b.channel_id {
+                ss.channel_id_override = if c.is_empty() { None } else { Some(c) };
+            }
+            if let Some(n) = b.channel_name {
+                ss.channel_name_override = if n.is_empty() { None } else { Some(n) };
+            }
+            if let Some(d) = b.watch_delay_ms {
+                ss.watch_delay_ms = d;
+            }
+            if let Some(d) = b.chat_delay_ms {
+                ss.chat_delay_ms = d;
+            }
             warp::reply::json(&json!({"status":"ok","stream":&*ss}))
         });
     let scm = Arc::clone(&state);
-    let chat_mode_status = warp::path("chat_mode_status").and(warp::get()).map(move || {
-        let cm = scm.last_chat_mode.lock().unwrap();
-        warp::reply::json(&json!({"chat_mode": *cm}))
-    });
+    let chat_mode_status = warp::path("chat_mode_status")
+        .and(warp::get())
+        .map(move || {
+            let cm = scm.last_chat_mode.lock().unwrap();
+            warp::reply::json(&json!({"chat_mode": *cm}))
+        });
     let stv = Arc::clone(&state);
-    let token_validation = warp::path("token_validation").and(warp::get()).map(move || {
-        let tv = stv.token_validation.lock().unwrap();
-        warp::reply::json(&*tv)
-    });
+    let token_validation = warp::path("token_validation")
+        .and(warp::get())
+        .map(move || {
+            let tv = stv.token_validation.lock().unwrap();
+            warp::reply::json(&*tv)
+        });
     let srs = Arc::clone(&state);
     let reset = warp::path("reset").and(warp::post()).map(move || {
-        let mut r = srs.replay_state.lock().unwrap(); r.current_index = 0; r.start_time = None; r.base_timestamp = None;
-        srs.message_queue.lock().unwrap().clear(); *srs.auth_state.lock().unwrap() = AuthState::default();
+        let mut r = srs.replay_state.lock().unwrap();
+        r.current_index = 0;
+        r.start_time = None;
+        r.base_timestamp = None;
+        srs.message_queue.lock().unwrap().clear();
+        *srs.auth_state.lock().unwrap() = AuthState::default();
         *srs.stream_state.lock().unwrap() = StreamState::default();
         *srs.last_chat_mode.lock().unwrap() = None;
         *srs.token_validation.lock().unwrap() = TokenValidation::default();
@@ -606,29 +683,95 @@ fn build_routes(state: Arc<ServerState>) -> impl Filter<Extract = impl warp::Rep
         });
     // Get auto-message status
     let gam = Arc::clone(&state);
-    let auto_message_status = warp::path("auto_message_status").and(warp::get()).map(move || {
-        let auto_msg = gam.auto_message.lock().unwrap();
-        warp::reply::json(&*auto_msg)
-    });
+    let auto_message_status = warp::path("auto_message_status")
+        .and(warp::get())
+        .map(move || {
+            let auto_msg = gam.auto_message.lock().unwrap();
+            warp::reply::json(&*auto_msg)
+        });
     // Cookie echo endpoint — returns the last Cookie headers received by /watch and /next
     let slrc = Arc::clone(&state);
-    let last_request_cookies = warp::path("last_request_cookies").and(warp::get()).map(move || {
-        let lrc = slrc.last_request_cookies.lock().unwrap();
-        warp::reply::json(&*lrc)
-    });
-    login_page.or(do_login).or(logged_in).or(watch).or(chat).or(next_api).or(acct).or(setauth).or(authst).or(status).or(add).or(setstream).or(chat_mode_status).or(token_validation).or(reset).or(set_auto_message).or(auto_message_status).or(last_request_cookies)
+    let last_request_cookies = warp::path("last_request_cookies")
+        .and(warp::get())
+        .map(move || {
+            let lrc = slrc.last_request_cookies.lock().unwrap();
+            warp::reply::json(&*lrc)
+        });
+    login_page
+        .or(do_login)
+        .or(logged_in)
+        .or(watch)
+        .or(chat)
+        .or(next_api)
+        .or(acct)
+        .or(setauth)
+        .or(authst)
+        .or(status)
+        .or(add)
+        .or(setstream)
+        .or(chat_mode_status)
+        .or(token_validation)
+        .or(reset)
+        .or(set_auto_message)
+        .or(auto_message_status)
+        .or(last_request_cookies)
 }
 
-#[derive(Debug, Deserialize)] struct WQ { v: Option<String> }
-#[derive(Debug, Deserialize)] struct AMR { message_type: String, author: String, #[serde(default = "dcid")] channel_id: String, #[serde(default)] content: String, amount: Option<String>, tier: Option<String>, #[serde(default)] is_member: bool, milestone_months: Option<u32>, gift_count: Option<u32> }
-#[derive(Debug, Deserialize)] struct SAR { session_valid: Option<bool>, expected_sapisid: Option<String>, simulate_error: Option<bool>, auth_channel_name: Option<String>, auth_channel_id: Option<String> }
-#[derive(Debug, Deserialize)] struct SSR { member_only: Option<bool>, require_auth: Option<bool>, watch_force_no_chat: Option<bool>, title: Option<String>, channel_id: Option<String>, channel_name: Option<String>, watch_delay_ms: Option<u64>, chat_delay_ms: Option<u64> }
-#[derive(Debug, Deserialize)] struct AutoMsgReq { enabled: Option<bool>, messages_per_poll: Option<usize> }
-fn dcid() -> String { format!("UC_user_{}", rand::random::<u32>() % 1000) }
+#[derive(Debug, Deserialize)]
+struct WQ {
+    v: Option<String>,
+}
+#[derive(Debug, Deserialize)]
+struct AMR {
+    message_type: String,
+    author: String,
+    #[serde(default = "dcid")]
+    channel_id: String,
+    #[serde(default)]
+    content: String,
+    amount: Option<String>,
+    tier: Option<String>,
+    #[serde(default)]
+    is_member: bool,
+    milestone_months: Option<u32>,
+    gift_count: Option<u32>,
+}
+#[derive(Debug, Deserialize)]
+struct SAR {
+    session_valid: Option<bool>,
+    expected_sapisid: Option<String>,
+    simulate_error: Option<bool>,
+    auth_channel_name: Option<String>,
+    auth_channel_id: Option<String>,
+}
+#[derive(Debug, Deserialize)]
+struct SSR {
+    member_only: Option<bool>,
+    require_auth: Option<bool>,
+    watch_force_no_chat: Option<bool>,
+    title: Option<String>,
+    channel_id: Option<String>,
+    channel_name: Option<String>,
+    watch_delay_ms: Option<u64>,
+    chat_delay_ms: Option<u64>,
+}
+#[derive(Debug, Deserialize)]
+struct AutoMsgReq {
+    enabled: Option<bool>,
+    messages_per_poll: Option<usize>,
+}
+fn dcid() -> String {
+    format!("UC_user_{}", rand::random::<u32>() % 1000)
+}
 
 fn get_actions(s: &ServerState) -> Vec<Value> {
     // First, drain any queued messages
-    { let mut q = s.message_queue.lock().unwrap(); if !q.is_empty() { return q.drain(..).collect(); } }
+    {
+        let mut q = s.message_queue.lock().unwrap();
+        if !q.is_empty() {
+            return q.drain(..).collect();
+        }
+    }
 
     // Check if auto-message generation is enabled
     {
@@ -637,18 +780,29 @@ fn get_actions(s: &ServerState) -> Vec<Value> {
             let mut msgs = Vec::new();
             for i in 0..auto_msg.messages_per_poll {
                 let msg_num = auto_msg.total_generated + i as u64;
-                let ts = format!("{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_micros());
+                let ts = format!(
+                    "{}",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_micros()
+                );
                 let author = format!("AutoUser{}", msg_num % 50);
                 let channel_id = format!("UC_auto_{}", msg_num % 50);
 
                 // Simulate YouTube's behavior: on reconnect, recent messages are returned again
                 // with the SAME IDs. We achieve this by reusing cached IDs for the first N messages.
-                let id = if !auto_msg.recent_message_ids.is_empty() && (i as usize) < auto_msg.recent_message_ids.len() / 2 {
+                let id = if !auto_msg.recent_message_ids.is_empty()
+                    && i < auto_msg.recent_message_ids.len() / 2
+                {
                     // Reuse a cached ID (simulating YouTube returning same messages on reconnect)
-                    auto_msg.recent_message_ids[i as usize].clone()
+                    auto_msg.recent_message_ids[i].clone()
                 } else {
                     // Generate new unique ID
-                    let new_id = format!("auto_msg_{}", s.message_counter.fetch_add(1, Ordering::SeqCst));
+                    let new_id = format!(
+                        "auto_msg_{}",
+                        s.message_counter.fetch_add(1, Ordering::SeqCst)
+                    );
                     // Cache the new ID
                     auto_msg.recent_message_ids.push(new_id.clone());
                     // Trim cache to max size
@@ -663,58 +817,74 @@ fn get_actions(s: &ServerState) -> Vec<Value> {
                 let (runs, badges) = match msg_num % 10 {
                     0 => {
                         // Message with emoji
-                        (json!([
-                            {"text": "Great stream! "},
-                            {"emoji": {"emojiId": "UC_emoji_1", "shortcuts": [":fire:"], "image": {"thumbnails": [{"url": "https://yt3.ggpht.com/emoji1.png", "width": 24, "height": 24}]}}},
-                            {"text": " Keep it up!"}
-                        ]), json!([]))
+                        (
+                            json!([
+                                {"text": "Great stream! "},
+                                {"emoji": {"emojiId": "UC_emoji_1", "shortcuts": [":fire:"], "image": {"thumbnails": [{"url": "https://yt3.ggpht.com/emoji1.png", "width": 24, "height": 24}]}}},
+                                {"text": " Keep it up!"}
+                            ]),
+                            json!([]),
+                        )
                     }
                     1 => {
                         // Member message with badge
-                        (json!([{"text": format!("Member message #{}", msg_num)}]),
-                        json!([{
-                            "liveChatAuthorBadgeRenderer": {
-                                "customThumbnail": {
-                                    "thumbnails": [{"url": "https://yt3.ggpht.com/badge.png", "width": 16, "height": 16}]
-                                },
-                                "tooltip": "Member (1 year)",
-                                "accessibility": {"accessibilityData": {"label": "Member (1 year)"}}
-                            }
-                        }]))
+                        (
+                            json!([{"text": format!("Member message #{}", msg_num)}]),
+                            json!([{
+                                "liveChatAuthorBadgeRenderer": {
+                                    "customThumbnail": {
+                                        "thumbnails": [{"url": "https://yt3.ggpht.com/badge.png", "width": 16, "height": 16}]
+                                    },
+                                    "tooltip": "Member (1 year)",
+                                    "accessibility": {"accessibilityData": {"label": "Member (1 year)"}}
+                                }
+                            }]),
+                        )
                     }
                     2 => {
                         // Moderator message
-                        (json!([{"text": format!("Mod message #{}", msg_num)}]),
-                        json!([{
-                            "liveChatAuthorBadgeRenderer": {
-                                "icon": {"iconType": "MODERATOR"},
-                                "tooltip": "Moderator",
-                                "accessibility": {"accessibilityData": {"label": "Moderator"}}
-                            }
-                        }]))
+                        (
+                            json!([{"text": format!("Mod message #{}", msg_num)}]),
+                            json!([{
+                                "liveChatAuthorBadgeRenderer": {
+                                    "icon": {"iconType": "MODERATOR"},
+                                    "tooltip": "Moderator",
+                                    "accessibility": {"accessibilityData": {"label": "Moderator"}}
+                                }
+                            }]),
+                        )
                     }
                     3 => {
                         // Message with multiple emojis
-                        (json!([
-                            {"emoji": {"emojiId": "UC_emoji_2", "shortcuts": [":heart:"], "image": {"thumbnails": [{"url": "https://yt3.ggpht.com/emoji2.png", "width": 24, "height": 24}]}}},
-                            {"emoji": {"emojiId": "UC_emoji_3", "shortcuts": [":thumbsup:"], "image": {"thumbnails": [{"url": "https://yt3.ggpht.com/emoji3.png", "width": 24, "height": 24}]}}},
-                            {"text": " Love this!"}
-                        ]), json!([]))
+                        (
+                            json!([
+                                {"emoji": {"emojiId": "UC_emoji_2", "shortcuts": [":heart:"], "image": {"thumbnails": [{"url": "https://yt3.ggpht.com/emoji2.png", "width": 24, "height": 24}]}}},
+                                {"emoji": {"emojiId": "UC_emoji_3", "shortcuts": [":thumbsup:"], "image": {"thumbnails": [{"url": "https://yt3.ggpht.com/emoji3.png", "width": 24, "height": 24}]}}},
+                                {"text": " Love this!"}
+                            ]),
+                            json!([]),
+                        )
                     }
                     4 => {
                         // Long message
-                        (json!([{"text": format!("This is a longer message #{} with more content to simulate real YouTube chat messages that can sometimes be quite verbose and contain multiple sentences or thoughts expressed in a single chat message", msg_num)}]),
-                        json!([]))
+                        (
+                            json!([{"text": format!("This is a longer message #{} with more content to simulate real YouTube chat messages that can sometimes be quite verbose and contain multiple sentences or thoughts expressed in a single chat message", msg_num)}]),
+                            json!([]),
+                        )
                     }
                     5 => {
                         // Message with special characters
-                        (json!([{"text": format!("Special chars: äöü ñ 中文 日本語 한국어 émoji! #{}", msg_num)}]),
-                        json!([]))
+                        (
+                            json!([{"text": format!("Special chars: äöü ñ 中文 日本語 한국어 émoji! #{}", msg_num)}]),
+                            json!([]),
+                        )
                     }
                     _ => {
                         // Normal message
-                        (json!([{"text": format!("Auto message #{} - simulating real YouTube chat flow", msg_num)}]),
-                        json!([]))
+                        (
+                            json!([{"text": format!("Auto message #{} - simulating real YouTube chat flow", msg_num)}]),
+                            json!([]),
+                        )
                     }
                 };
 
@@ -734,21 +904,44 @@ fn get_actions(s: &ServerState) -> Vec<Value> {
     }
 
     // Fall back to replay entries
-    if s.config.replay_entries.is_empty() { return Vec::new(); }
+    if s.config.replay_entries.is_empty() {
+        return Vec::new();
+    }
     let mut rs = s.replay_state.lock().unwrap();
-    if rs.start_time.is_none() { rs.start_time = Some(Instant::now()); rs.base_timestamp = Some(s.config.replay_entries[0].timestamp); }
-    let st = rs.start_time.unwrap(); let bt = rs.base_timestamp.unwrap();
-    let es = if s.config.replay_speed > 0.0 { (st.elapsed().as_secs_f64() * s.config.replay_speed) as u64 } else { u64::MAX };
+    if rs.start_time.is_none() {
+        rs.start_time = Some(Instant::now());
+        rs.base_timestamp = Some(s.config.replay_entries[0].timestamp);
+    }
+    let st = rs.start_time.unwrap();
+    let bt = rs.base_timestamp.unwrap();
+    let es = if s.config.replay_speed > 0.0 {
+        (st.elapsed().as_secs_f64() * s.config.replay_speed) as u64
+    } else {
+        u64::MAX
+    };
     let ct = bt.saturating_add(es);
     let mut acts = Vec::new();
     while rs.current_index < s.config.replay_entries.len() {
         let e = &s.config.replay_entries[rs.current_index];
-        if e.timestamp > ct { break; }
-        if let Some(ea) = e.response.pointer("/continuationContents/liveChatContinuation/actions").and_then(|v| v.as_array()) { acts.extend(ea.clone()); }
-        rs.current_index += 1; if acts.len() >= 20 { break; }
+        if e.timestamp > ct {
+            break;
+        }
+        if let Some(ea) = e
+            .response
+            .pointer("/continuationContents/liveChatContinuation/actions")
+            .and_then(|v| v.as_array())
+        {
+            acts.extend(ea.clone());
+        }
+        rs.current_index += 1;
+        if acts.len() >= 20 {
+            break;
+        }
     }
     if rs.current_index >= s.config.replay_entries.len() && s.config.replay_loop {
-        rs.current_index = 0; rs.start_time = Some(Instant::now()); rs.base_timestamp = Some(s.config.replay_entries[0].timestamp);
+        rs.current_index = 0;
+        rs.start_time = Some(Instant::now());
+        rs.base_timestamp = Some(s.config.replay_entries[0].timestamp);
     }
     acts
 }
@@ -795,14 +988,22 @@ fn gen_html(_vid: &str, cid: &str, cn: &str, t: &str) -> String {
     let ct = generate_mock_continuation_token(4);
     let title_runs = split_title_into_runs(t);
     let d = json!({"contents":{"twoColumnWatchNextResults":{"results":{"results":{"contents":[{"videoPrimaryInfoRenderer":{"title":{"runs":title_runs}}},{"videoSecondaryInfoRenderer":{"owner":{"videoOwnerRenderer":{"title":{"runs":[{"text":cn}]},"navigationEndpoint":{"browseEndpoint":{"browseId":cid}}}}}}]}},"conversationBar":{"liveChatRenderer":{"continuations":[{"reloadContinuationData":{"continuation":ct}}],"isReplay":false}}}}});
-    format!("<!DOCTYPE html><html><head><title>{}</title></head><body><script>var ytInitialData = {};</script></body></html>", t, serde_json::to_string(&d).unwrap())
+    format!(
+        "<!DOCTYPE html><html><head><title>{}</title></head><body><script>var ytInitialData = {};</script></body></html>",
+        t,
+        serde_json::to_string(&d).unwrap()
+    )
 }
 
 /// 認証なし（メンバー限定ストリーム未認証）時のHTML生成 - liveChatRenderer なし
 fn gen_html_no_chat(_vid: &str, cid: &str, cn: &str, t: &str) -> String {
     let title_runs = split_title_into_runs(t);
     let d = json!({"contents":{"twoColumnWatchNextResults":{"results":{"results":{"contents":[{"videoPrimaryInfoRenderer":{"title":{"runs":title_runs}}},{"videoSecondaryInfoRenderer":{"owner":{"videoOwnerRenderer":{"title":{"runs":[{"text":cn}]},"navigationEndpoint":{"browseEndpoint":{"browseId":cid}}}}}}]}}}}});
-    format!("<!DOCTYPE html><html><head><title>{}</title></head><body><script>var ytInitialData = {};</script></body></html>", t, serde_json::to_string(&d).unwrap())
+    format!(
+        "<!DOCTYPE html><html><head><title>{}</title></head><body><script>var ytInitialData = {};</script></body></html>",
+        t,
+        serde_json::to_string(&d).unwrap()
+    )
 }
 
 /// ログインページのHTML生成（E2Eテスト用）
@@ -869,10 +1070,20 @@ fn generate_mock_continuation_token(chattype: u8) -> String {
     // Plus some random data to make each token unique
     let random_data: u32 = rand::random();
     let bytes: Vec<u8> = vec![
-        0xd2, 0x87, 0xcc, 0xc8, 0x03,           // Some header bytes
-        0x10, (random_data & 0xFF) as u8,       // Field 2 with random value
-        0x82, 0x01, 0x02, 0x08, chattype,       // Field 16 with chattype
-        0x20, ((random_data >> 8) & 0xFF) as u8, // Trailing field
+        0xd2,
+        0x87,
+        0xcc,
+        0xc8,
+        0x03, // Some header bytes
+        0x10,
+        (random_data & 0xFF) as u8, // Field 2 with random value
+        0x82,
+        0x01,
+        0x02,
+        0x08,
+        chattype, // Field 16 with chattype
+        0x20,
+        ((random_data >> 8) & 0xFF) as u8, // Trailing field
     ];
     general_purpose::URL_SAFE_NO_PAD.encode(&bytes)
 }
@@ -884,8 +1095,17 @@ fn build_resp(acts: Vec<Value>, chattype: u8) -> Value {
 }
 
 fn gen_msg(s: &ServerState, r: &AMR) -> Value {
-    let id = format!("mock_msg_{}", s.message_counter.fetch_add(1, Ordering::SeqCst));
-    let ts = format!("{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_micros());
+    let id = format!(
+        "mock_msg_{}",
+        s.message_counter.fetch_add(1, Ordering::SeqCst)
+    );
+    let ts = format!(
+        "{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_micros()
+    );
     // Member badge for member messages
     let member_badge = if r.is_member {
         json!([{"liveChatAuthorBadgeRenderer":{"customThumbnail":{"thumbnails":[{"url":"https://example.com/member_badge.png"}]},"tooltip":"Member"}}])
@@ -893,44 +1113,75 @@ fn gen_msg(s: &ServerState, r: &AMR) -> Value {
         json!([])
     };
     match r.message_type.as_str() {
-        "superchat" => json!({"addChatItemAction":{"item":{"liveChatPaidMessageRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":"https://example.com/av.png"}]},"authorExternalChannelId":&r.channel_id,"purchaseAmountText":{"simpleText":r.amount.as_deref().unwrap_or("¥500")},"message":{"runs":[{"text":&r.content}]},"headerBackgroundColor":tier_col(r.tier.as_deref()),"headerTextColor":0xFFFFFF,"bodyBackgroundColor":tier_col(r.tier.as_deref()),"bodyTextColor":0xFFFFFF,"authorBadges":member_badge}}}}),
-        "supersticker" => json!({"addChatItemAction":{"item":{"liveChatPaidStickerRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":"https://example.com/av.png"}]},"authorExternalChannelId":&r.channel_id,"purchaseAmountText":{"simpleText":r.amount.as_deref().unwrap_or("¥500")},"sticker":{"thumbnails":[{"url":"https://example.com/sticker.png"}]},"moneyChipBackgroundColor":tier_col(r.tier.as_deref()),"moneyChipTextColor":0xFFFFFF,"authorBadges":member_badge}}}}),
-        "membership" => json!({"addChatItemAction":{"item":{"liveChatMembershipItemRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":"https://example.com/av.png"}]},"authorExternalChannelId":&r.channel_id,"headerSubtext":{"runs":[{"text":"Welcome to "},{"text":"Channel"},{"text":"!"}]},"authorBadges":[{"liveChatAuthorBadgeRenderer":{"tooltip":"New member","customThumbnail":{"thumbnails":[{"url":"https://example.com/badge.png"}]}}}]}}}}),
+        "superchat" => {
+            json!({"addChatItemAction":{"item":{"liveChatPaidMessageRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":"https://example.com/av.png"}]},"authorExternalChannelId":&r.channel_id,"purchaseAmountText":{"simpleText":r.amount.as_deref().unwrap_or("¥500")},"message":{"runs":[{"text":&r.content}]},"headerBackgroundColor":tier_col(r.tier.as_deref()),"headerTextColor":0xFFFFFF,"bodyBackgroundColor":tier_col(r.tier.as_deref()),"bodyTextColor":0xFFFFFF,"authorBadges":member_badge}}}})
+        }
+        "supersticker" => {
+            json!({"addChatItemAction":{"item":{"liveChatPaidStickerRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":"https://example.com/av.png"}]},"authorExternalChannelId":&r.channel_id,"purchaseAmountText":{"simpleText":r.amount.as_deref().unwrap_or("¥500")},"sticker":{"thumbnails":[{"url":"https://example.com/sticker.png"}]},"moneyChipBackgroundColor":tier_col(r.tier.as_deref()),"moneyChipTextColor":0xFFFFFF,"authorBadges":member_badge}}}})
+        }
+        "membership" => {
+            json!({"addChatItemAction":{"item":{"liveChatMembershipItemRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":"https://example.com/av.png"}]},"authorExternalChannelId":&r.channel_id,"headerSubtext":{"runs":[{"text":"Welcome to "},{"text":"Channel"},{"text":"!"}]},"authorBadges":[{"liveChatAuthorBadgeRenderer":{"tooltip":"New member","customThumbnail":{"thumbnails":[{"url":"https://example.com/badge.png"}]}}}]}}}})
+        }
         "membership_milestone" => {
             let months = r.milestone_months.unwrap_or(6);
             // Actual YouTube format: months in badge tooltip, not headerSubtext
             json!({"addChatItemAction":{"item":{"liveChatMembershipItemRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":"https://example.com/av.png"}]},"authorExternalChannelId":&r.channel_id,"headerSubtext":{"runs":[{"text":"Welcome to "},{"text":"Channel"},{"text":"!"}]},"message":{"runs":[{"text":&r.content}]},"authorBadges":[{"liveChatAuthorBadgeRenderer":{"tooltip":format!("Member ({} months)", months),"customThumbnail":{"thumbnails":[{"url":"https://example.com/badge.png"}]}}}]}}}})
-        },
+        }
         "membership_gift" => {
             let count = r.gift_count.unwrap_or(5);
             // Actual YouTube format: authorExternalChannelId at root level
             json!({"addChatItemAction":{"item":{"liveChatSponsorshipsGiftPurchaseAnnouncementRenderer":{"id":id,"timestampUsec":ts,"authorExternalChannelId":&r.channel_id,"header":{"liveChatSponsorshipsHeaderRenderer":{"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":"https://example.com/av.png"}]},"primaryText":{"runs":[{"text":"Sent "},{"text":format!("{}", count)},{"text":" "},{"text":"Channel"},{"text":" gift memberships"}]}}}}}}})
-        },
-        "system" => json!({"addChatItemAction":{"item":{"liveChatTextMessageRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":"System"},"authorExternalChannelId":"system","message":{"runs":[{"text":&r.content}]}}}}}),
-        _ => json!({"addChatItemAction":{"item":{"liveChatTextMessageRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":"https://example.com/av.png"}]},"authorExternalChannelId":&r.channel_id,"message":{"runs":[{"text":&r.content}]},"authorBadges":member_badge}}}})
+        }
+        "system" => {
+            json!({"addChatItemAction":{"item":{"liveChatTextMessageRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":"System"},"authorExternalChannelId":"system","message":{"runs":[{"text":&r.content}]}}}}})
+        }
+        _ => {
+            json!({"addChatItemAction":{"item":{"liveChatTextMessageRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":"https://example.com/av.png"}]},"authorExternalChannelId":&r.channel_id,"message":{"runs":[{"text":&r.content}]},"authorBadges":member_badge}}}})
+        }
     }
 }
 
-fn tier_col(t: Option<&str>) -> u32 { match t { Some("blue")=>0x1565C0, Some("cyan")=>0x00B8D4, Some("green")=>0x00BFA5, Some("yellow")=>0xFFB300, Some("orange")=>0xE65100, Some("magenta")=>0xC2185B, Some("red")=>0xD00000, _=>0x00BFA5 } }
+fn tier_col(t: Option<&str>) -> u32 {
+    match t {
+        Some("blue") => 0x1565C0,
+        Some("cyan") => 0x00B8D4,
+        Some("green") => 0x00BFA5,
+        Some("yellow") => 0xFFB300,
+        Some("orange") => 0xE65100,
+        Some("magenta") => 0xC2185B,
+        Some("red") => 0xD00000,
+        _ => 0x00BFA5,
+    }
+}
 
 fn load_ndjson(p: &str) -> Result<Vec<ResponseEntry>, String> {
     let f = File::open(p).map_err(|e| format!("Open error: {}", e))?;
     let mut ents: Vec<ResponseEntry> = Vec::new();
     for (i, lr) in BufReader::new(f).lines().enumerate() {
-        let l = lr.map_err(|e| format!("Line {}: {}", i+1, e))?;
-        if l.trim().is_empty() { continue; }
-        ents.push(serde_json::from_str(&l).map_err(|e| format!("Line {}: {}", i+1, e))?);
+        let l = lr.map_err(|e| format!("Line {}: {}", i + 1, e))?;
+        if l.trim().is_empty() {
+            continue;
+        }
+        ents.push(serde_json::from_str(&l).map_err(|e| format!("Line {}: {}", i + 1, e))?);
     }
-    ents.sort_by_key(|e| e.timestamp); Ok(ents)
+    ents.sort_by_key(|e| e.timestamp);
+    Ok(ents)
 }
 
 fn generate_sample_ndjson(p: &str) -> Result<(), String> {
     let mut f = File::create(p).map_err(|e| format!("Create error: {}", e))?;
-    let bt = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-    for (i, (a, m)) in [("User1","Hello!"),("User2","Hi!"),("User3","Thanks!")].iter().enumerate() {
+    let bt = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    for (i, (a, m)) in [("User1", "Hello!"), ("User2", "Hi!"), ("User3", "Thanks!")]
+        .iter()
+        .enumerate()
+    {
         let ts = bt + (i as u64 * 2);
         let e = json!({"timestamp":ts,"response":{"continuationContents":{"liveChatContinuation":{"actions":[{"addChatItemAction":{"item":{"liveChatTextMessageRenderer":{"id":format!("msg_{}",i),"timestampUsec":format!("{}",ts*1000000),"authorName":{"simpleText":a},"message":{"runs":[{"text":m}]},"authorBadges":[]}}}}]}}}});
-        writeln!(f, "{}", serde_json::to_string(&e).unwrap()).map_err(|e| format!("Write error: {}", e))?;
+        writeln!(f, "{}", serde_json::to_string(&e).unwrap())
+            .map_err(|e| format!("Write error: {}", e))?;
     }
     Ok(())
 }

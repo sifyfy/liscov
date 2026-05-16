@@ -5,10 +5,10 @@ use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{RwLock, broadcast};
 use tokio_tungstenite::tungstenite::Message;
 
 type ClientId = u64;
@@ -26,9 +26,16 @@ pub enum ClientEvent {
 #[allow(clippy::large_enum_variant)]
 pub enum ServerMessage {
     ChatMessage(ChatMessage),
-    Connected { client_id: ClientId },
-    ServerInfo { version: String, connected_clients: u32 },
-    Error { message: String },
+    Connected {
+        client_id: ClientId,
+    },
+    ServerInfo {
+        version: String,
+        connected_clients: u32,
+    },
+    Error {
+        message: String,
+    },
 }
 
 /// Client to server message
@@ -94,14 +101,19 @@ impl WebSocketServer {
 
         // Try to bind to ports (spec: 8765-8774, 10 ports)
         let port_range_end = self.preferred_port.saturating_add(9);
-        let (listener, bound_port) = self.try_bind_ports(self.preferred_port, port_range_end).await?;
+        let (listener, bound_port) = self
+            .try_bind_ports(self.preferred_port, port_range_end)
+            .await?;
 
         {
             let mut actual = self.actual_port.write().await;
             *actual = Some(bound_port);
         }
 
-        tracing::info!("WebSocket server listening on ws://127.0.0.1:{}", bound_port);
+        tracing::info!(
+            "WebSocket server listening on ws://127.0.0.1:{}",
+            bound_port
+        );
 
         {
             let mut state = self.state.write().await;
@@ -148,7 +160,11 @@ impl WebSocketServer {
         Ok(bound_port)
     }
 
-    async fn try_bind_ports(&self, start_port: u16, end_port: u16) -> anyhow::Result<(TcpListener, u16)> {
+    async fn try_bind_ports(
+        &self,
+        start_port: u16,
+        end_port: u16,
+    ) -> anyhow::Result<(TcpListener, u16)> {
         for port in start_port..=end_port {
             let addr = format!("127.0.0.1:{}", port);
             match TcpListener::bind(&addr).await {
@@ -156,7 +172,11 @@ impl WebSocketServer {
                 Err(_) => continue,
             }
         }
-        Err(anyhow::anyhow!("No available ports in range {}-{}", start_port, end_port))
+        Err(anyhow::anyhow!(
+            "No available ports in range {}-{}",
+            start_port,
+            end_port
+        ))
     }
 
     pub async fn stop(&self) {

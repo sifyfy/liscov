@@ -17,15 +17,15 @@ pub fn keyring_service() -> String {
 
 /// 設定ディレクトリのパスを返す（OS標準の config_dir + app_name）
 pub fn config_dir() -> Result<PathBuf, String> {
-    let base = dirs::config_dir()
-        .ok_or_else(|| "設定ディレクトリを特定できませんでした".to_string())?;
+    let base =
+        dirs::config_dir().ok_or_else(|| "設定ディレクトリを特定できませんでした".to_string())?;
     Ok(base.join(app_name()))
 }
 
 /// データディレクトリのパスを返す（OS標準の data_dir + app_name）
 pub fn data_dir() -> Result<PathBuf, String> {
-    let base = dirs::data_dir()
-        .ok_or_else(|| "データディレクトリを特定できませんでした".to_string())?;
+    let base =
+        dirs::data_dir().ok_or_else(|| "データディレクトリを特定できませんでした".to_string())?;
     Ok(base.join(app_name()))
 }
 

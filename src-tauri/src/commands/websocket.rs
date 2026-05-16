@@ -3,9 +3,9 @@
 //! The WebSocket server starts automatically when the application launches.
 //! Manual start/stop is not required.
 
+use crate::AppState;
 use crate::core::api::{ClientEvent, WebSocketServer};
 use crate::errors::CommandError;
-use crate::AppState;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
@@ -59,8 +59,10 @@ pub async fn start_websocket_server_auto(
                 while let Ok(event) = event_rx.recv().await {
                     match event {
                         ClientEvent::Connected { client_id } => {
-                            let _ = app_handle
-                                .emit("websocket-client-connected", ClientEventPayload { client_id });
+                            let _ = app_handle.emit(
+                                "websocket-client-connected",
+                                ClientEventPayload { client_id },
+                            );
                         }
                         ClientEvent::Disconnected { client_id } => {
                             let _ = app_handle.emit(
@@ -78,11 +80,17 @@ pub async fn start_websocket_server_auto(
                 *ws = Some(server);
             }
 
-            tracing::info!("WebSocket server started automatically on port {}", actual_port);
+            tracing::info!(
+                "WebSocket server started automatically on port {}",
+                actual_port
+            );
         }
         Err(e) => {
             // Log error but don't fail app startup
-            tracing::error!("Failed to start WebSocket server: {}. App will continue without WebSocket functionality.", e);
+            tracing::error!(
+                "Failed to start WebSocket server: {}. App will continue without WebSocket functionality.",
+                e
+            );
         }
     }
 }

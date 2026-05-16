@@ -37,8 +37,5 @@ fn embed_test_manifest() {
 
     let manifest_str = manifest_path.to_str().expect("OUT_DIR パスが非UTF-8");
     println!("cargo:rustc-link-arg-tests=/MANIFEST:EMBED");
-    println!(
-        "cargo:rustc-link-arg-tests=/MANIFESTINPUT:{}",
-        manifest_str
-    );
+    println!("cargo:rustc-link-arg-tests=/MANIFESTINPUT:{manifest_str}");
 }

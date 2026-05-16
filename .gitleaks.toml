@@ -1,0 +1,28 @@
+# .gitleaks.toml
+# このファイルは lint-and-hooks-setup スキルで生成
+# 初期は組み込みデフォルトルールに頼り、誤検出が出てから個別追加
+
+title = "liscov-tauri gitleaks config"
+
+[extend]
+# gitleaks 標準ルールを継承
+useDefault = true
+
+# プロジェクト固有の allowlist (誤検出を除外)
+# 既知の dummy/test fixture を見つけたら paths/regexes に追加していく
+[allowlist]
+description = "テスト fixture / モックデータ / 公開 YouTube Innertube API キー"
+
+# 公開済み YouTube Innertube DEFAULT_API_KEY (yt-dlp 等で公知の値、シークレットではない)
+# 参考: https://github.com/yt-dlp/yt-dlp が同じキーを使用
+regexes = [
+  '''AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8''',
+]
+
+paths = [
+  '''e2e/utils/.*''',                  # E2E ユーティリティ
+  '''src-tauri/tests/fixtures/.*''',   # Rust テスト fixture (将来作成想定)
+  '''mutants\.out.*/''',                # mutation testing 出力
+  '''\.stryker-tmp/''',                 # Stryker 一時ファイル
+  '''reports/''',                       # mutation testing レポート
+]

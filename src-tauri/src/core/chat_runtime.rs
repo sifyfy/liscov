@@ -15,7 +15,7 @@ use crate::core::models::{ChatMessage, ChatMode};
 use crate::core::raw_response::{RawResponseSaver, SaveConfig};
 use crate::database::{self, Database};
 use crate::state::MAX_MESSAGES;
-use crate::tts::{TtsManager, TtsQueueItem, TtsPriority};
+use crate::tts::{TtsManager, TtsPriority, TtsQueueItem};
 
 /// 監視タスクが必要とする共有依存をまとめた構造体
 ///
@@ -258,13 +258,9 @@ async fn process_message(
         let db_guard = deps.database.read().await;
         if let Some(db) = db_guard.as_ref() {
             let conn = db.connection().await;
-            if let Err(e) = database::save_message(
-                &conn,
-                sid,
-                broadcaster_id.as_deref(),
-                msg,
-                Some(video_id),
-            ) {
+            if let Err(e) =
+                database::save_message(&conn, sid, broadcaster_id.as_deref(), msg, Some(video_id))
+            {
                 tracing::warn!("メッセージ保存失敗: {}", e);
             }
         }
@@ -276,13 +272,9 @@ async fn process_message(
             let db_guard = deps.database.read().await;
             if let Some(db) = db_guard.as_ref() {
                 let conn = db.connection().await;
-                msg.is_first_time_viewer = database::is_first_time_viewer(
-                    &conn,
-                    bid,
-                    &msg.channel_id,
-                    video_id,
-                )
-                .unwrap_or(false);
+                msg.is_first_time_viewer =
+                    database::is_first_time_viewer(&conn, bid, &msg.channel_id, video_id)
+                        .unwrap_or(false);
             }
         }
     }

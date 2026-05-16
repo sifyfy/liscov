@@ -2,9 +2,9 @@
 
 use std::time::Duration;
 
-use async_trait::async_trait;
 use super::{TtsBackend, TtsError};
 use crate::tts::config::BouyomichanConfig;
+use async_trait::async_trait;
 
 /// Bouyomichan backend
 pub struct BouyomichanBackend {
@@ -40,7 +40,10 @@ impl BouyomichanBackend {
 #[async_trait]
 impl TtsBackend for BouyomichanBackend {
     async fn test_connection(&self) -> Result<bool, TtsError> {
-        let url = format!("http://{}:{}/Talk?text=", self.config.host, self.config.port);
+        let url = format!(
+            "http://{}:{}/Talk?text=",
+            self.config.host, self.config.port
+        );
 
         match self.client.get(&url).send().await {
             Ok(response) => {
@@ -48,7 +51,10 @@ impl TtsBackend for BouyomichanBackend {
                     log::info!("Bouyomichan connection successful");
                     Ok(true)
                 } else {
-                    log::warn!("Bouyomichan connection failed: status {}", response.status());
+                    log::warn!(
+                        "Bouyomichan connection failed: status {}",
+                        response.status()
+                    );
                     Ok(false)
                 }
             }

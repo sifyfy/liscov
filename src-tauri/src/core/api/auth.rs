@@ -1,7 +1,7 @@
 //! YouTube authentication utilities
 
-use sha1::{Digest, Sha1};
 use crate::core::models::YouTubeCookies;
+use sha1::{Digest, Sha1};
 
 /// Generate SAPISIDHASH for YouTube API authentication
 ///
@@ -11,12 +11,12 @@ pub fn generate_sapisidhash(sapisid: &str, origin: &str) -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    
+
     let data = format!("{} {} {}", timestamp, sapisid, origin);
     let mut hasher = Sha1::new();
     hasher.update(data.as_bytes());
     let hash = hex::encode(hasher.finalize());
-    
+
     format!("{}_{}", timestamp, hash)
 }
 
@@ -24,9 +24,12 @@ pub fn generate_sapisidhash(sapisid: &str, origin: &str) -> String {
 pub fn build_auth_headers(cookies: &YouTubeCookies) -> Vec<(String, String)> {
     let origin = "https://www.youtube.com";
     let sapisidhash = generate_sapisidhash(&cookies.sapisid, origin);
-    
+
     vec![
-        ("Authorization".to_string(), format!("SAPISIDHASH {}", sapisidhash)),
+        (
+            "Authorization".to_string(),
+            format!("SAPISIDHASH {}", sapisidhash),
+        ),
         ("Cookie".to_string(), cookies.to_cookie_string()),
         ("X-Origin".to_string(), origin.to_string()),
         ("Origin".to_string(), origin.to_string()),

@@ -5,7 +5,23 @@ members = [
 ]
 resolver = "2"
 
-# Release profile optimizations
+# lint 設定をワークスペース一元管理
+# 各メンバー Cargo.toml で `[lints] workspace = true` を宣言して継承
+# 初期は控えめ。新規 lint 適用時は段階的に強化する想定
+#
+# 注: `unsafe_code = "warn"` は Rust 2024 edition で std::env::set_var 等が
+# unsafe 化された影響でテストコードに大量警告を出すため、初期では採用しない。
+# unsafe 監査を厳格化するタイミングで [workspace.lints.rust] セクションを追加する想定
+
+[workspace.lints.clippy]
+# Rust 1.81+ 必須: グループ lint は priority = -1 を明示
+# 初期は clippy::all (correctness/suspicious/complexity/perf/style) のみ。
+# pedantic / nursery は導入後にチームで合意のうえ段階的に有効化する
+all = { level = "warn", priority = -1 }
+
+# Release profile (workspace 全体に適用される)
+# 旧: src-tauri/Cargo.toml に居たが、サブパッケージの [profile.*] は
+# cargo に無視されるため workspace root に移設
 [profile.release]
 lto = true
 opt-level = "z"

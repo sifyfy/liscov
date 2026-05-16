@@ -11,8 +11,8 @@ pub mod voicevox;
 pub use bouyomichan::BouyomichanBackend;
 pub use voicevox::VoicevoxBackend;
 
-use async_trait::async_trait;
 use crate::tts::config::{BouyomichanConfig, TtsBackendType, VoicevoxConfig};
+use async_trait::async_trait;
 
 /// TTS backend error
 #[derive(Debug, thiserror::Error)]
@@ -52,12 +52,8 @@ pub fn create_backend(
 ) -> Option<Box<dyn TtsBackend>> {
     match backend_type {
         TtsBackendType::None => None,
-        TtsBackendType::Bouyomichan => {
-            Some(Box::new(BouyomichanBackend::new(bouyomichan.clone())))
-        }
-        TtsBackendType::Voicevox => {
-            Some(Box::new(VoicevoxBackend::new(voicevox.clone())))
-        }
+        TtsBackendType::Bouyomichan => Some(Box::new(BouyomichanBackend::new(bouyomichan.clone()))),
+        TtsBackendType::Voicevox => Some(Box::new(VoicevoxBackend::new(voicevox.clone()))),
     }
 }
 

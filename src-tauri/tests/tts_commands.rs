@@ -7,14 +7,14 @@ mod common;
 
 use app_lib::commands::tts::{TtsConfigDto, TtsStatus};
 use app_lib::state::AppState;
-use app_lib::tts::{TtsBackend, TtsConfig, TtsManager, TtsProcessManager};
 use app_lib::tts::backends::TtsError;
+use app_lib::tts::{TtsBackend, TtsConfig, TtsManager, TtsProcessManager};
 use async_trait::async_trait;
 use common::{invoke_no_args, invoke_with_args};
 use serial_test::serial;
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets};
 use tokio::sync::{Mutex, RwLock};
 
@@ -66,7 +66,10 @@ fn app_state_tts_enabled() -> AppState {
 /// モックバックエンド付きの AppState を構築
 fn app_state_with_mock_backend() -> AppState {
     let tts_manager = TtsManager::with_backend(
-        TtsConfig { enabled: true, ..TtsConfig::default() },
+        TtsConfig {
+            enabled: true,
+            ..TtsConfig::default()
+        },
         Some(Box::new(MockTtsBackend::connected())),
     );
     build_app_state(tts_manager)
@@ -157,7 +160,11 @@ fn tts_get_config_returns_current_config() {
 
     // get_config で変更値を確認
     let response = get_ipc_response(&webview, invoke_no_args("tts_get_config"));
-    assert!(response.is_ok(), "tts_get_config failed: {:?}", response.err());
+    assert!(
+        response.is_ok(),
+        "tts_get_config failed: {:?}",
+        response.err()
+    );
 
     let config: TtsConfigDto = response.unwrap().deserialize().unwrap();
     assert_eq!(config.max_text_length, 42);
@@ -187,7 +194,11 @@ fn tts_update_config_updates_config() {
         &webview,
         invoke_with_args("tts_update_config", serde_json::json!({ "config": dto })),
     );
-    assert!(response.is_ok(), "tts_update_config failed: {:?}", response.err());
+    assert!(
+        response.is_ok(),
+        "tts_update_config failed: {:?}",
+        response.err()
+    );
 
     // 変更が反映されていることを確認
     let get_response = get_ipc_response(&webview, invoke_no_args("tts_get_config"));
@@ -213,9 +224,12 @@ fn tts_speak_enqueues_message() {
     // speak で enqueue
     let response = get_ipc_response(
         &webview,
-        invoke_with_args("tts_speak", serde_json::json!({
-            "text": "テスト発話"
-        })),
+        invoke_with_args(
+            "tts_speak",
+            serde_json::json!({
+                "text": "テスト発話"
+            }),
+        ),
     );
     assert!(response.is_ok());
 
@@ -243,7 +257,10 @@ fn tts_speak_direct_returns_error_without_backend() {
         &webview,
         invoke_with_args("tts_speak_direct", serde_json::json!({ "text": "テスト" })),
     );
-    assert!(response.is_err(), "speak_direct should fail without backend");
+    assert!(
+        response.is_err(),
+        "speak_direct should fail without backend"
+    );
 }
 
 // ============================================================================
@@ -264,7 +281,10 @@ fn tts_test_connection_returns_false_without_backend() {
     let response = get_ipc_response(&webview, invoke_no_args("tts_test_connection"));
     assert!(response.is_ok());
     let result: bool = response.unwrap().deserialize().unwrap();
-    assert!(!result, "test_connection should return false without backend");
+    assert!(
+        !result,
+        "test_connection should return false without backend"
+    );
 }
 
 #[test]
@@ -281,7 +301,10 @@ fn tts_test_connection_returns_true_with_mock_backend() {
     let response = get_ipc_response(&webview, invoke_no_args("tts_test_connection"));
     assert!(response.is_ok());
     let result: bool = response.unwrap().deserialize().unwrap();
-    assert!(result, "test_connection should return true with connected mock backend");
+    assert!(
+        result,
+        "test_connection should return true with connected mock backend"
+    );
 }
 
 // ============================================================================
@@ -314,7 +337,10 @@ fn tts_start_sets_processing_state() {
         .unwrap()
         .deserialize()
         .unwrap();
-    assert!(status.is_processing, "is_processing should be true after tts_start");
+    assert!(
+        status.is_processing,
+        "is_processing should be true after tts_start"
+    );
 
     // cleanup: stop
     let _ = get_ipc_response(&webview, invoke_no_args("tts_stop"));
@@ -341,7 +367,10 @@ fn tts_stop_clears_processing_state() {
         .unwrap()
         .deserialize()
         .unwrap();
-    assert!(status.is_processing, "precondition: is_processing should be true");
+    assert!(
+        status.is_processing,
+        "precondition: is_processing should be true"
+    );
 
     // stop
     let response = get_ipc_response(&webview, invoke_no_args("tts_stop"));
@@ -354,7 +383,10 @@ fn tts_stop_clears_processing_state() {
         .unwrap()
         .deserialize()
         .unwrap();
-    assert!(!status.is_processing, "is_processing should be false after tts_stop");
+    assert!(
+        !status.is_processing,
+        "is_processing should be false after tts_stop"
+    );
 }
 
 // ============================================================================
@@ -375,7 +407,10 @@ fn tts_clear_queue_empties_queue() {
     for i in 0..3 {
         let _ = get_ipc_response(
             &webview,
-            invoke_with_args("tts_speak", serde_json::json!({ "text": format!("msg{}", i) })),
+            invoke_with_args(
+                "tts_speak",
+                serde_json::json!({ "text": format!("msg{}", i) }),
+            ),
         );
     }
 
@@ -384,7 +419,10 @@ fn tts_clear_queue_empties_queue() {
         .unwrap()
         .deserialize()
         .unwrap();
-    assert_eq!(status.queue_size, 3, "precondition: queue should have 3 items");
+    assert_eq!(
+        status.queue_size, 3,
+        "precondition: queue should have 3 items"
+    );
 
     // clear
     let response = get_ipc_response(&webview, invoke_no_args("tts_clear_queue"));
@@ -414,7 +452,10 @@ fn tts_discover_exe_returns_none_for_invalid_backend() {
 
     let response = get_ipc_response(
         &webview,
-        invoke_with_args("tts_discover_exe", serde_json::json!({ "backend": "invalid" })),
+        invoke_with_args(
+            "tts_discover_exe",
+            serde_json::json!({ "backend": "invalid" }),
+        ),
     );
     assert!(response.is_ok());
     let result: Option<String> = response.unwrap().deserialize().unwrap();
@@ -435,13 +476,9 @@ fn tts_get_launch_status_returns_both_false_initially() {
         .build()
         .unwrap();
 
-    let response = get_ipc_response(
-        &webview,
-        invoke_no_args("tts_get_launch_status"),
-    );
+    let response = get_ipc_response(&webview, invoke_no_args("tts_get_launch_status"));
     assert!(response.is_ok());
-    let status: app_lib::commands::tts::TtsLaunchStatus =
-        response.unwrap().deserialize().unwrap();
+    let status: app_lib::commands::tts::TtsLaunchStatus = response.unwrap().deserialize().unwrap();
     assert!(!status.bouyomichan_launched);
     assert!(!status.voicevox_launched);
 }
@@ -462,12 +499,15 @@ fn tts_speak_with_superchat_priority_enqueues() {
 
     let response = get_ipc_response(
         &webview,
-        invoke_with_args("tts_speak", serde_json::json!({
-            "text": "スーパーチャット",
-            "priority": "superchat",
-            "authorName": null,
-            "amount": null
-        })),
+        invoke_with_args(
+            "tts_speak",
+            serde_json::json!({
+                "text": "スーパーチャット",
+                "priority": "superchat",
+                "authorName": null,
+                "amount": null
+            }),
+        ),
     );
     assert!(response.is_ok());
 

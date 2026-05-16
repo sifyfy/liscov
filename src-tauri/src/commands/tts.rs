@@ -2,7 +2,7 @@
 
 use crate::errors::CommandError;
 use crate::state::AppState;
-use crate::tts::{TtsBackendType, TtsConfig, TtsProcessManager, TtsPriority, TtsQueueItem};
+use crate::tts::{TtsBackendType, TtsConfig, TtsPriority, TtsProcessManager, TtsQueueItem};
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, State};
 use tauri_plugin_dialog::DialogExt;
@@ -174,7 +174,10 @@ pub async fn tts_speak(
 
 /// Speak text directly (bypasses queue)
 #[tauri::command]
-pub async fn tts_speak_direct(state: State<'_, AppState>, text: String) -> Result<(), CommandError> {
+pub async fn tts_speak_direct(
+    state: State<'_, AppState>,
+    text: String,
+) -> Result<(), CommandError> {
     state
         .tts_manager
         .speak_direct(&text)
@@ -261,7 +264,11 @@ pub async fn tts_get_status(state: State<'_, AppState>) -> Result<TtsStatus, Com
     Ok(TtsStatus {
         is_processing: state.tts_manager.is_processing().await,
         queue_size: state.tts_manager.queue_size().await,
-        backend_name: state.tts_manager.backend_name().await.map(|s| s.to_string()),
+        backend_name: state
+            .tts_manager
+            .backend_name()
+            .await
+            .map(|s| s.to_string()),
     })
 }
 
@@ -367,12 +374,8 @@ pub async fn tts_launch_backend(
     backend: String,
     exe_path: Option<String>,
 ) -> Result<u32, CommandError> {
-    let result = launch_backend_impl(
-        &state.tts_process_manager,
-        &backend,
-        exe_path.as_deref(),
-    )
-    .await;
+    let result =
+        launch_backend_impl(&state.tts_process_manager, &backend, exe_path.as_deref()).await;
 
     if result.is_ok() {
         let _ = app.emit("tts:process_launched", &backend);
@@ -399,7 +402,9 @@ pub async fn tts_kill_backend(
 
 /// Get TTS backend launch status
 #[tauri::command]
-pub async fn tts_get_launch_status(state: State<'_, AppState>) -> Result<TtsLaunchStatus, CommandError> {
+pub async fn tts_get_launch_status(
+    state: State<'_, AppState>,
+) -> Result<TtsLaunchStatus, CommandError> {
     Ok(TtsLaunchStatus {
         bouyomichan_launched: state
             .tts_process_manager
@@ -512,12 +517,18 @@ mod tests {
 
     #[test]
     fn parse_backend_type_bouyomichan() {
-        assert_eq!(parse_backend_type("bouyomichan"), Some(TtsBackendType::Bouyomichan));
+        assert_eq!(
+            parse_backend_type("bouyomichan"),
+            Some(TtsBackendType::Bouyomichan)
+        );
     }
 
     #[test]
     fn parse_backend_type_voicevox() {
-        assert_eq!(parse_backend_type("voicevox"), Some(TtsBackendType::Voicevox));
+        assert_eq!(
+            parse_backend_type("voicevox"),
+            Some(TtsBackendType::Voicevox)
+        );
     }
 
     #[test]
@@ -536,12 +547,18 @@ mod tests {
 
     #[test]
     fn parse_tts_priority_superchat() {
-        assert_eq!(parse_tts_priority(Some("superchat")), TtsPriority::SuperChat);
+        assert_eq!(
+            parse_tts_priority(Some("superchat")),
+            TtsPriority::SuperChat
+        );
     }
 
     #[test]
     fn parse_tts_priority_membership() {
-        assert_eq!(parse_tts_priority(Some("membership")), TtsPriority::Membership);
+        assert_eq!(
+            parse_tts_priority(Some("membership")),
+            TtsPriority::Membership
+        );
     }
 
     #[test]
@@ -560,12 +577,18 @@ mod tests {
 
     #[test]
     fn decide_processing_action_disabled_to_enabled_starts() {
-        assert_eq!(decide_processing_action(false, true), Some(ProcessingAction::Start));
+        assert_eq!(
+            decide_processing_action(false, true),
+            Some(ProcessingAction::Start)
+        );
     }
 
     #[test]
     fn decide_processing_action_enabled_to_disabled_stops() {
-        assert_eq!(decide_processing_action(true, false), Some(ProcessingAction::Stop));
+        assert_eq!(
+            decide_processing_action(true, false),
+            Some(ProcessingAction::Stop)
+        );
     }
 
     #[test]

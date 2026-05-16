@@ -73,8 +73,8 @@ impl RawResponseSaver {
                 .unwrap_or_else(|_| serde_json::Value::String(response_json.to_string()))
         });
 
-        let json_line = serde_json::to_string(&entry)
-            .context("Failed to serialize response to JSON")?;
+        let json_line =
+            serde_json::to_string(&entry).context("Failed to serialize response to JSON")?;
 
         // ファイルに追記
         self.append_to_file(&json_line).await?;
@@ -154,8 +154,7 @@ impl RawResponseSaver {
             .join(&rotated_name);
 
         // ファイルをリネーム
-        std::fs::rename(&self.config.file_path, &rotated_path)
-            .context("Failed to rotate file")?;
+        std::fs::rename(&self.config.file_path, &rotated_path).context("Failed to rotate file")?;
 
         info!(
             "File rotated: {} -> {}",
@@ -196,7 +195,7 @@ impl RawResponseSaver {
         }
 
         // 作成日時でソート（新しい順）
-        backup_files.sort_by(|a, b| b.1.cmp(&a.1));
+        backup_files.sort_by_key(|entry| std::cmp::Reverse(entry.1));
 
         // 制限を超えた古いファイルを削除
         if backup_files.len() > self.config.max_backup_files as usize {
@@ -252,7 +251,9 @@ mod tests {
     use std::path::PathBuf;
 
     fn temp_dir_for_test(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join("liscov_test_raw_response").join(name);
+        let dir = std::env::temp_dir()
+            .join("liscov_test_raw_response")
+            .join(name);
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
@@ -448,7 +449,10 @@ mod tests {
             max_backup_files: 5,
         });
 
-        saver.save_response(r#"{"check": "no_rotate"}"#).await.unwrap();
+        saver
+            .save_response(r#"{"check": "no_rotate"}"#)
+            .await
+            .unwrap();
 
         // バックアップファイルが作成されていないことを確認
         let backup_count = fs::read_dir(&dir)
@@ -553,6 +557,10 @@ mod tests {
             })
             .count();
 
-        assert!(backup_count <= 3, "Expected at most 3 backups, got {}", backup_count);
+        assert!(
+            backup_count <= 3,
+            "Expected at most 3 backups, got {}",
+            backup_count
+        );
     }
 }
