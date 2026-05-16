@@ -83,13 +83,29 @@ pub async fn run_monitoring_loop<F>(
     let mut poll_count = 0u64;
 
     // セッション開始時点のコメント数をDBから復元してカウンターを初期化
+    // 復元失敗時に silent に空マップへフォールバックすると既存コメント者も
+    // 「初回扱い」となり first_comment_only / プレフィックス機能の挙動が崩れるため、
+    // 失敗時は warn ログで副作用を明示する (provenance: branch-owned)
     let mut in_stream_counts: std::collections::HashMap<String, u32> = {
         let db_guard = deps.database.read().await;
-        if let Some(db) = db_guard.as_ref() {
-            let conn = db.connection().await;
-            database::get_in_stream_comment_counts(&conn, &video_id).unwrap_or_default()
-        } else {
-            std::collections::HashMap::new()
+        match db_guard.as_ref() {
+            Some(db) => {
+                let conn = db.connection().await;
+                match database::get_in_stream_comment_counts(&conn, &video_id) {
+                    Ok(counts) => counts,
+                    Err(e) => {
+                        tracing::warn!(
+                            "in_stream_comment_count の DB 復元失敗 video_id={}: {}。\
+                             空状態で続行するため、既存コメント者も「初回扱い」となり \
+                             first_comment_only / プレフィックス機能に影響する可能性あり",
+                            video_id,
+                            e
+                        );
+                        std::collections::HashMap::new()
+                    }
+                }
+            }
+            None => std::collections::HashMap::new(),
         }
     };
 
