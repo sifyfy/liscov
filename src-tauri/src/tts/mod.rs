@@ -1505,4 +1505,245 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
         assert!(!manager.is_processing().await);
     }
+
+    // ========================================================================
+    // 初回コメント機能 end-to-end テスト (AC-1〜AC-6)
+    //
+    // MockTtsBackend.speak_calls を介して、enqueue → start_processing →
+    // backend.speak() のフルパスでプレフィックス付加・スキップ判定を検証する。
+    // 純粋関数レベルのテスト (build_first_comment_prefix / should_skip_tts)
+    // とは別に、TtsManager のオーケストレーションを含めた挙動を確認する。
+    // ========================================================================
+
+    /// end-to-end テスト用ヘルパー: manager + speak_calls 共有参照を生成
+    fn build_e2e_manager(
+        config: TtsConfig,
+    ) -> (TtsManager, Arc<Mutex<Vec<String>>>) {
+        let mock = MockTtsBackend::connected();
+        let calls = Arc::clone(&mock.speak_calls);
+        let manager = TtsManager::with_backend(config, Some(Box::new(mock)));
+        (manager, calls)
+    }
+
+    /// キューに enqueue したアイテムが backend.speak() に渡るまでを待機して
+    /// speak_calls のスナップショットを返す
+    async fn drain_speak_calls(
+        manager: &TtsManager,
+        calls: &Arc<Mutex<Vec<String>>>,
+    ) -> Vec<String> {
+        manager.start_processing().await;
+        // ポーリング間隔は 100ms。1 アイテム最大 200ms 程度を見込む
+        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+        manager.stop_processing().await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        calls.lock().await.clone()
+    }
+
+    fn test_item(
+        text: &str,
+        priority: TtsPriority,
+        in_stream_comment_count: Option<u32>,
+    ) -> TtsQueueItem {
+        TtsQueueItem {
+            text: text.to_string(),
+            priority,
+            author_name: Some("田中".to_string()),
+            amount: None,
+            in_stream_comment_count,
+            message_id: Some(format!("msg-{text}")),
+        }
+    }
+
+    #[tokio::test]
+    async fn e2e_ac1_prefix_enabled_first_comment_prepends_default() {
+        // AC-1 (E2E): プレフィックスON + 空文字列 + count=1
+        // → speak テキストに「1回目のコメント。」が付加される
+        let (manager, calls) = build_e2e_manager(TtsConfig {
+            enabled: true,
+            first_comment_prefix_enabled: true,
+            first_comment_prefix: String::new(),
+            ..TtsConfig::default()
+        });
+        manager
+            .enqueue(test_item("こんにちは", TtsPriority::Normal, Some(1)))
+            .await;
+        let spoken = drain_speak_calls(&manager, &calls).await;
+        assert_eq!(spoken.len(), 1, "1メッセージが speak されるはず");
+        assert!(
+            spoken[0].starts_with("1回目のコメント。"),
+            "プレフィックスが先頭に付加されるはず: actual={:?}",
+            spoken[0]
+        );
+        assert!(spoken[0].contains("こんにちは"));
+    }
+
+    #[tokio::test]
+    async fn e2e_ac1_prefix_enabled_with_custom_string() {
+        // AC-1 派生 (E2E): プレフィックスON + カスタム文字列 + count=1
+        // → カスタム文字列が付加される
+        let (manager, calls) = build_e2e_manager(TtsConfig {
+            enabled: true,
+            first_comment_prefix_enabled: true,
+            first_comment_prefix: "初コメ！".to_string(),
+            ..TtsConfig::default()
+        });
+        manager
+            .enqueue(test_item("こんにちは", TtsPriority::Normal, Some(1)))
+            .await;
+        let spoken = drain_speak_calls(&manager, &calls).await;
+        assert_eq!(spoken.len(), 1);
+        assert!(
+            spoken[0].starts_with("初コメ！"),
+            "カスタムプレフィックスが付加されるはず: actual={:?}",
+            spoken[0]
+        );
+    }
+
+    #[tokio::test]
+    async fn e2e_ac2_prefix_enabled_second_comment_no_prefix() {
+        // AC-2 (E2E): プレフィックスON + count=2 → プレフィックスなし
+        let (manager, calls) = build_e2e_manager(TtsConfig {
+            enabled: true,
+            first_comment_prefix_enabled: true,
+            ..TtsConfig::default()
+        });
+        manager
+            .enqueue(test_item("2回目", TtsPriority::Normal, Some(2)))
+            .await;
+        let spoken = drain_speak_calls(&manager, &calls).await;
+        assert_eq!(spoken.len(), 1);
+        assert!(
+            !spoken[0].contains("1回目のコメント。"),
+            "2回目はデフォルトプレフィックスが付かないはず: actual={:?}",
+            spoken[0]
+        );
+    }
+
+    #[tokio::test]
+    async fn e2e_ac3_prefix_disabled_no_prefix_even_on_first() {
+        // AC-3 (E2E): プレフィックスOFF + count=1 → プレフィックスなし
+        let (manager, calls) = build_e2e_manager(TtsConfig {
+            enabled: true,
+            first_comment_prefix_enabled: false,
+            ..TtsConfig::default()
+        });
+        manager
+            .enqueue(test_item("初回だがOFF", TtsPriority::Normal, Some(1)))
+            .await;
+        let spoken = drain_speak_calls(&manager, &calls).await;
+        assert_eq!(spoken.len(), 1);
+        assert!(
+            !spoken[0].contains("1回目のコメント。"),
+            "OFF時はデフォルトプレフィックスが付かないはず: actual={:?}",
+            spoken[0]
+        );
+    }
+
+    #[tokio::test]
+    async fn e2e_ac4_first_comment_only_speaks_first() {
+        // AC-4 (E2E): first_comment_only=ON + count=1 → speak される
+        let (manager, calls) = build_e2e_manager(TtsConfig {
+            enabled: true,
+            first_comment_only: true,
+            ..TtsConfig::default()
+        });
+        manager
+            .enqueue(test_item("初回", TtsPriority::Normal, Some(1)))
+            .await;
+        let spoken = drain_speak_calls(&manager, &calls).await;
+        assert_eq!(spoken.len(), 1, "初回コメントは speak されるはず");
+        assert!(spoken[0].contains("初回"));
+    }
+
+    #[tokio::test]
+    async fn e2e_ac5_first_comment_only_skips_subsequent() {
+        // AC-5 (E2E): first_comment_only=ON + count=2 → speak されない
+        let (manager, calls) = build_e2e_manager(TtsConfig {
+            enabled: true,
+            first_comment_only: true,
+            ..TtsConfig::default()
+        });
+        manager
+            .enqueue(test_item("2回目", TtsPriority::Normal, Some(2)))
+            .await;
+        let spoken = drain_speak_calls(&manager, &calls).await;
+        assert!(
+            spoken.is_empty(),
+            "2回目以降はスキップされ speak されないはず: actual={:?}",
+            spoken
+        );
+    }
+
+    #[tokio::test]
+    async fn e2e_ac6_first_comment_only_off_speaks_everything() {
+        // AC-6 (E2E): first_comment_only=OFF → count に関係なく speak される
+        let (manager, calls) = build_e2e_manager(TtsConfig {
+            enabled: true,
+            first_comment_only: false,
+            ..TtsConfig::default()
+        });
+        manager
+            .enqueue(test_item("first", TtsPriority::Normal, Some(1)))
+            .await;
+        manager
+            .enqueue(test_item("second", TtsPriority::Normal, Some(2)))
+            .await;
+        manager
+            .enqueue(test_item("fifth", TtsPriority::Normal, Some(5)))
+            .await;
+        let spoken = drain_speak_calls(&manager, &calls).await;
+        assert_eq!(
+            spoken.len(),
+            3,
+            "OFF 時は全件 speak されるはず: actual={:?}",
+            spoken
+        );
+    }
+
+    #[tokio::test]
+    async fn e2e_priority_order_superchat_first_then_membership_then_normal() {
+        // 仕様 (04_tts.md TtsPriority): SuperChat (2) > Membership (1) > Normal (0)
+        // 同時に enqueue した場合の speak 順序を end-to-end で検証する
+        let (manager, calls) = build_e2e_manager(TtsConfig {
+            enabled: true,
+            ..TtsConfig::default()
+        });
+        // Normal → Membership → SuperChat の順で enqueue
+        // start_processing 前なので、優先度ソートが正しく働けば
+        // SuperChat → Membership → Normal の順で speak される
+        manager
+            .enqueue(test_item("normal", TtsPriority::Normal, None))
+            .await;
+        manager
+            .enqueue(test_item("member", TtsPriority::Membership, None))
+            .await;
+        manager
+            .enqueue(test_item("superchat", TtsPriority::SuperChat, None))
+            .await;
+
+        // ポーリングが 100ms 間隔なので 3 件処理に約 300ms+ 必要
+        manager.start_processing().await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(600)).await;
+        manager.stop_processing().await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        let spoken = calls.lock().await.clone();
+        assert_eq!(spoken.len(), 3, "3 件全て speak されるはず");
+        // 各 speak テキストに含まれる識別子で順序を検証
+        assert!(
+            spoken[0].contains("superchat"),
+            "1番目は SuperChat: actual={:?}",
+            spoken[0]
+        );
+        assert!(
+            spoken[1].contains("member"),
+            "2番目は Membership: actual={:?}",
+            spoken[1]
+        );
+        assert!(
+            spoken[2].contains("normal"),
+            "3番目は Normal: actual={:?}",
+            spoken[2]
+        );
+    }
 }
