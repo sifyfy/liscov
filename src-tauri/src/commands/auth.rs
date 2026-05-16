@@ -1154,7 +1154,7 @@ mod tests {
     }
 
     #[test]
-    #[serial]
+    #[serial(liscov_env)]
     fn load_cookies_with_storage_secure_mode_no_entry() {
         // Secureモード + ストレージにデータなし + ファイルもなし → Err
         let storage = InMemoryStorage::empty();
@@ -1166,7 +1166,7 @@ mod tests {
     }
 
     #[test]
-    #[serial]
+    #[serial(liscov_env)]
     fn load_cookies_with_storage_fallback_mode_ignores_secure_storage() {
         // Fallbackモード → セキュアストレージにデータがあっても使用せずファイルパスに委譲する
         // ここではFallbackモード時にsecure_storage.load()が呼ばれない（= ファイルパス経由）ことを
@@ -1215,7 +1215,7 @@ mod tests {
     }
 
     #[test]
-    #[serial]
+    #[serial(liscov_env)]
     fn save_cookies_with_storage_fallback_mode() {
         // Fallbackモード → ファイルパスに委譲
         // ファイルI/Oが発生するため、ストレージには委譲されないことを確認
@@ -1237,7 +1237,7 @@ mod tests {
     // =========================================================================
 
     #[test]
-    #[serial]
+    #[serial(liscov_env)]
     fn delete_credentials_with_storage_secure_mode() {
         // Secureモード → InMemoryStorage から削除確認
         let cookies = sample_cookies();
@@ -1255,7 +1255,7 @@ mod tests {
     }
 
     #[test]
-    #[serial]
+    #[serial(liscov_env)]
     fn delete_credentials_with_storage_clears_cache() {
         // 削除時にインメモリキャッシュもクリアされることを確認
         let cookies = sample_cookies();

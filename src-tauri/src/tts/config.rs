@@ -226,7 +226,7 @@ mod tests {
     }
 
     #[test]
-    #[serial]
+    #[serial(liscov_env)]
     fn load_returns_default_when_file_missing() {
         let _guard = ConfigTestGuard::new();
         let config = TtsConfig::load();
@@ -236,7 +236,7 @@ mod tests {
     }
 
     #[test]
-    #[serial]
+    #[serial(liscov_env)]
     fn save_then_load_roundtrip() {
         let _guard = ConfigTestGuard::new();
         let config = TtsConfig {
@@ -262,7 +262,7 @@ mod tests {
     }
 
     #[test]
-    #[serial]
+    #[serial(liscov_env)]
     fn load_returns_default_for_corrupted_file() {
         let _guard = ConfigTestGuard::new();
         // 壊れたTOMLを書き込む

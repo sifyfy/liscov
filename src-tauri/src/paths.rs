@@ -59,7 +59,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    #[serial]
+    #[serial(liscov_env)]
     fn app_name_returns_default_when_env_not_set() {
         // SAFETY: テスト環境でのみ実行。#[serial] で直列化済み
         unsafe { std::env::remove_var("LISCOV_APP_NAME") };
@@ -67,7 +67,7 @@ mod tests {
     }
 
     #[test]
-    #[serial]
+    #[serial(liscov_env)]
     fn app_name_respects_env_override() {
         // SAFETY: テスト環境でのみ実行。#[serial] で直列化済み
         unsafe {
@@ -83,7 +83,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    #[serial]
+    #[serial(liscov_env)]
     fn keyring_service_returns_default_when_env_not_set() {
         // SAFETY: テスト環境でのみ実行。#[serial] で直列化済み
         unsafe { std::env::remove_var("LISCOV_KEYRING_SERVICE") };
@@ -91,7 +91,7 @@ mod tests {
     }
 
     #[test]
-    #[serial]
+    #[serial(liscov_env)]
     fn keyring_service_respects_env_override() {
         // SAFETY: テスト環境でのみ実行。#[serial] で直列化済み
         unsafe {
@@ -107,7 +107,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    #[serial]
+    #[serial(liscov_env)]
     fn config_dir_ends_with_app_name() {
         // SAFETY: テスト環境でのみ実行。#[serial] で直列化済み
         unsafe { std::env::remove_var("LISCOV_APP_NAME") };
@@ -120,7 +120,7 @@ mod tests {
     }
 
     #[test]
-    #[serial]
+    #[serial(liscov_env)]
     fn data_dir_ends_with_app_name() {
         // SAFETY: テスト環境でのみ実行。#[serial] で直列化済み
         unsafe { std::env::remove_var("LISCOV_APP_NAME") };
@@ -133,7 +133,7 @@ mod tests {
     }
 
     #[test]
-    #[serial]
+    #[serial(liscov_env)]
     fn credentials_path_ends_with_credentials_toml() {
         // SAFETY: テスト環境でのみ実行。#[serial] で直列化済み
         unsafe { std::env::remove_var("LISCOV_APP_NAME") };
@@ -142,7 +142,7 @@ mod tests {
     }
 
     #[test]
-    #[serial]
+    #[serial(liscov_env)]
     fn config_path_ends_with_config_toml() {
         // SAFETY: テスト環境でのみ実行。#[serial] で直列化済み
         unsafe { std::env::remove_var("LISCOV_APP_NAME") };
@@ -151,7 +151,7 @@ mod tests {
     }
 
     #[test]
-    #[serial]
+    #[serial(liscov_env)]
     fn database_path_ends_with_liscov_db() {
         // SAFETY: テスト環境でのみ実行。#[serial] で直列化済み
         unsafe { std::env::remove_var("LISCOV_APP_NAME") };
@@ -160,7 +160,7 @@ mod tests {
     }
 
     #[test]
-    #[serial]
+    #[serial(liscov_env)]
     fn backup_dir_ends_with_backups() {
         // SAFETY: テスト環境でのみ実行。#[serial] で直列化済み
         unsafe { std::env::remove_var("LISCOV_APP_NAME") };
