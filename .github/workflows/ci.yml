@@ -43,8 +43,8 @@ jobs:
           install: true
           cache: true
 
-      - name: Install Node dependencies (npm ci)
-        run: npm ci
+      - name: Install Node dependencies (pnpm)
+        run: pnpm install --frozen-lockfile
 
       - name: Cache Cargo registry
         uses: actions/cache@v4
@@ -56,6 +56,14 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-
 
       - name: Run lint (make lint)
         run: make lint
@@ -97,7 +105,7 @@ jobs:
           install: true
           cache: true
 
-      - run: npm ci
+      - run: pnpm install --frozen-lockfile
 
       - name: Cache Cargo registry
         uses: actions/cache@v4

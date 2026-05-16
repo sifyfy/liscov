@@ -9,6 +9,9 @@
 rust = "1.95"
 # Node.js: LTS Krypton
 node = "24"
+# pnpm: Node.js のパッケージマネージャ (npm より高速・ディスク効率良)
+# package.json の packageManager フィールドと整合させる
+pnpm = "10"
 
 # ---- 言語非依存のツール ----
 # lefthook: ubi backend を採用。

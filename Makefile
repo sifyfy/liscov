@@ -40,7 +40,7 @@ help:
 # ---- 環境セットアップ ----
 install:
 	mise install
-	npm install
+	pnpm install
 	lefthook install
 
 # ---- 統合ターゲット ----
@@ -91,25 +91,27 @@ secscan-rs:
 	cargo audit
 
 # ---- TypeScript / Svelte 5 ----
+# 注: パッケージマネージャは pnpm に統一 (package.json の packageManager フィールド参照)
 lint-ts:
-	npm run lint
+	pnpm lint
 
 fix-ts:
-	npm run format
+	pnpm format
 
 format-ts:
-	npm run format
+	pnpm format
 
 typecheck-ts:
-	npm run typecheck
+	pnpm typecheck
 
 test-ts:
-	npm run test:run
+	pnpm test:run
 
 secscan-ts:
-	npm run secscan
+	pnpm secscan
 
 # ---- Clean ----
 clean:
 	cargo clean
+	pnpm store prune
 	rm -rf node_modules/.cache build .svelte-kit playwright-report test-results
