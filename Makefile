@@ -67,10 +67,9 @@ secscan-staged:
 all: lint typecheck test secscan
 
 # ---- Rust (Cargo workspace: src-tauri + crates/mock-server) ----
-# lint: 初期は warning を許容 (既存違反 16件は段階的に解消する)
-# TODO(quality): 既存違反解消後、`-- -D warnings` を再付与して warning 見逃しを防ぐ
+# lint: warning を error 扱い (新規 warning 混入をCIで防ぐ)
 lint-rs:
-	cargo clippy --workspace --all-targets
+	cargo clippy --workspace --all-targets -- -D warnings
 
 fix-rs:
 	cargo clippy --workspace --all-targets --fix --allow-dirty --allow-staged

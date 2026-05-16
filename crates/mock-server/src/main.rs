@@ -5,6 +5,10 @@
 //!   POST /set_auth_state                    - Control auth behavior
 //!   GET  /auth_status                       - Get current auth state
 
+// YouTube API の略称 (AMR / SAR / SSR 等) は仕様側の命名を尊重する。
+// deserialize 専用のフィールドは将来の挙動切替のため保持する。
+#![allow(clippy::upper_case_acronyms, dead_code)]
+
 use base64::{Engine as _, engine::general_purpose};
 use clap::Parser;
 use serde::{Deserialize, Serialize};

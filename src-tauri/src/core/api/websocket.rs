@@ -21,6 +21,10 @@ pub enum ClientEvent {
 }
 
 /// Server to client message
+// TODO(perf): ChatMessage バリアントが他より大きいため、サイズ最適化が必要なら
+// `ChatMessage(Box<ChatMessage>)` に変更する。WebSocket シリアル化通過後の
+// 表現には影響しないが API consumer の型が変わるため別タスクで判断する。
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 pub enum ServerMessage {

@@ -308,6 +308,10 @@ pub(crate) fn truncate_text(text: &str, max_length: usize) -> String {
 }
 
 /// Build complete TTS text from parts
+// TODO(refactor): 8 個の制御フラグ・しきい値を TtsTextOptions struct に集約して
+// 引数を 2 つに削減する。仕様 (docs/specs/04_tts.md) との対応関係を保つため
+// 別タスクで実施。
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_tts_text(
     author_name: Option<&str>,
     amount: Option<&str>,

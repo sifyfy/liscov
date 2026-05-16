@@ -252,8 +252,7 @@ mod tests {
         let result = mgr.launch(TtsBackendType::Bouyomichan, None).await;
 
         // 棒読みちゃんがインストールされていなければエラー
-        if result.is_err() {
-            let err = result.unwrap_err();
+        if let Err(err) = result {
             assert!(
                 err.contains("Could not find") || err.contains("not found"),
                 "Unexpected error: {}",

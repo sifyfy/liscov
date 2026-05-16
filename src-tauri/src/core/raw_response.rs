@@ -195,7 +195,7 @@ impl RawResponseSaver {
         }
 
         // 作成日時でソート（新しい順）
-        backup_files.sort_by(|a, b| b.1.cmp(&a.1));
+        backup_files.sort_by_key(|entry| std::cmp::Reverse(entry.1));
 
         // 制限を超えた古いファイルを削除
         if backup_files.len() > self.config.max_backup_files as usize {

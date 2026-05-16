@@ -21,9 +21,11 @@ fn build_test_app() -> tauri::App<tauri::test::MockRuntime> {
     // ConfigState をFallbackモードで初期化
     let config_state = {
         let state = ConfigState::new();
-        let mut config = Config::default();
-        config.storage = StorageConfig {
-            mode: StorageMode::Fallback,
+        let config = Config {
+            storage: StorageConfig {
+                mode: StorageMode::Fallback,
+            },
+            ..Default::default()
         };
         state.set(config);
         state
