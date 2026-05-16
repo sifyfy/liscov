@@ -49,6 +49,10 @@ tmpclaude-*
 /.claude/worktrees/
 .worktrees/
 
+# lefthook 個人用上書き (チーム共有しない)
+lefthook-local.yml
+.lefthook-local.yml
+
 # Local cargo config (machine-specific)
 /.cargo/
 

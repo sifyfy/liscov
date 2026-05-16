@@ -83,6 +83,10 @@ tempfile = "3"
 [features]
 default = []
 
+# workspace lint 設定を継承 (ルート Cargo.toml の [workspace.lints] 参照)
+[lints]
+workspace = true
+
 # Release profile optimizations
 [profile.release]
 lto = true

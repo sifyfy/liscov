@@ -1,0 +1,113 @@
+# .github/workflows/ci.yml
+# このファイルは lint-and-hooks-setup スキルで生成
+# Makefile を呼ぶだけにして SSoT 維持。実コマンドはこのファイルに書かない
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 同じ ref への新規 push で古いラン中ジョブをキャンセル (CI 浪費削減)
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint (Rust + TS/Svelte)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Tauri 2 のビルド依存 (Linux): cargo clippy が src-tauri を compile するため必要
+      # 参考: https://tauri.app/v2/start/prerequisites/
+      - name: Install Tauri system dependencies (Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      # mise: .mise.toml で定義した Rust / Node / lefthook / gitleaks / cargo-audit を導入
+      - uses: jdx/mise-action@v2
+        with:
+          install: true
+          cache: true
+
+      - name: Install Node dependencies (npm ci)
+        run: npm ci
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Run lint (make lint)
+        run: make lint
+
+  secscan:
+    name: Security scan (deps + secrets)
+    runs-on: ubuntu-latest
+    # gitleaks の全履歴スキャンには full clone が必要
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: jdx/mise-action@v2
+        with:
+          install: true
+          cache: true
+
+      - name: Run secscan (make secscan)
+        # 既存依存に既知 advisory がある場合の運用は別途検討。
+        # 当面は MR ブロックとして運用、ノイズが多ければ allow-failure 化を検討
+        run: make secscan
+
+  typecheck:
+    name: Typecheck (svelte-check + cargo check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Tauri system dependencies (Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev \
+            libayatana-appindicator3-dev librsvg2-dev
+
+      - uses: jdx/mise-action@v2
+        with:
+          install: true
+          cache: true
+
+      - run: npm ci
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - run: make typecheck

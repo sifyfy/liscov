@@ -1,0 +1,23 @@
+# lefthook.yml
+# このファイルは lint-and-hooks-setup スキルで生成
+# pre-commit hook で Makefile ターゲットを呼ぶ (SSoT 維持)
+#
+# 重要: mise が管理するツール (lefthook 自体含む) は lefthook 起動シェルの
+# PATH に居ない可能性がある。`mise exec --` プレフィックスで shim を経由
+# させることで .mise.toml で定義したツール (gitleaks, cargo-audit) が
+# 解決される。
+
+pre-commit:
+  parallel: true
+  commands:
+    lint:
+      # 全言語 lint。Rust の clippy はワークスペース単位で実行 (ファイル単位より速い)
+      run: mise exec -- make lint
+    secscan:
+      # フルスキャン (make secscan) ではなく staged 限定版を呼ぶ。
+      # 単一 commit では dep 脆弱性は意味薄く gitleaks のみで十分。
+      # フル secscan は CI (.github/workflows/ci.yml) で実行される
+      run: mise exec -- make secscan-staged
+    merge-conflict:
+      # マージコンフリクトマーカー検出 (git 標準、mise exec 不要)
+      run: git diff --cached --check
