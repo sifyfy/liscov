@@ -172,9 +172,11 @@ test.describe('TTS First Comment Settings', () => {
     await expect(firstCommentOnlyAfter).toHaveAttribute('aria-pressed', 'true');
 
     // テスト後のクリーンアップ: 設定を戻す
+    // 注: prefixInput はトグルが ON のときのみ表示されるため、必ず toggle OFF より
+    // 前に fill('') でクリアする。順序を逆にすると非表示要素への fill で失敗する。
+    await prefixInputAfter.fill('');
     await prefixToggleAfter.click();
     await firstCommentOnlyAfter.click();
-    await prefixInputAfter.fill('');
     await mainPage.waitForTimeout(500);
   });
 });

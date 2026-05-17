@@ -26,8 +26,9 @@ let tauriProcess: ChildProcess | null = null;
 let staticFrontendServer: http.Server | null = null;
 
 // プリビルドバイナリのパス（Windowsのみ対応）
-const PREBUILT_TAURI_APP_PATH = path.join(PROJECT_DIR, 'src-tauri', 'target', 'debug', 'liscov-tauri.exe');
-const PREBUILT_MOCK_SERVER_PATH = path.join(PROJECT_DIR, 'src-tauri', 'target', 'debug', 'mock_server.exe');
+// 注: workspace 化により cargo build の出力先は <root>/target/ (旧: src-tauri/target/)
+const PREBUILT_TAURI_APP_PATH = path.join(PROJECT_DIR, 'target', 'debug', 'liscov-tauri.exe');
+const PREBUILT_MOCK_SERVER_PATH = path.join(PROJECT_DIR, 'target', 'debug', 'mock-server.exe');
 const PREBUILT_FRONTEND_INDEX_PATH = path.join(PROJECT_DIR, 'build', 'index.html');
 const PREBUILT_FRONTEND_DIR = path.join(PROJECT_DIR, 'build');
 const PREBUILT_FRONTEND_PORT = 5173;
@@ -413,9 +414,9 @@ export async function killMockServer(): Promise<void> {
   // 孤立プロセスのフォールバック
   try {
     if (process.platform === 'win32') {
-      execSync('taskkill /F /T /IM mock_server.exe 2>nul', { stdio: 'ignore' });
+      execSync('taskkill /F /T /IM mock-server.exe 2>nul', { stdio: 'ignore' });
     } else {
-      execSync('pkill -f mock_server', { stdio: 'ignore' });
+      execSync('pkill -f mock-server', { stdio: 'ignore' });
     }
   } catch { /* プロセスが存在しない場合は無視 */ }
   await waitForPortFree(3456, 3000);
