@@ -35,13 +35,19 @@ jobs:
             libxdo-dev \
             libssl-dev \
             libayatana-appindicator3-dev \
-            librsvg2-dev
+            librsvg2-dev \
+            libasound2-dev
 
       # mise: .mise.toml で定義した Rust / Node / lefthook / gitleaks / cargo-audit を導入
       - uses: jdx/mise-action@v2
         with:
           install: true
           cache: true
+
+      # 保険: .mise.toml で components 指定しても認識されない場合に備えて
+      # rustup で clippy / rustfmt を明示的にインストールする
+      - name: Ensure Rust components (clippy, rustfmt)
+        run: rustup component add clippy rustfmt
 
       - name: Install Node dependencies (pnpm)
         run: pnpm install --frozen-lockfile
@@ -98,7 +104,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev \
-            libayatana-appindicator3-dev librsvg2-dev
+            libayatana-appindicator3-dev librsvg2-dev libasound2-dev
 
       - uses: jdx/mise-action@v2
         with:

@@ -6,7 +6,8 @@
 [tools]
 # ---- 言語ランタイム ----
 # Rust: stable。MSRV (Cargo.toml の rust-version) との互換性は維持
-rust = "1.95"
+# components: clippy / rustfmt は make lint / make fmt で利用
+rust = { version = "1.95", components = "clippy,rustfmt" }
 # Node.js: LTS Krypton
 node = "24"
 # pnpm: Node.js のパッケージマネージャ (npm より高速・ディスク効率良)
