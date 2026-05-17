@@ -436,6 +436,7 @@ pub(crate) fn build_tts_text(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     // ========================================================================
     // process_author_name (04_tts.md: 投稿者名処理)
@@ -1049,8 +1050,16 @@ mod tests {
     // ========================================================================
 
     #[tokio::test]
+    #[serial(liscov_env)]
     async fn update_config_reflects_changes_in_get_config() {
         // spec: update_config 後に get_config でフィールドが反映される
+        //
+        // NOTE: TtsManager::update_config は内部で TtsConfig::save() を呼び、
+        // LISCOV_APP_NAME 経由で解決される実ファイル
+        // ($APPDATA/Roaming/<app_name>/tts_config.toml) に書き込む。
+        // この副作用は tts::config::tests::save_then_load_roundtrip 等の
+        // 同じパスへ I/O する他テストと衝突するため、liscov_env キーで直列化する。
+        // (1500 iter ハントで rate ~1/500 を確認、修正後 0/N で検証)
         let manager = TtsManager::new(TtsConfig::default());
         let new_config = TtsConfig {
             enabled: true,
