@@ -11,6 +11,7 @@ use app_lib::core::api::{ClientEvent, WebSocketServer};
 use app_lib::core::models::ChatMessage;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
+use serial_test::serial;
 use std::time::Duration;
 use tokio::time::timeout;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
@@ -58,6 +59,7 @@ fn parse_server_message(msg: &Message) -> Option<Value> {
 // ============================================================================
 
 #[tokio::test]
+#[serial]
 async fn test_connected_message_sent_on_connection() {
     // Spec: 接続確立時に Connected メッセージを送信
     let port = get_test_port().await;
@@ -83,6 +85,7 @@ async fn test_connected_message_sent_on_connection() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_connected_message_has_unique_client_id() {
     // Spec: 各クライアントに一意のIDを割り当て
     let port = get_test_port().await;
@@ -120,6 +123,7 @@ async fn test_connected_message_has_unique_client_id() {
 // ============================================================================
 
 #[tokio::test]
+#[serial]
 async fn test_ping_json_receives_pong_frame() {
     // Spec: ClientMessage::Ping → サーバーは Pong フレームで応答
     let port = get_test_port().await;
@@ -150,6 +154,7 @@ async fn test_ping_json_receives_pong_frame() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_websocket_ping_frame_receives_pong() {
     // WebSocket protocol: Ping frame → Pong frame
     let port = get_test_port().await;
@@ -188,6 +193,7 @@ async fn test_websocket_ping_frame_receives_pong() {
 // ============================================================================
 
 #[tokio::test]
+#[serial]
 async fn test_getinfo_returns_server_info() {
     // Spec: GetInfo → ServerInfo { version, connected_clients }
     let port = get_test_port().await;
@@ -226,6 +232,7 @@ async fn test_getinfo_returns_server_info() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_getinfo_returns_correct_client_count() {
     // Spec: connected_clients は現在接続中のクライアント数
     let port = get_test_port().await;
@@ -270,6 +277,7 @@ async fn test_getinfo_returns_correct_client_count() {
 // ============================================================================
 
 #[tokio::test]
+#[serial]
 async fn test_multiple_clients_can_connect() {
     // Spec: 複数クライアントの同時接続をサポート
     let port = get_test_port().await;
@@ -301,6 +309,7 @@ async fn test_multiple_clients_can_connect() {
 // ============================================================================
 
 #[tokio::test]
+#[serial]
 async fn test_client_connected_event_emitted() {
     // Spec: ClientEvent::Connected が発火される
     let port = get_test_port().await;
@@ -332,6 +341,7 @@ async fn test_client_connected_event_emitted() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_client_disconnected_event_emitted() {
     // Spec: ClientEvent::Disconnected が発火される
     let port = get_test_port().await;
@@ -372,8 +382,16 @@ async fn test_client_disconnected_event_emitted() {
 // ============================================================================
 
 #[tokio::test]
+#[serial]
 async fn test_port_fallback_when_occupied() {
     // Spec: 指定ポートが使用中の場合、自動的に次のポートを試行
+    //
+    // NOTE: 本ファイル全 #[tokio::test] に #[serial] を付けている。理由は
+    // このテストが preferred_port..preferred_port+9 の 10 ポート連続範囲のうち
+    // 少なくとも 1 つが空いていることを前提にしているため。
+    // 他テストが並行実行で get_test_port() を呼び近接ポートを掴むと
+    // 全 9 ポートが取られて "No available ports" でフレーク化する
+    // (`cargo test --no-fail-fast` ループ実測: 3/20 → 0/20 に改善)。
     let base_port = get_test_port().await;
 
     // Occupy the base port
@@ -394,6 +412,7 @@ async fn test_port_fallback_when_occupied() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_server_reports_actual_port() {
     // Spec: actual_port を正しく報告
     let port = get_test_port().await;
@@ -416,6 +435,7 @@ async fn test_server_reports_actual_port() {
 // ============================================================================
 
 #[tokio::test]
+#[serial]
 async fn test_server_state_transitions() {
     // Spec: ServerState: Stopped → Starting → Running → Stopping → Stopped
     let port = get_test_port().await;
@@ -436,6 +456,7 @@ async fn test_server_state_transitions() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_connected_clients_count() {
     // Spec: connected_clients メソッドが正しいカウントを返す
     let port = get_test_port().await;
@@ -464,6 +485,7 @@ async fn test_connected_clients_count() {
 // ============================================================================
 
 #[tokio::test]
+#[serial]
 async fn test_invalid_json_does_not_crash_server() {
     // Spec: 不正なメッセージ受信 → 警告ログ、接続は維持
     let port = get_test_port().await;
@@ -498,6 +520,7 @@ async fn test_invalid_json_does_not_crash_server() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_unknown_message_type_does_not_crash() {
     // Unknown message types should be ignored
     let port = get_test_port().await;
@@ -536,6 +559,7 @@ async fn test_unknown_message_type_does_not_crash() {
 // ============================================================================
 
 #[tokio::test]
+#[serial]
 async fn test_chatmessage_json_format_matches_spec() {
     // Spec (03_websocket.md):
     // {
@@ -657,6 +681,7 @@ async fn test_chatmessage_json_format_matches_spec() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_connected_message_json_format_matches_spec() {
     // Spec: { "type": "Connected", "data": { "client_id": 1 } }
     let port = get_test_port().await;
@@ -687,6 +712,7 @@ async fn test_connected_message_json_format_matches_spec() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_serverinfo_message_json_format_matches_spec() {
     // Spec: { "type": "ServerInfo", "data": { "version": "0.1.0", "connected_clients": 3 } }
     let port = get_test_port().await;
@@ -747,6 +773,7 @@ fn create_test_message(id: &str, author: &str, content: &str) -> ChatMessage {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_broadcast_message_to_single_client() {
     // Spec: チャットメッセージ受信時、接続中のすべてのクライアントに配信
     let port = get_test_port().await;
@@ -779,6 +806,7 @@ async fn test_broadcast_message_to_single_client() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_broadcast_message_to_multiple_clients() {
     // Spec: すべてのクライアントにメッセージをブロードキャスト
     let port = get_test_port().await;
@@ -814,6 +842,7 @@ async fn test_broadcast_message_to_multiple_clients() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_broadcast_preserves_message_content() {
     // Verify all message fields are preserved in broadcast
     let port = get_test_port().await;
@@ -862,6 +891,7 @@ async fn test_broadcast_preserves_message_content() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_new_client_does_not_receive_past_messages() {
     // Spec: 過去メッセージは送信しない、接続後に受信したメッセージのみ配信
     let port = get_test_port().await;

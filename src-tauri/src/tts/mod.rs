@@ -1502,7 +1502,14 @@ mod tests {
         manager.start_processing().await;
         assert!(manager.is_processing().await);
         manager.stop_processing().await;
-        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+        // is_processing が false になるまでポーリング (最大 5 秒)
+        let deadline =
+            std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while manager.is_processing().await
+            && std::time::Instant::now() < deadline
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
         assert!(!manager.is_processing().await);
     }
 
@@ -1527,15 +1534,28 @@ mod tests {
 
     /// キューに enqueue したアイテムが backend.speak() に渡るまでを待機して
     /// speak_calls のスナップショットを返す
+    ///
+    /// 旧実装は固定 sleep(300ms + 100ms) で、CPU負荷下では
+    /// tokio runtime のスケジューリング遅延により speak が間に合わずフレーク化していた。
+    /// 状態ベースの polling に置き換えることでマージン依存を排除する。
     async fn drain_speak_calls(
         manager: &TtsManager,
         calls: &Arc<Mutex<Vec<String>>>,
     ) -> Vec<String> {
         manager.start_processing().await;
-        // ポーリング間隔は 100ms。1 アイテム最大 200ms 程度を見込む
-        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+        // queue が空になるまでポーリング (最大 5 秒)
+        let deadline =
+            std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            if manager.queue_size().await == 0 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        // pop_front() と backend.speak().await の間で queue_size が 0 になり得るため、
+        // 処理ループの empty 時 sleep 周期 (100ms) 相当を追加で待ち in-flight を完了させる
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
         manager.stop_processing().await;
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         calls.lock().await.clone()
     }
 
@@ -1721,13 +1741,7 @@ mod tests {
             .enqueue(test_item("superchat", TtsPriority::SuperChat, None))
             .await;
 
-        // ポーリングが 100ms 間隔なので 3 件処理に約 300ms+ 必要
-        manager.start_processing().await;
-        tokio::time::sleep(tokio::time::Duration::from_millis(600)).await;
-        manager.stop_processing().await;
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-        let spoken = calls.lock().await.clone();
+        let spoken = drain_speak_calls(&manager, &calls).await;
         assert_eq!(spoken.len(), 3, "3 件全て speak されるはず");
         // 各 speak テキストに含まれる識別子で順序を検証
         assert!(
