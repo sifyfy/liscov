@@ -17,15 +17,15 @@ pub fn keyring_service() -> String {
 
 /// 設定ディレクトリのパスを返す（OS標準の config_dir + app_name）
 pub fn config_dir() -> Result<PathBuf, String> {
-    let base = dirs::config_dir()
-        .ok_or_else(|| "設定ディレクトリを特定できませんでした".to_string())?;
+    let base =
+        dirs::config_dir().ok_or_else(|| "設定ディレクトリを特定できませんでした".to_string())?;
     Ok(base.join(app_name()))
 }
 
 /// データディレクトリのパスを返す（OS標準の data_dir + app_name）
 pub fn data_dir() -> Result<PathBuf, String> {
-    let base = dirs::data_dir()
-        .ok_or_else(|| "データディレクトリを特定できませんでした".to_string())?;
+    let base =
+        dirs::data_dir().ok_or_else(|| "データディレクトリを特定できませんでした".to_string())?;
     Ok(base.join(app_name()))
 }
 
@@ -52,23 +52,24 @@ pub fn backup_dir() -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     // -----------------------------------------------------------------------
     // app_name
     // -----------------------------------------------------------------------
 
     #[test]
+    #[serial(liscov_env)]
     fn app_name_returns_default_when_env_not_set() {
-        // 環境変数が未設定のとき既定値 "liscov-tauri" を返す
-        // SAFETY: テスト環境でのみ実行。並列テストとの競合を避けるため単一スレッドで確認
+        // SAFETY: テスト環境でのみ実行。#[serial] で直列化済み
         unsafe { std::env::remove_var("LISCOV_APP_NAME") };
         assert_eq!(app_name(), "liscov-tauri");
     }
 
     #[test]
+    #[serial(liscov_env)]
     fn app_name_respects_env_override() {
-        // テスト用に環境変数をセットしてオーバーライドを確認
-        // SAFETY: テスト環境でのみ実行
+        // SAFETY: テスト環境でのみ実行。#[serial] で直列化済み
         unsafe {
             std::env::set_var("LISCOV_APP_NAME", "liscov-test");
         }
@@ -82,15 +83,17 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
+    #[serial(liscov_env)]
     fn keyring_service_returns_default_when_env_not_set() {
-        // SAFETY: テスト環境でのみ実行
+        // SAFETY: テスト環境でのみ実行。#[serial] で直列化済み
         unsafe { std::env::remove_var("LISCOV_KEYRING_SERVICE") };
         assert_eq!(keyring_service(), "liscov-tauri");
     }
 
     #[test]
+    #[serial(liscov_env)]
     fn keyring_service_respects_env_override() {
-        // SAFETY: テスト環境でのみ実行
+        // SAFETY: テスト環境でのみ実行。#[serial] で直列化済み
         unsafe {
             std::env::set_var("LISCOV_KEYRING_SERVICE", "liscov-test");
         }
@@ -104,8 +107,9 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
+    #[serial(liscov_env)]
     fn config_dir_ends_with_app_name() {
-        // SAFETY: テスト環境でのみ実行
+        // SAFETY: テスト環境でのみ実行。#[serial] で直列化済み
         unsafe { std::env::remove_var("LISCOV_APP_NAME") };
         let path = config_dir().expect("config_dir should succeed");
         assert!(
@@ -116,8 +120,9 @@ mod tests {
     }
 
     #[test]
+    #[serial(liscov_env)]
     fn data_dir_ends_with_app_name() {
-        // SAFETY: テスト環境でのみ実行
+        // SAFETY: テスト環境でのみ実行。#[serial] で直列化済み
         unsafe { std::env::remove_var("LISCOV_APP_NAME") };
         let path = data_dir().expect("data_dir should succeed");
         assert!(
@@ -128,32 +133,36 @@ mod tests {
     }
 
     #[test]
+    #[serial(liscov_env)]
     fn credentials_path_ends_with_credentials_toml() {
-        // SAFETY: テスト環境でのみ実行
+        // SAFETY: テスト環境でのみ実行。#[serial] で直列化済み
         unsafe { std::env::remove_var("LISCOV_APP_NAME") };
         let path = credentials_path().expect("credentials_path should succeed");
         assert!(path.ends_with("credentials.toml"));
     }
 
     #[test]
+    #[serial(liscov_env)]
     fn config_path_ends_with_config_toml() {
-        // SAFETY: テスト環境でのみ実行
+        // SAFETY: テスト環境でのみ実行。#[serial] で直列化済み
         unsafe { std::env::remove_var("LISCOV_APP_NAME") };
         let path = config_path().expect("config_path should succeed");
         assert!(path.ends_with("config.toml"));
     }
 
     #[test]
+    #[serial(liscov_env)]
     fn database_path_ends_with_liscov_db() {
-        // SAFETY: テスト環境でのみ実行
+        // SAFETY: テスト環境でのみ実行。#[serial] で直列化済み
         unsafe { std::env::remove_var("LISCOV_APP_NAME") };
         let path = database_path().expect("database_path should succeed");
         assert!(path.ends_with("liscov.db"));
     }
 
     #[test]
+    #[serial(liscov_env)]
     fn backup_dir_ends_with_backups() {
-        // SAFETY: テスト環境でのみ実行
+        // SAFETY: テスト環境でのみ実行。#[serial] で直列化済み
         unsafe { std::env::remove_var("LISCOV_APP_NAME") };
         let path = backup_dir().expect("backup_dir should succeed");
         assert!(path.ends_with("backups"));

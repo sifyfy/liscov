@@ -15,7 +15,7 @@ use crate::core::models::{ChatMessage, ChatMode};
 use crate::core::raw_response::{RawResponseSaver, SaveConfig};
 use crate::database::{self, Database};
 use crate::state::MAX_MESSAGES;
-use crate::tts::{TtsManager, TtsQueueItem, TtsPriority};
+use crate::tts::{TtsManager, TtsPriority, TtsQueueItem};
 
 /// 監視タスクが必要とする共有依存をまとめた構造体
 ///
@@ -83,13 +83,29 @@ pub async fn run_monitoring_loop<F>(
     let mut poll_count = 0u64;
 
     // セッション開始時点のコメント数をDBから復元してカウンターを初期化
+    // 復元失敗時に silent に空マップへフォールバックすると既存コメント者も
+    // 「初回扱い」となり first_comment_only / プレフィックス機能の挙動が崩れるため、
+    // 失敗時は warn ログで副作用を明示する (provenance: branch-owned)
     let mut in_stream_counts: std::collections::HashMap<String, u32> = {
         let db_guard = deps.database.read().await;
-        if let Some(db) = db_guard.as_ref() {
-            let conn = db.connection().await;
-            database::get_in_stream_comment_counts(&conn, &video_id).unwrap_or_default()
-        } else {
-            std::collections::HashMap::new()
+        match db_guard.as_ref() {
+            Some(db) => {
+                let conn = db.connection().await;
+                match database::get_in_stream_comment_counts(&conn, &video_id) {
+                    Ok(counts) => counts,
+                    Err(e) => {
+                        tracing::warn!(
+                            "in_stream_comment_count の DB 復元失敗 video_id={}: {}。\
+                             空状態で続行するため、既存コメント者も「初回扱い」となり \
+                             first_comment_only / プレフィックス機能に影響する可能性あり",
+                            video_id,
+                            e
+                        );
+                        std::collections::HashMap::new()
+                    }
+                }
+            }
+            None => std::collections::HashMap::new(),
         }
     };
 
@@ -258,13 +274,9 @@ async fn process_message(
         let db_guard = deps.database.read().await;
         if let Some(db) = db_guard.as_ref() {
             let conn = db.connection().await;
-            if let Err(e) = database::save_message(
-                &conn,
-                sid,
-                broadcaster_id.as_deref(),
-                msg,
-                Some(video_id),
-            ) {
+            if let Err(e) =
+                database::save_message(&conn, sid, broadcaster_id.as_deref(), msg, Some(video_id))
+            {
                 tracing::warn!("メッセージ保存失敗: {}", e);
             }
         }
@@ -276,13 +288,9 @@ async fn process_message(
             let db_guard = deps.database.read().await;
             if let Some(db) = db_guard.as_ref() {
                 let conn = db.connection().await;
-                msg.is_first_time_viewer = database::is_first_time_viewer(
-                    &conn,
-                    bid,
-                    &msg.channel_id,
-                    video_id,
-                )
-                .unwrap_or(false);
+                msg.is_first_time_viewer =
+                    database::is_first_time_viewer(&conn, bid, &msg.channel_id, video_id)
+                        .unwrap_or(false);
             }
         }
     }
@@ -309,6 +317,8 @@ async fn enqueue_tts(tts_manager: &TtsManager, msg: &ChatMessage) {
         priority,
         author_name: Some(msg.author.clone()),
         amount,
+        in_stream_comment_count: msg.in_stream_comment_count,
+        message_id: Some(msg.id.clone()),
     };
     tts_manager.enqueue(item).await;
 }

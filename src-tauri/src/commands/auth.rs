@@ -90,10 +90,7 @@ impl CredentialStorage for KeyringStorage {
             }
             Err(e) => {
                 log::error!("❌ Verification failed: could not read back: {}", e);
-                return Err(format!(
-                    "Credentials saved but cannot be read back: {}",
-                    e
-                ));
+                return Err(format!("Credentials saved but cannot be read back: {}", e));
             }
         }
 
@@ -106,7 +103,9 @@ impl CredentialStorage for KeyringStorage {
 
         match entry.delete_credential() {
             Ok(_) => log::info!("Credentials deleted from secure storage"),
-            Err(keyring::Error::NoEntry) => log::info!("No credentials to delete from secure storage"),
+            Err(keyring::Error::NoEntry) => {
+                log::info!("No credentials to delete from secure storage")
+            }
             Err(e) => return Err(format!("Failed to delete from secure storage: {}", e)),
         }
         Ok(())
@@ -258,9 +257,7 @@ fn get_credentials_path() -> Result<PathBuf, String> {
 
 /// Check if credentials file exists
 fn credentials_file_exists() -> bool {
-    get_credentials_path()
-        .map(|p| p.exists())
-        .unwrap_or(false)
+    get_credentials_path().map(|p| p.exists()).unwrap_or(false)
 }
 
 // =============================================================================
@@ -289,11 +286,11 @@ fn load_cookies_from_file() -> Result<YouTubeCookies, String> {
         return Err("Credentials file not found".to_string());
     }
 
-    let content = fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read credentials file: {}", e))?;
+    let content =
+        fs::read_to_string(&path).map_err(|e| format!("Failed to read credentials file: {}", e))?;
 
-    let config: CredentialsConfig = toml::from_str(&content)
-        .map_err(|e| format!("Failed to parse credentials file: {}", e))?;
+    let config: CredentialsConfig =
+        toml::from_str(&content).map_err(|e| format!("Failed to parse credentials file: {}", e))?;
 
     // Handle raw_cookies if present
     if let Some(ref raw) = config.youtube.raw_cookies {
@@ -364,8 +361,7 @@ fn delete_credentials_file() -> Result<(), String> {
     let path = get_credentials_path()?;
 
     if path.exists() {
-        fs::remove_file(&path)
-            .map_err(|e| format!("Failed to delete credentials file: {}", e))?;
+        fs::remove_file(&path).map_err(|e| format!("Failed to delete credentials file: {}", e))?;
         log::info!("Credentials file deleted");
     }
 
@@ -529,7 +525,10 @@ async fn check_session_validity_internal(cookies: &YouTubeCookies) -> SessionVal
     let session_check_url = std::env::var("LISCOV_SESSION_CHECK_URL")
         .unwrap_or_else(|_| "https://www.youtube.com/youtubei/v1/account/account_menu".to_string());
 
-    log::info!("🌐 Making session validity check request to: {}", session_check_url);
+    log::info!(
+        "🌐 Making session validity check request to: {}",
+        session_check_url
+    );
 
     // G4: API接続と同じCookie・認証ヘッダーを使用（build_auth_headersで統一）
     let auth_headers = build_auth_headers(cookies);
@@ -561,7 +560,9 @@ async fn check_session_validity_internal(cookies: &YouTubeCookies) -> SessionVal
                     checked_at,
                     error: None,
                 }
-            } else if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+            } else if status == reqwest::StatusCode::UNAUTHORIZED
+                || status == reqwest::StatusCode::FORBIDDEN
+            {
                 SessionValidity {
                     is_valid: false,
                     checked_at,
@@ -593,10 +594,14 @@ async fn check_session_validity_internal(cookies: &YouTubeCookies) -> SessionVal
 /// Raw cookie文字列のバリデーション（純粋関数）
 pub(crate) fn validate_raw_cookies(raw_cookies: &str) -> Result<(), CommandError> {
     if raw_cookies.is_empty() {
-        return Err(CommandError::InvalidInput("Cookie string is empty".to_string()));
+        return Err(CommandError::InvalidInput(
+            "Cookie string is empty".to_string(),
+        ));
     }
     if !raw_cookies.contains("SAPISID=") {
-        return Err(CommandError::InvalidInput("Cookie string must contain SAPISID".to_string()));
+        return Err(CommandError::InvalidInput(
+            "Cookie string must contain SAPISID".to_string(),
+        ));
     }
     Ok(())
 }
@@ -683,8 +688,7 @@ pub async fn auth_save_raw_cookies(
 
     let cookies = parse_raw_cookies(&raw_cookies);
     let config = config_state.get();
-    save_cookies(&cookies, &config.storage.mode)
-        .map_err(CommandError::StorageError)?;
+    save_cookies(&cookies, &config.storage.mode).map_err(CommandError::StorageError)?;
 
     log::info!("Credentials saved from raw cookies");
     Ok(())
@@ -701,7 +705,9 @@ pub async fn auth_save_credentials(
     config_state: State<'_, ConfigState>,
 ) -> Result<(), CommandError> {
     if sapisid.is_empty() {
-        return Err(CommandError::InvalidInput("SAPISID is required".to_string()));
+        return Err(CommandError::InvalidInput(
+            "SAPISID is required".to_string(),
+        ));
     }
 
     let cookies = YouTubeCookies {
@@ -714,8 +720,7 @@ pub async fn auth_save_credentials(
     };
 
     let config = config_state.get();
-    save_cookies(&cookies, &config.storage.mode)
-        .map_err(CommandError::StorageError)?;
+    save_cookies(&cookies, &config.storage.mode).map_err(CommandError::StorageError)?;
 
     log::info!("Credentials saved");
     Ok(())
@@ -727,17 +732,14 @@ pub async fn auth_delete_credentials(
     config_state: State<'_, ConfigState>,
 ) -> Result<(), CommandError> {
     let config = config_state.get();
-    delete_credentials(&config.storage.mode)
-        .map_err(CommandError::StorageError)?;
+    delete_credentials(&config.storage.mode).map_err(CommandError::StorageError)?;
     log::info!("Credentials deleted");
     Ok(())
 }
 
 /// Clear WebView cookies (logout from YouTube)
 #[tauri::command]
-pub async fn auth_clear_webview_cookies(
-    app: tauri::AppHandle,
-) -> Result<(), CommandError> {
+pub async fn auth_clear_webview_cookies(app: tauri::AppHandle) -> Result<(), CommandError> {
     use tauri::Manager;
 
     log::info!("🧹 Clearing WebView cookies...");
@@ -762,8 +764,7 @@ pub async fn auth_validate_credentials(
     config_state: State<'_, ConfigState>,
 ) -> Result<bool, CommandError> {
     let config = config_state.get();
-    let cookies = load_cookies(&config.storage.mode)
-        .map_err(CommandError::AuthRequired)?;
+    let cookies = load_cookies(&config.storage.mode).map_err(CommandError::AuthRequired)?;
 
     // SAPISIDが存在し空でないことをチェック
     Ok(!cookies.sapisid.is_empty())
@@ -776,12 +777,15 @@ pub async fn auth_check_session_validity(
 ) -> Result<SessionValidity, CommandError> {
     log::info!("🔍 auth_check_session_validity called");
     let config = config_state.get();
-    let cookies = load_cookies(&config.storage.mode)
-        .map_err(CommandError::AuthRequired)?;
+    let cookies = load_cookies(&config.storage.mode).map_err(CommandError::AuthRequired)?;
     log::info!("🔍 Checking session validity...");
 
     let result = check_session_validity_internal(&cookies).await;
-    log::info!("🔍 Session validity result: is_valid={}, error={:?}", result.is_valid, result.error);
+    log::info!(
+        "🔍 Session validity result: is_valid={}, error={:?}",
+        result.is_valid,
+        result.error
+    );
     Ok(result)
 }
 
@@ -813,7 +817,10 @@ pub async fn auth_use_fallback_storage(
     if let Some(cookies) = credentials_to_migrate {
         if let Err(e) = save_cookies_to_file(&cookies) {
             log::error!("Failed to migrate credentials to file: {}", e);
-            return Err(CommandError::StorageError(format!("Failed to migrate credentials: {}", e)));
+            return Err(CommandError::StorageError(format!(
+                "Failed to migrate credentials: {}",
+                e
+            )));
         }
         log::info!("Credentials migrated to file storage");
     }
@@ -834,8 +841,7 @@ pub async fn auth_open_window(
 
             // 現在のストレージモードでCookieを保存
             let config = config_state.get();
-            save_cookies(&cookies, &config.storage.mode)
-                .map_err(CommandError::StorageError)?;
+            save_cookies(&cookies, &config.storage.mode).map_err(CommandError::StorageError)?;
 
             // Windows資格情報マネージャーへの永続化を待機
             // 参照: https://docs.rs/keyring/latest/x86_64-pc-windows-msvc/keyring/windows/index.html
@@ -858,6 +864,7 @@ pub async fn auth_open_window(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     #[test]
     fn parse_raw_cookies_preserves_raw_string() {
@@ -948,7 +955,10 @@ mod tests {
         let toml_str = toml::to_string_pretty(&config).unwrap();
         let restored: CredentialsConfig = toml::from_str(&toml_str).unwrap();
         let restored_cookies: YouTubeCookies = restored.youtube.into();
-        assert_eq!(restored_cookies.raw_cookie_string, cookies.raw_cookie_string);
+        assert_eq!(
+            restored_cookies.raw_cookie_string,
+            cookies.raw_cookie_string
+        );
     }
 
     // =========================================================================
@@ -1095,7 +1105,8 @@ mod tests {
 
     impl CredentialStorage for CountingStorage {
         fn load(&self) -> Result<YouTubeCookies, String> {
-            self.load_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.load_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             self.inner.load()
         }
 
@@ -1143,6 +1154,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(liscov_env)]
     fn load_cookies_with_storage_secure_mode_no_entry() {
         // Secureモード + ストレージにデータなし + ファイルもなし → Err
         let storage = InMemoryStorage::empty();
@@ -1154,6 +1166,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(liscov_env)]
     fn load_cookies_with_storage_fallback_mode_ignores_secure_storage() {
         // Fallbackモード → セキュアストレージにデータがあっても使用せずファイルパスに委譲する
         // ここではFallbackモード時にsecure_storage.load()が呼ばれない（= ファイルパス経由）ことを
@@ -1165,7 +1178,11 @@ mod tests {
         let _result = load_cookies_with_storage(&StorageMode::Fallback, &storage, &cache);
 
         // Fallbackモードではsecure_storage.load()は呼ばれない
-        assert_eq!(storage.load_count(), 0, "Fallbackモードではsecure_storage.load()は呼ばれない");
+        assert_eq!(
+            storage.load_count(),
+            0,
+            "Fallbackモードではsecure_storage.load()は呼ばれない"
+        );
     }
 
     // =========================================================================
@@ -1188,10 +1205,21 @@ mod tests {
         assert_eq!(stored.unwrap().sapisid, cookies.sapisid);
     }
 
+    /// Fallbackモードテストが実ファイルシステムに書き込むため、
+    /// panic時にもクリーンアップを保証するRAIIガード
+    struct CredentialsFileGuard;
+    impl Drop for CredentialsFileGuard {
+        fn drop(&mut self) {
+            let _ = delete_credentials_file();
+        }
+    }
+
     #[test]
+    #[serial(liscov_env)]
     fn save_cookies_with_storage_fallback_mode() {
         // Fallbackモード → ファイルパスに委譲
         // ファイルI/Oが発生するため、ストレージには委譲されないことを確認
+        let _guard = CredentialsFileGuard;
         let cookies = sample_cookies();
         let storage = InMemoryStorage::empty();
         let cache = RwLock::new(None);
@@ -1209,6 +1237,7 @@ mod tests {
     // =========================================================================
 
     #[test]
+    #[serial(liscov_env)]
     fn delete_credentials_with_storage_secure_mode() {
         // Secureモード → InMemoryStorage から削除確認
         let cookies = sample_cookies();
@@ -1226,6 +1255,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(liscov_env)]
     fn delete_credentials_with_storage_clears_cache() {
         // 削除時にインメモリキャッシュもクリアされることを確認
         let cookies = sample_cookies();
@@ -1257,7 +1287,11 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(result.unwrap().sapisid, cookies.sapisid);
         // キャッシュヒットのためstorage.load()は呼ばれない
-        assert_eq!(storage.load_count(), 0, "キャッシュヒット時はstorage.load()を呼ばない");
+        assert_eq!(
+            storage.load_count(),
+            0,
+            "キャッシュヒット時はstorage.load()を呼ばない"
+        );
     }
 
     #[test]

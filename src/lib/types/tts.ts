@@ -13,6 +13,9 @@ export interface TtsConfig {
   read_superchat_amount: boolean;
   max_text_length: number;
   queue_size_limit: number;
+  first_comment_prefix_enabled: boolean;
+  first_comment_prefix: string;
+  first_comment_only: boolean;
   // Bouyomichan settings
   bouyomichan_host: string;
   bouyomichan_port: number;
@@ -57,6 +60,9 @@ export const defaultTtsConfig: TtsConfig = {
   read_superchat_amount: true,
   max_text_length: 200,
   queue_size_limit: 50,
+  first_comment_prefix_enabled: false,
+  first_comment_prefix: '',
+  first_comment_only: false,
   bouyomichan_host: 'localhost',
   bouyomichan_port: 50080,
   bouyomichan_voice: 0,

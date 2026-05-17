@@ -3,27 +3,36 @@
 use serde::{Deserialize, Serialize};
 
 /// Chat message type
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub enum MessageType {
+    #[default]
     Text,
-    SuperChat { amount: String },
-    SuperSticker { amount: String },
-    Membership { milestone_months: Option<u32> },
-    MembershipGift { gift_count: u32 },
+    SuperChat {
+        amount: String,
+    },
+    SuperSticker {
+        amount: String,
+    },
+    Membership {
+        milestone_months: Option<u32>,
+    },
+    MembershipGift {
+        gift_count: u32,
+    },
     System,
-}
-
-impl Default for MessageType {
-    fn default() -> Self {
-        Self::Text
-    }
 }
 
 /// Message run (text or emoji)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MessageRun {
-    Text { content: String },
-    Emoji { emoji_id: String, image_url: String, alt_text: String },
+    Text {
+        content: String,
+    },
+    Emoji {
+        emoji_id: String,
+        image_url: String,
+        alt_text: String,
+    },
 }
 
 /// Badge information
@@ -38,7 +47,7 @@ pub struct BadgeInfo {
 /// SuperChat color scheme (per 02_chat.md spec)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SuperChatColors {
-    pub header_background: String,  // "#RRGGBB"
+    pub header_background: String, // "#RRGGBB"
     pub header_text: String,
     pub body_background: String,
     pub body_text: String,
@@ -57,7 +66,7 @@ pub struct MessageMetadata {
 }
 
 /// Chat message
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub id: String,
     pub timestamp: String,
@@ -72,26 +81,6 @@ pub struct ChatMessage {
     pub is_member: bool,
     pub is_first_time_viewer: bool,
     pub in_stream_comment_count: Option<u32>,
-}
-
-impl Default for ChatMessage {
-    fn default() -> Self {
-        Self {
-            id: String::new(),
-            timestamp: String::new(),
-            timestamp_usec: String::new(),
-            message_type: MessageType::default(),
-            author: String::new(),
-            author_icon_url: None,
-            channel_id: String::new(),
-            content: String::new(),
-            runs: vec![],
-            metadata: None,
-            is_member: false,
-            is_first_time_viewer: false,
-            in_stream_comment_count: None,
-        }
-    }
 }
 
 /// Chat statistics
@@ -170,7 +159,9 @@ mod tests {
     #[test]
     fn update_superchat_message_increments_total_super_chats_and_revenue() {
         let mut stats = ChatStats::default();
-        stats.update(&make_message(MessageType::SuperChat { amount: "$10.00".to_string() }));
+        stats.update(&make_message(MessageType::SuperChat {
+            amount: "$10.00".to_string(),
+        }));
         assert_eq!(stats.total_messages, 1);
         assert_eq!(stats.super_chats, 1);
         assert_eq!(stats.text_messages, 0);
@@ -184,7 +175,9 @@ mod tests {
     #[test]
     fn update_supersticker_message_increments_total_super_stickers_and_revenue() {
         let mut stats = ChatStats::default();
-        stats.update(&make_message(MessageType::SuperSticker { amount: "$5.00".to_string() }));
+        stats.update(&make_message(MessageType::SuperSticker {
+            amount: "$5.00".to_string(),
+        }));
         assert_eq!(stats.total_messages, 1);
         assert_eq!(stats.super_stickers, 1);
         assert_eq!(stats.text_messages, 0);
@@ -198,7 +191,9 @@ mod tests {
     #[test]
     fn update_membership_message_increments_total_and_memberships() {
         let mut stats = ChatStats::default();
-        stats.update(&make_message(MessageType::Membership { milestone_months: None }));
+        stats.update(&make_message(MessageType::Membership {
+            milestone_months: None,
+        }));
         assert_eq!(stats.total_messages, 1);
         assert_eq!(stats.memberships, 1);
         assert_eq!(stats.text_messages, 0);
@@ -227,8 +222,12 @@ mod tests {
     fn update_multiple_messages_accumulates_counts_correctly() {
         let mut stats = ChatStats::default();
         stats.update(&make_message(MessageType::Text));
-        stats.update(&make_message(MessageType::SuperChat { amount: "$10.00".to_string() }));
-        stats.update(&make_message(MessageType::SuperSticker { amount: "$5.00".to_string() }));
+        stats.update(&make_message(MessageType::SuperChat {
+            amount: "$10.00".to_string(),
+        }));
+        stats.update(&make_message(MessageType::SuperSticker {
+            amount: "$5.00".to_string(),
+        }));
         assert_eq!(stats.total_messages, 3);
         assert_eq!(stats.text_messages, 1);
         assert_eq!(stats.super_chats, 1);

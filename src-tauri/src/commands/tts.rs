@@ -2,7 +2,7 @@
 
 use crate::errors::CommandError;
 use crate::state::AppState;
-use crate::tts::{TtsBackendType, TtsConfig, TtsProcessManager, TtsPriority, TtsQueueItem};
+use crate::tts::{TtsBackendType, TtsConfig, TtsPriority, TtsProcessManager, TtsQueueItem};
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, State};
 use tauri_plugin_dialog::DialogExt;
@@ -19,6 +19,9 @@ pub struct TtsConfigDto {
     pub read_superchat_amount: bool,
     pub max_text_length: usize,
     pub queue_size_limit: usize,
+    pub first_comment_prefix_enabled: bool,
+    pub first_comment_prefix: String,
+    pub first_comment_only: bool,
     // Bouyomichan settings
     pub bouyomichan_host: String,
     pub bouyomichan_port: u16,
@@ -58,6 +61,9 @@ impl From<TtsConfig> for TtsConfigDto {
             read_superchat_amount: config.read_superchat_amount,
             max_text_length: config.max_text_length,
             queue_size_limit: config.queue_size_limit,
+            first_comment_prefix_enabled: config.first_comment_prefix_enabled,
+            first_comment_prefix: config.first_comment_prefix,
+            first_comment_only: config.first_comment_only,
             bouyomichan_host: config.bouyomichan.host,
             bouyomichan_port: config.bouyomichan.port,
             bouyomichan_voice: config.bouyomichan.voice,
@@ -122,6 +128,9 @@ impl From<TtsConfigDto> for TtsConfig {
             read_superchat_amount: dto.read_superchat_amount,
             max_text_length: dto.max_text_length,
             queue_size_limit: dto.queue_size_limit,
+            first_comment_prefix_enabled: dto.first_comment_prefix_enabled,
+            first_comment_prefix: dto.first_comment_prefix,
+            first_comment_only: dto.first_comment_only,
         }
     }
 }
@@ -149,17 +158,15 @@ pub async fn tts_speak(
     author_name: Option<String>,
     amount: Option<String>,
 ) -> Result<(), CommandError> {
-    let priority = match priority.as_deref() {
-        Some("superchat") => TtsPriority::SuperChat,
-        Some("membership") => TtsPriority::Membership,
-        _ => TtsPriority::Normal,
-    };
+    let priority = parse_tts_priority(priority.as_deref());
 
     let item = TtsQueueItem {
         text,
         priority,
         author_name,
         amount,
+        in_stream_comment_count: None,
+        message_id: None,
     };
 
     state.tts_manager.enqueue(item).await;
@@ -168,7 +175,10 @@ pub async fn tts_speak(
 
 /// Speak text directly (bypasses queue)
 #[tauri::command]
-pub async fn tts_speak_direct(state: State<'_, AppState>, text: String) -> Result<(), CommandError> {
+pub async fn tts_speak_direct(
+    state: State<'_, AppState>,
+    text: String,
+) -> Result<(), CommandError> {
     state
         .tts_manager
         .speak_direct(&text)
@@ -188,10 +198,10 @@ pub async fn tts_update_config(
     state.tts_manager.update_config(config.into()).await;
 
     // Start/stop processing based on enabled state change
-    if !was_enabled && will_be_enabled {
-        state.tts_manager.start_processing().await;
-    } else if was_enabled && !will_be_enabled {
-        state.tts_manager.stop_processing().await;
+    match decide_processing_action(was_enabled, will_be_enabled) {
+        Some(ProcessingAction::Start) => state.tts_manager.start_processing().await,
+        Some(ProcessingAction::Stop) => state.tts_manager.stop_processing().await,
+        None => {}
     }
 
     Ok(())
@@ -211,10 +221,8 @@ pub async fn tts_test_connection(
     backend: Option<String>,
 ) -> Result<bool, CommandError> {
     if let Some(backend_str) = backend {
-        let backend_type = match backend_str.as_str() {
-            "bouyomichan" => TtsBackendType::Bouyomichan,
-            "voicevox" => TtsBackendType::Voicevox,
-            _ => return Ok(false),
+        let Some(backend_type) = parse_backend_type(&backend_str) else {
+            return Ok(false);
         };
         state
             .tts_manager
@@ -257,7 +265,11 @@ pub async fn tts_get_status(state: State<'_, AppState>) -> Result<TtsStatus, Com
     Ok(TtsStatus {
         is_processing: state.tts_manager.is_processing().await,
         queue_size: state.tts_manager.queue_size().await,
-        backend_name: state.tts_manager.backend_name().await.map(|s| s.to_string()),
+        backend_name: state
+            .tts_manager
+            .backend_name()
+            .await
+            .map(|s| s.to_string()),
     })
 }
 
@@ -268,13 +280,50 @@ pub struct TtsLaunchStatus {
     pub voicevox_launched: bool,
 }
 
+/// TTS処理の有効/無効切り替えアクション
+#[derive(Debug, PartialEq)]
+pub(crate) enum ProcessingAction {
+    Start,
+    Stop,
+}
+
+/// enabled状態の変化からProcessingActionを決定する
+pub(crate) fn decide_processing_action(
+    was_enabled: bool,
+    will_be_enabled: bool,
+) -> Option<ProcessingAction> {
+    if !was_enabled && will_be_enabled {
+        Some(ProcessingAction::Start)
+    } else if was_enabled && !will_be_enabled {
+        Some(ProcessingAction::Stop)
+    } else {
+        None
+    }
+}
+
+/// バックエンド文字列をTtsBackendTypeに変換する
+pub(crate) fn parse_backend_type(s: &str) -> Option<TtsBackendType> {
+    match s {
+        "bouyomichan" => Some(TtsBackendType::Bouyomichan),
+        "voicevox" => Some(TtsBackendType::Voicevox),
+        _ => None,
+    }
+}
+
+/// 優先度文字列をTtsPriorityに変換する
+pub(crate) fn parse_tts_priority(priority: Option<&str>) -> TtsPriority {
+    match priority {
+        Some("superchat") => TtsPriority::SuperChat,
+        Some("membership") => TtsPriority::Membership,
+        _ => TtsPriority::Normal,
+    }
+}
+
 /// Discover executable path for a TTS backend
 #[tauri::command]
 pub async fn tts_discover_exe(backend: String) -> Result<Option<String>, CommandError> {
-    let backend_type = match backend.as_str() {
-        "bouyomichan" => TtsBackendType::Bouyomichan,
-        "voicevox" => TtsBackendType::Voicevox,
-        _ => return Ok(None),
+    let Some(backend_type) = parse_backend_type(&backend) else {
+        return Ok(None);
     };
     Ok(TtsProcessManager::discover_exe(&backend_type))
 }
@@ -291,6 +340,33 @@ pub async fn tts_select_exe(app: tauri::AppHandle) -> Result<Option<String>, Com
     Ok(file.map(|f| f.to_string()))
 }
 
+/// バックエンドプロセス起動のビジネスロジック
+pub(crate) async fn launch_backend_impl(
+    process_manager: &TtsProcessManager,
+    backend: &str,
+    exe_path: Option<&str>,
+) -> Result<u32, CommandError> {
+    let backend_type = parse_backend_type(backend)
+        .ok_or_else(|| CommandError::InvalidInput("Invalid backend type".to_string()))?;
+    process_manager
+        .launch(backend_type, exe_path)
+        .await
+        .map_err(CommandError::TtsError)
+}
+
+/// バックエンドプロセス停止のビジネスロジック
+pub(crate) async fn kill_backend_impl(
+    process_manager: &TtsProcessManager,
+    backend: &str,
+) -> Result<(), CommandError> {
+    let backend_type = parse_backend_type(backend)
+        .ok_or_else(|| CommandError::InvalidInput("Invalid backend type".to_string()))?;
+    process_manager
+        .kill(&backend_type)
+        .await
+        .map_err(CommandError::TtsError)
+}
+
 /// Launch a TTS backend process
 #[tauri::command]
 pub async fn tts_launch_backend(
@@ -299,18 +375,9 @@ pub async fn tts_launch_backend(
     backend: String,
     exe_path: Option<String>,
 ) -> Result<u32, CommandError> {
-    let backend_type = match backend.as_str() {
-        "bouyomichan" => TtsBackendType::Bouyomichan,
-        "voicevox" => TtsBackendType::Voicevox,
-        _ => return Err(CommandError::InvalidInput("Invalid backend type".to_string())),
-    };
-    let result = state
-        .tts_process_manager
-        .launch(backend_type, exe_path.as_deref())
-        .await
-        .map_err(|e| CommandError::TtsError(e));
+    let result =
+        launch_backend_impl(&state.tts_process_manager, &backend, exe_path.as_deref()).await;
 
-    // 起動成功時にイベントを送信
     if result.is_ok() {
         let _ = app.emit("tts:process_launched", &backend);
     }
@@ -325,15 +392,8 @@ pub async fn tts_kill_backend(
     state: State<'_, AppState>,
     backend: String,
 ) -> Result<(), CommandError> {
-    let backend_type = match backend.as_str() {
-        "bouyomichan" => TtsBackendType::Bouyomichan,
-        "voicevox" => TtsBackendType::Voicevox,
-        _ => return Err(CommandError::InvalidInput("Invalid backend type".to_string())),
-    };
-    let result = state.tts_process_manager.kill(&backend_type).await
-        .map_err(|e| CommandError::TtsError(e));
+    let result = kill_backend_impl(&state.tts_process_manager, &backend).await;
 
-    // 停止成功時にイベントを送信
     if result.is_ok() {
         let _ = app.emit("tts:process_stopped", &backend);
     }
@@ -343,7 +403,9 @@ pub async fn tts_kill_backend(
 
 /// Get TTS backend launch status
 #[tauri::command]
-pub async fn tts_get_launch_status(state: State<'_, AppState>) -> Result<TtsLaunchStatus, CommandError> {
+pub async fn tts_get_launch_status(
+    state: State<'_, AppState>,
+) -> Result<TtsLaunchStatus, CommandError> {
     Ok(TtsLaunchStatus {
         bouyomichan_launched: state
             .tts_process_manager
@@ -354,4 +416,240 @@ pub async fn tts_get_launch_status(state: State<'_, AppState>) -> Result<TtsLaun
             .is_launched(&TtsBackendType::Voicevox)
             .await,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tts::{TtsBackendType, TtsConfig, TtsPriority};
+
+    // ========================================================================
+    // TtsConfig → TtsConfigDto 変換（L50のmutantをkill）
+    // ========================================================================
+
+    #[test]
+    fn tts_config_to_dto_backend_none() {
+        // spec: TtsBackendType::None → dto.backend == "none"
+        let config = TtsConfig {
+            backend: TtsBackendType::None,
+            ..TtsConfig::default()
+        };
+        let dto = TtsConfigDto::from(config);
+        assert_eq!(dto.backend, "none");
+    }
+
+    #[test]
+    fn tts_config_to_dto_backend_bouyomichan() {
+        // spec: TtsBackendType::Bouyomichan → dto.backend == "bouyomichan"
+        let config = TtsConfig {
+            enabled: true,
+            backend: TtsBackendType::Bouyomichan,
+            first_comment_only: true,
+            ..TtsConfig::default()
+        };
+        let dto = TtsConfigDto::from(config);
+        assert_eq!(dto.backend, "bouyomichan");
+        assert!(dto.enabled);
+        assert!(dto.first_comment_only);
+    }
+
+    #[test]
+    fn tts_config_to_dto_backend_voicevox() {
+        // spec: TtsBackendType::Voicevox → dto.backend == "voicevox"
+        let config = TtsConfig {
+            backend: TtsBackendType::Voicevox,
+            ..TtsConfig::default()
+        };
+        let dto = TtsConfigDto::from(config);
+        assert_eq!(dto.backend, "voicevox");
+    }
+
+    // ========================================================================
+    // TtsConfigDto → TtsConfig 変換（L92, L97, L98のmutantをkill）
+    // ========================================================================
+
+    #[test]
+    fn dto_to_config_backend_bouyomichan() {
+        // spec: dto.backend == "bouyomichan" → TtsBackendType::Bouyomichan
+        let dto = TtsConfigDto {
+            backend: "bouyomichan".to_string(),
+            ..TtsConfigDto::default()
+        };
+        let config = TtsConfig::from(dto);
+        assert_eq!(config.backend, TtsBackendType::Bouyomichan);
+    }
+
+    #[test]
+    fn dto_to_config_backend_voicevox() {
+        // spec: dto.backend == "voicevox" → TtsBackendType::Voicevox
+        let dto = TtsConfigDto {
+            backend: "voicevox".to_string(),
+            ..TtsConfigDto::default()
+        };
+        let config = TtsConfig::from(dto);
+        assert_eq!(config.backend, TtsBackendType::Voicevox);
+    }
+
+    #[test]
+    fn dto_to_config_backend_none_string() {
+        // spec: dto.backend == "none" → TtsBackendType::None
+        let dto = TtsConfigDto {
+            backend: "none".to_string(),
+            ..TtsConfigDto::default()
+        };
+        let config = TtsConfig::from(dto);
+        assert_eq!(config.backend, TtsBackendType::None);
+    }
+
+    #[test]
+    fn dto_to_config_backend_invalid_string_falls_back_to_none() {
+        // spec: 無効な文字列 → TtsBackendType::None にフォールバック
+        let dto = TtsConfigDto {
+            backend: "invalid_backend".to_string(),
+            ..TtsConfigDto::default()
+        };
+        let config = TtsConfig::from(dto);
+        assert_eq!(config.backend, TtsBackendType::None);
+    }
+
+    // ========================================================================
+    // parse_backend_type テスト（バックエンド文字列→TtsBackendType変換）
+    // ========================================================================
+
+    #[test]
+    fn parse_backend_type_bouyomichan() {
+        assert_eq!(
+            parse_backend_type("bouyomichan"),
+            Some(TtsBackendType::Bouyomichan)
+        );
+    }
+
+    #[test]
+    fn parse_backend_type_voicevox() {
+        assert_eq!(
+            parse_backend_type("voicevox"),
+            Some(TtsBackendType::Voicevox)
+        );
+    }
+
+    #[test]
+    fn parse_backend_type_unknown_returns_none() {
+        assert_eq!(parse_backend_type("unknown"), None);
+    }
+
+    #[test]
+    fn parse_backend_type_empty_returns_none() {
+        assert_eq!(parse_backend_type(""), None);
+    }
+
+    // ========================================================================
+    // parse_tts_priority テスト（優先度文字列→TtsPriority変換）
+    // ========================================================================
+
+    #[test]
+    fn parse_tts_priority_superchat() {
+        assert_eq!(
+            parse_tts_priority(Some("superchat")),
+            TtsPriority::SuperChat
+        );
+    }
+
+    #[test]
+    fn parse_tts_priority_membership() {
+        assert_eq!(
+            parse_tts_priority(Some("membership")),
+            TtsPriority::Membership
+        );
+    }
+
+    #[test]
+    fn parse_tts_priority_none_returns_normal() {
+        assert_eq!(parse_tts_priority(None), TtsPriority::Normal);
+    }
+
+    #[test]
+    fn parse_tts_priority_unknown_returns_normal() {
+        assert_eq!(parse_tts_priority(Some("unknown")), TtsPriority::Normal);
+    }
+
+    // ========================================================================
+    // decide_processing_action テスト（enabled変化→ProcessingAction決定）
+    // ========================================================================
+
+    #[test]
+    fn decide_processing_action_disabled_to_enabled_starts() {
+        assert_eq!(
+            decide_processing_action(false, true),
+            Some(ProcessingAction::Start)
+        );
+    }
+
+    #[test]
+    fn decide_processing_action_enabled_to_disabled_stops() {
+        assert_eq!(
+            decide_processing_action(true, false),
+            Some(ProcessingAction::Stop)
+        );
+    }
+
+    #[test]
+    fn decide_processing_action_both_disabled_returns_none() {
+        assert_eq!(decide_processing_action(false, false), None);
+    }
+
+    #[test]
+    fn decide_processing_action_both_enabled_returns_none() {
+        assert_eq!(decide_processing_action(true, true), None);
+    }
+
+    #[test]
+    fn dto_to_config_first_comment_fields_are_preserved() {
+        // spec: first_comment_prefix_enabled/first_comment_only が正しく変換される
+        let dto = TtsConfigDto {
+            first_comment_prefix_enabled: true,
+            first_comment_only: true,
+            first_comment_prefix: "初コメ！".to_string(),
+            ..TtsConfigDto::default()
+        };
+        let config = TtsConfig::from(dto);
+        assert!(config.first_comment_prefix_enabled);
+        assert!(config.first_comment_only);
+        assert_eq!(config.first_comment_prefix, "初コメ！");
+    }
+
+    // ========================================================================
+    // launch_backend_impl / kill_backend_impl テスト
+    // ========================================================================
+
+    #[tokio::test]
+    async fn launch_backend_impl_rejects_invalid_backend() {
+        // spec: 無効なバックエンド文字列 → InvalidInput エラー
+        let pm = crate::tts::TtsProcessManager::new();
+        let result = launch_backend_impl(&pm, "invalid", None).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn launch_backend_impl_fails_without_exe() {
+        // spec: exe なし + 探索失敗 → エラー（Ok(0) / Ok(1) mutant をkill）
+        let pm = crate::tts::TtsProcessManager::new();
+        let result = launch_backend_impl(&pm, "bouyomichan", None).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn kill_backend_impl_rejects_invalid_backend() {
+        // spec: 無効なバックエンド文字列 → InvalidInput エラー
+        let pm = crate::tts::TtsProcessManager::new();
+        let result = kill_backend_impl(&pm, "invalid").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn kill_backend_impl_fails_when_not_launched() {
+        // spec: 起動していないバックエンド → エラー（Ok(()) mutant をkill）
+        let pm = crate::tts::TtsProcessManager::new();
+        let result = kill_backend_impl(&pm, "bouyomichan").await;
+        assert!(result.is_err());
+    }
 }

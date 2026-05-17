@@ -1,15 +1,15 @@
 //! Chat monitoring commands
 
-use crate::connection::{ConnectionInfo, StreamConnection, MAX_CONNECTIONS};
-use crate::core::api::InnerTubeClient;
-use crate::core::chat_runtime::{MonitoringDeps, run_monitoring_loop};
-use crate::core::models::{extract_video_id, ChatMessage, ChatMode, ConnectionStatus, Platform};
-use crate::database;
-use crate::errors::CommandError;
 use crate::AppState;
 use crate::commands::SaveConfigState;
-use crate::commands::config::ConfigState;
 use crate::commands::auth;
+use crate::commands::config::ConfigState;
+use crate::connection::{ConnectionInfo, MAX_CONNECTIONS, StreamConnection};
+use crate::core::api::InnerTubeClient;
+use crate::core::chat_runtime::{MonitoringDeps, run_monitoring_loop};
+use crate::core::models::{ChatMessage, ChatMode, ConnectionStatus, Platform, extract_video_id};
+use crate::database;
+use crate::errors::CommandError;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -54,8 +54,14 @@ impl From<ConnectionStatus> for ConnectionResult {
 #[serde(tag = "type")]
 #[ts(export, export_to = "../../src/lib/types/generated/")]
 pub enum MessageRun {
-    Text { content: String },
-    Emoji { emoji_id: String, image_url: String, alt_text: String },
+    Text {
+        content: String,
+    },
+    Emoji {
+        emoji_id: String,
+        image_url: String,
+        alt_text: String,
+    },
 }
 
 /// Badge information
@@ -138,41 +144,47 @@ impl From<ChatMessage> for GuiChatMessage {
         };
 
         // runs を core models から GUI models に変換
-        let runs: Vec<MessageRun> = msg.runs.into_iter().map(|run| {
-            match run {
+        let runs: Vec<MessageRun> = msg
+            .runs
+            .into_iter()
+            .map(|run| match run {
                 crate::core::models::MessageRun::Text { content } => MessageRun::Text { content },
-                crate::core::models::MessageRun::Emoji { emoji_id, image_url, alt_text } => {
-                    MessageRun::Emoji { emoji_id, image_url, alt_text }
-                }
-            }
-        }).collect();
+                crate::core::models::MessageRun::Emoji {
+                    emoji_id,
+                    image_url,
+                    alt_text,
+                } => MessageRun::Emoji {
+                    emoji_id,
+                    image_url,
+                    alt_text,
+                },
+            })
+            .collect();
 
         // metadata を変換
-        let metadata = msg.metadata.map(|m| {
-            GuiMessageMetadata {
-                amount: m.amount,
-                milestone_months,
-                gift_count,
-                badges: m.badges,
-                badge_info: m.badge_info.into_iter().map(|b| {
-                    BadgeInfo {
-                        badge_type: b.badge_type,
-                        label: b.label.clone(),
-                        tooltip: b.tooltip.or(Some(b.label)),
-                        image_url: b.icon_url,
-                    }
-                }).collect(),
-                is_moderator: m.is_moderator,
-                is_verified: m.is_verified,
-                superchat_colors: m.superchat_colors.map(|c| {
-                    SuperChatColors {
-                        header_background: c.header_background,
-                        header_text: c.header_text,
-                        body_background: c.body_background,
-                        body_text: c.body_text,
-                    }
-                }),
-            }
+        let metadata = msg.metadata.map(|m| GuiMessageMetadata {
+            amount: m.amount,
+            milestone_months,
+            gift_count,
+            badges: m.badges,
+            badge_info: m
+                .badge_info
+                .into_iter()
+                .map(|b| BadgeInfo {
+                    badge_type: b.badge_type,
+                    label: b.label.clone(),
+                    tooltip: b.tooltip.or(Some(b.label)),
+                    image_url: b.icon_url,
+                })
+                .collect(),
+            is_moderator: m.is_moderator,
+            is_verified: m.is_verified,
+            superchat_colors: m.superchat_colors.map(|c| SuperChatColors {
+                header_background: c.header_background,
+                header_text: c.header_text,
+                body_background: c.body_background,
+                body_text: c.body_text,
+            }),
         });
 
         Self {
@@ -272,10 +284,8 @@ pub async fn connect_to_stream(
         .map_err(|e| CommandError::ConnectionFailed(format!("Failed to connect: {}", e)))?;
 
     // 初期化後にチャットモードを設定（continuation token が必要）
-    if status.is_connected {
-        if !client.set_chat_mode(mode) {
-            tracing::warn!("Failed to set chat mode to {:?}, using default", mode);
-        }
+    if status.is_connected && !client.set_chat_mode(mode) {
+        tracing::warn!("Failed to set chat mode to {:?}, using default", mode);
     }
 
     tracing::info!(
@@ -332,7 +342,9 @@ pub async fn connect_to_stream(
         let deps = MonitoringDeps::from_state(&state);
 
         // 生レスポンス保存設定を取得
-        let save_config = save_config_state.0.lock()
+        let save_config = save_config_state
+            .0
+            .lock()
             .map_err(|e| CommandError::Internal(format!("Mutex lock failed: {}", e)))?
             .clone();
 
@@ -445,16 +457,16 @@ pub async fn disconnect_stream(
     state: State<'_, AppState>,
     connection_id: u64,
 ) -> Result<(), CommandError> {
-    tracing::info!("disconnect_stream called for connection_id: {}", connection_id);
+    tracing::info!(
+        "disconnect_stream called for connection_id: {}",
+        connection_id
+    );
 
     // 接続のキャンセレーショントークンを取得してキャンセル
     let task_handle = {
         let mut connections = state.connections.write().await;
         let conn = connections.get_mut(&connection_id).ok_or_else(|| {
-            CommandError::NotConnected(format!(
-                "接続 {} が見つかりません",
-                connection_id
-            ))
+            CommandError::NotConnected(format!("接続 {} が見つかりません", connection_id))
         })?;
 
         // トークンをキャンセル
@@ -485,7 +497,9 @@ pub async fn disconnect_stream(
         let timeout = std::time::Duration::from_secs(5);
         match tokio::time::timeout(timeout, handle).await {
             Ok(Ok(())) => tracing::debug!("disconnect_stream: task {} completed", connection_id),
-            Ok(Err(e)) => tracing::warn!("disconnect_stream: task {} panicked: {}", connection_id, e),
+            Ok(Err(e)) => {
+                tracing::warn!("disconnect_stream: task {} panicked: {}", connection_id, e)
+            }
             Err(_) => tracing::warn!("disconnect_stream: task {} timed out", connection_id),
         }
     }
@@ -501,9 +515,7 @@ pub async fn disconnect_stream(
 
 /// 全接続を一括切断する
 #[tauri::command]
-pub async fn disconnect_all_streams(
-    state: State<'_, AppState>,
-) -> Result<(), CommandError> {
+pub async fn disconnect_all_streams(state: State<'_, AppState>) -> Result<(), CommandError> {
     tracing::info!("disconnect_all_streams called");
 
     // State は Clone でないため Arc を直接操作する
@@ -575,9 +587,9 @@ pub async fn set_chat_mode(
         CommandError::NotConnected(format!("接続 {} が見つかりません", connection_id))
     })?;
 
-    conn.chat_mode_tx.send(chat_mode).map_err(|_| {
-        CommandError::Internal("監視タスクが既に終了しています".to_string())
-    })?;
+    conn.chat_mode_tx
+        .send(chat_mode)
+        .map_err(|_| CommandError::Internal("監視タスクが既に終了しています".to_string()))?;
 
     tracing::info!(
         "チャットモード変更要求を送信: connection_id={}, mode={:?}",

@@ -20,7 +20,12 @@ use tokio::sync::RwLock;
 // ============================================================================
 
 /// テスト用 ChatMessage を生成するヘルパー
-fn make_chat_message(id: &str, author: &str, channel_id: &str, message_type: MessageType) -> ChatMessage {
+fn make_chat_message(
+    id: &str,
+    author: &str,
+    channel_id: &str,
+    message_type: MessageType,
+) -> ChatMessage {
     ChatMessage {
         id: id.to_string(),
         author: author.to_string(),
@@ -69,9 +74,16 @@ async fn get_revenue_analytics_empty_messages_returns_default() {
 
     let response = get_ipc_response(&webview, invoke_no_args("get_revenue_analytics"));
 
-    assert!(response.is_ok(), "get_revenue_analytics は成功するべき: {:?}", response.err());
+    assert!(
+        response.is_ok(),
+        "get_revenue_analytics は成功するべき: {:?}",
+        response.err()
+    );
 
-    let analytics: RevenueAnalytics = response.unwrap().deserialize().expect("RevenueAnalytics のデシリアライズに失敗");
+    let analytics: RevenueAnalytics = response
+        .unwrap()
+        .deserialize()
+        .expect("RevenueAnalytics のデシリアライズに失敗");
 
     assert_eq!(analytics.super_chat_count, 0);
     assert_eq!(analytics.super_sticker_count, 0);
@@ -87,12 +99,20 @@ async fn get_revenue_analytics_with_superchat_messages() {
     // 仕様: SuperChat 2件（異なる送信者）→ super_chat_count=2, top_contributors の件数も正しい
     let messages = vec![
         make_chat_message(
-            "sc1", "UserA", "UC_a",
-            MessageType::SuperChat { amount: "$10.00".to_string() },
+            "sc1",
+            "UserA",
+            "UC_a",
+            MessageType::SuperChat {
+                amount: "$10.00".to_string(),
+            },
         ),
         make_chat_message(
-            "sc2", "UserB", "UC_b",
-            MessageType::SuperChat { amount: "$200.00".to_string() },
+            "sc2",
+            "UserB",
+            "UC_b",
+            MessageType::SuperChat {
+                amount: "$200.00".to_string(),
+            },
         ),
     ];
 
@@ -103,7 +123,11 @@ async fn get_revenue_analytics_with_superchat_messages() {
 
     let response = get_ipc_response(&webview, invoke_no_args("get_revenue_analytics"));
 
-    assert!(response.is_ok(), "get_revenue_analytics は成功するべき: {:?}", response.err());
+    assert!(
+        response.is_ok(),
+        "get_revenue_analytics は成功するべき: {:?}",
+        response.err()
+    );
 
     let analytics: RevenueAnalytics = response.unwrap().deserialize().expect("デシリアライズ失敗");
 
@@ -120,9 +144,30 @@ async fn get_revenue_analytics_with_superchat_messages() {
 async fn get_revenue_analytics_mixed_message_types() {
     // 仕様: SuperChat×1 + SuperSticker×1 + Membership×1 + Text×1 が正しく集計される
     let messages = vec![
-        make_chat_message("sc1", "UserA", "UC_a", MessageType::SuperChat { amount: "$10.00".to_string() }),
-        make_chat_message("ss1", "UserB", "UC_b", MessageType::SuperSticker { amount: "$5.00".to_string() }),
-        make_chat_message("m1", "UserC", "UC_c", MessageType::Membership { milestone_months: Some(3) }),
+        make_chat_message(
+            "sc1",
+            "UserA",
+            "UC_a",
+            MessageType::SuperChat {
+                amount: "$10.00".to_string(),
+            },
+        ),
+        make_chat_message(
+            "ss1",
+            "UserB",
+            "UC_b",
+            MessageType::SuperSticker {
+                amount: "$5.00".to_string(),
+            },
+        ),
+        make_chat_message(
+            "m1",
+            "UserC",
+            "UC_c",
+            MessageType::Membership {
+                milestone_months: Some(3),
+            },
+        ),
         make_chat_message("t1", "UserD", "UC_d", MessageType::Text),
     ];
 
@@ -132,7 +177,11 @@ async fn get_revenue_analytics_mixed_message_types() {
         .unwrap();
 
     let response = get_ipc_response(&webview, invoke_no_args("get_revenue_analytics"));
-    assert!(response.is_ok(), "get_revenue_analytics は成功するべき: {:?}", response.err());
+    assert!(
+        response.is_ok(),
+        "get_revenue_analytics は成功するべき: {:?}",
+        response.err()
+    );
 
     let analytics: RevenueAnalytics = response.unwrap().deserialize().expect("デシリアライズ失敗");
 
@@ -150,7 +199,14 @@ async fn export_current_messages_json_format() {
     // 仕様: メッセージあり + JSON形式 → ファイルに出力され、有効な JSON を含む
     let messages = vec![
         make_chat_message("msg1", "UserA", "UC_a", MessageType::Text),
-        make_chat_message("sc1", "UserB", "UC_b", MessageType::SuperChat { amount: "$10.00".to_string() }),
+        make_chat_message(
+            "sc1",
+            "UserB",
+            "UC_b",
+            MessageType::SuperChat {
+                amount: "$10.00".to_string(),
+            },
+        ),
     ];
 
     let app = build_test_app(build_app_state(messages));
@@ -165,19 +221,26 @@ async fn export_current_messages_json_format() {
 
     let response = get_ipc_response(
         &webview,
-        invoke_with_args("export_current_messages", serde_json::json!({
-            "filePath": file_path_str,
-            "config": {
-                "format": "json",
-                "include_metadata": true,
-                "include_system_messages": false,
-                "max_records": null,
-                "sort_order": null
-            }
-        })),
+        invoke_with_args(
+            "export_current_messages",
+            serde_json::json!({
+                "filePath": file_path_str,
+                "config": {
+                    "format": "json",
+                    "include_metadata": true,
+                    "include_system_messages": false,
+                    "max_records": null,
+                    "sort_order": null
+                }
+            }),
+        ),
     );
 
-    assert!(response.is_ok(), "export_current_messages (JSON) は成功するべき: {:?}", response.err());
+    assert!(
+        response.is_ok(),
+        "export_current_messages (JSON) は成功するべき: {:?}",
+        response.err()
+    );
 
     // ファイルが作成されたことを確認
     assert!(file_path.exists(), "エクスポートファイルが作成されていない");
@@ -187,10 +250,18 @@ async fn export_current_messages_json_format() {
     let parsed: serde_json::Value = serde_json::from_str(&content).expect("JSON パースに失敗");
 
     // include_metadata=true なので metadata/messages/statistics を含む
-    assert!(parsed.get("metadata").is_some(), "metadata フィールドが存在しない");
-    assert!(parsed.get("messages").is_some(), "messages フィールドが存在しない");
+    assert!(
+        parsed.get("metadata").is_some(),
+        "metadata フィールドが存在しない"
+    );
+    assert!(
+        parsed.get("messages").is_some(),
+        "messages フィールドが存在しない"
+    );
 
-    let messages_arr = parsed["messages"].as_array().expect("messages は配列であるべき");
+    let messages_arr = parsed["messages"]
+        .as_array()
+        .expect("messages は配列であるべき");
     assert_eq!(messages_arr.len(), 2);
 }
 
@@ -199,7 +270,14 @@ async fn export_current_messages_csv_format() {
     // 仕様: メッセージあり + CSV形式 → ファイルに出力され、CSVヘッダーとデータ行を含む
     let messages = vec![
         make_chat_message("msg1", "UserA", "UC_a", MessageType::Text),
-        make_chat_message("sc1", "UserB", "UC_b", MessageType::SuperChat { amount: "$10.00".to_string() }),
+        make_chat_message(
+            "sc1",
+            "UserB",
+            "UC_b",
+            MessageType::SuperChat {
+                amount: "$10.00".to_string(),
+            },
+        ),
     ];
 
     let app = build_test_app(build_app_state(messages));
@@ -213,19 +291,26 @@ async fn export_current_messages_csv_format() {
 
     let response = get_ipc_response(
         &webview,
-        invoke_with_args("export_current_messages", serde_json::json!({
-            "filePath": file_path_str,
-            "config": {
-                "format": "csv",
-                "include_metadata": false,
-                "include_system_messages": false,
-                "max_records": null,
-                "sort_order": null
-            }
-        })),
+        invoke_with_args(
+            "export_current_messages",
+            serde_json::json!({
+                "filePath": file_path_str,
+                "config": {
+                    "format": "csv",
+                    "include_metadata": false,
+                    "include_system_messages": false,
+                    "max_records": null,
+                    "sort_order": null
+                }
+            }),
+        ),
     );
 
-    assert!(response.is_ok(), "export_current_messages (CSV) は成功するべき: {:?}", response.err());
+    assert!(
+        response.is_ok(),
+        "export_current_messages (CSV) は成功するべき: {:?}",
+        response.err()
+    );
 
     assert!(file_path.exists(), "エクスポートファイルが作成されていない");
 
@@ -239,17 +324,26 @@ async fn export_current_messages_csv_format() {
     );
 
     // データ行が含まれる
-    assert!(content.contains("\"msg1\""), "msg1 がエクスポートされていない");
-    assert!(content.contains("\"sc1\""), "sc1 がエクスポートされていない");
+    assert!(
+        content.contains("\"msg1\""),
+        "msg1 がエクスポートされていない"
+    );
+    assert!(
+        content.contains("\"sc1\""),
+        "sc1 がエクスポートされていない"
+    );
 }
 
 #[tokio::test]
 async fn export_current_messages_empty_connections_uses_default_session_id() {
     // 仕様: 接続が空の場合、session_id はデフォルト値 "current" になる
     // （export_current_messages 内のフォールバックロジックの確認）
-    let messages = vec![
-        make_chat_message("msg1", "UserA", "UC_a", MessageType::Text),
-    ];
+    let messages = vec![make_chat_message(
+        "msg1",
+        "UserA",
+        "UC_a",
+        MessageType::Text,
+    )];
 
     let app = build_test_app(build_app_state(messages));
     let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
@@ -262,25 +356,35 @@ async fn export_current_messages_empty_connections_uses_default_session_id() {
 
     let response = get_ipc_response(
         &webview,
-        invoke_with_args("export_current_messages", serde_json::json!({
-            "filePath": file_path_str,
-            "config": {
-                "format": "json",
-                "include_metadata": true,
-                "include_system_messages": false,
-                "max_records": null,
-                "sort_order": null
-            }
-        })),
+        invoke_with_args(
+            "export_current_messages",
+            serde_json::json!({
+                "filePath": file_path_str,
+                "config": {
+                    "format": "json",
+                    "include_metadata": true,
+                    "include_system_messages": false,
+                    "max_records": null,
+                    "sort_order": null
+                }
+            }),
+        ),
     );
 
-    assert!(response.is_ok(), "export_current_messages は成功するべき: {:?}", response.err());
+    assert!(
+        response.is_ok(),
+        "export_current_messages は成功するべき: {:?}",
+        response.err()
+    );
 
     let content = std::fs::read_to_string(&file_path).expect("ファイル読み込みに失敗");
     let parsed: serde_json::Value = serde_json::from_str(&content).expect("JSON パースに失敗");
 
     // 接続なし → session_id は "current"
-    assert_eq!(parsed["metadata"]["session_id"], "current", "接続なしの session_id は 'current' であるべき");
+    assert_eq!(
+        parsed["metadata"]["session_id"], "current",
+        "接続なしの session_id は 'current' であるべき"
+    );
 
     // 接続なし → broadcaster_channel_id は null（空文字列はフィルタされる）
     assert!(
@@ -303,16 +407,19 @@ async fn export_current_messages_unsupported_format_returns_error() {
 
     let response = get_ipc_response(
         &webview,
-        invoke_with_args("export_current_messages", serde_json::json!({
-            "filePath": file_path_str,
-            "config": {
-                "format": "xml",
-                "include_metadata": false,
-                "include_system_messages": false,
-                "max_records": null,
-                "sort_order": null
-            }
-        })),
+        invoke_with_args(
+            "export_current_messages",
+            serde_json::json!({
+                "filePath": file_path_str,
+                "config": {
+                    "format": "xml",
+                    "include_metadata": false,
+                    "include_system_messages": false,
+                    "max_records": null,
+                    "sort_order": null
+                }
+            }),
+        ),
     );
 
     assert!(response.is_err(), "未対応フォーマットはエラーを返すべき");

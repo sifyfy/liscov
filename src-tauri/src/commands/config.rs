@@ -52,9 +52,7 @@ pub struct UiConfig {
 
 impl Default for UiConfig {
     fn default() -> Self {
-        Self {
-            theme: Theme::Dark,
-        }
+        Self { theme: Theme::Dark }
     }
 }
 
@@ -156,11 +154,10 @@ fn save_config_to_path(path: &std::path::Path, config: &Config) -> Result<(), St
             .map_err(|e| format!("Failed to create config directory: {}", e))?;
     }
 
-    let toml_string = toml::to_string_pretty(config)
-        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+    let toml_string =
+        toml::to_string_pretty(config).map_err(|e| format!("Failed to serialize config: {}", e))?;
 
-    fs::write(path, toml_string)
-        .map_err(|e| format!("Failed to write config file: {}", e))?;
+    fs::write(path, toml_string).map_err(|e| format!("Failed to write config file: {}", e))?;
 
     log::info!("Config saved to {:?}", path);
     Ok(())
@@ -193,10 +190,12 @@ pub async fn config_load(state: State<'_, ConfigState>) -> Result<Config, Comman
 
 /// Save configuration
 #[tauri::command]
-pub async fn config_save(config: Config, state: State<'_, ConfigState>) -> Result<(), CommandError> {
+pub async fn config_save(
+    config: Config,
+    state: State<'_, ConfigState>,
+) -> Result<(), CommandError> {
     state.set(config.clone());
-    save_config_to_file(&config)
-        .map_err(CommandError::IoError)
+    save_config_to_file(&config).map_err(CommandError::IoError)
 }
 
 /// Config構造体から section/key で値を取得する純粋関数
@@ -207,9 +206,15 @@ pub(crate) fn config_lookup(config: &Config, section: &str, key: &str) -> Option
             _ => None,
         },
         "chat_display" => match key {
-            "message_font_size" => Some(serde_json::to_value(config.chat_display.message_font_size).unwrap()),
-            "show_timestamps" => Some(serde_json::to_value(config.chat_display.show_timestamps).unwrap()),
-            "auto_scroll_enabled" => Some(serde_json::to_value(config.chat_display.auto_scroll_enabled).unwrap()),
+            "message_font_size" => {
+                Some(serde_json::to_value(config.chat_display.message_font_size).unwrap())
+            }
+            "show_timestamps" => {
+                Some(serde_json::to_value(config.chat_display.show_timestamps).unwrap())
+            }
+            "auto_scroll_enabled" => {
+                Some(serde_json::to_value(config.chat_display.auto_scroll_enabled).unwrap())
+            }
             _ => None,
         },
         "ui" => match key {
@@ -244,39 +249,72 @@ pub(crate) fn config_apply_value(
     match section {
         "storage" => match key {
             "mode" => {
-                new_config.storage.mode = serde_json::from_value(value)
-                    .map_err(|e| CommandError::InvalidInput(format!("Invalid storage mode value: {}", e)))?;
+                new_config.storage.mode = serde_json::from_value(value).map_err(|e| {
+                    CommandError::InvalidInput(format!("Invalid storage mode value: {}", e))
+                })?;
             }
-            _ => return Err(CommandError::InvalidInput(format!("Unknown key in storage section: {}", key))),
+            _ => {
+                return Err(CommandError::InvalidInput(format!(
+                    "Unknown key in storage section: {}",
+                    key
+                )));
+            }
         },
         "chat_display" => match key {
             "message_font_size" => {
-                let size: u32 = serde_json::from_value(value)
-                    .map_err(|e| CommandError::InvalidInput(format!("Invalid font size value: {}", e)))?;
+                let size: u32 = serde_json::from_value(value).map_err(|e| {
+                    CommandError::InvalidInput(format!("Invalid font size value: {}", e))
+                })?;
                 // 有効範囲チェック (10-24)
                 if !(10..=24).contains(&size) {
-                    return Err(CommandError::InvalidInput(format!("Font size must be between 10 and 24, got {}", size)));
+                    return Err(CommandError::InvalidInput(format!(
+                        "Font size must be between 10 and 24, got {}",
+                        size
+                    )));
                 }
                 new_config.chat_display.message_font_size = size;
             }
             "show_timestamps" => {
-                new_config.chat_display.show_timestamps = serde_json::from_value(value)
-                    .map_err(|e| CommandError::InvalidInput(format!("Invalid show_timestamps value: {}", e)))?;
+                new_config.chat_display.show_timestamps =
+                    serde_json::from_value(value).map_err(|e| {
+                        CommandError::InvalidInput(format!("Invalid show_timestamps value: {}", e))
+                    })?;
             }
             "auto_scroll_enabled" => {
                 new_config.chat_display.auto_scroll_enabled = serde_json::from_value(value)
-                    .map_err(|e| CommandError::InvalidInput(format!("Invalid auto_scroll_enabled value: {}", e)))?;
+                    .map_err(|e| {
+                        CommandError::InvalidInput(format!(
+                            "Invalid auto_scroll_enabled value: {}",
+                            e
+                        ))
+                    })?;
             }
-            _ => return Err(CommandError::InvalidInput(format!("Unknown key in chat_display section: {}", key))),
+            _ => {
+                return Err(CommandError::InvalidInput(format!(
+                    "Unknown key in chat_display section: {}",
+                    key
+                )));
+            }
         },
         "ui" => match key {
             "theme" => {
-                new_config.ui.theme = serde_json::from_value(value)
-                    .map_err(|e| CommandError::InvalidInput(format!("Invalid theme value: {}", e)))?;
+                new_config.ui.theme = serde_json::from_value(value).map_err(|e| {
+                    CommandError::InvalidInput(format!("Invalid theme value: {}", e))
+                })?;
             }
-            _ => return Err(CommandError::InvalidInput(format!("Unknown key in ui section: {}", key))),
+            _ => {
+                return Err(CommandError::InvalidInput(format!(
+                    "Unknown key in ui section: {}",
+                    key
+                )));
+            }
         },
-        _ => return Err(CommandError::InvalidInput(format!("Unknown section: {}", section))),
+        _ => {
+            return Err(CommandError::InvalidInput(format!(
+                "Unknown section: {}",
+                section
+            )));
+        }
     }
 
     Ok(new_config)
@@ -364,9 +402,18 @@ mod tests {
         let parsed: Config = toml::from_str(&toml_str).unwrap();
 
         assert_eq!(parsed.storage.mode, config.storage.mode);
-        assert_eq!(parsed.chat_display.message_font_size, config.chat_display.message_font_size);
-        assert_eq!(parsed.chat_display.show_timestamps, config.chat_display.show_timestamps);
-        assert_eq!(parsed.chat_display.auto_scroll_enabled, config.chat_display.auto_scroll_enabled);
+        assert_eq!(
+            parsed.chat_display.message_font_size,
+            config.chat_display.message_font_size
+        );
+        assert_eq!(
+            parsed.chat_display.show_timestamps,
+            config.chat_display.show_timestamps
+        );
+        assert_eq!(
+            parsed.chat_display.auto_scroll_enabled,
+            config.chat_display.auto_scroll_enabled
+        );
         assert_eq!(parsed.ui.theme, config.ui.theme);
     }
 
@@ -415,7 +462,11 @@ future_setting = true
     #[test]
     fn font_size_invalid_range() {
         for size in [9u32, 25, 0, 100] {
-            assert!(!(10..=24).contains(&size), "Size {} should be invalid", size);
+            assert!(
+                !(10..=24).contains(&size),
+                "Size {} should be invalid",
+                size
+            );
         }
     }
 
@@ -425,8 +476,14 @@ future_setting = true
 
     #[test]
     fn storage_mode_serializes_lowercase() {
-        assert_eq!(serde_json::to_string(&StorageMode::Secure).unwrap(), "\"secure\"");
-        assert_eq!(serde_json::to_string(&StorageMode::Fallback).unwrap(), "\"fallback\"");
+        assert_eq!(
+            serde_json::to_string(&StorageMode::Secure).unwrap(),
+            "\"secure\""
+        );
+        assert_eq!(
+            serde_json::to_string(&StorageMode::Fallback).unwrap(),
+            "\"fallback\""
+        );
     }
 
     #[test]
@@ -504,8 +561,12 @@ future_setting = true
     fn config_apply_value_font_size_valid() {
         let config = Config::default();
         let new_config = config_apply_value(
-            &config, "chat_display", "message_font_size", serde_json::json!(20),
-        ).unwrap();
+            &config,
+            "chat_display",
+            "message_font_size",
+            serde_json::json!(20),
+        )
+        .unwrap();
         assert_eq!(new_config.chat_display.message_font_size, 20);
     }
 
@@ -513,7 +574,10 @@ future_setting = true
     fn config_apply_value_font_size_too_small() {
         let config = Config::default();
         let result = config_apply_value(
-            &config, "chat_display", "message_font_size", serde_json::json!(9),
+            &config,
+            "chat_display",
+            "message_font_size",
+            serde_json::json!(9),
         );
         assert!(result.is_err());
     }
@@ -522,7 +586,10 @@ future_setting = true
     fn config_apply_value_font_size_too_large() {
         let config = Config::default();
         let result = config_apply_value(
-            &config, "chat_display", "message_font_size", serde_json::json!(25),
+            &config,
+            "chat_display",
+            "message_font_size",
+            serde_json::json!(25),
         );
         assert!(result.is_err());
     }
@@ -531,8 +598,12 @@ future_setting = true
     fn config_apply_value_show_timestamps_false() {
         let config = Config::default();
         let new_config = config_apply_value(
-            &config, "chat_display", "show_timestamps", serde_json::json!(false),
-        ).unwrap();
+            &config,
+            "chat_display",
+            "show_timestamps",
+            serde_json::json!(false),
+        )
+        .unwrap();
         assert!(!new_config.chat_display.show_timestamps);
     }
 
@@ -540,41 +611,54 @@ future_setting = true
     fn config_apply_value_auto_scroll_enabled_false() {
         let config = Config::default();
         let new_config = config_apply_value(
-            &config, "chat_display", "auto_scroll_enabled", serde_json::json!(false),
-        ).unwrap();
+            &config,
+            "chat_display",
+            "auto_scroll_enabled",
+            serde_json::json!(false),
+        )
+        .unwrap();
         assert!(!new_config.chat_display.auto_scroll_enabled);
     }
 
     #[test]
     fn config_apply_value_ui_theme_light() {
         let config = Config::default();
-        let new_config = config_apply_value(
-            &config, "ui", "theme", serde_json::json!("light"),
-        ).unwrap();
+        let new_config =
+            config_apply_value(&config, "ui", "theme", serde_json::json!("light")).unwrap();
         assert_eq!(new_config.ui.theme, Theme::Light);
     }
 
     #[test]
     fn config_apply_value_unknown_section_error() {
         let config = Config::default();
-        let result = config_apply_value(
-            &config, "nonexistent", "key", serde_json::json!("value"),
-        );
+        let result = config_apply_value(&config, "nonexistent", "key", serde_json::json!("value"));
         assert!(result.is_err());
     }
 
     #[test]
     fn config_apply_value_unknown_key_error() {
         let config = Config::default();
-        assert!(config_apply_value(
-            &config, "storage", "nonexistent", serde_json::json!("value"),
-        ).is_err());
-        assert!(config_apply_value(
-            &config, "chat_display", "nonexistent", serde_json::json!("value"),
-        ).is_err());
-        assert!(config_apply_value(
-            &config, "ui", "nonexistent", serde_json::json!("value"),
-        ).is_err());
+        assert!(
+            config_apply_value(
+                &config,
+                "storage",
+                "nonexistent",
+                serde_json::json!("value"),
+            )
+            .is_err()
+        );
+        assert!(
+            config_apply_value(
+                &config,
+                "chat_display",
+                "nonexistent",
+                serde_json::json!("value"),
+            )
+            .is_err()
+        );
+        assert!(
+            config_apply_value(&config, "ui", "nonexistent", serde_json::json!("value"),).is_err()
+        );
     }
 
     #[test]
@@ -582,8 +666,12 @@ future_setting = true
         // 元のConfigが変更されないことを確認（immutability）
         let config = Config::default();
         let _ = config_apply_value(
-            &config, "chat_display", "message_font_size", serde_json::json!(20),
-        ).unwrap();
+            &config,
+            "chat_display",
+            "message_font_size",
+            serde_json::json!(20),
+        )
+        .unwrap();
         assert_eq!(config.chat_display.message_font_size, 13);
     }
 

@@ -55,9 +55,12 @@ describe('chatStore パフォーマンス最適化', () => {
 		vi.mocked(listen).mockReset();
 
 		// listen モックでコールバックをキャプチャ
-		vi.mocked(listen).mockImplementation(async (event: string, handler: (e: { payload: ChatMessage }) => void) => {
+		// 注: Tauri の listen は EventCallback<unknown> を要求するが、本テストでは
+		// payload しか使わないため、handler を type assertion でナローイングする
+		vi.mocked(listen).mockImplementation(async (event, handler) => {
 			if (event === 'chat:message') {
-				emitMessage = (msg: ChatMessage) => handler({ payload: msg });
+				const typed = handler as (e: { payload: ChatMessage }) => void;
+				emitMessage = (msg: ChatMessage) => typed({ payload: msg });
 			}
 			return () => {};
 		});

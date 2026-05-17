@@ -1,0 +1,6 @@
+# rustfmt.toml
+# このファイルは lint-and-hooks-setup スキルで生成
+# stable rustfmt で動く最小設定 (nightly 限定オプションは含めない)
+
+edition = "2024"
+max_width = 100

@@ -1,8 +1,8 @@
 //! Database commands
 
+use crate::AppState;
 use crate::database::{self, Session, ViewerCustomInfo};
 use crate::errors::CommandError;
-use crate::AppState;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 

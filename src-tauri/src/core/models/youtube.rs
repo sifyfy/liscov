@@ -98,7 +98,7 @@ impl YouTubeCookies {
 }
 
 /// Connection status
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ConnectionStatus {
     pub is_connected: bool,
     pub stream_title: Option<String>,
@@ -109,20 +109,6 @@ pub struct ConnectionStatus {
     pub error: Option<String>,
 }
 
-impl Default for ConnectionStatus {
-    fn default() -> Self {
-        Self {
-            is_connected: false,
-            stream_title: None,
-            broadcaster_channel_id: None,
-            broadcaster_name: None,
-            chat_mode: ChatMode::default(),
-            is_replay: false,
-            error: None,
-        }
-    }
-}
-
 /// Extract video ID from YouTube URL
 pub fn extract_video_id(url: &str) -> Option<String> {
     // Handle various YouTube URL formats
@@ -130,7 +116,8 @@ pub fn extract_video_id(url: &str) -> Option<String> {
 
     // youtu.be/VIDEO_ID
     if url.contains("youtu.be/") {
-        return url.split("youtu.be/")
+        return url
+            .split("youtu.be/")
             .nth(1)
             .and_then(|s| s.split(&['?', '&', '#'][..]).next())
             .map(|s| s.to_string());
@@ -149,14 +136,19 @@ pub fn extract_video_id(url: &str) -> Option<String> {
 
     // youtube.com/live/VIDEO_ID or any URL with /live/VIDEO_ID
     if url.contains("/live/") {
-        return url.split("/live/")
+        return url
+            .split("/live/")
             .nth(1)
             .and_then(|s| s.split(&['?', '&', '#', '/'][..]).next())
             .map(|s| s.to_string());
     }
 
     // Plain video ID (11 characters)
-    if url.len() == 11 && url.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+    if url.len() == 11
+        && url
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    {
         return Some(url.to_string());
     }
 
@@ -260,14 +252,18 @@ mod tests {
             apisid: "a".to_string(),
             sapisid: "sa".to_string(),
             raw_cookie_string: Some(
-                "SID=s; HSID=h; SSID=ss; APISID=a; SAPISID=sa; __Secure-1PSID=sec1; YSC=ysc".to_string()
+                "SID=s; HSID=h; SSID=ss; APISID=a; SAPISID=sa; __Secure-1PSID=sec1; YSC=ysc"
+                    .to_string(),
             ),
         };
 
         let result = cookies.to_cookie_string();
 
         // raw_cookie_stringを返す（5基本のみではない）
-        assert!(result.contains("__Secure-1PSID=sec1"), "raw should include __Secure-1PSID");
+        assert!(
+            result.contains("__Secure-1PSID=sec1"),
+            "raw should include __Secure-1PSID"
+        );
         assert!(result.contains("YSC=ysc"), "raw should include YSC");
 
         // 5基本のみの文字列とは異なることを確認
@@ -275,7 +271,10 @@ mod tests {
             "SID={}; HSID={}; SSID={}; APISID={}; SAPISID={}",
             cookies.sid, cookies.hsid, cookies.ssid, cookies.apisid, cookies.sapisid
         );
-        assert_ne!(result, five_basic_only, "should return raw, not 5-basic fallback");
+        assert_ne!(
+            result, five_basic_only,
+            "should return raw, not 5-basic fallback"
+        );
     }
 
     #[test]

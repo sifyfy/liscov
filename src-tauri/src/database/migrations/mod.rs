@@ -69,7 +69,7 @@ fn create_schema_versions_table(conn: &Connection) -> Result<()> {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL UNIQUE,
             applied_at TEXT DEFAULT CURRENT_TIMESTAMP
-        );"
+        );",
     )?;
     Ok(())
 }
@@ -85,10 +85,7 @@ fn get_applied_migrations(conn: &Connection) -> Result<HashSet<String>> {
 
 /// Record a migration as applied
 fn record_migration(conn: &Connection, name: &str) -> Result<()> {
-    conn.execute(
-        "INSERT INTO schema_versions (name) VALUES (?1)",
-        [name],
-    )?;
+    conn.execute("INSERT INTO schema_versions (name) VALUES (?1)", [name])?;
     Ok(())
 }
 
@@ -170,7 +167,7 @@ fn migrate_viewer_profiles_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "DROP INDEX IF EXISTS idx_viewer_profiles_message_count;
          DROP INDEX IF EXISTS idx_viewer_profiles_contribution;
-         DROP TRIGGER IF EXISTS update_viewer_profiles_timestamp;"
+         DROP TRIGGER IF EXISTS update_viewer_profiles_timestamp;",
     )?;
 
     // 2. Rename old table
@@ -192,7 +189,7 @@ fn migrate_viewer_profiles_schema(conn: &Connection) -> Result<()> {
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(broadcaster_channel_id, channel_id)
-        );"
+        );",
     )?;
 
     // 4. Migrate data - use a placeholder broadcaster_id for orphaned viewers
@@ -222,7 +219,7 @@ fn migrate_viewer_profiles_schema(conn: &Connection) -> Result<()> {
             vp.tags,
             vp.created_at,
             vp.updated_at
-        FROM viewer_profiles_old vp;"
+        FROM viewer_profiles_old vp;",
     )?;
 
     // 5. Migrate viewer_custom_info if it exists and has old schema
@@ -253,7 +250,7 @@ fn migrate_viewer_profiles_schema(conn: &Connection) -> Result<()> {
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (viewer_profile_id) REFERENCES viewer_profiles(id) ON DELETE CASCADE
-                );"
+                );",
             )?;
 
             conn.execute_batch(
@@ -290,7 +287,7 @@ fn migrate_viewer_profiles_schema(conn: &Connection) -> Result<()> {
             AFTER UPDATE ON viewer_profiles
             BEGIN
                 UPDATE viewer_profiles SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
-            END;"
+            END;",
     )?;
 
     Ok(())
@@ -308,11 +305,13 @@ mod tests {
         run_migrations(&conn).unwrap();
 
         // Verify schema_versions exists and has the migration
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM schema_versions WHERE name = '001_initial'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM schema_versions WHERE name = '001_initial'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(count, 1);
 
         // Verify tables were created
@@ -333,11 +332,9 @@ mod tests {
         run_migrations(&conn).unwrap();
 
         // Should have exactly the number of migrations (no duplicates)
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM schema_versions",
-            [],
-            |row| row.get(0),
-        ).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM schema_versions", [], |row| row.get(0))
+            .unwrap();
         assert_eq!(count, MIGRATIONS.len() as i64);
     }
 
@@ -358,8 +355,9 @@ mod tests {
                 tags TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-            );"
-        ).unwrap();
+            );",
+        )
+        .unwrap();
 
         // Should detect as legacy
         assert!(is_legacy_database(&conn).unwrap());

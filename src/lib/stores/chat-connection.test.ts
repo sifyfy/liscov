@@ -1004,11 +1004,11 @@ describe('chatStore 追加補強テスト', () => {
 		// メッセージを追加するためにイベントハンドラをセットアップ
 		let messageHandler: ((e: { payload: unknown }) => void) | null = null;
 		vi.mocked(listen).mockReset();
-		vi.mocked(listen).mockImplementation(async (event: string, handler: unknown) => {
+		vi.mocked(listen).mockImplementation(async (event, handler) => {
 			if (event === 'chat:message') {
 				messageHandler = handler as (e: { payload: unknown }) => void;
 			}
-			return vi.fn();
+			return () => {};
 		});
 
 		vi.resetModules();
@@ -1246,10 +1246,10 @@ describe('chatStore 追加補強テスト', () => {
 		const unlistenConnection = vi.fn();
 		vi.clearAllMocks();
 		vi.mocked(listen).mockReset();
-		vi.mocked(listen).mockImplementation(async (event: string) => {
+		vi.mocked(listen).mockImplementation(async (event) => {
 			if (event === 'chat:message') return unlistenMessage;
 			if (event === 'chat:connection') return unlistenConnection;
-			return vi.fn();
+			return () => {};
 		});
 
 		vi.resetModules();

@@ -1,0 +1,31 @@
+# .mise.toml
+# このファイルは lint-and-hooks-setup スキルで生成
+# 開発に必要なツール・言語ランタイムの定義 (mise install で揃う)
+# SSoT 設計: 実コマンドは各言語標準ランナーに置き、Makefile が薄く束ねる
+
+[tools]
+# ---- 言語ランタイム ----
+# Rust: stable。MSRV (Cargo.toml の rust-version) との互換性は維持
+# components: clippy / rustfmt は make lint / make fmt で利用
+rust = { version = "1.95", components = "clippy,rustfmt" }
+# Node.js: LTS Krypton
+node = "24"
+# pnpm: Node.js のパッケージマネージャ (npm より高速・ディスク効率良)
+# package.json の packageManager フィールドと整合させる
+pnpm = "10"
+
+# ---- 言語非依存のツール ----
+# lefthook: ubi backend を採用。
+# 経緯: asdf プラグイン (デフォルト) と github backend は Windows で
+# バイナリを `lefthook_<ver>_Windows[_x86_64]` のまま展開し PATH 解決に失敗する。
+# ubi backend のみ `lefthook.exe` に正しくリネームしてくれる。
+# 注: ubi backend には deprecation 警告が出るが削除予定は mise 2027.1.0 以降のため
+# 当面は ubi を維持。github backend の Windows 対応が改善されたら移行を検討。
+"ubi:evilmartians/lefthook" = "latest"
+gitleaks = "latest"    # secret 検出 (DB 更新取り込みのため latest)
+
+# ---- Rust ツール ----
+# 依存脆弱性スキャン (RustSec advisory DB)
+# 注: mise の cargo: backend で入れた場合、PATH に shim を通すには
+# `mise exec --` 経由か `mise activate` が必要。Makefile / lefthook の前提。
+"cargo:cargo-audit" = "latest"
