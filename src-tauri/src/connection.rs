@@ -33,7 +33,7 @@ pub struct StreamConnection {
 
 /// フロントエンドに公開する接続情報（シリアライズ可能）
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub struct ConnectionInfo {
     pub id: u64,
     pub platform: Platform,

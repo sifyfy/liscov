@@ -5,7 +5,7 @@ use ts_rs::TS;
 
 /// 配信プラットフォーム
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 #[serde(rename_all = "lowercase")]
 pub enum Platform {
     YouTube,
