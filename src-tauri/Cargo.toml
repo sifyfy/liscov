@@ -13,11 +13,14 @@ name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2.5.3", features = [] }
+tauri-build = { version = "2.6", features = [] }
 
 [dependencies]
 # Tauri
-tauri = { version = "2.9.5", features = [] }
+# NOTE: tauri / tauri-plugin-dialog の version floor は @tauri-apps/api,
+# @tauri-apps/plugin-dialog (package.json) の major.minor と揃える必要がある。
+# 揃っていない場合 `pnpm tauri build` が version mismatch error で失敗する。
+tauri = { version = "2.11", features = [] }
 tauri-plugin-log = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-window-state = "2"
@@ -70,14 +73,14 @@ toml = "0.8"
 ts-rs = { version = "10", features = ["serde-compat"] }
 # Excel export
 rust_xlsxwriter = "0.78"
-tauri-plugin-dialog = "2.5.0"
+tauri-plugin-dialog = "2.7"
 rodio = "0.21.1"
 
 [dev-dependencies]
 # シリアル実行が必要なテスト（環境変数を操作するもの）に使用
 serial_test = "3"
 # Tauri コマンドの統合テスト用 mock API
-tauri = { version = "2.9.5", features = ["test"] }
+tauri = { version = "2.11", features = ["test"] }
 # ファイル書き込みテストの一時ディレクトリ管理
 tempfile = "3"
 
