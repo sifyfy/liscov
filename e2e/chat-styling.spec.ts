@@ -1,5 +1,5 @@
 import { test, expect } from './utils/fixtures';
-import type { BrowserContext, Page, Browser } from '@playwright/test';
+import type { Page, Browser } from '@playwright/test';
 import { log } from './utils/logger';
 import {
   MOCK_SERVER_URL,
@@ -19,7 +19,6 @@ import {
 
 test.describe('Chat Display — Styling (02_chat.md)', () => {
   let browser: Browser;
-  let context: BrowserContext;
   let mainPage: Page;
 
   test.beforeAll(async () => {
@@ -28,7 +27,6 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
     log.info('Setting up test environment for Chat Display tests...');
     const connection = await setupTestEnvironment();
     browser = connection.browser;
-    context = connection.context;
     mainPage = connection.page;
     log.info('Connected to Tauri app');
   });
@@ -323,6 +321,113 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
 
       // Reset stream title
       await setStreamState({ title: '' });
+    });
+
+    // 著者名の表示幅（02_chat.md:584）
+    // 固定200px上限を撤廃し「利用可能幅まで表示、行が収まらない場合のみ末尾省略」する挙動を検証する。
+    test('should display a moderately long author name wider than the former 200px cap without truncation', async () => {
+      // Connect to stream
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await mainPage.locator('button:has-text("開始")').click();
+      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+
+      // 全角約24文字（13px換算で ~300px、旧上限200pxを明確に超える）。
+      // 一意トークンを先頭に付与し、メッセージ本文とは別に著者名 span を特定できるようにする。
+      const widthMarker = 'WCAPMARK';
+      const moderateName = `${widthMarker}_やまだたろうのなまえはとてもながいですね`;
+      const content = 'moderate-author-width-marker';
+
+      await addMockMessage({
+        message_type: 'text',
+        author: moderateName,
+        content,
+        channel_id: 'UC_moderate_width',
+        is_member: false,
+      });
+
+      const message = mainPage.locator('[data-message-id]').filter({
+        has: mainPage.locator(`text=${content}`),
+      }).first();
+      await expect(message).toBeVisible({ timeout: 5000 });
+
+      const authorSpan = message.locator('span').filter({ hasText: widthMarker }).first();
+      const metrics = await authorSpan.evaluate((el) => ({
+        clientWidth: el.clientWidth,
+        scrollWidth: el.scrollWidth,
+      }));
+
+      // 固定上限が撤廃され、名前が200pxを超えて表示されている
+      expect(metrics.clientWidth).toBeGreaterThan(200);
+      // 利用可能幅に収まっているため省略されず全体表示（クリップなし、1pxの丸め誤差を許容）
+      expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth + 1);
+
+      await disconnectAndInitialize(mainPage);
+    });
+
+    test('should ellipsize an over-long author name while keeping the member badge visible and the row from overflowing', async () => {
+      // Connect to stream
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await mainPage.locator('button:has-text("開始")').click();
+      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+
+      // どんな現実的なパネル幅も超える長さ（全角300文字）。
+      // is_member: true で「メンバー」バッジを同居させ、長い名前がバッジを押し出さない
+      // ことを検証する（バッジは showTimestamps の UI 状態に依存せず常に描画される）。
+      const overLongName = `OVFMARK_${'あ'.repeat(300)}`;
+      const content = 'overlong-author-width-marker';
+
+      await addMockMessage({
+        message_type: 'text',
+        author: overLongName,
+        content,
+        channel_id: 'UC_overlong_width',
+        is_member: true,
+      });
+
+      const message = mainPage.locator('[data-message-id]').filter({
+        has: mainPage.locator(`text=${content}`),
+      }).first();
+      await expect(message).toBeVisible({ timeout: 5000 });
+
+      const authorSpan = message.locator('span').filter({ hasText: 'OVFMARK_' }).first();
+      const result = await authorSpan.evaluate((el) => {
+        const style = window.getComputedStyle(el);
+        // 著者名 span の親 = メタデータ flex 行
+        const row = el.parentElement as HTMLElement;
+        return {
+          textOverflow: style.textOverflow,
+          overflow: style.overflow,
+          whiteSpace: style.whiteSpace,
+          spanClientWidth: el.clientWidth,
+          spanScrollWidth: el.scrollWidth,
+          rowClientWidth: row.clientWidth,
+          rowScrollWidth: row.scrollWidth,
+        };
+      });
+
+      // 省略スタイルが適用されている（truncate = overflow-hidden / ellipsis / nowrap）
+      expect(result.textOverflow).toBe('ellipsis');
+      expect(result.overflow).toBe('hidden');
+      expect(result.whiteSpace).toBe('nowrap');
+      // 実際にクリップが発生している（収まらないので末尾省略）
+      expect(result.spanScrollWidth).toBeGreaterThan(result.spanClientWidth);
+      // 保存則: 名前が縮小を吸収し、メタデータ行は横方向に溢れない。
+      // バッジが同居するため、名前が譲らなければ行が溢れる ⇒ この検証は非自明
+      expect(result.rowScrollWidth).toBeLessThanOrEqual(result.rowClientWidth + 1);
+
+      // 成功条件: 長い名前があってもメンバーバッジは表示され、押し出されない。
+      // バッジの右端がメッセージ枠内に収まっていることで「押し出されない」を実証する
+      const memberBadge = message.getByText('メンバー', { exact: true }).first();
+      await expect(memberBadge).toBeVisible();
+      const badgeBox = await memberBadge.boundingBox();
+      const messageBox = await message.boundingBox();
+      expect(badgeBox).not.toBeNull();
+      expect(messageBox).not.toBeNull();
+      expect(badgeBox!.x + badgeBox!.width).toBeLessThanOrEqual(messageBox!.x + messageBox!.width + 1);
+
+      await disconnectAndInitialize(mainPage);
     });
   });
 });

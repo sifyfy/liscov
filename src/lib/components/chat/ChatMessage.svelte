@@ -218,8 +218,11 @@
     {/if}
 
     <!-- Author name (member=green, non-member=blue) -->
+    <!-- min-w-0 で flex の縮小ポイントを名前に集約し、利用可能幅まで表示。
+         バッジ・タイムスタンプ(flex-shrink-0)は常に表示を維持し、
+         1行に収まらない場合のみ名前を末尾省略(…)する -->
     <span
-      class="font-medium truncate max-w-[200px]"
+      class="font-medium truncate min-w-0"
       style="color: {message.is_member ? 'var(--member-accent)' : 'var(--accent)'};"
     >
       {message.author}
