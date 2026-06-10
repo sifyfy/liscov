@@ -1,5 +1,6 @@
 // Chat state management using Svelte 5 runes
 import { listen } from '@tauri-apps/api/event';
+import { normalizeError } from '$lib/tauri/errors';
 import type { ChatMessage, ConnectionResult, ChatMode, ChatFilter, FrontendConnectionState } from '$lib/types';
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import * as chatApi from '$lib/tauri/chat';
@@ -179,7 +180,7 @@ function createChatStore() {
       next.delete(tempId);
       connections = next;
 
-      error = e instanceof Error ? e.message : String(e);
+      error = normalizeError(e).message;
       return {
         success: false,
         stream_title: null,

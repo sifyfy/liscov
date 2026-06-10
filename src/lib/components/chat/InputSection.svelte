@@ -20,11 +20,8 @@
 
   // 統計情報
   let messageCount = $derived(chatStore.messages.length);
-  let uniqueViewers = $derived(() => {
-    const uniqueIds = new Set(chatStore.messages.map(m => m.channel_id));
-    return uniqueIds.size;
-  });
-  let messagesPerMinute = $derived(() => {
+  let uniqueViewers = $derived(new Set(chatStore.messages.map(m => m.channel_id)).size);
+  let messagesPerMinute = $derived.by(() => {
     if (chatStore.messages.length < 2) return 0;
     const now = Date.now();
     const oneMinuteAgo = now - 60000;
@@ -82,11 +79,11 @@
         <span class="text-xs text-[var(--text-secondary)] ml-1">件</span>
       </div>
       <div class="min-w-[4.5rem] px-2 py-1 bg-[var(--bg-surface-3)] rounded border border-[var(--border-default)] text-right">
-        <span class="text-sm font-bold text-[var(--text-primary)]" style="font-family: var(--font-mono);">{chatStore.isConnected ? messagesPerMinute() : 0}</span>
+        <span class="text-sm font-bold text-[var(--text-primary)]" style="font-family: var(--font-mono);">{chatStore.isConnected ? messagesPerMinute : 0}</span>
         <span class="text-xs text-[var(--text-secondary)] ml-1">/分</span>
       </div>
       <div class="min-w-[4.5rem] px-2 py-1 bg-[var(--bg-surface-3)] rounded border border-[var(--border-default)] text-right">
-        <span class="text-sm font-bold text-[var(--text-primary)]" style="font-family: var(--font-mono);">{chatStore.isConnected ? uniqueViewers() : 0}</span>
+        <span class="text-sm font-bold text-[var(--text-primary)]" style="font-family: var(--font-mono);">{chatStore.isConnected ? uniqueViewers : 0}</span>
         <span class="text-xs text-[var(--text-secondary)] ml-1">人</span>
       </div>
     </div>

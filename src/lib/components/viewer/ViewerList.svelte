@@ -1,5 +1,6 @@
 <script lang="ts">
   import { viewerStore } from '$lib/stores';
+  import { formatContribution } from '$lib/utils/format';
 
   interface Props {
     broadcasterId: string;
@@ -23,14 +24,6 @@
     viewerStore.loadViewers(broadcasterId);
   }
 
-  function formatContribution(amount: number): string {
-    if (amount === 0) return '-';
-    return new Intl.NumberFormat('ja-JP', {
-      style: 'currency',
-      currency: 'JPY',
-      maximumFractionDigits: 0
-    }).format(amount);
-  }
 
   function formatDate(dateStr: string): string {
     try {

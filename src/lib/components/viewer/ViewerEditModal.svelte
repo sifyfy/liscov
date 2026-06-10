@@ -1,6 +1,8 @@
 <script lang="ts">
   import { viewerStore } from '$lib/stores';
+  import { normalizeError } from '$lib/tauri/errors';
   import type { ViewerWithCustomInfo } from '$lib/types';
+  import { formatContribution } from '$lib/utils/format';
   import DeleteConfirmDialog from './DeleteConfirmDialog.svelte';
 
   interface Props {
@@ -40,7 +42,7 @@
       );
       onClose();
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      error = normalizeError(e).message;
     } finally {
       isSaving = false;
     }
@@ -55,20 +57,12 @@
       showDeleteConfirm = false;
       onClose();
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      error = normalizeError(e).message;
     } finally {
       isDeleting = false;
     }
   }
 
-  function formatContribution(amount: number): string {
-    if (amount === 0) return '-';
-    return new Intl.NumberFormat('ja-JP', {
-      style: 'currency',
-      currency: 'JPY',
-      maximumFractionDigits: 0
-    }).format(amount);
-  }
 </script>
 
 <!-- Modal backdrop -->

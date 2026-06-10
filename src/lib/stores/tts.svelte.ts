@@ -3,35 +3,8 @@
 import type { TtsConfig, TtsStatus, TtsPriority, TtsLaunchStatus } from '$lib/types';
 import { defaultTtsConfig } from '$lib/types';
 import * as ttsApi from '$lib/tauri/tts';
+import { normalizeError } from '$lib/tauri/errors';
 
-
-function toErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  if (typeof error === 'string') {
-    return error;
-  }
-
-  if (error && typeof error === 'object') {
-    const record = error as Record<string, unknown>;
-    for (const key of ['message', 'error', 'details']) {
-      const value = record[key];
-      if (typeof value === 'string' && value.length > 0) {
-        return value;
-      }
-    }
-
-    try {
-      return JSON.stringify(error);
-    } catch {
-      // JSON変換に失敗した場合は最後に String() にフォールバックする
-    }
-  }
-
-  return String(error);
-}
 
 function createTtsStore() {
   let config = $state<TtsConfig>({ ...defaultTtsConfig });
@@ -78,7 +51,7 @@ function createTtsStore() {
       try {
         config = await ttsApi.ttsGetConfig();
       } catch (e) {
-        error = toErrorMessage(e);
+        error = normalizeError(e).message;
       } finally {
         isLoading = false;
       }
@@ -91,7 +64,7 @@ function createTtsStore() {
         await ttsApi.ttsUpdateConfig(newConfig);
         config = newConfig;
       } catch (e) {
-        error = toErrorMessage(e);
+        error = normalizeError(e).message;
       } finally {
         isLoading = false;
       }
@@ -109,7 +82,7 @@ function createTtsStore() {
       try {
         connectionTestResult = await ttsApi.ttsTestConnection(backend);
       } catch (e) {
-        error = toErrorMessage(e);
+        error = normalizeError(e).message;
         connectionTestResult = false;
       } finally {
         testingBackend = null;
@@ -121,7 +94,7 @@ function createTtsStore() {
       try {
         await ttsApi.ttsSpeak(text, options);
       } catch (e) {
-        error = toErrorMessage(e);
+        error = normalizeError(e).message;
       }
     },
 
@@ -129,7 +102,7 @@ function createTtsStore() {
       try {
         await ttsApi.ttsSpeakDirect(text);
       } catch (e) {
-        error = toErrorMessage(e);
+        error = normalizeError(e).message;
       }
     },
 
@@ -139,7 +112,7 @@ function createTtsStore() {
         await ttsApi.ttsStart();
         await this.refreshStatus();
       } catch (e) {
-        error = toErrorMessage(e);
+        error = normalizeError(e).message;
       }
     },
 
@@ -149,7 +122,7 @@ function createTtsStore() {
         await ttsApi.ttsStop();
         await this.refreshStatus();
       } catch (e) {
-        error = toErrorMessage(e);
+        error = normalizeError(e).message;
       }
     },
 
@@ -159,7 +132,7 @@ function createTtsStore() {
         await ttsApi.ttsClearQueue();
         await this.refreshStatus();
       } catch (e) {
-        error = toErrorMessage(e);
+        error = normalizeError(e).message;
       }
     },
 
@@ -167,7 +140,7 @@ function createTtsStore() {
       try {
         status = await ttsApi.ttsGetStatus();
       } catch (e) {
-        error = toErrorMessage(e);
+        error = normalizeError(e).message;
       }
     },
 
@@ -183,7 +156,7 @@ function createTtsStore() {
       try {
         return await ttsApi.ttsDiscoverExe(backend);
       } catch (e) {
-        error = toErrorMessage(e);
+        error = normalizeError(e).message;
         return null;
       }
     },
@@ -192,7 +165,7 @@ function createTtsStore() {
       try {
         return await ttsApi.ttsSelectExe();
       } catch (e) {
-        error = toErrorMessage(e);
+        error = normalizeError(e).message;
         return null;
       }
     },
@@ -204,7 +177,7 @@ function createTtsStore() {
         await this.refreshLaunchStatus();
         return pid;
       } catch (e) {
-        error = toErrorMessage(e);
+        error = normalizeError(e).message;
         return null;
       }
     },
@@ -216,7 +189,7 @@ function createTtsStore() {
         await this.refreshLaunchStatus();
         return true;
       } catch (e) {
-        error = toErrorMessage(e);
+        error = normalizeError(e).message;
         return false;
       }
     },
@@ -225,7 +198,7 @@ function createTtsStore() {
       try {
         launchStatus = await ttsApi.ttsGetLaunchStatus();
       } catch (e) {
-        error = toErrorMessage(e);
+        error = normalizeError(e).message;
       }
     }
   };

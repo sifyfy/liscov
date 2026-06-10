@@ -1,5 +1,6 @@
 <script lang="ts">
   import { viewerStore } from '$lib/stores';
+  import { normalizeError } from '$lib/tauri/errors';
   import ViewerList from './ViewerList.svelte';
   import ViewerEditModal from './ViewerEditModal.svelte';
   import BroadcasterSelector from './BroadcasterSelector.svelte';
@@ -44,7 +45,7 @@
       selectedBroadcasterId = null;
       showDeleteBroadcasterConfirm = false;
     } catch (e) {
-      deleteError = e instanceof Error ? e.message : String(e);
+      deleteError = normalizeError(e).message;
     } finally {
       isDeletingBroadcaster = false;
     }

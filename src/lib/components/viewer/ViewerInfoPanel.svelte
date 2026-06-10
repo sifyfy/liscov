@@ -2,6 +2,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import type { ChatMessage } from '$lib/types';
   import { chatStore } from '$lib/stores';
+  import { formatTimestamp } from '$lib/utils/format';
 
   interface Props {
     viewer: {
@@ -117,23 +118,6 @@
     return null;
   }
 
-  // Format timestamp to local timezone HH:MM:SS
-  function formatTimestamp(timestamp: string): string {
-    if (!timestamp) return '';
-    try {
-      const date = new Date(timestamp);
-      if (isNaN(date.getTime())) {
-        return timestamp;
-      }
-      return date.toLocaleTimeString('ja-JP', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit'
-      });
-    } catch {
-      return timestamp;
-    }
-  }
 </script>
 
 <!-- Slide-in panel (original liscov dark theme style) -->

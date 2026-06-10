@@ -1,5 +1,6 @@
 // Viewer state management using Svelte 5 runes
 import type { ViewerWithCustomInfo, Session, BroadcasterChannel } from '$lib/types';
+import { normalizeError } from '$lib/tauri/errors';
 import * as viewerApi from '$lib/tauri/viewer';
 
 // ファクトリ関数：テスト時に独立したストアインスタンスを生成できる
@@ -24,7 +25,7 @@ function createViewerStore() {
     try {
       sessions = await viewerApi.getSessions(20);
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      error = normalizeError(e).message;
     } finally {
       isLoading = false;
     }
@@ -45,7 +46,7 @@ function createViewerStore() {
         page * pageSize
       );
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      error = normalizeError(e).message;
       viewers = [];
     } finally {
       isLoading = false;
@@ -87,7 +88,7 @@ function createViewerStore() {
         await loadViewers(selectedBroadcasterId, currentPage);
       }
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      error = normalizeError(e).message;
       throw e;
     }
   }
@@ -121,7 +122,7 @@ function createViewerStore() {
         await loadViewers(selectedBroadcasterId, currentPage);
       }
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      error = normalizeError(e).message;
       throw e;
     }
   }
@@ -146,7 +147,7 @@ function createViewerStore() {
       broadcasters = await viewerApi.broadcasterGetList();
     } catch (e) {
       console.error('[viewerStore] loadBroadcasters error:', e);
-      error = e instanceof Error ? e.message : String(e);
+      error = normalizeError(e).message;
       broadcasters = [];
     } finally {
       isLoading = false;
@@ -172,7 +173,7 @@ function createViewerStore() {
 
       return result;
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      error = normalizeError(e).message;
       throw e;
     }
   }
@@ -193,7 +194,7 @@ function createViewerStore() {
 
       return result;
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      error = normalizeError(e).message;
       throw e;
     }
   }

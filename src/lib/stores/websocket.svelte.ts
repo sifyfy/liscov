@@ -1,6 +1,7 @@
 // WebSocket state management using Svelte 5 runes
 // WebSocketサーバーはアプリ起動時に自動起動するため、手動での開始・停止は不要
 import * as wsApi from '$lib/tauri/websocket';
+import { normalizeError } from '$lib/tauri/errors';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 // ファクトリ関数：テスト時に独立したストアインスタンスを生成できる
@@ -66,7 +67,7 @@ function createWebsocketStore() {
 
       initialized = true;
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      error = normalizeError(e).message;
     }
   }
 
@@ -79,7 +80,7 @@ function createWebsocketStore() {
       connectedClients = status.connected_clients;
       error = null;
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      error = normalizeError(e).message;
     }
   }
 

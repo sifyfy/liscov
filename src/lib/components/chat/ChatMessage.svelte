@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ChatMessage } from '$lib/types';
+  import { formatTimestamp } from '$lib/utils/format';
 
   interface Props {
     message: ChatMessage;
@@ -15,47 +16,12 @@
 
   let { message, fontSize, showTimestamps, highlighted = false, onClick, showSourceIndicator = false, sourceColor, sourceName }: Props = $props();
 
-  // Get SuperChat colors from metadata or use defaults
-  let superchatColors = $derived(() => {
-    if (message.metadata?.superchat_colors) {
-      return message.metadata.superchat_colors;
-    }
-    return null;
-  });
+  // SuperChat の配色（metadata に含まれる場合のみ）
+  let superchatColors = $derived(message.metadata?.superchat_colors ?? null);
 
-  // Determine container styles based on message type (original liscov style: left border frame)
-  let containerStyle = $derived(() => {
-    // Base style: white background with left border frame (original liscov style)
-    const baseStyle = 'rounded';
-
-    switch (message.message_type) {
-      case 'superchat':
-        // SuperChat: gradient background with YouTube colors
-        return `${baseStyle} border-l-4`;
-      case 'supersticker':
-        // SuperSticker: similar to SuperChat
-        return `${baseStyle} border-l-4`;
-      case 'membership':
-        // Membership: green gradient (new member or milestone)
-        return `${baseStyle} border-l-4`;
-      case 'membership_gift':
-        // Membership gift: blue gradient
-        return `${baseStyle} border-l-4`;
-      case 'system':
-        // System message: blue left border
-        return `${baseStyle} border-l-4`;
-      default:
-        // Normal text: primary color left border, member gets green background
-        if (message.is_member) {
-          return `${baseStyle} border-l-4`;
-        }
-        return `${baseStyle} border-l-4`;
-    }
-  });
-
-  // Dynamic inline style for message type (original liscov style with left frame)
-  let dynamicStyle = $derived(() => {
-    const colors = superchatColors();
+  // メッセージ種別ごとの動的インラインスタイル（liscov オリジナルの左枠スタイル）
+  let dynamicStyle = $derived.by(() => {
+    const colors = superchatColors;
 
     switch (message.message_type) {
       case 'superchat':
@@ -87,27 +53,11 @@
     }
   });
 
-  // Format timestamp to HH:MM:SS in local timezone (manual format for performance)
-  let formattedTime = $derived(() => {
-    if (!message.timestamp) {
-      return '';
-    }
-    try {
-      const date = new Date(message.timestamp);
-      if (isNaN(date.getTime())) {
-        return message.timestamp;
-      }
-      const h = String(date.getHours()).padStart(2, '0');
-      const m = String(date.getMinutes()).padStart(2, '0');
-      const s = String(date.getSeconds()).padStart(2, '0');
-      return `${h}:${m}:${s}`;
-    } catch {
-      return message.timestamp;
-    }
-  });
+  // タイムスタンプ（ローカルタイムゾーンの HH:MM:SS）
+  let formattedTime = $derived(formatTimestamp(message.timestamp));
 
-  // Message type header text
-  let typeHeader = $derived(() => {
+  // メッセージ種別のヘッダーテキスト
+  let typeHeader = $derived.by(() => {
     switch (message.message_type) {
       case 'superchat':
         return 'スーパーチャット';
@@ -122,9 +72,9 @@
     }
   });
 
-  // Get header color from YouTube colors or default
-  let headerColor = $derived(() => {
-    const colors = superchatColors();
+  // ヘッダー色（YouTube の配色があればそれを使い、なければ種別ごとの既定色）
+  let headerColor = $derived.by(() => {
+    const colors = superchatColors;
     if (colors && (message.message_type === 'superchat' || message.message_type === 'supersticker')) {
       return colors.header_background;
     }
@@ -146,18 +96,15 @@
   let isFirstTimeViewer = $derived(message.is_first_time_viewer);
 
   // 配信内コメント回数表示
-  let commentCountDisplay = $derived(() => {
-    if (message.in_stream_comment_count === null || message.in_stream_comment_count === undefined) {
-      return null;
-    }
-    return `#${message.in_stream_comment_count}`;
-  });
+  let commentCountDisplay = $derived(
+    message.in_stream_comment_count == null ? null : `#${message.in_stream_comment_count}`
+  );
 
 </script>
 
 <div
-  class="px-3 py-2 cursor-pointer hover:ring-2 hover:ring-[var(--accent)]/30 transition-all {containerStyle()}"
-  style="{dynamicStyle()}{highlighted ? 'border: 2px solid var(--accent); box-shadow: 0 0 8px var(--accent-subtle);' : ''}"
+  class="px-3 py-2 cursor-pointer hover:ring-2 hover:ring-[var(--accent)]/30 transition-all rounded border-l-4"
+  style="{dynamicStyle}{highlighted ? 'border: 2px solid var(--accent); box-shadow: 0 0 8px var(--accent-subtle);' : ''}"
   data-message-id={message.id}
   onclick={onClick}
   role="button"
@@ -173,13 +120,13 @@
   {/if}
 
   <!-- Type header for special messages -->
-  {#if typeHeader()}
-    {#if superchatColors()}
+  {#if typeHeader}
+    {#if superchatColors}
       <div
         class="-mx-3 -mt-2 mb-1.5 px-3 py-1 flex items-center justify-between rounded-tr"
-        style="background-color: {headerColor()}; color: {superchatColors()!.header_text};"
+        style="background-color: {headerColor}; color: {superchatColors.header_text};"
       >
-        <span class="text-xs font-semibold tracking-wide">{typeHeader()}</span>
+        <span class="text-xs font-semibold tracking-wide">{typeHeader}</span>
         {#if message.amount}
           <span class="text-xs font-bold">{message.amount}</span>
         {/if}
@@ -188,9 +135,9 @@
       <div class="mb-1.5">
         <span
           class="text-xs font-medium px-2 py-0.5 rounded-full"
-          style={headerColor() ? `background-color: ${headerColor()}; color: white;` : ''}
+          style={headerColor ? `background-color: ${headerColor}; color: white;` : ''}
         >
-          {typeHeader()}
+          {typeHeader}
           {#if message.amount}
             <span class="ml-1 font-bold">{message.amount}</span>
           {/if}
@@ -200,7 +147,7 @@
   {/if}
 
   <!-- Row 1: Metadata (icon, name, badges, comment count, timestamp) -->
-  <div class="flex items-center gap-2 {superchatColors() ? 'bg-[var(--bg-surface-2)]/80 -mx-1 px-1 py-0.5 rounded-md' : ''}" style="font-size: {fontSize}px;">
+  <div class="flex items-center gap-2 {superchatColors ? 'bg-[var(--bg-surface-2)]/80 -mx-1 px-1 py-0.5 rounded-md' : ''}" style="font-size: {fontSize}px;">
     <!-- Author icon -->
     {#if message.author_icon_url}
       <img
@@ -277,14 +224,14 @@
     {/if}
 
     <!-- 配信内コメント回数 (#1は目立つ色、#2以降はmuted) -->
-    {#if commentCountDisplay()}
+    {#if commentCountDisplay}
       <span class="{message.in_stream_comment_count === 1 ? 'font-bold text-[var(--warning)]' : 'text-[var(--text-muted)]'}" style="font-size: {fontSize}px;">
-        {commentCountDisplay()}
+        {commentCountDisplay}
       </span>
     {/if}
 
     <!-- Amount badge for SuperChat (when not shown in header) -->
-    {#if message.amount && !typeHeader()}
+    {#if message.amount && !typeHeader}
       <span class="px-1.5 py-0.5 text-xs bg-[var(--warning-subtle)] text-[var(--warning)] rounded border border-[var(--border-default)] font-bold">
         {message.amount}
       </span>
@@ -293,14 +240,14 @@
     <!-- Timestamp -->
     {#if showTimestamps}
       <span class="text-xs text-[var(--text-muted)] ml-auto flex-shrink-0">
-        {formattedTime()}
+        {formattedTime}
       </span>
     {/if}
   </div>
 
   <!-- Row 2: Message content with runs (text + emoji) -->
   <div class="mt-1 ml-8">
-    <p class="break-words leading-relaxed" style="font-size: {fontSize}px; color: {superchatColors() && (message.message_type === 'superchat' || message.message_type === 'supersticker') ? superchatColors()!.body_text : 'var(--text-secondary)'};">
+    <p class="break-words leading-relaxed" style="font-size: {fontSize}px; color: {superchatColors && (message.message_type === 'superchat' || message.message_type === 'supersticker') ? superchatColors.body_text : 'var(--text-secondary)'};">
       {#if message.runs && message.runs.length > 0}
         {#each message.runs as run, i (i)}
           {#if run.type === 'Text'}

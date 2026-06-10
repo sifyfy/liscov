@@ -1,6 +1,7 @@
 // Auth store (01_auth.md)
 
 import type { AuthStatus, SessionValidity, AuthIndicatorState } from '$lib/types';
+import { normalizeError } from '$lib/tauri/errors';
 import * as authApi from '$lib/tauri/auth';
 
 function createAuthStore() {
@@ -86,7 +87,7 @@ function createAuthStore() {
       try {
         status = await authApi.authGetStatus();
       } catch (e) {
-        error = e instanceof Error ? e.message : String(e);
+        error = normalizeError(e).message;
       } finally {
         isLoading = false;
       }
@@ -100,7 +101,7 @@ function createAuthStore() {
         await this.refreshStatus();
         return true;
       } catch (e) {
-        error = e instanceof Error ? e.message : String(e);
+        error = normalizeError(e).message;
         return false;
       } finally {
         isLoading = false;
@@ -114,7 +115,7 @@ function createAuthStore() {
         await authApi.authSaveRawCookies(rawCookies);
         await this.refreshStatus();
       } catch (e) {
-        error = e instanceof Error ? e.message : String(e);
+        error = normalizeError(e).message;
         throw e;
       } finally {
         isLoading = false;
@@ -134,7 +135,7 @@ function createAuthStore() {
         await authApi.authSaveCredentials(sid, hsid, ssid, apisid, sapisid);
         await this.refreshStatus();
       } catch (e) {
-        error = e instanceof Error ? e.message : String(e);
+        error = normalizeError(e).message;
         throw e;
       } finally {
         isLoading = false;
@@ -152,7 +153,7 @@ function createAuthStore() {
         sessionValidity = null;
         await this.refreshStatus();
       } catch (e) {
-        error = e instanceof Error ? e.message : String(e);
+        error = normalizeError(e).message;
       } finally {
         isLoading = false;
       }
@@ -163,7 +164,7 @@ function createAuthStore() {
       try {
         return await authApi.authValidateCredentials();
       } catch (e) {
-        error = e instanceof Error ? e.message : String(e);
+        error = normalizeError(e).message;
         return false;
       }
     },
@@ -175,7 +176,7 @@ function createAuthStore() {
         sessionValidity = await authApi.authCheckSessionValidity();
         return sessionValidity;
       } catch (e) {
-        error = e instanceof Error ? e.message : String(e);
+        error = normalizeError(e).message;
         sessionValidity = {
           is_valid: false,
           checked_at: new Date().toISOString(),
@@ -195,7 +196,7 @@ function createAuthStore() {
         await this.refreshStatus();
         return true;
       } catch (e) {
-        error = e instanceof Error ? e.message : String(e);
+        error = normalizeError(e).message;
         return false;
       } finally {
         isLoading = false;
@@ -209,7 +210,7 @@ function createAuthStore() {
         await authApi.authOpenWindow();
         await this.refreshStatus();
       } catch (e) {
-        error = e instanceof Error ? e.message : String(e);
+        error = normalizeError(e).message;
         throw e;
       } finally {
         isLoading = false;

@@ -2,6 +2,7 @@
   import { authStore } from '$lib/stores';
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
+  import { normalizeError } from '$lib/tauri/errors';
   import Icon from '$lib/components/ui/Icon.svelte';
 
   let isLoggingIn = $state(false);
@@ -23,7 +24,7 @@
       }
     } catch (error) {
       console.error('Login failed:', error);
-      loginError = error instanceof Error ? error.message : String(error);
+      loginError = normalizeError(error).message;
     } finally {
       isLoggingIn = false;
     }

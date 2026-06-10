@@ -1,21 +1,13 @@
 // Config state management using Svelte 5 runes
 import type { Config, StorageMode, Theme } from '$lib/types';
+import { DEFAULT_CONFIG } from '$lib/types';
+import { normalizeError } from '$lib/tauri/errors';
 import * as configApi from '$lib/tauri/config';
 
 // ファクトリ関数：テスト時に独立したストアインスタンスを生成できる
 function createConfigStore() {
-  // リアクティブ状態
-  let config = $state<Config>({
-    storage: { mode: 'secure' },
-    chat_display: {
-      message_font_size: 13,
-      show_timestamps: true,
-      auto_scroll_enabled: true
-    },
-    ui: {
-      theme: 'dark'
-    }
-  });
+  // リアクティブ状態（ストアは config をミューテートするため、共有定数は deep copy して使う）
+  let config = $state<Config>(structuredClone(DEFAULT_CONFIG));
   let isLoaded = $state(false);
   let error = $state<string | null>(null);
 
@@ -28,7 +20,7 @@ function createConfigStore() {
       error = null;
       return config;
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      error = normalizeError(e).message;
       // エラー時はデフォルト値を使用
       applyTheme(config.ui.theme);
       isLoaded = true;
@@ -41,7 +33,7 @@ function createConfigStore() {
       await configApi.configSave(config);
       error = null;
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      error = normalizeError(e).message;
       // 保存失敗しても継続
     }
   }
@@ -52,7 +44,7 @@ function createConfigStore() {
       await configApi.configSetValue('storage', 'mode', mode);
       error = null;
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      error = normalizeError(e).message;
     }
   }
 
@@ -64,7 +56,7 @@ function createConfigStore() {
       await configApi.configSetValue('chat_display', 'message_font_size', clampedSize);
       error = null;
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      error = normalizeError(e).message;
     }
   }
 
@@ -74,7 +66,7 @@ function createConfigStore() {
       await configApi.configSetValue('chat_display', 'show_timestamps', show);
       error = null;
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      error = normalizeError(e).message;
     }
   }
 
@@ -84,7 +76,7 @@ function createConfigStore() {
       await configApi.configSetValue('chat_display', 'auto_scroll_enabled', enabled);
       error = null;
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      error = normalizeError(e).message;
     }
   }
 
@@ -95,7 +87,7 @@ function createConfigStore() {
       await configApi.configSetValue('ui', 'theme', theme);
       error = null;
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      error = normalizeError(e).message;
     }
   }
 

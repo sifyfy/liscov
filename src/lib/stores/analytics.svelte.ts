@@ -1,5 +1,6 @@
 // Analytics state management using Svelte 5 runes
 import type { RevenueAnalytics, ExportConfig } from '$lib/types';
+import { normalizeError } from '$lib/tauri/errors';
 import * as analyticsApi from '$lib/tauri/analytics';
 
 // ファクトリ関数：テスト時に独立したストアインスタンスを生成できる
@@ -19,7 +20,7 @@ function createAnalyticsStore() {
       analytics = await analyticsApi.getRevenueAnalytics();
       lastUpdate = new Date();
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      error = normalizeError(e).message;
     } finally {
       isLoading = false;
     }
@@ -33,7 +34,7 @@ function createAnalyticsStore() {
       analytics = await analyticsApi.getSessionAnalytics(sessionId);
       lastUpdate = new Date();
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      error = normalizeError(e).message;
     } finally {
       isLoading = false;
     }
@@ -47,7 +48,7 @@ function createAnalyticsStore() {
     try {
       await analyticsApi.exportSessionData(sessionId, filePath, config);
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      error = normalizeError(e).message;
       throw e;
     }
   }
@@ -56,7 +57,7 @@ function createAnalyticsStore() {
     try {
       await analyticsApi.exportCurrentMessages(filePath, config);
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      error = normalizeError(e).message;
       throw e;
     }
   }

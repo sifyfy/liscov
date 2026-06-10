@@ -1,5 +1,6 @@
 <script lang="ts">
   import { analyticsStore } from '$lib/stores';
+  import { normalizeError } from '$lib/tauri/errors';
   import type { ExportConfig } from '$lib/types';
 
   interface Props {
@@ -63,7 +64,7 @@
         exportSuccess = false;
       }, 3000);
     } catch (e) {
-      exportError = e instanceof Error ? e.message : String(e);
+      exportError = normalizeError(e).message;
     } finally {
       isExporting = false;
     }
