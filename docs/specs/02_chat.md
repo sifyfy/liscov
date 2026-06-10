@@ -1179,7 +1179,7 @@ CREATE INDEX idx_viewer_custom_info_lookup
 |---------|------|------|------|
 | `viewer_get_profile` | `broadcaster_id, channel_id` | `Option<GuiViewerProfile>` | 視聴者プロフィールを取得 |
 | `viewer_get_custom_info` | `viewer_profile_id: i64` | `Option<ViewerCustomInfo>` | 視聴者カスタム情報を取得 |
-| `viewer_upsert_custom_info` | `viewer_profile_id, reading, notes, ...` | `i64` | カスタム情報を保存（Upsert） |
+| `viewer_upsert_custom_info` | `viewer_profile_id, reading, notes, ...` | `()` | カスタム情報を保存（Upsert） |
 | `viewer_delete` | `viewer_profile_id: i64` | `bool` | 視聴者を削除 |
 
 詳細は[視聴者管理機能仕様](06_viewer.md)を参照。

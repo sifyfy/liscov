@@ -51,6 +51,9 @@
 | `viewer_delete` | `viewer_profile_id` | `bool` | 視聴者データ削除 |
 | `broadcaster_get_list` | なし | `Vec<BroadcasterChannel>` | 配信者リスト取得 |
 | `broadcaster_delete` | `broadcaster_id` | `(bool, u32)` | 配信者データ削除 |
+| `get_top_contributors` | `session_id, limit?` | `Vec<GuiContributorStats>` | セッション内の貢献額上位の視聴者を取得 |
+
+> **Note**: タグも含めて一括更新する場合は [08_database.md](08_database.md) の `viewer_update_info` を使用する。
 
 ## 永続化
 

@@ -50,10 +50,11 @@
 
 | コマンド | 入力 | 出力 | 説明 |
 |---------|------|------|------|
-| `session_get_list` | `limit: Option<usize>` | `Vec<Session>` | セッション履歴取得 |
-| `session_get_messages` | `session_id, limit?` | `Vec<StoredMessage>` | セッションのメッセージ取得 |
-| `session_create` | `stream_url, stream_title?` | `String` | セッション作成 |
-| `session_end` | `session_id` | `()` | セッション終了 |
+| `get_sessions` | `limit: Option<usize>`（デフォルト50） | `Vec<GuiSession>` | セッション履歴取得 |
+| `get_session_messages` | `session_id, limit?`（デフォルト100） | `Vec<GuiStoredMessage>` | セッションのメッセージ取得 |
+| `viewer_update_info` | `viewer_profile_id, reading?, notes?, custom_data?, tags?` | `bool` | 視聴者カスタム情報＋タグの一括更新（[06_viewer.md](06_viewer.md) の `viewer_upsert_custom_info` はタグを扱わない点が異なる） |
+
+> **Note**: セッションの作成・終了はTauriコマンドではなく、チャット接続/切断時にバックエンド内部関数（`database::create_session` / `database::end_session`）として `commands/chat.rs` から呼ばれる。
 
 ## テーブル一覧
 
@@ -282,7 +283,7 @@ CREATE INDEX idx_contributor_stats_session ON contributor_stats(session_id);
 ```
 1. ユーザーが「配信を監視」クリック
         ↓
-2. session_create コマンド呼び出し
+2. 内部関数 database::create_session 呼び出し
         ↓
 3. UUID v4 でセッションID生成
         ↓
@@ -299,7 +300,7 @@ CREATE INDEX idx_contributor_stats_session ON contributor_stats(session_id);
 1. ユーザーが「監視を停止」クリック
    または 配信終了を検出
         ↓
-2. session_end コマンド呼び出し
+2. 内部関数 database::end_session 呼び出し
         ↓
 3. sessions テーブルを UPDATE
    - end_time = 現在時刻（UTC）
@@ -480,12 +481,14 @@ interface ViewerCustomInfo {
 
 ## フロントエンド
 
-### SessionHistory.svelte
+### セッション履歴UI
+
+> **Status**: 専用のセッション履歴画面は未実装。現状は `viewerStore`（`src/lib/stores/viewer.svelte.ts`）が `get_sessions` でセッション一覧を取得・保持するのみ。
 
 | ユーザー操作 | 期待動作 |
 |-------------|---------|
-| 画面表示 | `session_get_list`呼び出し、履歴表示 |
-| セッションクリック | `session_get_messages`呼び出し、詳細表示 |
+| 画面表示 | `get_sessions`呼び出し、履歴表示 |
+| セッションクリック | `get_session_messages`呼び出し、詳細表示 |
 
 ### 表示項目
 

@@ -88,7 +88,8 @@
 |---------|------|------|------|
 | `tts_get_config` | なし | `TtsConfigDto` | 設定取得 |
 | `tts_update_config` | `config: TtsConfigDto` | `()` | 設定更新（enabled変更時は自動でstart/stop） |
-| `tts_speak_direct` | `text: String` | `()` | 直接読み上げ（テスト用） |
+| `tts_speak` | `text, priority?, author_name?, amount?` | `()` | 読み上げキューに追加（チャットメッセージ読み上げの本番経路） |
+| `tts_speak_direct` | `text: String` | `()` | キューを介さず直接読み上げ（テスト用） |
 | `tts_test_connection` | `backend: Option<String>` | `bool` | 接続テスト |
 | `tts_start` | なし | `()` | キュー処理開始 |
 | `tts_stop` | なし | `()` | キュー処理停止 |
@@ -99,6 +100,13 @@
 | `tts_launch_backend` | `backend: String, exe_path: Option<String>` | `u32` | バックエンド手動起動（PIDを返却） |
 | `tts_kill_backend` | `backend: String` | `()` | バックエンド停止 |
 | `tts_get_launch_status` | なし | `TtsLaunchStatus` | 起動状態取得 |
+
+### Tauriイベント
+
+| イベント | ペイロード | 発火タイミング |
+|---------|-----------|---------------|
+| `tts:process_launched` | `backend: String`（`"bouyomichan"` / `"voicevox"`） | `tts_launch_backend` でプロセス起動成功時 |
+| `tts:process_stopped` | `backend: String` | `tts_kill_backend` でプロセス停止成功時 |
 
 ### TtsStatus
 

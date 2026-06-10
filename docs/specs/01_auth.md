@@ -419,7 +419,7 @@ E2Eテストは `e2e/auth-flow.spec.ts` に実装。
 
 ### モックサーバー
 
-認証テスト用のモックサーバー（`src-tauri/src/bin/mock_server.rs`）を提供。
+認証テスト用のモックサーバー（`crates/mock-server/` の独立クレート）を提供。
 
 **認証関連エンドポイント:**
 

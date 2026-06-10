@@ -4,6 +4,8 @@
 
 承認
 
+関連仕様書: [docs/specs/01_auth.md](../specs/01_auth.md)
+
 ## コンテキスト
 
 従来、YouTube認証情報（Cookie）は `%APPDATA%/liscov/credentials.toml` にプレーンテキストで保存していた。

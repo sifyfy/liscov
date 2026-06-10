@@ -171,6 +171,7 @@ src/lib/components/         core/api/ (InnerTubeClient, WebSocket)
 | `commands/analytics.rs` | `docs/specs/07_revenue.md` |
 | `commands/database.rs` | `docs/specs/08_database.md` |
 | `commands/config.rs` | `docs/specs/09_config.md` |
+| （コマンドなし: `tauri-plugin-window-state` が自動管理） | `docs/specs/10_window_state.md` |
 
 ### 元liscovとの対応
 

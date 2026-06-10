@@ -122,7 +122,7 @@ liscov-tauri/
 ├── src-tauri/                    # Rust Backend
 │   ├── src/
 │   │   ├── commands/             # Tauri commands
-│   │   ├── core/                 # コアモジュール (api/, models/)
+│   │   ├── core/                 # コアモジュール (api/, models/, chat_runtime.rs)
 │   │   ├── database/             # SQLiteデータベース操作
 │   │   └── tts/                  # TTS (棒読みちゃん/VOICEVOX)
 │   └── Cargo.toml
@@ -169,6 +169,7 @@ src/lib/components/         core/api/ (InnerTubeClient, WebSocket)
 | `commands/analytics.rs` | `docs/specs/07_revenue.md` |
 | `commands/database.rs` | `docs/specs/08_database.md` |
 | `commands/config.rs` | `docs/specs/09_config.md` |
+| （コマンドなし: `tauri-plugin-window-state` が自動管理） | `docs/specs/10_window_state.md` |
 
 **Tauri Events**: バックエンドからフロントエンドへのリアルタイム通知。
 - `chat:message` - 新規チャットメッセージ
@@ -196,8 +197,10 @@ src/lib/components/         core/api/ (InnerTubeClient, WebSocket)
 
 ## ドキュメント
 
+- **機能一覧（入口）**: `docs/FEATURE_SPECIFICATION.md` - 全機能と仕様書の対応表
 - **機能仕様**: `docs/specs/` - 認証、チャット、WebSocket、TTS、収益分析等
 - **ADR**: `docs/decisions/` - セキュアストレージ、認証インジケータ等の設計判断
+- **書き方ガイド**: `docs/SPECIFICATION_GUIDE.md` - 仕様書・ADR・CLAUDE.mdの書き方
 
 ## 元liscovとの対応
 
