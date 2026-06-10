@@ -58,6 +58,14 @@ impl Database {
     pub async fn connection(&self) -> tokio::sync::MutexGuard<'_, Connection> {
         self.conn.lock().await
     }
+
+    /// 所有権付きガードとして接続を取得する
+    ///
+    /// `Database` を保持するロック（例: `AppState::database` の read guard）を
+    /// 解放した後も接続を使い続けられるため、コマンド層のヘルパーから返却できる。
+    pub async fn connection_owned(&self) -> tokio::sync::OwnedMutexGuard<Connection> {
+        Arc::clone(&self.conn).lock_owned().await
+    }
 }
 
 /// データベースファイルのパスを返す

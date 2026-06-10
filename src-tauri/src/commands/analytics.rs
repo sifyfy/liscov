@@ -367,12 +367,7 @@ pub async fn get_session_analytics(
     state: State<'_, AppState>,
     session_id: String,
 ) -> Result<RevenueAnalytics, CommandError> {
-    let db_guard = state.database.read().await;
-    let db = db_guard
-        .as_ref()
-        .ok_or_else(|| CommandError::DatabaseError("Database not initialized".to_string()))?;
-
-    let conn = db.connection().await;
+    let conn = state.db_connection().await?;
 
     // セッションのメッセージをカラー情報と一緒に取得
     let mut stmt = conn
@@ -402,12 +397,7 @@ pub async fn export_session_data(
     file_path: String,
     config: ExportConfig,
 ) -> Result<(), CommandError> {
-    let db_guard = state.database.read().await;
-    let db = db_guard
-        .as_ref()
-        .ok_or_else(|| CommandError::DatabaseError("Database not initialized".to_string()))?;
-
-    let conn = db.connection().await;
+    let conn = state.db_connection().await?;
 
     // セッションメタデータを取得
     let session = conn

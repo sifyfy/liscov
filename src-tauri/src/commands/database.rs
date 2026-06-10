@@ -72,12 +72,7 @@ pub async fn get_sessions(
     state: State<'_, AppState>,
     limit: Option<usize>,
 ) -> Result<Vec<GuiSession>, CommandError> {
-    let db_guard = state.database.read().await;
-    let db = db_guard
-        .as_ref()
-        .ok_or_else(|| CommandError::DatabaseError("Database not initialized".to_string()))?;
-
-    let conn = db.connection().await;
+    let conn = state.db_connection().await?;
     let sessions = database::get_sessions(&conn, limit.unwrap_or(50))
         .map_err(|e| CommandError::DatabaseError(format!("Failed to get sessions: {}", e)))?;
 
@@ -91,12 +86,7 @@ pub async fn get_session_messages(
     session_id: String,
     limit: Option<usize>,
 ) -> Result<Vec<GuiStoredMessage>, CommandError> {
-    let db_guard = state.database.read().await;
-    let db = db_guard
-        .as_ref()
-        .ok_or_else(|| CommandError::DatabaseError("Database not initialized".to_string()))?;
-
-    let conn = db.connection().await;
+    let conn = state.db_connection().await?;
     let messages = database::get_session_messages(&conn, &session_id, limit.unwrap_or(100))
         .map_err(|e| CommandError::DatabaseError(format!("Failed to get messages: {}", e)))?;
 
@@ -113,12 +103,7 @@ pub async fn viewer_update_info(
     custom_data: Option<String>,
     tags: Option<Vec<String>>,
 ) -> Result<bool, CommandError> {
-    let db_guard = state.database.read().await;
-    let db = db_guard
-        .as_ref()
-        .ok_or_else(|| CommandError::DatabaseError("Database not initialized".to_string()))?;
-
-    let conn = db.connection().await;
+    let conn = state.db_connection().await?;
 
     // カスタム情報 (reading, notes, custom_data) を更新
     let custom_info = ViewerCustomInfo {

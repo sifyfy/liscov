@@ -1,7 +1,27 @@
 //! チャットメッセージのパース・変換ロジック
 
 use crate::core::models::*;
+use regex::Regex;
 use serde_json::Value;
+use std::sync::LazyLock;
+
+// 呼び出しごとの再コンパイルを避けるため、正規表現はプロセス起動後の初回使用時に
+// 一度だけコンパイルする（tts/mod.rs と同じ方式）
+static MILESTONE_EN_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\((\d+)\s*months?\)").expect("正規表現コンパイル失敗"));
+static MILESTONE_JA_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"[（(](\d+)\s*か月[）)]").expect("正規表現コンパイル失敗"));
+static GIFT_JA_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(\d+)\s*人").expect("正規表現コンパイル失敗"));
+static GIFT_SENT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"Sent\s+(\d+)").expect("正規表現コンパイル失敗"));
+static GIFT_EN_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(\d+)\s+(?:gift\s+)?memberships?").expect("正規表現コンパイル失敗"));
+
+/// 正規表現の最初のキャプチャグループを u32 としてパースする
+fn capture_u32(re: &Regex, text: &str) -> Option<u32> {
+    re.captures(text)?.get(1)?.as_str().parse().ok()
+}
 
 /// YouTube color integer（ARGB 形式）を hex 文字列（#RRGGBB）に変換する
 pub fn color_int_to_hex(color: i64) -> String {
@@ -58,34 +78,13 @@ fn parse_supersticker_colors(renderer: &Value) -> Option<SuperChatColors> {
 /// バッジ tooltip から milestone の月数を抽出する（例: "Member (6 months)"）。
 /// 新規メンバーバッジは None を返す。
 pub fn extract_milestone_months_from_badge(tooltip: &str) -> Option<u32> {
-    use regex::Regex;
-
     // "New member" バッジはスキップ
     if tooltip.to_lowercase().contains("new member") {
         return None;
     }
 
-    // 英語フォーマット: "Member (6 months)" または "Member (1 month)"
-    let en_regex = Regex::new(r"\((\d+)\s*months?\)").ok()?;
-    if let Some(caps) = en_regex.captures(tooltip) {
-        if let Some(m) = caps.get(1) {
-            if let Ok(months) = m.as_str().parse::<u32>() {
-                return Some(months);
-            }
-        }
-    }
-
-    // 日本語フォーマット: "メンバー（6か月）"
-    let ja_regex = Regex::new(r"[（(](\d+)\s*か月[）)]").ok()?;
-    if let Some(caps) = ja_regex.captures(tooltip) {
-        if let Some(m) = caps.get(1) {
-            if let Ok(months) = m.as_str().parse::<u32>() {
-                return Some(months);
-            }
-        }
-    }
-
-    None
+    // 英語フォーマット: "Member (6 months)" / 日本語フォーマット: "メンバー（6か月）"
+    capture_u32(&MILESTONE_EN_RE, tooltip).or_else(|| capture_u32(&MILESTONE_JA_RE, tooltip))
 }
 
 /// メンバーシップギフトメッセージからギフト数を抽出する。
@@ -93,39 +92,11 @@ pub fn extract_milestone_months_from_badge(tooltip: &str) -> Option<u32> {
 /// - 日本語: "5人にメンバーシップをギフトしました"
 /// - 英語: "Sent 5 [channel] gift memberships"
 pub fn extract_gift_count(content: &str) -> Option<u32> {
-    use regex::Regex;
-
-    // 日本語フォーマット: "5人にメンバーシップをギフト"
-    let ja_regex = Regex::new(r"(\d+)\s*人").ok()?;
-    if let Some(caps) = ja_regex.captures(content) {
-        if let Some(m) = caps.get(1) {
-            if let Ok(count) = m.as_str().parse::<u32>() {
-                return Some(count);
-            }
-        }
-    }
-
-    // 英語フォーマット: "Sent 5 [channel] gift memberships"
-    let sent_regex = Regex::new(r"Sent\s+(\d+)").ok()?;
-    if let Some(caps) = sent_regex.captures(content) {
-        if let Some(m) = caps.get(1) {
-            if let Ok(count) = m.as_str().parse::<u32>() {
-                return Some(count);
-            }
-        }
-    }
-
-    // フォールバック: "gifted X memberships" または "X memberships"
-    let en_regex = Regex::new(r"(\d+)\s+(?:gift\s+)?memberships?").ok()?;
-    if let Some(caps) = en_regex.captures(content) {
-        if let Some(m) = caps.get(1) {
-            if let Ok(count) = m.as_str().parse::<u32>() {
-                return Some(count);
-            }
-        }
-    }
-
-    None
+    // 日本語: "5人にメンバーシップをギフト" → 英語: "Sent 5 [channel] gift memberships"
+    // → フォールバック: "gifted X memberships" / "X memberships" の順に試す
+    capture_u32(&GIFT_JA_RE, content)
+        .or_else(|| capture_u32(&GIFT_SENT_RE, content))
+        .or_else(|| capture_u32(&GIFT_EN_RE, content))
 }
 
 /// メッセージの runs（テキスト・絵文字）をパースして (content文字列, runs配列) を返す

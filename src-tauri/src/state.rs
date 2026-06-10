@@ -4,6 +4,7 @@ use crate::connection::StreamConnection;
 use crate::core::api::WebSocketServer;
 use crate::core::models::ChatMessage;
 use crate::database::Database;
+use crate::errors::CommandError;
 use crate::tts::{TtsManager, TtsProcessManager};
 use std::collections::HashMap;
 use std::collections::VecDeque;
@@ -58,6 +59,20 @@ impl AppState {
             next_connection_id: Arc::new(AtomicU64::new(0)),
             connections: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    /// DB接続を取得する。データベース未初期化の場合は `DatabaseError` を返す
+    ///
+    /// コマンド層に散在していた「database の read ロック → 未初期化チェック →
+    /// connection 取得」の定型句を集約するヘルパー。
+    pub async fn db_connection(
+        &self,
+    ) -> Result<tokio::sync::OwnedMutexGuard<rusqlite::Connection>, CommandError> {
+        let db_guard = self.database.read().await;
+        let db = db_guard
+            .as_ref()
+            .ok_or_else(|| CommandError::DatabaseError("Database not initialized".to_string()))?;
+        Ok(db.connection_owned().await)
     }
 
     /// メッセージバッファにメッセージを追加する

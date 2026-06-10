@@ -129,12 +129,7 @@ pub async fn viewer_get_profile(
     broadcaster_id: String,
     channel_id: String,
 ) -> Result<Option<GuiViewerProfile>, CommandError> {
-    let db_guard = state.database.read().await;
-    let db = db_guard
-        .as_ref()
-        .ok_or_else(|| CommandError::DatabaseError("Database not initialized".to_string()))?;
-
-    let conn = db.connection().await;
+    let conn = state.db_connection().await?;
     let profile = database::get_viewer_profile(&conn, &broadcaster_id, &channel_id)
         .map_err(|e| CommandError::DatabaseError(format!("Failed to get viewer profile: {}", e)))?;
 
@@ -150,12 +145,7 @@ pub async fn viewer_get_list(
     limit: Option<usize>,
     offset: Option<usize>,
 ) -> Result<Vec<GuiViewerWithInfo>, CommandError> {
-    let db_guard = state.database.read().await;
-    let db = db_guard
-        .as_ref()
-        .ok_or_else(|| CommandError::DatabaseError("Database not initialized".to_string()))?;
-
-    let conn = db.connection().await;
+    let conn = state.db_connection().await?;
     let viewers = database::get_viewers_for_broadcaster(
         &conn,
         &broadcaster_id,
@@ -176,12 +166,7 @@ pub async fn viewer_search(
     query: String,
     limit: Option<usize>,
 ) -> Result<Vec<GuiViewerWithInfo>, CommandError> {
-    let db_guard = state.database.read().await;
-    let db = db_guard
-        .as_ref()
-        .ok_or_else(|| CommandError::DatabaseError("Database not initialized".to_string()))?;
-
-    let conn = db.connection().await;
+    let conn = state.db_connection().await?;
     let viewers = database::get_viewers_for_broadcaster(
         &conn,
         &broadcaster_id,
@@ -200,12 +185,7 @@ pub async fn viewer_get_custom_info(
     state: State<'_, AppState>,
     viewer_profile_id: i64,
 ) -> Result<Option<ViewerCustomInfo>, CommandError> {
-    let db_guard = state.database.read().await;
-    let db = db_guard
-        .as_ref()
-        .ok_or_else(|| CommandError::DatabaseError("Database not initialized".to_string()))?;
-
-    let conn = db.connection().await;
+    let conn = state.db_connection().await?;
     database::get_viewer_custom_info(&conn, viewer_profile_id).map_err(|e| {
         CommandError::DatabaseError(format!("Failed to get viewer custom info: {}", e))
     })
@@ -220,12 +200,7 @@ pub async fn viewer_upsert_custom_info(
     notes: Option<String>,
     custom_data: Option<String>,
 ) -> Result<(), CommandError> {
-    let db_guard = state.database.read().await;
-    let db = db_guard
-        .as_ref()
-        .ok_or_else(|| CommandError::DatabaseError("Database not initialized".to_string()))?;
-
-    let conn = db.connection().await;
+    let conn = state.db_connection().await?;
 
     let info = ViewerCustomInfo {
         viewer_profile_id,
@@ -248,12 +223,7 @@ pub async fn viewer_delete(
     state: State<'_, AppState>,
     viewer_profile_id: i64,
 ) -> Result<bool, CommandError> {
-    let db_guard = state.database.read().await;
-    let db = db_guard
-        .as_ref()
-        .ok_or_else(|| CommandError::DatabaseError("Database not initialized".to_string()))?;
-
-    let conn = db.connection().await;
+    let conn = state.db_connection().await?;
     let deleted = database::delete_viewer_profile(&conn, viewer_profile_id)
         .map_err(|e| CommandError::DatabaseError(format!("Failed to delete viewer: {}", e)))?;
 
@@ -265,12 +235,7 @@ pub async fn viewer_delete(
 pub async fn broadcaster_get_list(
     state: State<'_, AppState>,
 ) -> Result<Vec<GuiBroadcasterChannel>, CommandError> {
-    let db_guard = state.database.read().await;
-    let db = db_guard
-        .as_ref()
-        .ok_or_else(|| CommandError::DatabaseError("Database not initialized".to_string()))?;
-
-    let conn = db.connection().await;
+    let conn = state.db_connection().await?;
 
     let broadcasters = database::get_distinct_broadcaster_channels(&conn)
         .map_err(|e| CommandError::DatabaseError(format!("Failed to get broadcasters: {}", e)))?;
@@ -299,12 +264,7 @@ pub async fn broadcaster_delete(
     state: State<'_, AppState>,
     broadcaster_id: String,
 ) -> Result<(bool, u32), CommandError> {
-    let db_guard = state.database.read().await;
-    let db = db_guard
-        .as_ref()
-        .ok_or_else(|| CommandError::DatabaseError("Database not initialized".to_string()))?;
-
-    let conn = db.connection().await;
+    let conn = state.db_connection().await?;
     let (broadcaster_deleted, viewers_deleted) =
         database::delete_broadcaster(&conn, &broadcaster_id).map_err(|e| {
             CommandError::DatabaseError(format!("Failed to delete broadcaster: {}", e))
@@ -320,12 +280,7 @@ pub async fn get_top_contributors(
     session_id: String,
     limit: Option<usize>,
 ) -> Result<Vec<GuiContributorStats>, CommandError> {
-    let db_guard = state.database.read().await;
-    let db = db_guard
-        .as_ref()
-        .ok_or_else(|| CommandError::DatabaseError("Database not initialized".to_string()))?;
-
-    let conn = db.connection().await;
+    let conn = state.db_connection().await?;
     let contributors = database::get_top_contributors(&conn, &session_id, limit.unwrap_or(10))
         .map_err(|e| CommandError::DatabaseError(format!("Failed to get contributors: {}", e)))?;
 
