@@ -22,17 +22,14 @@
   // メッセージ種別ごとの動的インラインスタイル（liscov オリジナルの左枠スタイル）
   let dynamicStyle = $derived.by(() => {
     const colors = superchatColors;
+    if (colors && (message.message_type === 'superchat' || message.message_type === 'supersticker')) {
+      return `border-left-color: ${colors.body_background}; background: linear-gradient(135deg, ${colors.header_background}33 0%, ${colors.body_background} 100%);`;
+    }
 
     switch (message.message_type) {
       case 'superchat':
-        if (colors) {
-          return `border-left-color: ${colors.body_background}; background: linear-gradient(135deg, ${colors.header_background}33 0%, ${colors.body_background} 100%);`;
-        }
         return 'border-left-color: #f6ad55; background: var(--bg-surface-2);';
       case 'supersticker':
-        if (colors) {
-          return `border-left-color: ${colors.body_background}; background: linear-gradient(135deg, ${colors.header_background}33 0%, ${colors.body_background} 100%);`;
-        }
         return 'border-left-color: #fc8181; background: var(--bg-surface-2);';
       case 'membership':
         // Check if milestone
