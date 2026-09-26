@@ -58,11 +58,11 @@ impl MonitoringDeps {
 /// - `session_id` — データベースセッション ID
 /// - `broadcaster_id` — 配信者チャンネル ID
 /// - `cancellation_token` — この接続のキャンセレーショントークン
-/// - `save_config` — レスポンス保存設定
+/// - `current_save_config` — その時点のレスポンス保存設定を返す（接続中の設定変更を反映するため毎回呼ぶ）
 /// - `chat_mode_rx` — チャットモード変更要求を受信する watch チャネル
 /// - `emit_gui_message` — ChatMessage を GUI 用に変換して emit するコールバック
 #[allow(clippy::too_many_arguments)]
-pub async fn run_monitoring_loop<F>(
+pub async fn run_monitoring_loop<F, G>(
     deps: MonitoringDeps,
     innertube_client: Arc<RwLock<Option<InnerTubeClient>>>,
     app: AppHandle,
@@ -71,15 +71,15 @@ pub async fn run_monitoring_loop<F>(
     session_id: Option<String>,
     broadcaster_id: Option<String>,
     cancellation_token: CancellationToken,
-    save_config: SaveConfig,
+    current_save_config: G,
     mut chat_mode_rx: watch::Receiver<ChatMode>,
     emit_gui_message: F,
 ) where
     F: Fn(&AppHandle, &ChatMessage) + Send + Sync + 'static,
+    G: Fn() -> SaveConfig + Send + Sync + 'static,
 {
     tracing::info!("チャット監視タスク開始 connection_id: {}", connection_id);
     let poll_interval = std::time::Duration::from_millis(1500);
-    let raw_response_saver = RawResponseSaver::new(save_config);
     let mut poll_count = 0u64;
 
     // セッション開始時点のコメント数をDBから復元してカウンターを初期化
@@ -190,9 +190,7 @@ pub async fn run_monitoring_loop<F>(
 
         // 生レスポンスを保存（設定が有効な場合）
         if let Some(raw_json) = raw_response {
-            if let Err(e) = raw_response_saver.save_response(&raw_json).await {
-                tracing::warn!("生レスポンス保存失敗: {}", e);
-            }
+            save_raw_response(&current_save_config(), &raw_json).await;
         }
 
         // 各メッセージを処理
@@ -293,6 +291,22 @@ async fn process_message(
                         .unwrap_or(false);
             }
         }
+    }
+}
+
+/// その時点の保存設定で生レスポンスを保存する（05_raw_response.md 書き込み処理）
+async fn save_raw_response(config: &SaveConfig, raw_json: &str) {
+    if !config.enabled {
+        return;
+    }
+    let resolved = crate::paths::data_dir().and_then(|dir| config.resolved_for_write(&dir));
+    match resolved {
+        Ok(config) => {
+            if let Err(e) = RawResponseSaver::new(config).save_response(raw_json).await {
+                tracing::warn!("生レスポンス保存失敗: {}", e);
+            }
+        }
+        Err(e) => tracing::warn!("生レスポンス保存をスキップ（保存先を解決できない）: {}", e),
     }
 }
 

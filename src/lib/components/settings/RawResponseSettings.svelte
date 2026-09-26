@@ -62,6 +62,8 @@
     } catch (error) {
       console.error('Failed to save config:', error);
       saveMessage = `保存に失敗: ${error}`;
+      // 拒否された設定はバックエンドに反映されていないので、表示を実際の設定に戻す
+      await loadConfig();
     }
   }
 

@@ -19,7 +19,6 @@ use tauri_plugin_window_state::StateFlags;
 // Re-export command functions for registration
 use commands::{
     ConfigState,
-    SaveConfigState,
     auth_check_session_validity,
     auth_clear_webview_cookies,
     auth_delete_credentials,
@@ -95,8 +94,7 @@ fn greet(name: &str) -> String {
 pub fn run() {
     tauri::Builder::default()
         .manage(AppState::new())
-        .manage(ConfigState::default())
-        .manage(SaveConfigState::default())
+        .manage(ConfigState::load_from_file())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(

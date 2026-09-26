@@ -1,19 +1,12 @@
 //! Raw response save configuration commands
+//!
+//! 保存設定は ConfigState（config.toml の [raw_response]）が正本（05_raw_response.md）
 
-use crate::core::raw_response::SaveConfig;
+use crate::commands::config::{Config, ConfigState, save_config_to_file};
+use crate::core::raw_response::{SaveConfig, resolve_save_path, validate_file_path};
 use crate::errors::CommandError;
 use serde::{Deserialize, Serialize};
-use std::sync::Mutex;
 use tauri::State;
-
-/// Global save config state
-pub struct SaveConfigState(pub Mutex<SaveConfig>);
-
-impl Default for SaveConfigState {
-    fn default() -> Self {
-        Self(Mutex::new(SaveConfig::default()))
-    }
-}
 
 /// GUI-friendly save config
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,62 +42,41 @@ impl From<GuiSaveConfig> for SaveConfig {
     }
 }
 
+/// Config に保存設定を適用する純粋関数。パス検証に失敗したら Err を返す。
+pub(crate) fn config_apply_raw_response(
+    config: &Config,
+    save_config: SaveConfig,
+) -> Result<Config, CommandError> {
+    validate_file_path(&save_config.file_path).map_err(CommandError::InvalidInput)?;
+    Ok(Config {
+        raw_response: save_config,
+        ..config.clone()
+    })
+}
+
 /// Get current save config (spec: 05_raw_response.md)
 #[tauri::command]
-pub fn raw_response_get_config(
-    state: State<'_, SaveConfigState>,
-) -> Result<GuiSaveConfig, CommandError> {
-    let config = state
-        .0
-        .lock()
-        .map_err(|e| CommandError::Internal(format!("Mutex lock failed: {}", e)))?;
-    Ok(GuiSaveConfig::from(config.clone()))
+pub fn raw_response_get_config(state: State<'_, ConfigState>) -> GuiSaveConfig {
+    GuiSaveConfig::from(state.get().raw_response)
 }
 
 /// Update save config (spec: 05_raw_response.md)
 #[tauri::command]
 pub fn raw_response_update_config(
-    state: State<'_, SaveConfigState>,
+    state: State<'_, ConfigState>,
     config: GuiSaveConfig,
 ) -> Result<(), CommandError> {
-    let mut current = state
-        .0
-        .lock()
-        .map_err(|e| CommandError::Internal(format!("Mutex lock failed: {}", e)))?;
-    *current = SaveConfig::from(config);
-    tracing::info!("💾 Save config updated: enabled={}", current.enabled);
-    Ok(())
-}
+    let new_config = config_apply_raw_response(&state.get(), SaveConfig::from(config))?;
+    state.set(new_config.clone());
+    tracing::info!(
+        "💾 Save config updated: enabled={}",
+        new_config.raw_response.enabled
+    );
 
-/// Validate file path for security (spec: 05_raw_response.md パス検証)
-fn validate_file_path(file_path: &str) -> Result<(), String> {
-    // Null文字
-    if file_path.contains('\0') {
-        return Err("Path contains null character".to_string());
+    // ファイル保存を試行。失敗してもメモリ上の変更は維持（09_config.md）
+    if let Err(e) = save_config_to_file(&new_config) {
+        tracing::error!("Failed to save config: {}", e);
     }
-
-    // ディレクトリトラバーサル
-    if file_path.contains("../") || file_path.contains("..\\") {
-        return Err("Directory traversal not allowed".to_string());
-    }
-
-    // Windows危険文字 (ファイル名部分のみチェック)
-    let dangerous_chars = ['<', '>', '"', '|', '?', '*'];
-    if file_path.chars().any(|c| dangerous_chars.contains(&c)) {
-        return Err("Path contains dangerous characters".to_string());
-    }
-
-    // パス長超過
-    if file_path.len() > 4096 {
-        return Err("Path exceeds maximum length (4096)".to_string());
-    }
-
-    // システムディレクトリ
-    let lower = file_path.to_lowercase().replace('/', "\\");
-    if lower.starts_with("c:\\windows") || lower.starts_with("c:\\program files") {
-        return Err("System directory not allowed".to_string());
-    }
-
     Ok(())
 }
 
@@ -112,79 +84,21 @@ fn validate_file_path(file_path: &str) -> Result<(), String> {
 /// (spec: 05_raw_response.md)
 #[tauri::command]
 pub fn raw_response_resolve_path(file_path: String) -> Result<String, CommandError> {
-    use std::path::Path;
-
-    // パスのバリデーション（内部関数は Result<(), String> を返す）
     validate_file_path(&file_path).map_err(CommandError::InvalidInput)?;
 
-    if Path::new(&file_path).is_absolute() {
-        Ok(file_path)
-    } else {
-        // 相対パスの場合はアプリデータディレクトリを基準に解決する
-        match crate::paths::data_dir() {
-            Ok(data_dir) => {
-                std::fs::create_dir_all(&data_dir).map_err(|e| {
-                    CommandError::IoError(format!("Failed to create data dir: {}", e))
-                })?;
-                Ok(data_dir.join(&file_path).to_string_lossy().to_string())
-            }
-            Err(_) => Ok(file_path),
-        }
-    }
+    let Ok(data_dir) = crate::paths::data_dir() else {
+        return Ok(file_path);
+    };
+    std::fs::create_dir_all(&data_dir)
+        .map_err(|e| CommandError::IoError(format!("Failed to create data dir: {}", e)))?;
+    Ok(resolve_save_path(&file_path, &data_dir)
+        .to_string_lossy()
+        .to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn validate_rejects_directory_traversal() {
-        assert!(validate_file_path("../etc/passwd").is_err());
-        assert!(validate_file_path("..\\secret").is_err());
-    }
-
-    #[test]
-    fn validate_rejects_null_char() {
-        assert!(validate_file_path("file\0.ndjson").is_err());
-    }
-
-    #[test]
-    fn validate_rejects_dangerous_chars() {
-        assert!(validate_file_path("file<>.ndjson").is_err());
-        assert!(validate_file_path("file|name").is_err());
-    }
-
-    #[test]
-    fn validate_rejects_system_dirs() {
-        assert!(validate_file_path("C:\\Windows\\test.ndjson").is_err());
-        assert!(validate_file_path("C:\\Program Files\\test.ndjson").is_err());
-    }
-
-    #[test]
-    fn validate_rejects_long_paths() {
-        let long_path = "a".repeat(4097);
-        assert!(validate_file_path(&long_path).is_err());
-    }
-
-    #[test]
-    fn validate_accepts_normal_paths() {
-        assert!(validate_file_path("raw_responses.ndjson").is_ok());
-        assert!(validate_file_path("D:\\data\\responses.ndjson").is_ok());
-    }
-
-    // spec: 05_raw_response.md パス検証 - ちょうど4096文字はOK (`>` mutant対策)
-    #[test]
-    fn validate_accepts_path_exactly_4096_chars() {
-        let path = "a".repeat(4096);
-        assert!(validate_file_path(&path).is_ok());
-    }
-
-    // spec: 05_raw_response.md パス検証 - 4097文字はエラー
-    #[test]
-    fn validate_rejects_path_4097_chars() {
-        let path = "a".repeat(4097);
-        assert!(validate_file_path(&path).is_err());
-    }
 
     // spec: 05_raw_response.md - From<GuiSaveConfig> for SaveConfig は全フィールドを保持する
     #[test]
@@ -202,5 +116,28 @@ mod tests {
         assert_eq!(config.max_file_size_mb, 50);
         assert!(!config.enable_rotation);
         assert_eq!(config.max_backup_files, 10);
+    }
+
+    // spec: 05_raw_response.md 設定の変更 - 有効化した設定が Config に入る
+    #[test]
+    fn apply_raw_response_updates_config() {
+        let save_config = SaveConfig {
+            enabled: true,
+            ..SaveConfig::default()
+        };
+        let config = config_apply_raw_response(&Config::default(), save_config).unwrap();
+        assert!(config.raw_response.enabled);
+    }
+
+    // spec: 05_raw_response.md 設定の変更 - パス検証に失敗する file_path はエラー
+    #[test]
+    fn apply_raw_response_rejects_invalid_path() {
+        let save_config = SaveConfig {
+            enabled: true,
+            file_path: "../secret.txt".to_string(),
+            ..SaveConfig::default()
+        };
+        let result = config_apply_raw_response(&Config::default(), save_config);
+        assert!(matches!(result, Err(CommandError::InvalidInput(_))));
     }
 }

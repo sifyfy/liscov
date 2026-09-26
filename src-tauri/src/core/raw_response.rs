@@ -5,12 +5,13 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tokio::fs::metadata;
 use tracing::{info, warn};
 
-/// 保存設定
+/// 保存設定（config.toml の [raw_response]。無いキーはデフォルト値で補完する）
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SaveConfig {
     /// レスポンス保存を有効にするか
     pub enabled: bool,
@@ -34,6 +35,61 @@ impl Default for SaveConfig {
             max_backup_files: 5,
         }
     }
+}
+
+impl SaveConfig {
+    /// 書き込み用に file_path を検証・解決した設定を返す（05_raw_response.md パス解決）
+    pub fn resolved_for_write(&self, data_dir: &Path) -> Result<SaveConfig, String> {
+        validate_file_path(&self.file_path)?;
+        Ok(SaveConfig {
+            file_path: resolve_save_path(&self.file_path, data_dir)
+                .to_string_lossy()
+                .to_string(),
+            ..self.clone()
+        })
+    }
+}
+
+/// 保存先パスを解決する。相対パスは data_dir 基準、絶対パスはそのまま。
+pub fn resolve_save_path(file_path: &str, data_dir: &Path) -> PathBuf {
+    let path = Path::new(file_path);
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        data_dir.join(path)
+    }
+}
+
+/// 保存先パスを検証する（05_raw_response.md パス検証）
+pub fn validate_file_path(file_path: &str) -> Result<(), String> {
+    // Null文字
+    if file_path.contains('\0') {
+        return Err("Path contains null character".to_string());
+    }
+
+    // ディレクトリトラバーサル
+    if file_path.contains("../") || file_path.contains("..\\") {
+        return Err("Directory traversal not allowed".to_string());
+    }
+
+    // Windows危険文字 (ファイル名部分のみチェック)
+    let dangerous_chars = ['<', '>', '"', '|', '?', '*'];
+    if file_path.chars().any(|c| dangerous_chars.contains(&c)) {
+        return Err("Path contains dangerous characters".to_string());
+    }
+
+    // パス長超過
+    if file_path.len() > 4096 {
+        return Err("Path exceeds maximum length (4096)".to_string());
+    }
+
+    // システムディレクトリ
+    let lower = file_path.to_lowercase().replace('/', "\\");
+    if lower.starts_with("c:\\windows") || lower.starts_with("c:\\program files") {
+        return Err("System directory not allowed".to_string());
+    }
+
+    Ok(())
 }
 
 /// YouTubeレスポンス保存管理
@@ -267,6 +323,146 @@ mod tests {
     fn save_config_default_values() {
         let config = SaveConfig::default();
         assert!(!config.enabled);
+        assert_eq!(config.file_path, "raw_responses.ndjson");
+        assert_eq!(config.max_file_size_mb, 100);
+        assert!(config.enable_rotation);
+        assert_eq!(config.max_backup_files, 5);
+    }
+
+    // ========================================================================
+    // パス解決 (05_raw_response.md: パス解決 — 実際の書き込み先)
+    // ========================================================================
+
+    #[test]
+    fn resolve_save_path_relative_is_under_data_dir() {
+        // 相対パス raw_responses.ndjson → %APPDATA%/liscov-tauri/raw_responses.ndjson
+        let data_dir = Path::new("C:\\Users\\u\\AppData\\Roaming\\liscov-tauri");
+        assert_eq!(
+            resolve_save_path("raw_responses.ndjson", data_dir),
+            data_dir.join("raw_responses.ndjson")
+        );
+    }
+
+    #[test]
+    fn resolve_save_path_absolute_is_unchanged() {
+        // 絶対パス C:\data\responses.ndjson → そのまま
+        let data_dir = Path::new("C:\\Users\\u\\AppData\\Roaming\\liscov-tauri");
+        assert_eq!(
+            resolve_save_path("C:\\data\\responses.ndjson", data_dir),
+            PathBuf::from("C:\\data\\responses.ndjson")
+        );
+    }
+
+    #[test]
+    fn resolved_for_write_rewrites_relative_path() {
+        let data_dir = temp_dir_for_test("resolved_relative");
+        let config = SaveConfig {
+            enabled: true,
+            ..SaveConfig::default()
+        }
+        .resolved_for_write(&data_dir)
+        .unwrap();
+        assert_eq!(
+            PathBuf::from(&config.file_path),
+            data_dir.join("raw_responses.ndjson")
+        );
+        assert!(config.enabled);
+    }
+
+    #[test]
+    fn resolved_for_write_rejects_invalid_path() {
+        // config.toml から読んだ file_path がパス検証に失敗 → 書き込みスキップ（Err）
+        let data_dir = temp_dir_for_test("resolved_invalid");
+        let config = SaveConfig {
+            enabled: true,
+            file_path: "../secret.txt".to_string(),
+            ..SaveConfig::default()
+        };
+        assert!(config.resolved_for_write(&data_dir).is_err());
+    }
+
+    #[tokio::test]
+    async fn save_with_relative_path_writes_under_data_dir() {
+        // 実際の書き込み先は「実際の保存先」表示と一致する（カレントディレクトリではない）
+        let data_dir = temp_dir_for_test("relative_write");
+        let config = SaveConfig {
+            enabled: true,
+            enable_rotation: false,
+            ..SaveConfig::default()
+        }
+        .resolved_for_write(&data_dir)
+        .unwrap();
+
+        RawResponseSaver::new(config)
+            .save_response(r#"{"actions": []}"#)
+            .await
+            .unwrap();
+
+        assert!(data_dir.join("raw_responses.ndjson").exists());
+    }
+
+    // ========================================================================
+    // パス検証 (05_raw_response.md: パス検証)
+    // ========================================================================
+
+    #[test]
+    fn validate_rejects_directory_traversal() {
+        assert!(validate_file_path("../etc/passwd").is_err());
+        assert!(validate_file_path("..\\secret").is_err());
+    }
+
+    #[test]
+    fn validate_rejects_null_char() {
+        assert!(validate_file_path("file\0.ndjson").is_err());
+    }
+
+    #[test]
+    fn validate_rejects_dangerous_chars() {
+        assert!(validate_file_path("file<>.ndjson").is_err());
+        assert!(validate_file_path("file|name").is_err());
+    }
+
+    #[test]
+    fn validate_rejects_system_dirs() {
+        assert!(validate_file_path("C:\\Windows\\test.ndjson").is_err());
+        assert!(validate_file_path("C:\\Program Files\\test.ndjson").is_err());
+    }
+
+    #[test]
+    fn validate_rejects_long_paths() {
+        let long_path = "a".repeat(4097);
+        assert!(validate_file_path(&long_path).is_err());
+    }
+
+    #[test]
+    fn validate_accepts_normal_paths() {
+        assert!(validate_file_path("raw_responses.ndjson").is_ok());
+        assert!(validate_file_path("D:\\data\\responses.ndjson").is_ok());
+    }
+
+    // spec: 05_raw_response.md パス検証 - ちょうど4096文字はOK (`>` mutant対策)
+    #[test]
+    fn validate_accepts_path_exactly_4096_chars() {
+        let path = "a".repeat(4096);
+        assert!(validate_file_path(&path).is_ok());
+    }
+
+    // spec: 05_raw_response.md パス検証 - 4097文字はエラー
+    #[test]
+    fn validate_rejects_path_4097_chars() {
+        let path = "a".repeat(4097);
+        assert!(validate_file_path(&path).is_err());
+    }
+
+    // ========================================================================
+    // 設定の永続化 (05_raw_response.md: config.toml の [raw_response])
+    // ========================================================================
+
+    #[test]
+    fn save_config_missing_keys_use_defaults() {
+        // 一部のキーが無い → 無いキーだけデフォルト値
+        let config: SaveConfig = toml::from_str("enabled = true").unwrap();
+        assert!(config.enabled);
         assert_eq!(config.file_path, "raw_responses.ndjson");
         assert_eq!(config.max_file_size_mb, 100);
         assert!(config.enable_rotation);

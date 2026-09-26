@@ -21,6 +21,7 @@
 | 状況 | 結果 |
 |------|------|
 | `config_set_value` 呼び出し | メモリ上のConfigを更新し、config.tomlに書き込み |
+| `config_save` 呼び出し | 受け取った Config でメモリ上の Config を置き換えて書き込む。ただし `raw_response` セクションは受け取った値を使わず、現在値を保持する |
 | 書き込み失敗 | エラーログを出力。メモリ上の変更は維持（次回の書き込みで反映される可能性あり） |
 | ディレクトリが存在しない | 自動作成を試行。失敗時はエラーログ、保存スキップ |
 
@@ -31,6 +32,7 @@
 | 未知のキーはエラーにせず無視する | 将来のバージョンダウン時に設定ファイルが壊れないようにする |
 | 存在しないキーはデフォルト値で補完する | 将来のバージョンアップ時にキーが追加されても既存設定が動作する |
 | 設定ファイルパスは環境変数 `LISCOV_APP_NAME` で分離可能 | E2Eテストが本番設定を破壊することを防ぐ |
+| `raw_response` セクションを変更するのは `raw_response_update_config` だけ | フロントエンドの `Config` 型はこのセクションを持たない。`config_save` で上書きを許すと、送られてこなかったセクションがデフォルト値に戻り、保存設定が黙って無効になる |
 
 ## 設定ファイル
 
@@ -59,6 +61,13 @@ auto_scroll_enabled = true
 
 [ui]
 theme = "dark"  # "dark" or "light"
+
+[raw_response]
+enabled = false
+file_path = "raw_responses.ndjson"
+max_file_size_mb = 100
+enable_rotation = true
+max_backup_files = 5
 ```
 
 ## 設定項目
@@ -89,6 +98,10 @@ UIの表示に関する設定。
 |-----|-----|----------|------|
 | `theme` | string | `"dark"` | テーマ（`dark` / `light`） |
 
+### raw_response セクション
+
+生レスポンス保存の設定。キー・デフォルト値・振る舞いは[生レスポンス保存機能仕様](05_raw_response.md)を参照。変更は `raw_response_get_config` / `raw_response_update_config` で行い、`config_get_value` / `config_set_value` の対象外。
+
 ## バックエンドコマンド
 
 | コマンド | 入力 | 出力 | 説明 |
@@ -105,6 +118,7 @@ pub struct Config {
     pub storage: StorageConfig,
     pub chat_display: ChatDisplayConfig,
     pub ui: UiConfig,
+    pub raw_response: SaveConfig,  // 05_raw_response.md
 }
 
 pub struct StorageConfig {
@@ -130,6 +144,8 @@ pub struct UiConfig {
 ## 読み込み・保存フロー
 
 ### アプリ起動時
+
+バックエンドは起動時に config.toml を読み込んでメモリ上の Config を初期化する（フロントエンドの `config_load` を待たない）。チャット監視など、フロントエンドを経由しない処理も起動直後から保存済みの設定で動くようにするため。
 
 ```
 1. config.tomlの存在確認

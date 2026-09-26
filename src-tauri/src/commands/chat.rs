@@ -1,7 +1,6 @@
 //! Chat monitoring commands
 
 use crate::AppState;
-use crate::commands::SaveConfigState;
 use crate::commands::auth;
 use crate::commands::config::ConfigState;
 use crate::connection::{ConnectionInfo, MAX_CONNECTIONS, StreamConnection};
@@ -13,7 +12,7 @@ use crate::errors::CommandError;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::{RwLock, watch};
 use tokio_util::sync::CancellationToken;
 use ts_rs::TS;
@@ -231,7 +230,6 @@ impl GuiChatMessage {
 pub async fn connect_to_stream(
     app: AppHandle,
     state: State<'_, AppState>,
-    save_config_state: State<'_, SaveConfigState>,
     config_state: State<'_, ConfigState>,
     url: String,
     chat_mode: Option<String>,
@@ -341,12 +339,14 @@ pub async fn connect_to_stream(
         // 監視タスクの共有依存を構築
         let deps = MonitoringDeps::from_state(&state);
 
-        // 生レスポンス保存設定を取得
-        let save_config = save_config_state
-            .0
-            .lock()
-            .map_err(|e| CommandError::Internal(format!("Mutex lock failed: {}", e)))?
-            .clone();
+        // 生レスポンス保存設定はポーリングごとに ConfigState から読む（接続中の変更を反映する）
+        let app_for_save_config = app.clone();
+        let current_save_config = move || {
+            app_for_save_config
+                .state::<ConfigState>()
+                .get()
+                .raw_response
+        };
 
         // emit コールバック用に接続情報をキャプチャ
         let conn_id = connection_id;
@@ -393,7 +393,7 @@ pub async fn connect_to_stream(
                 session_id,
                 broadcaster_id,
                 token_for_task,
-                save_config,
+                current_save_config,
                 chat_mode_rx,
                 move |app, msg| {
                     // ChatMessage を接続情報付き GUI メッセージに変換してフロントエンドへ emit

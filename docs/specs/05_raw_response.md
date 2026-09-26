@@ -15,7 +15,20 @@ YouTube InnerTube APIの生レスポンスを保存し、デバッグ・分析�
 | ファイルサイズが閾値（デフォルト100MB）に到達 | 自動ローテーション（タイムスタンプ付きリネーム + 新規ファイル作成） |
 | バックアップ数が上限（デフォルト5世代）超過 | 古いバックアップから自動削除 |
 
+### 設定の変更と永続化
+
+| 状況 | 結果 |
+|------|------|
+| 設定を変更（`raw_response_update_config`） | メモリ上の設定を更新し、`config.toml` の `[raw_response]` セクションに書き込む |
+| アプリを再起動 | `config.toml` の `[raw_response]` から設定を復元する（例: 有効にして終了 → 次回起動時も有効） |
+| `config.toml` に `[raw_response]` が無い、または一部のキーが無い | 無いキーだけデフォルト値を使う（[09_config](09_config.md) の補完規則と同じ） |
+| 接続中に設定を変更 | 次に受信するレスポンスから新しい設定で保存する（再接続は不要） |
+| パス検証に失敗する `file_path` で更新 | エラーを返し、設定を変更しない（メモリ・ファイルとも） |
+| `config.toml` から読んだ `file_path` がパス検証に失敗 | 書き込み時に警告ログを出し、書き込みをスキップする |
+
 ### パス解決
+
+実際の書き込み先は、設定画面の「実際の保存先」に表示されるパスと常に一致する。
 
 | 入力 | 出力 |
 |------|------|
@@ -40,7 +53,7 @@ YouTube InnerTube APIの生レスポンスを保存し、デバッグ・分析�
 | コマンド | 入力 | 出力 | 説明 |
 |---------|------|------|------|
 | `raw_response_get_config` | なし | `SaveConfig` | 設定取得 |
-| `raw_response_update_config` | `config: SaveConfig` | `()` | 設定更新 |
+| `raw_response_update_config` | `config: SaveConfig` | `()` | パス検証のうえ設定を更新し、`config.toml` に保存 |
 | `raw_response_resolve_path` | `file_path: String` | `String` | 相対パスを絶対パスに解決 |
 
 ## 永続化
@@ -51,7 +64,16 @@ YouTube InnerTube APIの生レスポンスを保存し、デバッグ・分析�
 |---------|------|------|
 | config.toml | `%APPDATA%/liscov-tauri/config.toml` | TOML |
 
-生レスポンス保存設定は `config.toml` 内に含まれる。
+生レスポンス保存設定は `config.toml` の `[raw_response]` セクションに保存する。キーは[設定項目](#設定項目)と同じ。
+
+```toml
+[raw_response]
+enabled = true
+file_path = "raw_responses.ndjson"
+max_file_size_mb = 100
+enable_rotation = true
+max_backup_files = 5
+```
 
 ### 生レスポンスファイル
 
@@ -195,19 +217,21 @@ NDJSON（Newline Delimited JSON）は、1行に1つのJSONオブジェクトを�
 ```
 1. APIレスポンス受信
         ↓
-2. enabled チェック
+2. その時点の設定を取得し、enabled チェック
    ├─ false → スキップ
    └─ true → 続行
         ↓
-3. ローテーションチェック（enable_rotation=true時）
+3. file_path を解決・検証（失敗 → 警告ログ、スキップ）
         ↓
-4. ResponseEntry作成（タイムスタンプ付与）
+4. ローテーションチェック（enable_rotation=true時）
         ↓
-5. JSONシリアライズ
+5. ResponseEntry作成（タイムスタンプ付与）
         ↓
-6. ファイルに追記（append mode）
+6. JSONシリアライズ
         ↓
-7. flush()で強制書き込み
+7. ファイルに追記（append mode）
+        ↓
+8. flush()で強制書き込み
 ```
 
 ### 同期性
@@ -232,7 +256,7 @@ NDJSON（Newline Delimited JSON）は、1行に1つのJSONオブジェクトを�
 
 | ユーザー操作 | 期待動作 |
 |-------------|---------|
-| 有効トグル | `raw_response_update_config`呼び出し、保存が有効/無効になる |
+| 有効トグル | `raw_response_update_config`呼び出し、保存が有効/無効になる（接続中なら次のレスポンスから反映） |
 | ファイルパス入力 | `raw_response_resolve_path`呼び出し、「実際の保存先」に解決されたパスを表示 |
 | 「参照」ボタンクリック | ファイル保存ダイアログを開き、選択したパスをファイルパス入力に設定 |
 | 最大ファイルサイズ変更 | `raw_response_update_config`呼び出し |

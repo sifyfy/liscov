@@ -2,6 +2,7 @@
 //!
 //! Implements 09_config.md specification
 
+use crate::core::raw_response::SaveConfig;
 use crate::errors::CommandError;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -84,6 +85,9 @@ pub struct Config {
     pub chat_display: ChatDisplayConfig,
     #[serde(default)]
     pub ui: UiConfig,
+    /// 生レスポンス保存設定（05_raw_response.md）。変更は raw_response_update_config だけが行う
+    #[serde(default)]
+    pub raw_response: SaveConfig,
 }
 
 /// Configuration state for managing in-memory config
@@ -102,6 +106,13 @@ impl Default for ConfigState {
 impl ConfigState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// 起動時に config.toml から読み込んだ設定で初期化する（09_config.md アプリ起動時）
+    pub fn load_from_file() -> Self {
+        Self {
+            config: RwLock::new(load_config_from_file()),
+        }
     }
 
     /// Get a clone of the current config
@@ -180,6 +191,15 @@ pub fn save_config_to_file(config: &Config) -> Result<(), String> {
     save_config_to_path(&path, config)
 }
 
+/// config_save 用に、受け取った Config へ現在の raw_response を引き継いだ Config を返す純粋関数。
+/// フロントエンドの Config 型は raw_response を持たないため、受け取った値はデフォルト値になっている。
+pub(crate) fn config_for_save(current: &Config, incoming: Config) -> Config {
+    Config {
+        raw_response: current.raw_response.clone(),
+        ..incoming
+    }
+}
+
 /// Load configuration
 #[tauri::command]
 pub async fn config_load(state: State<'_, ConfigState>) -> Result<Config, CommandError> {
@@ -194,6 +214,7 @@ pub async fn config_save(
     config: Config,
     state: State<'_, ConfigState>,
 ) -> Result<(), CommandError> {
+    let config = config_for_save(&state.get(), config);
     state.set(config.clone());
     save_config_to_file(&config).map_err(CommandError::IoError)
 }
@@ -795,5 +816,62 @@ mode = "fallback"
         assert_eq!(loaded.ui.theme, Theme::Light);
 
         let _ = fs::remove_file(&path);
+    }
+
+    // ========================================================================
+    // raw_response セクション (09_config.md / 05_raw_response.md: 設定の永続化)
+    // ========================================================================
+
+    #[test]
+    fn raw_response_section_is_restored_after_restart() {
+        // 有効にして終了 → 次回起動時も有効
+        let path = temp_config_path("raw_response_restore_stu901");
+
+        let mut config = Config::default();
+        config.raw_response.enabled = true;
+        config.raw_response.file_path = "custom.ndjson".to_string();
+        save_config_to_path(&path, &config).unwrap();
+
+        let loaded = load_config_from_path(&path);
+        assert!(loaded.raw_response.enabled);
+        assert_eq!(loaded.raw_response.file_path, "custom.ndjson");
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn config_without_raw_response_section_uses_defaults() {
+        // [raw_response] が無い既存の config.toml → デフォルト値（保存は無効）
+        let existing_toml = r#"
+[storage]
+mode = "secure"
+
+[chat_display]
+message_font_size = 22
+show_timestamps = true
+auto_scroll_enabled = true
+
+[ui]
+theme = "dark"
+"#;
+        let config: Config = toml::from_str(existing_toml).unwrap();
+        assert!(!config.raw_response.enabled);
+        assert_eq!(config.raw_response.file_path, "raw_responses.ndjson");
+        assert_eq!(config.chat_display.message_font_size, 22);
+    }
+
+    #[test]
+    fn config_save_keeps_current_raw_response() {
+        // config_save はフロントエンドの Config（raw_response を持たない）を受け取っても
+        // 現在の raw_response を保持する
+        let mut current = Config::default();
+        current.raw_response.enabled = true;
+
+        let mut incoming = Config::default();
+        incoming.chat_display.message_font_size = 18;
+
+        let merged = config_for_save(&current, incoming);
+        assert!(merged.raw_response.enabled);
+        assert_eq!(merged.chat_display.message_font_size, 18);
     }
 }
