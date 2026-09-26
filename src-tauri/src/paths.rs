@@ -5,14 +5,22 @@
 
 use std::path::PathBuf;
 
+/// 環境変数が無いときのアプリ名・キーリングサービス名。
+/// ユニットテストでは本番と別の名前にし、環境変数の設定漏れで本番データに触れないようにする
+/// （CLAUDE.md セキュリティ要件）。統合テスト・E2E は cfg(test) にならないので各自で環境変数を設定する。
+#[cfg(not(test))]
+const DEFAULT_NAME: &str = "liscov-tauri";
+#[cfg(test)]
+const DEFAULT_NAME: &str = "liscov-test-unit";
+
 /// アプリ名を返す（環境変数 LISCOV_APP_NAME でオーバーライド可能）
 pub fn app_name() -> String {
-    std::env::var("LISCOV_APP_NAME").unwrap_or_else(|_| "liscov-tauri".to_string())
+    std::env::var("LISCOV_APP_NAME").unwrap_or_else(|_| DEFAULT_NAME.to_string())
 }
 
 /// キーリングサービス名を返す（環境変数 LISCOV_KEYRING_SERVICE でオーバーライド可能）
 pub fn keyring_service() -> String {
-    std::env::var("LISCOV_KEYRING_SERVICE").unwrap_or_else(|_| "liscov-tauri".to_string())
+    std::env::var("LISCOV_KEYRING_SERVICE").unwrap_or_else(|_| DEFAULT_NAME.to_string())
 }
 
 /// 設定ディレクトリのパスを返す（OS標準の config_dir + app_name）
@@ -60,10 +68,12 @@ mod tests {
 
     #[test]
     #[serial(liscov_env)]
-    fn app_name_returns_default_when_env_not_set() {
+    fn app_name_in_unit_tests_is_not_production() {
+        // 環境変数を設定し忘れたユニットテストが本番の認証情報・DB・設定に触れないこと
+        // （CLAUDE.md セキュリティ要件。auth のテストが本番の credentials.toml を消した実例あり）
         // SAFETY: テスト環境でのみ実行。#[serial] で直列化済み
         unsafe { std::env::remove_var("LISCOV_APP_NAME") };
-        assert_eq!(app_name(), "liscov-tauri");
+        assert_ne!(app_name(), "liscov-tauri");
     }
 
     #[test]
@@ -84,10 +94,10 @@ mod tests {
 
     #[test]
     #[serial(liscov_env)]
-    fn keyring_service_returns_default_when_env_not_set() {
+    fn keyring_service_in_unit_tests_is_not_production() {
         // SAFETY: テスト環境でのみ実行。#[serial] で直列化済み
         unsafe { std::env::remove_var("LISCOV_KEYRING_SERVICE") };
-        assert_eq!(keyring_service(), "liscov-tauri");
+        assert_ne!(keyring_service(), "liscov-tauri");
     }
 
     #[test]
@@ -113,7 +123,7 @@ mod tests {
         unsafe { std::env::remove_var("LISCOV_APP_NAME") };
         let path = config_dir().expect("config_dir should succeed");
         assert!(
-            path.ends_with("liscov-tauri"),
+            path.ends_with(app_name()),
             "config_dir should end with app_name, got: {:?}",
             path
         );
@@ -126,7 +136,7 @@ mod tests {
         unsafe { std::env::remove_var("LISCOV_APP_NAME") };
         let path = data_dir().expect("data_dir should succeed");
         assert!(
-            path.ends_with("liscov-tauri"),
+            path.ends_with(app_name()),
             "data_dir should end with app_name, got: {:?}",
             path
         );

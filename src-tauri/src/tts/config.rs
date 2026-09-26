@@ -130,18 +130,9 @@ impl Default for TtsConfig {
 }
 
 impl TtsConfig {
-    /// Get the app name for directory paths (can be overridden via LISCOV_APP_NAME env var for testing)
-    fn get_app_name() -> String {
-        std::env::var("LISCOV_APP_NAME").unwrap_or_else(|_| "liscov-tauri".to_string())
-    }
-
-    /// Get the config file path
+    /// Get the config file path（ディレクトリ解決は paths に一元化。テスト時の本番分離もそちらで行う）
     fn config_path() -> Result<PathBuf, String> {
-        let config_dir =
-            dirs::config_dir().ok_or_else(|| "Failed to determine config directory".to_string())?;
-        Ok(config_dir
-            .join(Self::get_app_name())
-            .join("tts_config.toml"))
+        Ok(crate::paths::config_dir()?.join("tts_config.toml"))
     }
 
     /// Load config from file, or return default if file doesn't exist
@@ -223,6 +214,18 @@ mod tests {
             // SAFETY: テスト環境でのみ実行
             unsafe { std::env::remove_var("LISCOV_APP_NAME") };
         }
+    }
+
+    #[test]
+    #[serial(liscov_env)]
+    fn config_path_is_under_app_config_dir() {
+        // tts_config.toml は paths::config_dir() 配下（テスト時の本番分離が効く）
+        unsafe { std::env::remove_var("LISCOV_APP_NAME") };
+        let path = TtsConfig::config_path().expect("config_path failed");
+        assert_eq!(
+            path,
+            crate::paths::config_dir().unwrap().join("tts_config.toml")
+        );
     }
 
     #[test]
