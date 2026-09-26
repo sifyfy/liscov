@@ -78,9 +78,9 @@ pub fn validate_file_path(file_path: &str) -> Result<(), String> {
         return Err("Path contains dangerous characters".to_string());
     }
 
-    // パス長超過
-    if file_path.len() > 4096 {
-        return Err("Path exceeds maximum length (4096)".to_string());
+    // パス長超過（4096文字未満。バイト数ではなく文字数で数える）
+    if file_path.chars().count() >= 4096 {
+        return Err("Path must be shorter than 4096 characters".to_string());
     }
 
     // システムディレクトリ
@@ -440,18 +440,25 @@ mod tests {
         assert!(validate_file_path("D:\\data\\responses.ndjson").is_ok());
     }
 
-    // spec: 05_raw_response.md パス検証 - ちょうど4096文字はOK (`>` mutant対策)
+    // spec: 05_raw_response.md 制約「パス長は4096文字未満」- 4095文字はOK
     #[test]
-    fn validate_accepts_path_exactly_4096_chars() {
-        let path = "a".repeat(4096);
+    fn validate_accepts_path_4095_chars() {
+        let path = "a".repeat(4095);
         assert!(validate_file_path(&path).is_ok());
     }
 
-    // spec: 05_raw_response.md パス検証 - 4097文字はエラー
+    // spec: 05_raw_response.md パス検証「4096文字以上」はエラー - ちょうど4096文字
     #[test]
-    fn validate_rejects_path_4097_chars() {
-        let path = "a".repeat(4097);
+    fn validate_rejects_path_exactly_4096_chars() {
+        let path = "a".repeat(4096);
         assert!(validate_file_path(&path).is_err());
+    }
+
+    // spec: 05_raw_response.md 制約はバイト数ではなく文字数 - 日本語4095文字はOK
+    #[test]
+    fn validate_counts_chars_not_bytes() {
+        let path = "あ".repeat(4095);
+        assert!(validate_file_path(&path).is_ok());
     }
 
     // ========================================================================
