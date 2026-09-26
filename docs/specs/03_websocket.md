@@ -20,6 +20,7 @@ OBSオーバーレイ、カスタムボット、外部分析ツールなど、�
 |------|------|
 | `ws://127.0.0.1:{port}` に接続 | `Connected` メッセージ（client_id付き）を受信 |
 | 接続中にチャットメッセージ受信 | 全クライアントに `ChatMessage` をブロードキャスト |
+| 接続中にギフト受信 | 全クライアントに `ChatMessage`（`message_type` = `Gift`）をブロードキャスト。新しいメッセージ種別は作らない |
 | `GetInfo` を送信 | `ServerInfo`（バージョン、接続クライアント数）を受信 |
 | 接続直後 | **過去メッセージは送信されない**。接続後の新着メッセージのみ |
 
@@ -164,6 +165,26 @@ pub struct WebSocketStatus {
 }
 ```
 
+**ギフトの例**（付加情報のある種別は `{ "種別": { ... } }` の形になる。`content` はギフト名）
+
+```json
+{
+  "type": "ChatMessage",
+  "data": {
+    "message_type": { "Gift": { "gift_name": "Press F", "gift_image_url": "https://www.gstatic.com/youtube/img/pdg/gift/assets/press_f.png=w480-h480", "jewel_count": 10 } },
+    "author": "@viewer-a1b",
+    "channel_id": "UCxxxxxxxxxxxx",
+    "content": "Press F",
+    "runs": [],
+    "is_member": false,
+    "is_first_time_viewer": false,
+    "in_stream_comment_count": 2
+  }
+}
+```
+
+視聴者を特定できないギフトは `channel_id` が `""`、`in_stream_comment_count` が null になる。
+
 **runs フォーマット（InnerTube API準拠）**
 
 ```json
@@ -256,6 +277,7 @@ pub enum ClientMessage {
 | `SuperSticker` | スーパーステッカー | `amount` |
 | `Membership` | メンバーシップ | `milestone_months` |
 | `MembershipGift` | ギフトメンバーシップ | `gift_count` |
+| `Gift` | ジュエルで送るギフト | `gift_name`、`gift_image_url`（無ければ null）、`jewel_count`（取れなければ null） |
 | `System` | システムメッセージ | なし |
 
 ## クライアント管理

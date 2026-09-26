@@ -30,7 +30,20 @@ SuperChatの色情報（`headerBackgroundColor`）に基づいてtierを判定�
 
 ### 上位貢献者
 
-SuperChat件数でソートし、上位10人を表示。同一件数の場合は最高tierで比較。
+SuperChat件数でソートし、上位10人を表示。同一件数の場合は最高tierで比較。ギフトは含めない。
+
+### ギフト集計
+
+ジュエルで送るギフトは、SuperChat・メンバーシップとは別枠で集計する。既存の集計値には影響しない。
+
+| 受信したギフト | gift_count | gifts_by_name | jewel_known_count | total_jewels |
+|---------------|-----------|---------------|-------------------|--------------|
+| なし | 0 | [] | 0 | 0 |
+| `Hiding`(ジュエル数なし)・`Press F`(10)・`Press F`(10) | 3 | Press F 2件, Hiding 1件 | 2 | 20 |
+
+- gifts_by_name は件数の多い順。同数ならギフト名の昇順
+- ダッシュボードには「ジュエル数不明: {gift_count - jewel_known_count}件」も出し、合計が過小であることが分かるようにする
+- エクスポート: `message_type` = `gift`、`amount_display` = `10 Jewels`（ジュエル数が無ければ空）。JSON の `statistics` に `gifts`（GiftStats）を足す
 
 ## 制約・不変条件（Boundaries）
 
@@ -39,6 +52,7 @@ SuperChat件数でソートし、上位10人を表示。同一件数の場合は
 | SuperChatの金額に対して数値計算（合算・比較）を行わない | 通貨が異なるため数値加算は不正確（¥500 + $5 ≠ 505）。為替レート取得は複雑さとコストを増す |
 | 集計はYouTubeが返す色情報（tier）に基づく | YouTubeがtierを色で表現しており、同じ基準で通貨横断的に集計可能 |
 | `amount` フィールドは表示用文字列（"¥500"等）としてのみ保持する | パース・計算を行わず、ユーザーへの表示とエクスポートにのみ使用 |
+| ギフトはジュエル数が分かったものだけを合計し、分からないものを推測で埋めない | ギフトの価格は YouTube 側で変わりうる。不明件数を別に示せば合計の意味が保たれる |
 
 ## バックエンドコマンド
 
@@ -61,6 +75,7 @@ pub struct RevenueAnalytics {
     pub membership_gains: usize,
     pub hourly_stats: Vec<HourlyStats>,
     pub top_contributors: Vec<ContributorInfo>,
+    pub gifts: GiftStats,
 }
 ```
 
@@ -72,6 +87,26 @@ pub struct RevenueAnalytics {
 | `membership_gains` | usize | メンバーシップ獲得数 |
 | `hourly_stats` | Vec | 時間別統計データ（現在は常に空。将来実装予定） |
 | `top_contributors` | Vec | 上位貢献者（件数ベース、`get_revenue_analytics`のみで集計） |
+| `gifts` | GiftStats | ギフト集計（`get_revenue_analytics`・`get_session_analytics` の両方で集計） |
+
+### GiftStats
+
+```rust
+pub struct GiftStats {
+    pub gift_count: usize,                 // ギフトの件数
+    pub gifts_by_name: Vec<GiftNameCount>, // 名前別件数（件数降順、同数は名前昇順）
+    pub jewel_known_count: usize,          // ジュエル数が分かったギフトの件数
+    pub total_jewels: u64,                 // その合計
+}
+
+pub struct GiftNameCount {
+    pub gift_name: String,
+    pub gift_image_url: Option<String>,    // 最初に見たものの画像URL
+    pub count: usize,
+}
+```
+
+`get_session_analytics` は DB の `messages.metadata`（08_database.md）の `gift_name`・`gift_image_url`・`jewel_count` から集計する。
 
 ### SuperChatTierStats
 
@@ -303,6 +338,9 @@ id,timestamp,author,author_id,content,message_type,amount_display,tier,is_modera
 │   ├─ SuperChat総件数
 │   ├─ SuperSticker総件数
 │   └─ メンバーシップ獲得数
+├─ ギフト
+│   ├─ 件数・ジュエル合計・ジュエル数不明の件数
+│   └─ 名前別件数（画像付き）
 ├─ SuperChat tier別内訳
 │   ├─ 赤: X件
 │   ├─ マゼンタ: X件
@@ -333,6 +371,14 @@ interface RevenueAnalytics {
     membership_gains: number;
     hourly_stats: HourlyStats[];
     top_contributors: ContributorInfo[];
+    gifts: GiftStats;
+}
+
+interface GiftStats {
+    gift_count: number;
+    gifts_by_name: { gift_name: string; gift_image_url: string | null; count: number }[];
+    jewel_known_count: number;
+    total_jewels: number;
 }
 
 interface SuperChatTierStats {

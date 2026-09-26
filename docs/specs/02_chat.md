@@ -30,6 +30,58 @@
 | その配信者チャンネルで初めてコメントした視聴者（`viewer_streams`の最古video_idが現在のvideo_id） | `is_first_time_viewer = true` |
 | 過去に別の配信でコメント済み | `is_first_time_viewer = false` |
 | 配信者Aで初見 + 配信者Bでは常連 | 配信者ごとに独立判定 |
+| 視聴者を特定できないギフト（`channel_id == ""`） | `is_first_time_viewer = false` |
+
+### ギフト
+
+視聴者がジュエルで送るギフト（メンバーシップギフトとは別物）。InnerTube では `giftMessageViewModel` で届き、channel_id とタイムスタンプが付かない。
+
+**パース:**
+
+| 入力 | 結果 |
+|------|------|
+| `text` = `sent Press F for 10 Jewels` | gift_name = `Press F`、jewel_count = `Some(10)` |
+| `text` = `sent Press F for 1 Jewel` | gift_name = `Press F`、jewel_count = `Some(1)` |
+| `text` = `sent Hiding` | gift_name = `Hiding`、jewel_count = `None` |
+| `text` が `sent ` で始まらない、または空。`giftImageA11yLabel` = `@x sent a gift, Hiding` | gift_name = `Hiding`、jewel_count = `None` |
+| `text` からもラベルからも名前が取れない | gift_name = `ギフト`、jewel_count = `None`。warn ログを出す |
+| `authorName` = `@viewer-a1b `（末尾に空白） | author = `@viewer-a1b` |
+| `giftImage.sources[].url` = `//www.gstatic.com/...=w480-h480` | gift_image_url = `https://www.gstatic.com/...=w480-h480`（幅が最小の source を使う） |
+| `giftImage` が無い | gift_image_url = `None` |
+| タイムスタンプ | 受信した時刻 |
+| バッジ・メンバー情報 | 無し（is_member = false、badges は空） |
+
+ジュエル数は配信者本人としてログインした接続でのみ本文に入ると見られる（観測は2件）。
+
+**視聴者の特定（handle → channel_id）:** 次の順に探し、最初に見つかったものを使う。
+
+1. その接続で受信済みのメッセージの author → channel_id（同じ handle は最後に見たもの）
+2. DB: その配信者の `viewer_profiles` で `display_name` が handle と完全一致するもの。一致が2件以上なら特定しない
+
+| 状況（配信者 UCown） | 結果 |
+|------|------|
+| 同じ接続で `@viewer-a1b`（UCa1b）がコメント済み | channel_id = UCa1b |
+| 接続中は未発言、DB の UCown 配下に `@viewer-a1b` → UCa1b | channel_id = UCa1b |
+| DB の UCown 配下に `@viewer-a1b` が2件（UCa1b・UCzzz） | 特定しない |
+| どこにも無い | 特定しない |
+| 配信者の channel_id が分からない接続 | 1 だけで探す |
+
+| 特定の結果 | 扱い |
+|-----------|------|
+| 特定できた | 通常のメッセージと同じ（viewer_profiles・viewer_streams・初見判定・配信内コメント回数・視聴者情報パネル） |
+| 特定できない | `channel_id = ""` で保存・表示。viewer_profiles・viewer_streams は更新せず、初見判定は false、配信内コメント回数は数えない（`None`）。視聴者情報パネルは開かない |
+
+保存済みのギフトの channel_id を後から埋めることはしない。
+
+**ジュエル数を取れない接続の知らせ:**
+
+| 状況 | 結果 |
+|------|------|
+| jewel_count = None のギフトを受信 | 接続一覧のその接続に注記「ジュエル数を取得できません。配信者本人としてログインした接続でのみ取得できます」を出す |
+| jewel_count がある ギフトだけを受信 | 注記を出さない |
+| 切断・再接続・F5リロード | 注記は消える。再びジュエル数の無いギフトを受けたら出る |
+
+ダイアログや通知は出さない（配信中の操作を妨げない）。
 
 ### 多接続
 
@@ -49,6 +101,9 @@
 | 初見さん判定は `save_message`（`upsert_viewer_stream`含む）の**後**に実行する | 判定前にDBにデータが存在している必要がある |
 | システムメッセージ（`message_type == "system"`）は初見判定の対象外 | システムメッセージはユーザーの発言ではない |
 | 配信内コメント数カウンタはメモリ上のHashMapで管理し、DBには保存しない | O(1)のパフォーマンスが必要。再接続時はDBから復元可能 |
+| ギフトの handle から channel_id を引くとき、候補が2件以上なら特定しない | 別人に紐付けると読み仮名・初見判定・集計がすべて誤る。特定しないだけなら表示と保存は正しい |
+| 特定できないギフトの channel_id は `""` とし、viewer_profiles を作らない | 仮のIDでプロフィールを作ると本物の channel_id と二重になる |
+| ジュエル数は本文から読めたときだけ記録し、推測しない | ギフトの価格は YouTube 側で変わりうる |
 
 ## バックエンドコマンド
 
@@ -111,6 +166,7 @@ pub enum MessageRun {
 | `supersticker` | スーパーステッカー | `amount`（金額文字列）、`superchat_colors` |
 | `membership` | メンバーシップ新規/更新 | `milestone_months`（マイルストーン月数、新規はNone） |
 | `membership_gift` | メンバーシップギフト配布 | `gift_count`（ギフト数） |
+| `gift` | ジュエルで送るギフト。`content` はギフト名 | `gift_name`、`gift_image_url`、`jewel_count`（取れなければ None） |
 | `system` | システムメッセージ | なし |
 
 ### GuiMessageMetadata
@@ -120,6 +176,9 @@ pub struct GuiMessageMetadata {
     pub amount: Option<String>,                // 金額
     pub milestone_months: Option<u32>,         // メンバーシップマイルストーン月数
     pub gift_count: Option<u32>,               // メンバーシップギフト数
+    pub gift_name: Option<String>,             // ギフト名（gift のみ）
+    pub gift_image_url: Option<String>,        // ギフト画像URL（gift のみ）
+    pub jewel_count: Option<u32>,              // ジュエル数（gift で取れたときのみ）
     pub badges: Vec<String>,                   // バッジ識別子
     pub badge_info: Vec<BadgeInfo>,            // バッジ詳細
     pub is_moderator: bool,                    // モデレータ
@@ -297,6 +356,7 @@ Origin: https://www.youtube.com
 │ 3. chat_mode_rx でモード変更要求を確認         │
 │    └─ 変更あり → client.set_chat_mode(mode)  │
 │ 4. 各メッセージを処理:                         │
+│    ├─ ギフトなら handle から channel_id を特定  │
 │    ├─ 配信内コメント数カウンタ更新              │
 │    ├─ DBに保存（save_message）                │
 │    │   ├─ INSERT OR IGNORE (messages)         │
@@ -357,6 +417,7 @@ CREATE TABLE viewer_streams (
 | 配信内一貫性 | DB問い合わせのため、再接続後も自動的に正しい判定を維持（メモリキャッシュ不要） |
 | 判定タイミング | `save_message`（`upsert_viewer_stream` 含む）の**後**に判定する |
 | システムメッセージ | `message_type == "system"` のメッセージは判定対象外 |
+| 特定できないギフト | `channel_id == ""` のギフトは判定対象外（false） |
 | 将来の拡張 | 視聴者の訪問配信一覧、前回来た配信の特定等に利用可能 |
 
 ### 配信内コメント数カウンタ
@@ -387,6 +448,7 @@ SELECT m.channel_id, COUNT(*) as count
 FROM messages m
 JOIN sessions s ON m.session_id = s.id
 WHERE s.stream_url LIKE '%{video_id}%'
+  AND m.channel_id <> ''
 GROUP BY m.channel_id
 ```
 
@@ -421,7 +483,7 @@ GROUP BY m.channel_id
 |--------------|------|
 | `ChatTab.svelte` | チャットタブ全体のレイアウト管理（リサイズハンドル含む） |
 | `InputSection.svelte` | URL入力、接続開始、「接続設定」ラベル（常時表示、多接続対応） |
-| `ConnectionList.svelte` | アクティブ接続アイテムリスト、個別切断ボタン |
+| `ConnectionList.svelte` | アクティブ接続アイテムリスト、個別切断ボタン、ジュエル数を取れない接続の注記 |
 | `ChatDisplay.svelte` | メッセージ一覧表示（配信元色ライン付き） |
 | `FilterPanel.svelte` | メッセージフィルタリング、表示制御、メッセージクリア |
 
@@ -468,6 +530,7 @@ GROUP BY m.channel_id
 | `filteredMessages` | `ChatMessage[]` | フィルタ済みメッセージ（derived） |
 | `displayedMessages` | `ChatMessage[]` | displayLimit適用後の表示用メッセージ（derived） |
 | `connections` | `Map<number, FrontendConnectionState>` | アクティブ接続マップ（connection_id → 状態） |
+| `connections[id].jewelCountUnavailable` | `boolean` | その接続で jewel_count = null のギフトを受けたら true（フロントエンドのみの状態。バックエンドには持たない） |
 | `isConnected` | `boolean` | いずれかの接続がアクティブ（derived: connections.size > 0） |
 | `isConnecting` | `boolean` | 接続処理中の接続が存在（derived） |
 | `connectionState` | `string` | 後方互換（idle/connecting/connected） |
@@ -500,7 +563,7 @@ GROUP BY m.channel_id
 ```typescript
 interface ChatFilter {
     showText: boolean;        // 通常チャット表示
-    showSuperchat: boolean;   // スーパーチャット/ステッカー表示
+    showSuperchat: boolean;   // スーパーチャット/ステッカー/ギフト表示
     showMembership: boolean;  // メンバーシップ関連表示
     searchQuery: string;      // 検索クエリ（著者/コンテンツ）
 }
@@ -681,6 +744,20 @@ SuperChatの色情報がある場合はYouTube APIから取得した色を使用
 |-----|-----|
 | 背景 | `var(--info-subtle)` |
 | 左枠線 | 4px solid `var(--info)` |
+
+#### ギフト（gift）
+
+```
+[ギフト画像 32px] {author} が {gift_name} を送りました [{jewel_count} ジュエルバッジ]
+```
+
+| 項目 | 値 |
+|-----|-----|
+| 背景 | `var(--accent-subtle)` |
+| 左枠線 | 4px solid `var(--accent)` |
+| ジュエル数バッジ | `jewel_count` があるときだけ表示 |
+| 画像が無い・読めない | 画像を出さずに文だけ表示 |
+| 初見バッジ・配信内コメント回数 | 視聴者を特定できたときだけ既存の規則どおり表示 |
 
 #### システムメッセージ（system）
 

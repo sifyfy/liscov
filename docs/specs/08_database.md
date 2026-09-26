@@ -144,10 +144,22 @@ CREATE UNIQUE INDEX idx_messages_unique ON messages(session_id, message_id);
 | `author_icon_url` | TEXT | 投稿者アイコンURL |
 | `channel_id` | TEXT | 投稿者チャンネルID |
 | `content` | TEXT | メッセージ本文 |
-| `message_type` | TEXT | メッセージタイプ（text/superchat/supersticker/membership等） |
+| `message_type` | TEXT | メッセージタイプ（text/superchat/supersticker/membership/membership_gift/gift/system） |
 | `amount` | TEXT | SuperChat金額（通貨記号含む、例: "¥500"） |
 | `is_member` | INTEGER | メンバーシップ加入者フラグ（0/1） |
-| `metadata` | TEXT | JSON形式のメタデータ |
+| `metadata` | TEXT | JSON形式のメタデータ（現在は gift のみ。他の種別は NULL） |
+
+**ギフト（`message_type = 'gift'`）の保存形式:**
+
+| カラム | 値 |
+|--------|-----|
+| `content` | ギフト名（例: `Press F`） |
+| `author` | handle（例: `@viewer-a1b`） |
+| `channel_id` | handle から特定できた channel_id。できなければ `''` |
+| `amount` | NULL（通貨ではないため） |
+| `metadata` | `{"gift_name":"Press F","gift_image_url":"https://...","jewel_count":10}`（jewel_count は取れなければ null） |
+
+分析では `json_extract(metadata, '$.jewel_count')` で引ける。`channel_id = ''` の行は視聴者を特定できなかったギフトで、`author` の handle で後から紐付けられる。
 
 ### viewer_profiles テーブル
 
@@ -189,6 +201,16 @@ CREATE INDEX idx_viewer_profiles_contribution ON viewer_profiles(broadcaster_cha
 | `total_contribution` | REAL | 総貢献額（SuperChat等） |
 | `membership_level` | TEXT | メンバーシップレベル |
 | `tags` | TEXT | タグ（カンマ区切り） |
+
+**handle からの channel_id 検索**（ギフト用、`find_channel_id_by_handle`）:
+
+```sql
+SELECT channel_id FROM viewer_profiles
+WHERE broadcaster_channel_id = ?1 AND display_name = ?2
+LIMIT 2
+```
+
+1件ならその channel_id、0件または2件なら特定しない（None）。ギフトは頻度が低いため専用インデックスは作らない（`idx_viewer_profiles_broadcaster` で絞り込む）。
 
 ### viewer_custom_info テーブル
 
@@ -316,7 +338,7 @@ CREATE INDEX idx_contributor_stats_session ON contributor_stats(session_id);
         ↓
 2. messages テーブルに INSERT
         ↓
-3. viewer_profiles を UPSERT
+3. viewer_profiles を UPSERT（channel_id が '' のギフトは 3 以降を行わない）
    - message_count をインクリメント
    - last_seen を更新
    - SuperChat時は total_contribution に加算

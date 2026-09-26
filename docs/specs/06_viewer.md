@@ -30,6 +30,10 @@
 |---------|------|
 | メッセージ受信 | viewer_profilesの `message_count` インクリメント、`last_seen` 更新 |
 | SuperChat受信 | `total_contribution` に金額を加算 |
+| 視聴者を特定できたギフト受信 | 通常のメッセージと同じく `message_count` インクリメント、`last_seen`・`display_name` 更新 |
+| 視聴者を特定できないギフト受信 | 更新しない（プロフィールを作らない） |
+
+ギフトには channel_id が付かないため、handle と `display_name` の一致で視聴者を引く（規則は 02_chat.md「ギフト」）。`display_name` はメッセージのたびに最新の handle に更新されるので、この照合に使える。
 
 ## 制約・不変条件（Boundaries）
 

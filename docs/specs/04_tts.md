@@ -36,6 +36,19 @@
 | Membership（マイルストーン） | `{months}ヶ月のメンバーシップ` |
 | MembershipGift | `{gift_count}人へのメンバーシップギフト` |
 
+### ギフトの読み上げ
+
+ギフト（ジュエルで送るもの）は本文の代わりに「{ジュエル数}ジュエルの{ギフト名}のギフト」を読む。投稿者名の処理と「、」での結合は他の種別と同じ。
+
+| 条件 | 読み上げ |
+|------|---------|
+| 投稿者 `@山田太郎-xyz`、gift_name = `Hiding`、jewel_count = None | `山田太郎さん、Hidingのギフト` |
+| 投稿者 `@山田太郎-xyz`、gift_name = `Press F`、jewel_count = 10、`read_superchat_amount=true` | `山田太郎さん、10ジュエルのPress Fのギフト` |
+| 同上で `read_superchat_amount=false` | `山田太郎さん、Press Fのギフト` |
+
+- 優先度はスーパーチャットと同じ `SuperChat`（有料のため）
+- `first_comment_only` は既存どおり `in_stream_comment_count` で判定する。視聴者を特定できないギフトはカウントが無い（None）ので読み上げる
+
 ### 初回コメント読み上げ
 
 配信内で各視聴者の最初のコメントに対する読み上げ制御。`in_stream_comment_count`（video_id単位）で判定する。`is_first_time_viewer`（全配信通じての初見さん判定）とは別の機能。
@@ -274,6 +287,7 @@ auto_close = true
 | Membership（新規） | `メンバー加入` |
 | Membership（マイルストーン） | `{months}ヶ月のメンバーシップ` |
 | MembershipGift | `{gift_count}人へのメンバーシップギフト` |
+| Gift | `{jewel_count}ジュエルの{gift_name}のギフト`（jewel_count が無い、または `read_superchat_amount=false` なら `{gift_name}のギフト`） |
 
 ### テキストサニタイズ
 
@@ -307,7 +321,7 @@ pub struct TtsMessage {
 pub enum TtsPriority {
     Normal = 0,        // 通常メッセージ
     Membership = 1,    // メンバーシップ関連
-    SuperChat = 2,     // スーパーチャット（最高優先度）
+    SuperChat = 2,     // スーパーチャット・ギフト（最高優先度）
 }
 ```
 
