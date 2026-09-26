@@ -3,7 +3,7 @@
 //! connect_to_stream コマンドから抽出された監視ロジック。
 //! コマンド層は入出力の変換と MonitoringDeps / run_monitoring_loop への委譲のみを担う。
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio::sync::{RwLock, watch};
 use tokio_util::sync::CancellationToken;
@@ -11,7 +11,7 @@ use tokio_util::sync::CancellationToken;
 use tauri::AppHandle;
 
 use crate::core::api::{InnerTubeClient, WebSocketServer};
-use crate::core::models::{ChatMessage, ChatMode};
+use crate::core::models::{ChatMessage, ChatMode, MessageType};
 use crate::core::raw_response::{RawResponseSaver, SaveConfig};
 use crate::database::{self, Database};
 use crate::state::MAX_MESSAGES;
@@ -109,6 +109,9 @@ pub async fn run_monitoring_loop<F, G>(
         }
     };
 
+    // この接続で見た handle → channel_id（ギフトの視聴者特定用）
+    let mut known_handles: HashMap<String, String> = HashMap::new();
+
     loop {
         // CancellationToken でループ停止を確認
         if cancellation_token.is_cancelled() {
@@ -201,6 +204,7 @@ pub async fn run_monitoring_loop<F, G>(
                 &session_id,
                 &broadcaster_id,
                 &mut in_stream_counts,
+                &mut known_handles,
                 &deps,
             )
             .await;
@@ -255,13 +259,31 @@ async fn process_message(
     video_id: &str,
     session_id: &Option<String>,
     broadcaster_id: &Option<String>,
-    in_stream_counts: &mut std::collections::HashMap<String, u32>,
+    in_stream_counts: &mut HashMap<String, u32>,
+    known_handles: &mut HashMap<String, String>,
     deps: &MonitoringDeps,
 ) {
-    let is_system = matches!(msg.message_type, crate::core::models::MessageType::System);
+    let is_system = matches!(msg.message_type, MessageType::System);
+
+    // ギフトには channel_id が届かないので handle から特定する（特定できなければ空のまま）
+    if matches!(msg.message_type, MessageType::Gift(_)) && msg.channel_id.is_empty() {
+        let db_guard = deps.database.read().await;
+        let conn = match db_guard.as_ref() {
+            Some(db) => Some(db.connection().await),
+            None => None,
+        };
+        let db_scope = conn.as_deref().zip(broadcaster_id.as_deref());
+        msg.channel_id =
+            resolve_gift_channel_id(known_handles, &msg.author, db_scope).unwrap_or_default();
+    }
+    if !msg.channel_id.is_empty() {
+        known_handles.insert(msg.author.clone(), msg.channel_id.clone());
+    }
+    // 視聴者を特定できないメッセージは視聴者単位の集計・判定の対象外
+    let has_viewer = !msg.channel_id.is_empty();
 
     // システムメッセージ以外は in-stream コメントカウンターをインクリメント
-    if !is_system {
+    if !is_system && has_viewer {
         let count = in_stream_counts.entry(msg.channel_id.clone()).or_insert(0);
         *count += 1;
         msg.in_stream_comment_count = Some(*count);
@@ -281,7 +303,7 @@ async fn process_message(
     }
 
     // DB 保存後に初回視聴者かどうかを判定（viewer_streams が更新済みのため）
-    if !is_system {
+    if !is_system && has_viewer {
         if let Some(bid) = broadcaster_id {
             let db_guard = deps.database.read().await;
             if let Some(db) = db_guard.as_ref() {
@@ -292,6 +314,27 @@ async fn process_message(
             }
         }
     }
+}
+
+/// ギフトの handle から channel_id を特定する（02_chat.md「視聴者の特定」）
+///
+/// 1. この接続で見た handle → channel_id
+/// 2. DB: その配信者の viewer_profiles で display_name が一致するもの（候補が 1 件のときだけ）
+///
+/// `db_scope` は (DB 接続, 配信者 channel_id)。配信者が分からない接続では None で 1 だけを使う。
+fn resolve_gift_channel_id(
+    known_handles: &HashMap<String, String>,
+    handle: &str,
+    db_scope: Option<(&rusqlite::Connection, &str)>,
+) -> Option<String> {
+    if let Some(channel_id) = known_handles.get(handle) {
+        return Some(channel_id.clone());
+    }
+    let (conn, broadcaster_id) = db_scope?;
+    database::find_channel_id_by_handle(conn, broadcaster_id, handle)
+        .inspect_err(|e| tracing::warn!("ギフトの視聴者検索に失敗: {}", e))
+        .ok()
+        .flatten()
 }
 
 /// その時点の保存設定で生レスポンスを保存する（05_raw_response.md 書き込み処理）
@@ -313,21 +356,33 @@ async fn save_raw_response(config: &SaveConfig, raw_json: &str) {
 /// メッセージを TTS キューに追加する
 async fn enqueue_tts(tts_manager: &TtsManager, msg: &ChatMessage) {
     let priority = match &msg.message_type {
-        crate::core::models::MessageType::SuperChat { .. }
-        | crate::core::models::MessageType::SuperSticker { .. } => TtsPriority::SuperChat,
-        crate::core::models::MessageType::Membership { .. }
-        | crate::core::models::MessageType::MembershipGift { .. } => TtsPriority::Membership,
+        MessageType::SuperChat { .. } | MessageType::SuperSticker { .. } | MessageType::Gift(_) => {
+            TtsPriority::SuperChat
+        }
+        MessageType::Membership { .. } | MessageType::MembershipGift { .. } => {
+            TtsPriority::Membership
+        }
         _ => TtsPriority::Normal,
     };
 
     let amount = match &msg.message_type {
-        crate::core::models::MessageType::SuperChat { amount }
-        | crate::core::models::MessageType::SuperSticker { amount } => Some(amount.clone()),
+        MessageType::SuperChat { amount } | MessageType::SuperSticker { amount } => {
+            Some(amount.clone())
+        }
         _ => None,
     };
 
+    // ギフトは本文の代わりに「{n}ジュエルの{名前}のギフト」を読む
+    let text = match &msg.message_type {
+        MessageType::Gift(gift) => {
+            let read_jewels = tts_manager.get_config().await.read_superchat_amount;
+            crate::tts::gift_message(gift, read_jewels)
+        }
+        _ => msg.content.clone(),
+    };
+
     let item = TtsQueueItem {
-        text: msg.content.clone(),
+        text,
         priority,
         author_name: Some(msg.author.clone()),
         amount,
@@ -368,5 +423,63 @@ async fn finish_session(deps: &MonitoringDeps, connection_id: u64, session_id: &
             "監視タスク終了処理: 終了すべきセッションなし connection_id: {}",
             connection_id
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // 02_chat.md「視聴者の特定」の例（配信者 UCown）
+    async fn resolve_with_db(
+        profiles: &[(&str, &str)],
+        known: &HashMap<String, String>,
+        handle: &str,
+    ) -> Option<String> {
+        let db = Database::new_in_memory().expect("in-memory DB");
+        let conn = db.connection().await;
+        for (channel_id, display_name) in profiles {
+            database::upsert_viewer_profile(&conn, "UCown", channel_id, display_name, None)
+                .unwrap();
+        }
+        resolve_gift_channel_id(known, handle, Some((&conn, "UCown")))
+    }
+
+    #[tokio::test]
+    async fn gift_resolved_from_this_connection_first() {
+        let known = HashMap::from([("@viewer-a1b".to_string(), "UCa1b".to_string())]);
+        let resolved = resolve_with_db(&[("UCfromdb", "@viewer-a1b")], &known, "@viewer-a1b").await;
+        assert_eq!(resolved.as_deref(), Some("UCa1b"));
+    }
+
+    #[tokio::test]
+    async fn gift_resolved_from_db_when_not_seen_in_connection() {
+        let resolved =
+            resolve_with_db(&[("UCa1b", "@viewer-a1b")], &HashMap::new(), "@viewer-a1b").await;
+        assert_eq!(resolved.as_deref(), Some("UCa1b"));
+    }
+
+    #[tokio::test]
+    async fn gift_unresolved_when_db_has_two_candidates() {
+        let profiles = [("UCa1b", "@viewer-a1b"), ("UCzzz", "@viewer-a1b")];
+        assert_eq!(
+            resolve_with_db(&profiles, &HashMap::new(), "@viewer-a1b").await,
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn gift_unresolved_when_unknown() {
+        assert_eq!(resolve_with_db(&[], &HashMap::new(), "@new").await, None);
+    }
+
+    #[test]
+    fn gift_without_broadcaster_uses_connection_only() {
+        let known = HashMap::from([("@a".to_string(), "UCa".to_string())]);
+        assert_eq!(
+            resolve_gift_channel_id(&known, "@a", None).as_deref(),
+            Some("UCa")
+        );
+        assert_eq!(resolve_gift_channel_id(&known, "@b", None), None);
     }
 }

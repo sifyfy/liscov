@@ -46,6 +46,9 @@ describe('ChatMessage', () => {
 					is_verified: false,
 					milestone_months: null,
 					gift_count: null,
+					gift_name: null,
+					gift_image_url: null,
+					jewel_count: null,
 					badges: [],
 				},
 			});
@@ -74,6 +77,9 @@ describe('ChatMessage', () => {
 					is_verified: false,
 					milestone_months: null,
 					gift_count: null,
+					gift_name: null,
+					gift_image_url: null,
+					jewel_count: null,
 					badges: [],
 				},
 			});
@@ -111,6 +117,9 @@ describe('ChatMessage', () => {
 					is_verified: false,
 					milestone_months: null,
 					gift_count: null,
+					gift_name: null,
+					gift_image_url: null,
+					jewel_count: null,
 					badges: [],
 				},
 			});
@@ -142,6 +151,9 @@ describe('ChatMessage', () => {
 					is_verified: false,
 					milestone_months: null,
 					gift_count: null,
+					gift_name: null,
+					gift_image_url: null,
+					jewel_count: null,
 					badges: [],
 				},
 			});
@@ -202,6 +214,69 @@ describe('ChatMessage', () => {
 			const { container } = render(ChatMessage, { props: { message, fontSize: 13, showTimestamps: false } });
 			expect(container.textContent).toContain('🎉初見さん');
 			expect(container.textContent).toContain('#1');
+		});
+	});
+
+	// 02_chat.md「ギフト（gift）」の表示
+	describe('ギフト', () => {
+		function createGift(jewelCount: number | null, imageUrl: string | null = 'https://www.gstatic.com/gift/press_f.png') {
+			return createMessage({
+				message_type: 'gift',
+				author: '@viewer-a1b',
+				channel_id: '',
+				content: 'Press F',
+				runs: [],
+				metadata: {
+					amount: null,
+					milestone_months: null,
+					gift_count: null,
+					gift_name: 'Press F',
+					gift_image_url: imageUrl,
+					jewel_count: jewelCount,
+					badges: [],
+					badge_info: [],
+					is_moderator: false,
+					is_verified: false,
+					superchat_colors: null,
+				},
+			});
+		}
+
+		it('画像と「{author} が {gift_name} を送りました」を表示する', () => {
+			const { container } = render(ChatMessage, { props: { message: createGift(10), fontSize: 13, showTimestamps: false } });
+			expect(container.textContent).toContain('@viewer-a1b が Press F を送りました');
+			const image = container.querySelector('[data-testid="gift-image"]') as HTMLImageElement;
+			expect(image.src).toBe('https://www.gstatic.com/gift/press_f.png');
+			expect(image.style.width).toBe('32px');
+		});
+
+		it('jewel_count があるときだけジュエル数バッジを表示する', () => {
+			const withJewels = render(ChatMessage, { props: { message: createGift(10), fontSize: 13, showTimestamps: false } });
+			expect(withJewels.container.querySelector('[data-testid="gift-jewels"]')?.textContent?.trim()).toBe('10 ジュエル');
+
+			const withoutJewels = render(ChatMessage, { props: { message: createGift(null), fontSize: 13, showTimestamps: false } });
+			expect(withoutJewels.container.querySelector('[data-testid="gift-jewels"]')).toBeNull();
+		});
+
+		it('画像が無いときは文だけ表示する', () => {
+			const { container } = render(ChatMessage, { props: { message: createGift(null, null), fontSize: 13, showTimestamps: false } });
+			expect(container.querySelector('[data-testid="gift-image"]')).toBeNull();
+			expect(container.textContent).toContain('@viewer-a1b が Press F を送りました');
+		});
+
+		it('画像が読めないときは画像を消す', async () => {
+			const { container } = render(ChatMessage, { props: { message: createGift(null), fontSize: 13, showTimestamps: false } });
+			const image = container.querySelector('[data-testid="gift-image"]') as HTMLImageElement;
+			image.dispatchEvent(new Event('error'));
+			await Promise.resolve();
+			expect(container.querySelector('[data-testid="gift-image"]')).toBeNull();
+		});
+
+		it('背景は var(--accent-subtle)、左枠線は var(--accent)', () => {
+			const { container } = render(ChatMessage, { props: { message: createGift(null), fontSize: 13, showTimestamps: false } });
+			const root = container.querySelector('[data-message-id]') as HTMLElement;
+			expect(root.style.borderLeftColor).toBe('var(--accent)');
+			expect(root.style.background).toBe('var(--accent-subtle)');
 		});
 	});
 });

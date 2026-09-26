@@ -19,6 +19,7 @@ export type MessageType =
   | 'supersticker'
   | 'membership'
   | 'membership_gift'
+  | 'gift'
   | 'system';
 
 // チャットモード（フロントエンド固有）
@@ -27,7 +28,7 @@ export type ChatMode = 'top' | 'all';
 // チャットフィルター（フロントエンド固有）
 export interface ChatFilter {
   showText: boolean;
-  showSuperchat: boolean;
+  showSuperchat: boolean; // スーパーチャット/ステッカー/ギフト（有料系）
   showMembership: boolean;
   searchQuery: string;
 }
@@ -42,4 +43,6 @@ export interface FrontendConnectionState {
   broadcasterChannelId: string;
   connectionState: 'connecting' | 'connected' | 'paused' | 'disconnecting' | 'error';
   color: string;
+  /** この接続で jewel_count の無いギフトを受けたら true（接続一覧に注記を出す。フロントエンドのみの状態） */
+  jewelCountUnavailable: boolean;
 }

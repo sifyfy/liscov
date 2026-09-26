@@ -60,7 +60,9 @@ function createChatStore() {
       if (!filter.showText && msg.message_type === 'text') return false;
       if (
         !filter.showSuperchat &&
-        (msg.message_type === 'superchat' || msg.message_type === 'supersticker')
+        (msg.message_type === 'superchat' ||
+          msg.message_type === 'supersticker' ||
+          msg.message_type === 'gift')
       )
         return false;
       if (
@@ -119,11 +121,23 @@ function createChatStore() {
     }
 
     pendingMessages.push(message);
+    markJewelCountUnavailable(message);
 
     // バッチフラッシュをスケジュール（未スケジュールの場合のみ）
     if (!batchTimeout) {
       batchTimeout = setTimeout(flushPendingMessages, BATCH_DELAY_MS);
     }
+  }
+
+  // ジュエル数の無いギフトを受けた接続に注記フラグを立てる（02_chat.md）
+  function markJewelCountUnavailable(message: ChatMessage): void {
+    if (message.message_type !== 'gift' || message.metadata?.jewel_count != null) return;
+    const connId = Number(message.connection_id);
+    const conn = connections.get(connId);
+    if (!conn || conn.jewelCountUnavailable) return;
+    const next = new SvelteMap(connections);
+    next.set(connId, { ...conn, jewelCountUnavailable: true });
+    connections = next;
   }
 
   // アクション
@@ -143,7 +157,8 @@ function createChatStore() {
       broadcasterName: '',
       broadcasterChannelId: '',
       connectionState: 'connecting',
-      color: getConnectionColor(String(tempId))
+      color: getConnectionColor(String(tempId)),
+      jewelCountUnavailable: false
     };
     const beforeConnect = new SvelteMap(connections);
     beforeConnect.set(tempId, connectingConn);
@@ -166,7 +181,8 @@ function createChatStore() {
           broadcasterName: result.broadcaster_name ?? '',
           broadcasterChannelId: result.broadcaster_channel_id ?? '',
           connectionState: 'connected',
-          color: getConnectionColor(result.broadcaster_channel_id ?? String(connId))
+          color: getConnectionColor(result.broadcaster_channel_id ?? String(connId)),
+          jewelCountUnavailable: false
         });
       } else {
         error = result.error;
@@ -392,7 +408,8 @@ function createChatStore() {
           broadcasterName: info.broadcaster_name,
           broadcasterChannelId: info.broadcaster_channel_id,
           connectionState: info.is_monitoring ? 'connected' : 'disconnecting',
-          color: getConnectionColor(info.broadcaster_channel_id || String(connId))
+          color: getConnectionColor(info.broadcaster_channel_id || String(connId)),
+          jewelCountUnavailable: false
         });
       }
       connections = next;

@@ -126,6 +126,40 @@
       </div>
     </div>
 
+    <!-- Gifts（ジュエル）: 既存の収益集計とは別枠 (07_revenue.md ギフト集計) -->
+    {@const gifts = analyticsStore.analytics.gifts}
+    <div class="p-4 bg-[var(--bg-surface-2)] rounded-lg border border-[var(--border-default)]" data-testid="gift-stats">
+      <h3 class="text-lg font-medium text-[var(--text-primary)] mb-3">Gifts</h3>
+      <div class="flex flex-wrap gap-6 mb-3">
+        <div>
+          <p class="text-sm text-[var(--text-muted)]">件数</p>
+          <p class="text-2xl font-bold text-[var(--accent)]" style="font-family: var(--font-mono);">{formatNumber(gifts.gift_count)}</p>
+        </div>
+        <div>
+          <p class="text-sm text-[var(--text-muted)]">ジュエル合計</p>
+          <p class="text-2xl font-bold text-[var(--warning)]" style="font-family: var(--font-mono);">{formatNumber(gifts.total_jewels)}</p>
+        </div>
+        {#if gifts.gift_count > gifts.jewel_known_count}
+          <p class="self-end text-sm text-[var(--text-muted)]" data-testid="gift-jewels-unknown">
+            ジュエル数不明: {gifts.gift_count - gifts.jewel_known_count}件
+          </p>
+        {/if}
+      </div>
+      {#if gifts.gifts_by_name.length > 0}
+        <div class="space-y-1">
+          {#each gifts.gifts_by_name as g (g.gift_name)}
+            <div class="flex items-center gap-2">
+              {#if g.gift_image_url}
+                <img src={g.gift_image_url} alt="" class="w-6 h-6 flex-shrink-0" />
+              {/if}
+              <span class="flex-1 text-[var(--text-primary)]">{g.gift_name}</span>
+              <span class="text-sm text-[var(--text-muted)]">{g.count}件</span>
+            </div>
+          {/each}
+        </div>
+      {/if}
+    </div>
+
     <!-- Top Contributors -->
     {#if analyticsStore.analytics.top_contributors.length > 0}
       <div class="p-4 bg-[var(--bg-surface-2)] rounded-lg border border-[var(--border-default)]">

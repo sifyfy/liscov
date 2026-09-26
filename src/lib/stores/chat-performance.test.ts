@@ -341,6 +341,14 @@ describe('chatStore パフォーマンス最適化', () => {
 			expect(chatStore.filteredMessages).toHaveLength(0);
 		});
 
+		// 02_chat.md: ギフトは showSuperchat（有料系）に含める
+		it('showSuperchat=false で gift タイプが filteredMessages から除外される', () => {
+			chatStore.setFilter({ showSuperchat: false });
+			addAndFlush([createMessage('1', { message_type: 'gift' })]);
+
+			expect(chatStore.filteredMessages).toHaveLength(0);
+		});
+
 		// showSuperchat=false のとき supersticker タイプが除外される
 		it('showSuperchat=false で supersticker タイプが filteredMessages から除外される', () => {
 			chatStore.setFilter({ showSuperchat: false });

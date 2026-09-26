@@ -39,6 +39,8 @@
         return 'border-left-color: var(--member-accent); background: var(--member-subtle);';
       case 'membership_gift':
         return 'border-left-color: #4299e1; background: var(--info-subtle);';
+      case 'gift':
+        return 'border-left-color: var(--accent); background: var(--accent-subtle);';
       case 'system':
         return 'border-left-color: #4299e1; background: var(--info-subtle);';
       default:
@@ -88,6 +90,13 @@
         return null;
     }
   });
+
+  // ギフト（ジュエル）の表示内容。画像が読めなければ文だけにする
+  let isGift = $derived(message.message_type === 'gift');
+  let giftName = $derived(message.metadata?.gift_name ?? message.content);
+  let jewelCount = $derived(message.metadata?.jewel_count ?? null);
+  let giftImageFailed = $state(false);
+  let giftImageUrl = $derived(giftImageFailed ? null : (message.metadata?.gift_image_url ?? null));
 
   // 初見さん判定
   let isFirstTimeViewer = $derived(message.is_first_time_viewer);
@@ -243,6 +252,31 @@
   </div>
 
   <!-- Row 2: Message content with runs (text + emoji) -->
+  {#if isGift}
+    <div class="mt-1 ml-8 flex items-center gap-2" style="font-size: {fontSize}px;">
+      {#if giftImageUrl}
+        <img
+          data-testid="gift-image"
+          src={giftImageUrl}
+          alt={giftName}
+          class="flex-shrink-0"
+          style="width: 32px; height: 32px;"
+          onerror={() => (giftImageFailed = true)}
+        />
+      {/if}
+      <span class="break-words leading-relaxed text-[var(--text-secondary)]">
+        {message.author} が {giftName} を送りました
+      </span>
+      {#if jewelCount != null}
+        <span
+          data-testid="gift-jewels"
+          class="px-1.5 py-0.5 text-xs bg-[var(--warning-subtle)] text-[var(--warning)] rounded border border-[var(--border-default)] font-bold flex-shrink-0"
+        >
+          {jewelCount} ジュエル
+        </span>
+      {/if}
+    </div>
+  {:else}
   <div class="mt-1 ml-8">
     <p class="break-words leading-relaxed" style="font-size: {fontSize}px; color: {superchatColors && (message.message_type === 'superchat' || message.message_type === 'supersticker') ? superchatColors.body_text : 'var(--text-secondary)'};">
       {#if message.runs && message.runs.length > 0}
@@ -264,6 +298,7 @@
       {/if}
     </p>
   </div>
+  {/if}
 </div>
 
 <style>

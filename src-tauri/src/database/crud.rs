@@ -153,14 +153,7 @@ pub fn save_message(
     message: &ChatMessage,
     video_id: Option<&str>,
 ) -> Result<i64> {
-    let message_type = match &message.message_type {
-        crate::core::models::MessageType::Text => "text",
-        crate::core::models::MessageType::SuperChat { .. } => "superchat",
-        crate::core::models::MessageType::SuperSticker { .. } => "supersticker",
-        crate::core::models::MessageType::Membership { .. } => "membership",
-        crate::core::models::MessageType::MembershipGift { .. } => "membership_gift",
-        crate::core::models::MessageType::System => "system",
-    };
+    let message_type = message.message_type.as_str();
 
     let amount = match &message.message_type {
         crate::core::models::MessageType::SuperChat { amount } => Some(amount.clone()),
@@ -168,12 +161,18 @@ pub fn save_message(
         _ => None,
     };
 
+    // metadata は現在 gift のみ（08_database.md ギフトの保存形式）
+    let metadata = match &message.message_type {
+        crate::core::models::MessageType::Gift(gift) => serde_json::to_string(gift).ok(),
+        _ => None,
+    };
+
     // Insert message (ignore duplicates)
     conn.execute(
         "INSERT OR IGNORE INTO messages
          (session_id, message_id, timestamp, timestamp_usec, author, author_icon_url,
-          channel_id, content, message_type, amount, is_member)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+          channel_id, content, message_type, amount, is_member, metadata)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         params![
             session_id,
             message.id,
@@ -186,11 +185,14 @@ pub fn save_message(
             message_type,
             amount,
             message.is_member,
+            metadata,
         ],
     )?;
 
     // Update viewer profile (if broadcaster_channel_id is available)
-    if let Some(broadcaster_id) = broadcaster_channel_id {
+    // channel_id が空（視聴者を特定できないギフト）ならプロフィールを作らない
+    if let Some(broadcaster_id) = broadcaster_channel_id.filter(|_| !message.channel_id.is_empty())
+    {
         let profile_id = upsert_viewer_profile(
             conn,
             broadcaster_id,
@@ -307,6 +309,7 @@ pub fn get_in_stream_comment_counts(
          JOIN sessions s ON m.session_id = s.id
          WHERE s.stream_url LIKE ?1
            AND m.message_type != 'system'
+           AND m.channel_id <> ''
          GROUP BY m.channel_id",
     )?;
     let counts = stmt
@@ -317,6 +320,28 @@ pub fn get_in_stream_comment_counts(
         })?
         .collect::<Result<std::collections::HashMap<_, _>, _>>()?;
     Ok(counts)
+}
+
+/// handle（display_name と完全一致）から視聴者の channel_id を引く（ギフト用、08_database.md）
+///
+/// 候補が 1 件のときだけ返す。0 件・2 件以上は None（別人への取り違えを避ける）
+pub fn find_channel_id_by_handle(
+    conn: &Connection,
+    broadcaster_channel_id: &str,
+    handle: &str,
+) -> Result<Option<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT channel_id FROM viewer_profiles
+         WHERE broadcaster_channel_id = ?1 AND display_name = ?2
+         LIMIT 2",
+    )?;
+    let candidates = stmt
+        .query_map(params![broadcaster_channel_id, handle], |row| row.get(0))?
+        .collect::<Result<Vec<String>, _>>()?;
+    Ok(match <[String; 1]>::try_from(candidates) {
+        Ok([channel_id]) => Some(channel_id),
+        Err(_) => None,
+    })
 }
 
 /// Upsert viewer profile (returns the profile id)
@@ -1872,5 +1897,231 @@ mod tests {
         assert_eq!(contributors[0].channel_id, "UC_fan");
         assert_eq!(contributors[0].display_name, "BigFan");
         assert!(contributors[0].total_contribution > 0.0);
+    }
+
+    // ========================================================================
+    // ギフト (08_database.md: ギフトの保存形式 / handle からの channel_id 検索)
+    // ========================================================================
+
+    fn make_gift_message(
+        id: &str,
+        author: &str,
+        channel_id: &str,
+        jewels: Option<u32>,
+    ) -> ChatMessage {
+        ChatMessage {
+            id: id.to_string(),
+            timestamp_usec: "1000000".to_string(),
+            message_type: MessageType::Gift(crate::core::models::GiftDetails {
+                gift_name: "Press F".to_string(),
+                gift_image_url: Some("https://example.com/press_f.png".to_string()),
+                jewel_count: jewels,
+            }),
+            author: author.to_string(),
+            channel_id: channel_id.to_string(),
+            content: "Press F".to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn gift_saved_with_metadata_json_and_no_amount() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+
+        save_message(
+            &conn,
+            &session_id,
+            Some("UC_bc"),
+            &make_gift_message("g1", "@viewer-a1b", "UC_a1b", Some(10)),
+            None,
+        )
+        .unwrap();
+
+        let stored = &get_session_messages(&conn, &session_id, 10).unwrap()[0];
+        assert_eq!(stored.message_type, "gift");
+        assert_eq!(stored.content, "Press F");
+        assert_eq!(stored.author, "@viewer-a1b");
+        assert_eq!(stored.amount, None);
+        let metadata: serde_json::Value =
+            serde_json::from_str(stored.metadata.as_deref().unwrap()).unwrap();
+        assert_eq!(
+            metadata,
+            serde_json::json!({"gift_name": "Press F", "gift_image_url": "https://example.com/press_f.png", "jewel_count": 10})
+        );
+        let jewels: Option<i64> = conn
+            .query_row("SELECT json_extract(metadata, '$.jewel_count') FROM messages WHERE message_id = 'g1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(jewels, Some(10));
+    }
+
+    #[tokio::test]
+    async fn gift_unknown_jewels_saved_as_null() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+        save_message(
+            &conn,
+            &session_id,
+            Some("UC_bc"),
+            &make_gift_message("g1", "@a", "UC_a", None),
+            None,
+        )
+        .unwrap();
+        let stored = &get_session_messages(&conn, &session_id, 10).unwrap()[0];
+        let metadata: serde_json::Value =
+            serde_json::from_str(stored.metadata.as_deref().unwrap()).unwrap();
+        assert!(metadata["jewel_count"].is_null());
+    }
+
+    #[tokio::test]
+    async fn other_message_types_keep_null_metadata() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+        save_message(
+            &conn,
+            &session_id,
+            Some("UC_bc"),
+            &make_text_message("m1", "@a", "UC_a", "hi"),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            get_session_messages(&conn, &session_id, 10).unwrap()[0].metadata,
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn unresolved_gift_does_not_create_viewer_profile_or_stream() {
+        // 06_viewer.md: 視聴者を特定できないギフトはプロフィールを作らない
+        let db = setup_db();
+        let conn = db.connection().await;
+        let video_id = "vidGift1";
+        let url = format!("https://www.youtube.com/watch?v={}", video_id);
+        let session_id =
+            create_session(&conn, Some(&url), None, Some("UC_bc"), Some("BC")).unwrap();
+
+        save_message(
+            &conn,
+            &session_id,
+            Some("UC_bc"),
+            &make_gift_message("g1", "@new", "", None),
+            Some(video_id),
+        )
+        .unwrap();
+
+        assert_eq!(
+            get_viewer_profile(&conn, "UC_bc", "")
+                .unwrap()
+                .map(|p| p.id),
+            None
+        );
+        let streams: i64 = conn
+            .query_row("SELECT COUNT(*) FROM viewer_streams", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(streams, 0);
+        // メッセージ自体は保存される
+        assert_eq!(
+            get_session_messages(&conn, &session_id, 10).unwrap().len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn resolved_gift_updates_viewer_profile() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+        save_message(
+            &conn,
+            &session_id,
+            Some("UC_bc"),
+            &make_gift_message("g1", "@a1b", "UC_a1b", None),
+            None,
+        )
+        .unwrap();
+        let profile = get_viewer_profile(&conn, "UC_bc", "UC_a1b")
+            .unwrap()
+            .unwrap();
+        assert_eq!(profile.message_count, 1);
+        assert_eq!(profile.display_name, "@a1b");
+    }
+
+    #[tokio::test]
+    async fn in_stream_counts_exclude_unresolved_gifts() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let video_id = "vidGift2";
+        let url = format!("https://www.youtube.com/watch?v={}", video_id);
+        let session_id =
+            create_session(&conn, Some(&url), None, Some("UC_bc"), Some("BC")).unwrap();
+        save_message(
+            &conn,
+            &session_id,
+            Some("UC_bc"),
+            &make_gift_message("g1", "@x", "", None),
+            None,
+        )
+        .unwrap();
+        save_message(
+            &conn,
+            &session_id,
+            Some("UC_bc"),
+            &make_gift_message("g2", "@y", "", None),
+            None,
+        )
+        .unwrap();
+        save_message(
+            &conn,
+            &session_id,
+            Some("UC_bc"),
+            &make_gift_message("g3", "@a", "UC_a", None),
+            None,
+        )
+        .unwrap();
+
+        let counts = get_in_stream_comment_counts(&conn, video_id).unwrap();
+        assert_eq!(counts.get(""), None);
+        assert_eq!(counts.get("UC_a"), Some(&1u32));
+    }
+
+    #[tokio::test]
+    async fn find_channel_id_by_handle_cases() {
+        // 02_chat.md「視聴者の特定」の DB の例（配信者 UCown）
+        let db = setup_db();
+        let conn = db.connection().await;
+        upsert_viewer_profile(&conn, "UCown", "UCa1b", "@viewer-a1b", None).unwrap();
+        upsert_viewer_profile(&conn, "UCown", "UCdup1", "@dup", None).unwrap();
+        upsert_viewer_profile(&conn, "UCown", "UCdup2", "@dup", None).unwrap();
+        upsert_viewer_profile(&conn, "UCother", "UCelse", "@elsewhere", None).unwrap();
+
+        assert_eq!(
+            find_channel_id_by_handle(&conn, "UCown", "@viewer-a1b")
+                .unwrap()
+                .as_deref(),
+            Some("UCa1b")
+        );
+        assert_eq!(
+            find_channel_id_by_handle(&conn, "UCown", "@dup").unwrap(),
+            None,
+            "2件なら特定しない"
+        );
+        assert_eq!(
+            find_channel_id_by_handle(&conn, "UCown", "@nobody").unwrap(),
+            None
+        );
+        assert_eq!(
+            find_channel_id_by_handle(&conn, "UCown", "@elsewhere").unwrap(),
+            None,
+            "配信者スコープ"
+        );
+        assert_eq!(
+            find_channel_id_by_handle(&conn, "UCown", "@VIEWER-A1B").unwrap(),
+            None,
+            "完全一致"
+        );
     }
 }

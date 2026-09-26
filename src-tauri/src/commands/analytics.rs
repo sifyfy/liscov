@@ -4,7 +4,7 @@
 //! Note: SuperChat amounts are NOT calculated numerically due to different currencies.
 //! Instead, we use tier-based aggregation based on YouTube's color scheme.
 
-use crate::core::{ChatMessage, MessageType};
+use crate::core::{ChatMessage, GiftDetails, MessageType};
 use crate::errors::CommandError;
 use crate::state::AppState;
 use chrono::Utc;
@@ -76,6 +76,86 @@ pub struct RevenueAnalytics {
     pub membership_gains: usize,
     pub hourly_stats: Vec<HourlyStats>,
     pub top_contributors: Vec<ContributorInfo>,
+    // ギフト（ジュエル）の別枠集計。既存の集計値には含めない
+    pub gifts: GiftStats,
+}
+
+/// ギフト集計（07_revenue.md GiftStats）
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
+pub struct GiftStats {
+    pub gift_count: usize,
+    // 件数降順、同数はギフト名昇順
+    pub gifts_by_name: Vec<GiftNameCount>,
+    // ジュエル数が分かったギフトの件数
+    pub jewel_known_count: usize,
+    // 分かったものだけの合計（不明分は推測しない）
+    #[ts(type = "number")]
+    pub total_jewels: u64,
+}
+
+/// ギフト名ごとの件数
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
+pub struct GiftNameCount {
+    pub gift_name: String,
+    // 最初に見たギフトの画像 URL
+    pub gift_image_url: Option<String>,
+    pub count: usize,
+}
+
+impl GiftStats {
+    pub(crate) fn from_gifts<'a>(gifts: impl IntoIterator<Item = &'a GiftDetails>) -> Self {
+        let mut stats = GiftStats::default();
+        for gift in gifts {
+            stats.gift_count += 1;
+            if let Some(jewels) = gift.jewel_count {
+                stats.jewel_known_count += 1;
+                stats.total_jewels += u64::from(jewels);
+            }
+            match stats
+                .gifts_by_name
+                .iter_mut()
+                .find(|g| g.gift_name == gift.gift_name)
+            {
+                Some(entry) => entry.count += 1,
+                None => stats.gifts_by_name.push(GiftNameCount {
+                    gift_name: gift.gift_name.clone(),
+                    gift_image_url: gift.gift_image_url.clone(),
+                    count: 1,
+                }),
+            }
+        }
+        stats.gifts_by_name.sort_by(|a, b| {
+            b.count
+                .cmp(&a.count)
+                .then_with(|| a.gift_name.cmp(&b.gift_name))
+        });
+        stats
+    }
+}
+
+/// メッセージ列に含まれるギフトを取り出す
+fn gifts_in(messages: &[ChatMessage]) -> impl Iterator<Item = &GiftDetails> {
+    messages.iter().filter_map(|m| match &m.message_type {
+        MessageType::Gift(gift) => Some(gift),
+        _ => None,
+    })
+}
+
+/// DB の gift 行の metadata JSON（08_database.md）から集計する。読めない行は数えない
+pub(crate) fn gift_stats_from_metadata(rows: &[Option<String>]) -> GiftStats {
+    let gifts: Vec<GiftDetails> = rows
+        .iter()
+        .flatten()
+        .filter_map(|json| serde_json::from_str(json).ok())
+        .collect();
+    GiftStats::from_gifts(&gifts)
+}
+
+/// エクスポートの amount_display に入れるジュエル数の表記
+fn format_jewels(jewel_count: u32) -> String {
+    format!("{} Jewels", jewel_count)
 }
 
 /// Contributor information (07_revenue.md)
@@ -156,6 +236,7 @@ pub struct SessionStatistics {
     pub super_chat_count: usize,
     pub super_chat_by_tier: SuperChatTierStats,
     pub membership_count: usize,
+    pub gifts: GiftStats,
 }
 
 /// Determine SuperChat tier from header_background_color
@@ -310,6 +391,7 @@ pub(crate) fn compute_revenue_analytics(messages: &[ChatMessage]) -> RevenueAnal
 
     contributors_vec.truncate(10);
     analytics.top_contributors = contributors_vec;
+    analytics.gifts = GiftStats::from_gifts(gifts_in(messages));
 
     analytics
 }
@@ -386,7 +468,23 @@ pub async fn get_session_analytics(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| CommandError::DatabaseError(e.to_string()))?;
 
-    Ok(compute_session_analytics_from_rows(&rows))
+    let mut analytics = compute_session_analytics_from_rows(&rows);
+    analytics.gifts = gift_stats_from_metadata(&query_gift_metadata(&conn, &session_id)?);
+    Ok(analytics)
+}
+
+/// セッション内の gift 行の metadata を取得する
+fn query_gift_metadata(
+    conn: &rusqlite::Connection,
+    session_id: &str,
+) -> Result<Vec<Option<String>>, CommandError> {
+    let mut stmt = conn
+        .prepare("SELECT metadata FROM messages WHERE session_id = ? AND message_type = 'gift'")
+        .map_err(|e| CommandError::DatabaseError(e.to_string()))?;
+    stmt.query_map([session_id], |row| row.get::<_, Option<String>>(0))
+        .map_err(|e| CommandError::DatabaseError(e.to_string()))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| CommandError::DatabaseError(e.to_string()))
 }
 
 /// Export session data to file
@@ -428,7 +526,7 @@ pub async fn export_session_data(
         .unwrap_or_default();
     let query = format!(
         "SELECT id, timestamp, author, channel_id, content, message_type, amount, is_member,
-                is_moderator, is_verified, badges, header_color
+                is_moderator, is_verified, badges, header_color, metadata
          FROM messages WHERE session_id = ? ORDER BY timestamp{}",
         limit_clause
     );
@@ -443,6 +541,7 @@ pub async fn export_session_data(
             let amount: Option<String> = row.get(6)?;
             let header_color: Option<String> = row.get(11)?;
             let badges_json: Option<String> = row.get(10)?;
+            let metadata_json: Option<String> = row.get(12)?;
 
             let tier = if message_type == "superchat" {
                 if let Some(ref color) = header_color {
@@ -464,8 +563,15 @@ pub async fn export_session_data(
                 author: row.get(2)?,
                 author_id: row.get(3)?,
                 content: row.get(4)?,
+                amount_display: if message_type == "gift" {
+                    metadata_json
+                        .and_then(|j| serde_json::from_str::<GiftDetails>(&j).ok())
+                        .and_then(|g| g.jewel_count)
+                        .map(format_jewels)
+                } else {
+                    amount
+                },
                 message_type,
-                amount_display: amount,
                 tier,
                 is_member: row.get(7)?,
                 is_moderator: row.get(8).unwrap_or(false),
@@ -477,7 +583,8 @@ pub async fn export_session_data(
         .filter_map(|r| r.ok())
         .collect();
 
-    let statistics = calculate_session_statistics(&messages);
+    let gifts = gift_stats_from_metadata(&query_gift_metadata(&conn, &session_id)?);
+    let statistics = calculate_session_statistics(&messages, gifts);
 
     let export_data = SessionExportData {
         metadata: session,
@@ -537,6 +644,11 @@ pub(crate) fn convert_messages_to_export(
                 }
                 MessageType::Membership { .. } => ("membership".to_string(), None, None),
                 MessageType::MembershipGift { .. } => ("membership_gift".to_string(), None, None),
+                MessageType::Gift(gift) => (
+                    "gift".to_string(),
+                    gift.jewel_count.map(format_jewels),
+                    None,
+                ),
                 MessageType::System => ("system".to_string(), None, None),
             };
 
@@ -601,7 +713,10 @@ pub async fn export_current_messages(
         .collect();
     let export_messages = convert_messages_to_export(&messages_vec, &session_id, &broadcaster_id);
 
-    let statistics = calculate_session_statistics(&export_messages);
+    let statistics = calculate_session_statistics(
+        &export_messages,
+        GiftStats::from_gifts(gifts_in(&messages_vec)),
+    );
 
     let export_data = SessionExportData {
         metadata: SessionMetadata {
@@ -641,7 +756,7 @@ pub async fn export_current_messages(
 // Helper functions
 
 /// Calculate session statistics from export messages (DRY: used by both export functions)
-fn calculate_session_statistics(messages: &[ExportMessage]) -> SessionStatistics {
+fn calculate_session_statistics(messages: &[ExportMessage], gifts: GiftStats) -> SessionStatistics {
     let mut unique_viewers: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut super_chat_count = 0;
     let mut super_chat_by_tier = SuperChatTierStats::default();
@@ -670,6 +785,7 @@ fn calculate_session_statistics(messages: &[ExportMessage]) -> SessionStatistics
         super_chat_count,
         super_chat_by_tier,
         membership_count,
+        gifts,
     }
 }
 
@@ -982,6 +1098,7 @@ mod tests {
                 super_chat_count: 1,
                 super_chat_by_tier: SuperChatTierStats::default(),
                 membership_count: 0,
+                gifts: GiftStats::default(),
             },
         }
     }
@@ -1221,7 +1338,7 @@ mod tests {
             make_export_message("sc3", "UC_user3", "superchat", Some(SuperChatTier::Blue)),
         ];
 
-        let stats = calculate_session_statistics(&messages);
+        let stats = calculate_session_statistics(&messages, GiftStats::default());
 
         // 3件のsuperchatが正しく集計される
         assert_eq!(stats.super_chat_count, 3);
@@ -1235,7 +1352,7 @@ mod tests {
             make_export_message("msg2", "UC_user2", "text", None),
         ];
 
-        let stats = calculate_session_statistics(&messages);
+        let stats = calculate_session_statistics(&messages, GiftStats::default());
 
         assert_eq!(stats.super_chat_count, 0);
     }
@@ -1249,7 +1366,7 @@ mod tests {
             make_export_message("m2", "UC_user2", "membership", None),
         ];
 
-        let stats = calculate_session_statistics(&messages);
+        let stats = calculate_session_statistics(&messages, GiftStats::default());
 
         // 2件のmembershipが正しく集計される
         assert_eq!(stats.membership_count, 2);
@@ -1265,7 +1382,7 @@ mod tests {
             make_export_message("mg3", "UC_user3", "membership_gift", None),
         ];
 
-        let stats = calculate_session_statistics(&messages);
+        let stats = calculate_session_statistics(&messages, GiftStats::default());
 
         assert_eq!(stats.membership_count, 3);
     }
@@ -1282,7 +1399,7 @@ mod tests {
             make_export_message("t2", "UC_d", "text", None), // 同一ユーザーの重複
         ];
 
-        let stats = calculate_session_statistics(&messages);
+        let stats = calculate_session_statistics(&messages, GiftStats::default());
 
         assert_eq!(stats.super_chat_count, 2);
         assert_eq!(stats.membership_count, 1);
@@ -1962,5 +2079,139 @@ mod tests {
         assert_eq!(second["id"], "msg2");
         assert_eq!(second["message_type"], "superchat");
         assert_eq!(second["amount_display"], "$10.00");
+    }
+
+    // ========================================================================
+    // ギフト集計 (07_revenue.md: ギフト集計)
+    // ========================================================================
+
+    fn gift(name: &str, jewels: Option<u32>) -> GiftDetails {
+        GiftDetails {
+            gift_name: name.to_string(),
+            gift_image_url: Some(format!("https://example.com/{}.png", name)),
+            jewel_count: jewels,
+        }
+    }
+
+    #[test]
+    fn gift_stats_empty() {
+        let stats = GiftStats::from_gifts(&[] as &[GiftDetails]);
+        assert_eq!(stats.gift_count, 0);
+        assert!(stats.gifts_by_name.is_empty());
+        assert_eq!(stats.jewel_known_count, 0);
+        assert_eq!(stats.total_jewels, 0);
+    }
+
+    #[test]
+    fn gift_stats_spec_example() {
+        // Hiding(不明)・Press F(10)・Press F(10) → 3件、Press F 2件・Hiding 1件、判明 2件、合計 20
+        let stats = GiftStats::from_gifts(&[
+            gift("Hiding", None),
+            gift("Press F", Some(10)),
+            gift("Press F", Some(10)),
+        ]);
+        assert_eq!(stats.gift_count, 3);
+        let by_name: Vec<(&str, usize)> = stats
+            .gifts_by_name
+            .iter()
+            .map(|g| (g.gift_name.as_str(), g.count))
+            .collect();
+        assert_eq!(by_name, vec![("Press F", 2), ("Hiding", 1)]);
+        assert_eq!(
+            stats.gifts_by_name[0].gift_image_url.as_deref(),
+            Some("https://example.com/Press F.png")
+        );
+        assert_eq!(stats.jewel_known_count, 2);
+        assert_eq!(stats.total_jewels, 20);
+    }
+
+    #[test]
+    fn gift_stats_same_count_sorted_by_name() {
+        let stats = GiftStats::from_gifts(&[gift("Zebra", None), gift("Apple", None)]);
+        let names: Vec<&str> = stats
+            .gifts_by_name
+            .iter()
+            .map(|g| g.gift_name.as_str())
+            .collect();
+        assert_eq!(names, vec!["Apple", "Zebra"]);
+    }
+
+    #[test]
+    fn compute_revenue_analytics_counts_gifts_separately() {
+        let messages = vec![
+            make_chat_message("", "@a", MessageType::Gift(gift("Hiding", None)), None),
+            make_chat_message(
+                "UC_b",
+                "@b",
+                MessageType::Gift(gift("Press F", Some(10))),
+                None,
+            ),
+            make_chat_message(
+                "UC_c",
+                "@c",
+                MessageType::SuperChat {
+                    amount: "$10.00".to_string(),
+                },
+                None,
+            ),
+        ];
+        let analytics = compute_revenue_analytics(&messages);
+        assert_eq!(analytics.gifts.gift_count, 2);
+        assert_eq!(analytics.gifts.total_jewels, 10);
+        // 既存の集計には影響しない
+        assert_eq!(analytics.super_chat_count, 1);
+        assert_eq!(analytics.membership_gains, 0);
+        assert_eq!(analytics.top_contributors.len(), 1);
+    }
+
+    #[test]
+    fn gift_stats_from_db_metadata() {
+        // 08_database.md: gift 行の metadata JSON から集計する。壊れた JSON は数えない
+        let rows = vec![
+            Some(r#"{"gift_name":"Press F","gift_image_url":null,"jewel_count":10}"#.to_string()),
+            Some(r#"{"gift_name":"Hiding","gift_image_url":null,"jewel_count":null}"#.to_string()),
+            Some("not json".to_string()),
+            None,
+        ];
+        let stats = gift_stats_from_metadata(&rows);
+        assert_eq!(stats.gift_count, 2);
+        assert_eq!(stats.jewel_known_count, 1);
+        assert_eq!(stats.total_jewels, 10);
+    }
+
+    #[test]
+    fn convert_messages_to_export_gift() {
+        // 07_revenue.md: message_type = gift、amount_display = "10 Jewels"（不明なら空）
+        let messages = vec![
+            make_chat_message(
+                "UC_b",
+                "@b",
+                MessageType::Gift(gift("Press F", Some(10))),
+                None,
+            ),
+            make_chat_message("", "@a", MessageType::Gift(gift("Hiding", None)), None),
+        ];
+        let exported = convert_messages_to_export(&messages, "s", "UC_own");
+        assert_eq!(exported[0].message_type, "gift");
+        assert_eq!(exported[0].amount_display.as_deref(), Some("10 Jewels"));
+        assert_eq!(exported[1].message_type, "gift");
+        assert_eq!(exported[1].amount_display, None);
+    }
+
+    #[test]
+    fn json_export_statistics_include_gifts() {
+        let mut data = make_test_export_data();
+        data.statistics.gifts = GiftStats::from_gifts(&[gift("Press F", Some(10))]);
+        let config = ExportConfig {
+            format: "json".to_string(),
+            include_metadata: true,
+            include_system_messages: true,
+            max_records: None,
+            sort_order: None,
+        };
+        let json: serde_json::Value =
+            serde_json::from_str(&export_to_json(&data, &config).unwrap()).unwrap();
+        assert_eq!(json["statistics"]["gifts"]["gift_count"], 1);
+        assert_eq!(json["statistics"]["gifts"]["total_jewels"], 10);
     }
 }

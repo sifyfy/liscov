@@ -735,6 +735,8 @@ struct AMR {
     is_member: bool,
     milestone_months: Option<u32>,
     gift_count: Option<u32>,
+    /// ギフト（jewel）の画像 URL。実データと同じくスキーム無しを既定にする
+    gift_image_url: Option<String>,
 }
 #[derive(Debug, Deserialize)]
 struct SAR {
@@ -1131,6 +1133,16 @@ fn gen_msg(s: &ServerState, r: &AMR) -> Value {
             let count = r.gift_count.unwrap_or(5);
             // Actual YouTube format: authorExternalChannelId at root level
             json!({"addChatItemAction":{"item":{"liveChatSponsorshipsGiftPurchaseAnnouncementRenderer":{"id":id,"timestampUsec":ts,"authorExternalChannelId":&r.channel_id,"header":{"liveChatSponsorshipsHeaderRenderer":{"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":"https://example.com/av.png"}]},"primaryText":{"runs":[{"text":"Sent "},{"text":format!("{}", count)},{"text":" "},{"text":"Channel"},{"text":" gift memberships"}]}}}}}}})
+        }
+        "gift" => {
+            // ジュエルで送るギフト: channelId・timestampUsec が無く、authorName は末尾に空白が付く（実データ準拠）
+            // content は本文（例: "sent Press F for 10 Jewels"）
+            let image = r.gift_image_url.as_deref().unwrap_or(
+                "//www.gstatic.com/youtube/img/pdg/gift/assets/press_f.png=w480-h480",
+            );
+            let name = r.content.strip_prefix("sent ").unwrap_or(&r.content);
+            let name = name.split(" for ").next().unwrap_or(name);
+            json!({"addChatItemAction":{"item":{"giftMessageViewModel":{"id":id,"authorName":{"content":format!("{} ", r.author)},"authorAvatar":{"avatarViewModel":{"image":{"sources":[{"url":"https://example.com/av.png"}]}}},"text":{"content":&r.content},"giftImage":{"sources":[{"url":image,"width":480,"height":480}]},"giftImageA11yLabel":format!("{} sent a gift, {}", r.author, name)}}}})
         }
         "system" => {
             json!({"addChatItemAction":{"item":{"liveChatTextMessageRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":"System"},"authorExternalChannelId":"system","message":{"runs":[{"text":&r.content}]}}}}})

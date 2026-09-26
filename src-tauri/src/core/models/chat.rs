@@ -19,7 +19,33 @@ pub enum MessageType {
     MembershipGift {
         gift_count: u32,
     },
+    /// ジュエルで送るギフト（メンバーシップギフトとは別物）
+    Gift(GiftDetails),
     System,
+}
+
+/// ジュエルで送るギフトの内容。DB の messages.metadata にもこの形の JSON で保存する（08_database.md）
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct GiftDetails {
+    pub gift_name: String,
+    pub gift_image_url: Option<String>,
+    /// 本文から読めたときだけ Some（配信者本人としてログインした接続でのみ入る）
+    pub jewel_count: Option<u32>,
+}
+
+impl MessageType {
+    /// DB・GUI・エクスポートで使う種別名（02_chat.md MessageType）
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            MessageType::Text => "text",
+            MessageType::SuperChat { .. } => "superchat",
+            MessageType::SuperSticker { .. } => "supersticker",
+            MessageType::Membership { .. } => "membership",
+            MessageType::MembershipGift { .. } => "membership_gift",
+            MessageType::Gift(_) => "gift",
+            MessageType::System => "system",
+        }
+    }
 }
 
 /// Message run (text or emoji)
@@ -116,7 +142,7 @@ impl ChatStats {
             MessageType::MembershipGift { gift_count } => {
                 self.membership_gifts += *gift_count as usize;
             }
-            MessageType::System => {}
+            MessageType::Gift(_) | MessageType::System => {}
         }
     }
 }
@@ -257,5 +283,20 @@ mod tests {
     #[test]
     fn parse_amount_non_numeric_string_returns_none() {
         assert_eq!(parse_amount("free"), None);
+    }
+
+    // spec: 03_websocket.md「ギフトの例」— 付加情報のある種別は { "種別": { ... } } の形で流れる
+    #[test]
+    fn gift_serializes_as_externally_tagged_for_websocket() {
+        let gift = MessageType::Gift(GiftDetails {
+            gift_name: "Press F".to_string(),
+            gift_image_url: None,
+            jewel_count: Some(10),
+        });
+        assert_eq!(
+            serde_json::to_value(&gift).unwrap(),
+            serde_json::json!({"Gift": {"gift_name": "Press F", "gift_image_url": null, "jewel_count": 10}})
+        );
+        assert_eq!(gift.as_str(), "gift");
     }
 }

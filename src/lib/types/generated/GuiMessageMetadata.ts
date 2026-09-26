@@ -5,4 +5,4 @@ import type { SuperChatColors } from "./SuperChatColors";
 /**
  * Message metadata
  */
-export type GuiMessageMetadata = { amount: string | null, milestone_months: number | null, gift_count: number | null, badges: Array<string>, badge_info: Array<BadgeInfo>, is_moderator: boolean, is_verified: boolean, superchat_colors: SuperChatColors | null, };
+export type GuiMessageMetadata = { amount: string | null, milestone_months: number | null, gift_count: number | null, gift_name: string | null, gift_image_url: string | null, jewel_count: number | null, badges: Array<string>, badge_info: Array<BadgeInfo>, is_moderator: boolean, is_verified: boolean, superchat_colors: SuperChatColors | null, };

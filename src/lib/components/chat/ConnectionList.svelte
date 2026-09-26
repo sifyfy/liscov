@@ -15,6 +15,11 @@
         <div class="connection-info">
           <span class="broadcaster-name">{conn.broadcasterName}</span>
           <span class="stream-title" data-testid="stream-title">{conn.streamTitle}</span>
+          {#if conn.jewelCountUnavailable}
+            <span class="jewel-notice" data-testid="jewel-count-notice">
+              ジュエル数を取得できません。配信者本人としてログインした接続でのみ取得できます
+            </span>
+          {/if}
         </div>
         <button
           class="disconnect-btn"
@@ -72,6 +77,10 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  .jewel-notice {
+    font-size: 0.7em;
+    color: var(--warning);
   }
   .disconnect-btn {
     padding: 2px 6px;

@@ -90,6 +90,12 @@ pub struct GuiMessageMetadata {
     pub amount: Option<String>,
     pub milestone_months: Option<u32>,
     pub gift_count: Option<u32>,
+    // ギフト名（gift のみ）
+    pub gift_name: Option<String>,
+    // ギフト画像 URL（gift のみ）
+    pub gift_image_url: Option<String>,
+    // ジュエル数（gift で本文から読めたときのみ）
+    pub jewel_count: Option<u32>,
     pub badges: Vec<String>,
     pub badge_info: Vec<BadgeInfo>,
     pub is_moderator: bool,
@@ -125,21 +131,29 @@ pub struct GuiChatMessage {
 
 impl From<ChatMessage> for GuiChatMessage {
     fn from(msg: ChatMessage) -> Self {
-        let (message_type, amount, milestone_months, gift_count) = match &msg.message_type {
-            crate::core::models::MessageType::Text => ("text".to_string(), None, None, None),
-            crate::core::models::MessageType::SuperChat { amount } => {
-                ("superchat".to_string(), Some(amount.clone()), None, None)
+        use crate::core::models::MessageType;
+        let message_type = msg.message_type.as_str().to_string();
+        let amount = match &msg.message_type {
+            MessageType::SuperChat { amount } | MessageType::SuperSticker { amount } => {
+                Some(amount.clone())
             }
-            crate::core::models::MessageType::SuperSticker { amount } => {
-                ("supersticker".to_string(), Some(amount.clone()), None, None)
-            }
-            crate::core::models::MessageType::Membership { milestone_months } => {
-                ("membership".to_string(), None, *milestone_months, None)
-            }
-            crate::core::models::MessageType::MembershipGift { gift_count } => {
-                ("membership_gift".to_string(), None, None, Some(*gift_count))
-            }
-            crate::core::models::MessageType::System => ("system".to_string(), None, None, None),
+            _ => None,
+        };
+        let milestone_months = match &msg.message_type {
+            MessageType::Membership { milestone_months } => *milestone_months,
+            _ => None,
+        };
+        let gift_count = match &msg.message_type {
+            MessageType::MembershipGift { gift_count } => Some(*gift_count),
+            _ => None,
+        };
+        let (gift_name, gift_image_url, jewel_count) = match &msg.message_type {
+            MessageType::Gift(gift) => (
+                Some(gift.gift_name.clone()),
+                gift.gift_image_url.clone(),
+                gift.jewel_count,
+            ),
+            _ => (None, None, None),
         };
 
         // runs を core models から GUI models に変換
@@ -165,6 +179,9 @@ impl From<ChatMessage> for GuiChatMessage {
             amount: m.amount,
             milestone_months,
             gift_count,
+            gift_name,
+            gift_image_url,
+            jewel_count,
             badges: m.badges,
             badge_info: m
                 .badge_info

@@ -7,6 +7,7 @@ pub mod backends;
 pub mod config;
 pub mod process;
 
+use crate::core::models::GiftDetails;
 use regex::Regex;
 use std::collections::VecDeque;
 use std::sync::{Arc, LazyLock};
@@ -433,10 +434,67 @@ pub(crate) fn build_tts_text(
     parts.join("、")
 }
 
+/// ギフトの読み上げ本文（04_tts.md「ギフトの読み上げ」）
+///
+/// ジュエル数は分かっていて `read_jewels`（= read_superchat_amount）が true のときだけ読む
+pub(crate) fn gift_message(gift: &GiftDetails, read_jewels: bool) -> String {
+    match gift.jewel_count.filter(|_| read_jewels) {
+        Some(jewels) => format!("{}ジュエルの{}のギフト", jewels, gift.gift_name),
+        None => format!("{}のギフト", gift.gift_name),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serial_test::serial;
+
+    // ========================================================================
+    // ギフトの読み上げ (04_tts.md「ギフトの読み上げ」)
+    // ========================================================================
+
+    fn gift_tts(name: &str, jewels: Option<u32>, read_superchat_amount: bool) -> String {
+        let gift = GiftDetails {
+            gift_name: name.to_string(),
+            gift_image_url: None,
+            jewel_count: jewels,
+        };
+        build_tts_text(
+            Some("@山田太郎-xyz"),
+            None,
+            &gift_message(&gift, read_superchat_amount),
+            true,
+            true,
+            true,
+            true,
+            read_superchat_amount,
+            200,
+        )
+    }
+
+    #[test]
+    fn gift_without_jewels() {
+        assert_eq!(
+            gift_tts("Hiding", None, true),
+            "山田太郎さん、Hidingのギフト"
+        );
+    }
+
+    #[test]
+    fn gift_with_jewels() {
+        assert_eq!(
+            gift_tts("Press F", Some(10), true),
+            "山田太郎さん、10ジュエルのPress Fのギフト"
+        );
+    }
+
+    #[test]
+    fn gift_with_jewels_when_amount_reading_off() {
+        assert_eq!(
+            gift_tts("Press F", Some(10), false),
+            "山田太郎さん、Press Fのギフト"
+        );
+    }
 
     // ========================================================================
     // process_author_name (04_tts.md: 投稿者名処理)
@@ -1512,11 +1570,8 @@ mod tests {
         assert!(manager.is_processing().await);
         manager.stop_processing().await;
         // is_processing が false になるまでポーリング (最大 5 秒)
-        let deadline =
-            std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while manager.is_processing().await
-            && std::time::Instant::now() < deadline
-        {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while manager.is_processing().await && std::time::Instant::now() < deadline {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
         assert!(!manager.is_processing().await);
@@ -1532,9 +1587,7 @@ mod tests {
     // ========================================================================
 
     /// end-to-end テスト用ヘルパー: manager + speak_calls 共有参照を生成
-    fn build_e2e_manager(
-        config: TtsConfig,
-    ) -> (TtsManager, Arc<Mutex<Vec<String>>>) {
+    fn build_e2e_manager(config: TtsConfig) -> (TtsManager, Arc<Mutex<Vec<String>>>) {
         let mock = MockTtsBackend::connected();
         let calls = Arc::clone(&mock.speak_calls);
         let manager = TtsManager::with_backend(config, Some(Box::new(mock)));
@@ -1553,8 +1606,7 @@ mod tests {
     ) -> Vec<String> {
         manager.start_processing().await;
         // queue が空になるまでポーリング (最大 5 秒)
-        let deadline =
-            std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while std::time::Instant::now() < deadline {
             if manager.queue_size().await == 0 {
                 break;

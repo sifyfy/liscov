@@ -55,6 +55,8 @@
   });
 
   function handleMessageClick(message: ChatMessage) {
+    // 視聴者を特定できないギフト（channel_id が空）は視聴者情報パネルを開かない
+    if (!message.channel_id) return;
     selectedViewer = {
       channelId: message.channel_id,
       displayName: message.author,

@@ -15,8 +15,13 @@ static GIFT_JA_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(\d+)\s*人").expect("正規表現コンパイル失敗"));
 static GIFT_SENT_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"Sent\s+(\d+)").expect("正規表現コンパイル失敗"));
-static GIFT_EN_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(\d+)\s+(?:gift\s+)?memberships?").expect("正規表現コンパイル失敗"));
+static GIFT_EN_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(\d+)\s+(?:gift\s+)?memberships?").expect("正規表現コンパイル失敗")
+});
+// ジュエルで送るギフトの本文: "sent Press F for 10 Jewels" / "sent Hiding"
+static JEWEL_GIFT_TEXT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^sent (.+?)(?: for (\d+) Jewels?)?$").expect("正規表現コンパイル失敗")
+});
 
 /// 正規表現の最初のキャプチャグループを u32 としてパースする
 fn capture_u32(re: &Regex, text: &str) -> Option<u32> {
@@ -449,6 +454,96 @@ fn parse_membership_gift_message(renderer: &Value) -> Option<ChatMessage> {
     })
 }
 
+/// ギフト（giftMessageViewModel）の本文とアクセシビリティラベルから (ギフト名, ジュエル数) を取り出す
+///
+/// 本文 "sent <名前> for <n> Jewels" を優先し、読めなければラベル "... sent a gift, <名前>" を使う。
+fn parse_gift_text(text: Option<&str>, a11y_label: Option<&str>) -> (Option<String>, Option<u32>) {
+    if let Some(caps) = text.and_then(|t| JEWEL_GIFT_TEXT_RE.captures(t.trim())) {
+        let jewels = caps.get(2).and_then(|m| m.as_str().parse().ok());
+        return (Some(caps[1].to_string()), jewels);
+    }
+    let from_label = a11y_label
+        .and_then(|label| label.split_once("sent a gift, "))
+        .map(|(_, name)| name.trim().to_string())
+        .filter(|name| !name.is_empty());
+    (from_label, None)
+}
+
+/// ジュエルで送るギフトをパースする（channel_id とタイムスタンプは届かない）
+fn parse_jewel_gift_message(view_model: &Value) -> Option<ChatMessage> {
+    let id = view_model.get("id")?.as_str()?.to_string();
+    let text = view_model.pointer("/text/content").and_then(|v| v.as_str());
+    let a11y_label = view_model
+        .get("giftImageA11yLabel")
+        .and_then(|v| v.as_str());
+
+    let (gift_name, jewel_count) = parse_gift_text(text, a11y_label);
+    let gift_name = gift_name.unwrap_or_else(|| {
+        tracing::warn!(
+            "ギフト名を読めない（形式変更の可能性）: text={:?}, label={:?}",
+            text,
+            a11y_label
+        );
+        "ギフト".to_string()
+    });
+
+    // 画像 URL はスキーム無し（//www.gstatic.com/...）で届くので https: を補う
+    let gift_image_url = view_model
+        .pointer("/giftImage/sources")
+        .and_then(|v| v.as_array())
+        .and_then(|sources| {
+            sources
+                .iter()
+                .min_by_key(|s| s.get("width").and_then(|w| w.as_u64()).unwrap_or(u64::MAX))
+        })
+        .and_then(|s| s.get("url")?.as_str())
+        .map(|url| match url.strip_prefix("//") {
+            Some(rest) => format!("https://{}", rest),
+            None => url.to_string(),
+        });
+
+    let author = view_model
+        .pointer("/authorName/content")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "Unknown".to_string());
+
+    let author_icon_url = view_model
+        .pointer("/authorAvatar/avatarViewModel/image/sources/0/url")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let timestamp_usec = chrono::Utc::now().timestamp_micros().to_string();
+
+    Some(ChatMessage {
+        id,
+        timestamp: format_timestamp(&timestamp_usec),
+        timestamp_usec,
+        message_type: MessageType::Gift(GiftDetails {
+            gift_name: gift_name.clone(),
+            gift_image_url,
+            jewel_count,
+        }),
+        author,
+        author_icon_url,
+        channel_id: String::new(),
+        content: gift_name,
+        runs: vec![],
+        metadata: Some(MessageMetadata {
+            amount: None,
+            badges: vec![],
+            badge_info: vec![],
+            color: None,
+            is_moderator: false,
+            is_verified: false,
+            superchat_colors: None,
+        }),
+        is_member: false,
+        is_first_time_viewer: false,
+        in_stream_comment_count: None,
+    })
+}
+
 /// 1件のチャットアクションをパースして `ChatMessage` に変換する
 pub fn parse_chat_action(action: &Value) -> Option<ChatMessage> {
     let item = action
@@ -469,6 +564,9 @@ pub fn parse_chat_action(action: &Value) -> Option<ChatMessage> {
     }
     if let Some(renderer) = item.get("liveChatSponsorshipsGiftPurchaseAnnouncementRenderer") {
         return parse_membership_gift_message(renderer);
+    }
+    if let Some(view_model) = item.get("giftMessageViewModel") {
+        return parse_jewel_gift_message(view_model);
     }
     None
 }
@@ -919,5 +1017,129 @@ mod tests {
         assert_eq!(colors.body_background, "#1E88E5", "body_background は青");
         assert_eq!(colors.header_text, "#FFFFFF", "header_text は白");
         assert_eq!(colors.body_text, "#FFFFFF", "body_text は白");
+    }
+
+    // ========================================================================
+    // ギフト（giftMessageViewModel）— 02_chat.md「ギフト」のパース表
+    // ========================================================================
+
+    fn gift_action(text: Option<&str>, a11y: Option<&str>, with_image: bool) -> Value {
+        let mut vm = serde_json::json!({
+            "id": "gift_msg_1",
+            "authorName": {"content": "@viewer-a1b "},
+            "authorAvatar": {"avatarViewModel": {"image": {"sources": [
+                {"url": "https://yt4.ggpht.com/avatar=s64"}
+            ]}}}
+        });
+        if let Some(t) = text {
+            vm["text"] = serde_json::json!({"content": t});
+        }
+        if let Some(label) = a11y {
+            vm["giftImageA11yLabel"] = serde_json::json!(label);
+        }
+        if with_image {
+            vm["giftImage"] = serde_json::json!({"sources": [
+                {"url": "//www.gstatic.com/youtube/img/pdg/gift/assets/press_f.png=w640-h640", "width": 640, "height": 640},
+                {"url": "//www.gstatic.com/youtube/img/pdg/gift/assets/press_f.png=w480-h480", "width": 480, "height": 480}
+            ]});
+        }
+        serde_json::json!({"addChatItemAction": {"item": {"giftMessageViewModel": vm}}})
+    }
+
+    fn parse_gift(action: &Value) -> (ChatMessage, String, Option<String>, Option<u32>) {
+        let msg = parse_chat_action(action).expect("ギフトがパースされること");
+        match msg.message_type.clone() {
+            MessageType::Gift(GiftDetails {
+                gift_name,
+                gift_image_url,
+                jewel_count,
+            }) => (msg, gift_name, gift_image_url, jewel_count),
+            other => panic!("Gift を期待: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn gift_with_jewels_plural() {
+        let (_, name, _, jewels) =
+            parse_gift(&gift_action(Some("sent Press F for 10 Jewels"), None, true));
+        assert_eq!(name, "Press F");
+        assert_eq!(jewels, Some(10));
+    }
+
+    #[test]
+    fn gift_with_jewel_singular() {
+        let (_, name, _, jewels) =
+            parse_gift(&gift_action(Some("sent Press F for 1 Jewel"), None, true));
+        assert_eq!(name, "Press F");
+        assert_eq!(jewels, Some(1));
+    }
+
+    #[test]
+    fn gift_without_jewels() {
+        let (_, name, _, jewels) = parse_gift(&gift_action(Some("sent Hiding"), None, true));
+        assert_eq!(name, "Hiding");
+        assert_eq!(jewels, None);
+    }
+
+    #[test]
+    fn gift_name_falls_back_to_a11y_label() {
+        let label = Some("@x sent a gift, Hiding");
+        for text in [Some("ギフトを送りました"), Some(""), None] {
+            let (_, name, _, jewels) = parse_gift(&gift_action(text, label, true));
+            assert_eq!(name, "Hiding", "text={:?}", text);
+            assert_eq!(jewels, None);
+        }
+    }
+
+    #[test]
+    fn gift_name_defaults_when_unreadable() {
+        let (_, name, _, jewels) = parse_gift(&gift_action(None, None, true));
+        assert_eq!(name, "ギフト");
+        assert_eq!(jewels, None);
+    }
+
+    #[test]
+    fn gift_author_is_trimmed_handle() {
+        let (msg, ..) = parse_gift(&gift_action(Some("sent Hiding"), None, true));
+        assert_eq!(msg.author, "@viewer-a1b");
+    }
+
+    #[test]
+    fn gift_image_url_gets_https_and_smallest_width() {
+        let (_, _, image, _) = parse_gift(&gift_action(Some("sent Press F"), None, true));
+        assert_eq!(
+            image.as_deref(),
+            Some("https://www.gstatic.com/youtube/img/pdg/gift/assets/press_f.png=w480-h480")
+        );
+    }
+
+    #[test]
+    fn gift_without_image() {
+        let (_, _, image, _) = parse_gift(&gift_action(Some("sent Hiding"), None, false));
+        assert_eq!(image, None);
+    }
+
+    #[test]
+    fn gift_has_no_channel_id_badges_or_membership() {
+        let (msg, ..) = parse_gift(&gift_action(Some("sent Hiding"), None, true));
+        assert_eq!(msg.id, "gift_msg_1");
+        assert_eq!(msg.channel_id, "");
+        assert!(!msg.is_member);
+        assert!(msg.metadata.as_ref().is_none_or(|m| m.badges.is_empty()));
+        assert_eq!(msg.content, "Hiding");
+        assert_eq!(
+            msg.author_icon_url.as_deref(),
+            Some("https://yt4.ggpht.com/avatar=s64")
+        );
+    }
+
+    #[test]
+    fn gift_timestamp_is_receipt_time() {
+        let before = chrono::Utc::now().timestamp_micros();
+        let (msg, ..) = parse_gift(&gift_action(Some("sent Hiding"), None, true));
+        let after = chrono::Utc::now().timestamp_micros();
+        let usec: i64 = msg.timestamp_usec.parse().expect("マイクロ秒文字列");
+        assert!(before <= usec && usec <= after);
+        assert_eq!(msg.timestamp, format_timestamp(&msg.timestamp_usec));
     }
 }

@@ -3,7 +3,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { listen } from '@tauri-apps/api/event';
 import * as chatApi from '$lib/tauri/chat';
-import type { ConnectionResult, ConnectionInfo } from '$lib/types';
+import type { ChatMessage, ConnectionResult, ConnectionInfo } from '$lib/types';
 
 // chatApiをモック（setupファイルより前に宣言することでホイスティングを確保）
 vi.mock('$lib/tauri/chat', () => ({
@@ -1435,5 +1435,114 @@ describe('chatStore initDisplaySettings', () => {
 		store.cleanup();
 		vi.doUnmock('$lib/tauri/chat');
 		vi.doUnmock('./config.svelte');
+	});
+});
+
+// spec: docs/specs/02_chat.md「ジュエル数を取れない接続の知らせ」
+describe('chatStore ジュエル数を取れない接続の注記', () => {
+	let store: typeof import('./chat.svelte').chatStore;
+	let emitMessage: (msg: ChatMessage) => void;
+
+	function giftMessage(connectionId: number, jewelCount: number | null, id = 'g1'): ChatMessage {
+		return {
+			id,
+			timestamp: '2026-09-27T01:00:00+09:00',
+			timestamp_usec: '0',
+			author: '@viewer-a1b',
+			author_icon_url: null,
+			channel_id: '',
+			content: 'Hiding',
+			runs: [],
+			message_type: 'gift',
+			amount: null,
+			is_member: false,
+			is_first_time_viewer: false,
+			in_stream_comment_count: null,
+			metadata: {
+				amount: null,
+				milestone_months: null,
+				gift_count: null,
+				gift_name: 'Hiding',
+				gift_image_url: null,
+				jewel_count: jewelCount,
+				badges: [],
+				badge_info: [],
+				is_moderator: false,
+				is_verified: false,
+				superchat_colors: null,
+			},
+			connection_id: BigInt(connectionId),
+			platform: 'youtube',
+			broadcaster_name: 'Alice',
+		};
+	}
+
+	beforeEach(async () => {
+		vi.clearAllMocks();
+		vi.mocked(listen).mockReset();
+		vi.mocked(listen).mockImplementation(async (event: string, handler: unknown) => {
+			if (event === 'chat:message') {
+				emitMessage = (msg: ChatMessage) =>
+					(handler as (e: { payload: ChatMessage }) => void)({ payload: msg });
+			}
+			return () => {};
+		});
+		vi.resetModules();
+		vi.doMock('$lib/tauri/chat', () => ({
+			connectToStream: vi.fn(),
+			disconnectStream: vi.fn(),
+			disconnectAllStreams: vi.fn(),
+			setChatMode: vi.fn(),
+			getConnections: vi.fn(),
+		}));
+		vi.doMock('./config.svelte', () => ({
+			configStore: {
+				isLoaded: false,
+				messageFontSize: 13,
+				showTimestamps: true,
+				autoScrollEnabled: true,
+				setMessageFontSize: vi.fn(),
+			},
+		}));
+		const mod = await import('./chat.svelte');
+		store = mod.chatStore;
+		await store.setupEventListeners();
+
+		const { connectToStream } = await import('$lib/tauri/chat');
+		vi.mocked(connectToStream)
+			.mockResolvedValueOnce(makeSuccessResult({ connection_id: BigInt(1) }))
+			.mockResolvedValueOnce(makeSuccessResult({ connection_id: BigInt(2), broadcaster_channel_id: 'UC_bob' }));
+		await store.connect('https://www.youtube.com/watch?v=a');
+		await store.connect('https://www.youtube.com/watch?v=b');
+	});
+
+	afterEach(() => {
+		store.cleanup();
+		vi.doUnmock('$lib/tauri/chat');
+		vi.doUnmock('./config.svelte');
+	});
+
+	it('接続直後は注記を出さない', () => {
+		expect(store.connections.get(1)?.jewelCountUnavailable).toBe(false);
+	});
+
+	it('jewel_count = null のギフトを受けた接続だけ注記を出す', () => {
+		emitMessage(giftMessage(1, null));
+		expect(store.connections.get(1)?.jewelCountUnavailable).toBe(true);
+		expect(store.connections.get(2)?.jewelCountUnavailable).toBe(false);
+	});
+
+	it('jewel_count があるギフトだけなら注記を出さない', () => {
+		emitMessage(giftMessage(1, 10));
+		expect(store.connections.get(1)?.jewelCountUnavailable).toBe(false);
+	});
+
+	it('再接続（新しい接続）では注記が消える', async () => {
+		emitMessage(giftMessage(1, null));
+		await store.disconnect(1);
+		const { connectToStream } = await import('$lib/tauri/chat');
+		vi.mocked(connectToStream).mockResolvedValueOnce(makeSuccessResult({ connection_id: BigInt(3) }));
+		await store.connect('https://www.youtube.com/watch?v=a');
+		expect(store.connections.get(3)?.jewelCountUnavailable).toBe(false);
 	});
 });

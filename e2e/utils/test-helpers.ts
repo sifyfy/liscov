@@ -499,6 +499,7 @@ export async function addMockMessage(message: {
   tier?: string;
   milestone_months?: number;
   gift_count?: number;
+  gift_image_url?: string;
 }): Promise<void> {
   await fetch(`${MOCK_SERVER_URL}/add_message`, {
     method: 'POST',

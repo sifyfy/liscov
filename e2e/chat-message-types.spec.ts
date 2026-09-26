@@ -547,4 +547,93 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
       await disconnectAndInitialize(mainPage);
     });
   });
+
+  // spec: 02_chat.md「ギフト」— ジュエルで送るギフト（giftMessageViewModel、channelId 無し）
+  test.describe('ギフト（ジュエル）', () => {
+    async function connect(videoId: string) {
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=${videoId}`);
+      await mainPage.locator('button:has-text("開始")').click();
+      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+    }
+
+    function giftRow(author: string, giftName: string) {
+      return mainPage.locator('[data-message-id]').filter({
+        has: mainPage.locator(`text=${author} が ${giftName} を送りました`),
+      }).first();
+    }
+
+    test('ジュエル数付きのギフトを名前とジュエル数付きで表示し、注記は出さない', async () => {
+      await connect('test_video_gift_jewels');
+      await addMockMessage({
+        message_type: 'gift',
+        author: '@gift-jewel-user',
+        content: 'sent Press F for 10 Jewels',
+      });
+
+      const row = giftRow('@gift-jewel-user', 'Press F');
+      await expect(row).toBeVisible({ timeout: 5000 });
+      await expect(row.locator('[data-testid="gift-jewels"]')).toHaveText('10 ジュエル');
+      await expect(mainPage.locator('[data-testid="jewel-count-notice"]')).toHaveCount(0);
+
+      await disconnectAndInitialize(mainPage);
+    });
+
+    test('ジュエル数の無いギフトを受けた接続に注記を出す', async () => {
+      await connect('test_video_gift_no_jewels');
+      await addMockMessage({
+        message_type: 'gift',
+        author: '@gift-plain-user',
+        content: 'sent Hiding',
+      });
+
+      const row = giftRow('@gift-plain-user', 'Hiding');
+      await expect(row).toBeVisible({ timeout: 5000 });
+      await expect(row.locator('[data-testid="gift-jewels"]')).toHaveCount(0);
+      await expect(mainPage.locator('[data-testid="jewel-count-notice"]')).toBeVisible();
+
+      await disconnectAndInitialize(mainPage);
+    });
+
+    test('同じ接続でコメント済みの視聴者のギフトは同一人物として数える', async () => {
+      await connect('test_video_gift_resolved');
+      await addMockMessage({
+        message_type: 'text',
+        author: '@gift-regular',
+        content: 'ギフト前のコメント',
+        channel_id: 'UC_gift_regular',
+      });
+      await expect(mainPage.locator('text=ギフト前のコメント')).toBeVisible({ timeout: 5000 });
+
+      await addMockMessage({
+        message_type: 'gift',
+        author: '@gift-regular',
+        content: 'sent Hiding',
+      });
+      const row = giftRow('@gift-regular', 'Hiding');
+      await expect(row).toBeVisible({ timeout: 5000 });
+      // handle から channel_id を特定できたので配信内コメント回数が続く
+      await expect(row.getByText('#2')).toBeVisible();
+
+      await disconnectAndInitialize(mainPage);
+    });
+
+    test('視聴者を特定できないギフトは回数を出さず、クリックしても視聴者情報を開かない', async () => {
+      await connect('test_video_gift_unresolved');
+      await addMockMessage({
+        message_type: 'gift',
+        author: '@gift-stranger',
+        content: 'sent Hiding',
+      });
+      const row = giftRow('@gift-stranger', 'Hiding');
+      await expect(row).toBeVisible({ timeout: 5000 });
+      await expect(row.getByText(/^#\d+$/)).toHaveCount(0);
+      await expect(row.getByText('初見さん')).toHaveCount(0);
+
+      await row.click();
+      await expect(mainPage.locator('h2:has-text("視聴者情報")')).toHaveCount(0);
+
+      await disconnectAndInitialize(mainPage);
+    });
+  });
 });
