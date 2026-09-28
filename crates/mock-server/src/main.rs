@@ -26,12 +26,19 @@ use warp::Filter;
 /// HTTPモックでは代替名を使用してCookieパイプライン完全性を検証する。
 const MOCK_SECURE_COOKIE: &str = "SecurePSID";
 
+/// token を読む（%3D のパディング付き・無しの URL-safe base64、および標準 base64）
+fn decode_mock_token(token: &str) -> Option<Vec<u8>> {
+    let unpadded = token.replace("%3D", "=");
+    let trimmed = unpadded.trim_end_matches('=');
+    general_purpose::URL_SAFE_NO_PAD
+        .decode(trimmed)
+        .or_else(|_| general_purpose::STANDARD_NO_PAD.decode(trimmed))
+        .ok()
+}
+
 /// Detect chat mode from continuation token by parsing Protocol Buffer binary data
 fn detect_chat_mode_from_token(token: &str) -> Option<String> {
-    let decoded = general_purpose::URL_SAFE_NO_PAD
-        .decode(token)
-        .or_else(|_| general_purpose::STANDARD.decode(token))
-        .ok()?;
+    let decoded = decode_mock_token(token)?;
 
     // Pattern 1: Field 16 (0x82 0x01) + 1-byte length + 0x08 + chattype
     for i in 0..decoded.len().saturating_sub(4) {
@@ -101,12 +108,9 @@ fn validate_continuation_token(token: &str) -> TokenValidation {
     };
 
     // Try to decode
-    let decoded = match general_purpose::URL_SAFE_NO_PAD
-        .decode(token)
-        .or_else(|_| general_purpose::STANDARD.decode(token))
-    {
-        Ok(d) => d,
-        Err(_) => {
+    let decoded = match decode_mock_token(token) {
+        Some(d) => d,
+        None => {
             return TokenValidation {
                 received: true,
                 decode_success: false,
@@ -1113,27 +1117,25 @@ fn gen_logged_in_html() -> String {
 /// Generate a mock continuation token with proper Protocol Buffer structure
 /// that includes the chattype field (4=TopChat, 1=AllChat)
 fn generate_mock_continuation_token(chattype: u8) -> String {
-    // Build a minimal Protocol Buffer structure:
-    // Field 16 (0x82 0x01) + length(2) + Field 1 (0x08) + chattype
-    // Plus some random data to make each token unique
+    // 実データと同じ構造: field 119693434 { field 2: 乱数, field 16 { field 1: chattype }, field 4: 乱数, field 6: 0 }
+    // 実データと同じく URL-safe base64 で、パディングは %3D にする（02_chat.md「token の形式」）
     let random_data: u32 = rand::random();
-    let bytes: Vec<u8> = vec![
-        0xd2,
-        0x87,
-        0xcc,
-        0xc8,
-        0x03, // Some header bytes
+    let inner: Vec<u8> = vec![
         0x10,
-        (random_data & 0xFF) as u8, // Field 2 with random value
+        (random_data & 0x7F) as u8, // Field 2 with random value
         0x82,
         0x01,
         0x02,
         0x08,
         chattype, // Field 16 with chattype
         0x20,
-        ((random_data >> 8) & 0xFF) as u8, // Trailing field
+        ((random_data >> 8) & 0x7F) as u8, // Trailing field
+        0x30,
+        0x00, // Field 6（全体を 17 バイトにして、実データと同じく末尾に = が 1 つ付くようにする）
     ];
-    general_purpose::URL_SAFE_NO_PAD.encode(&bytes)
+    let mut bytes: Vec<u8> = vec![0xd2, 0x87, 0xcc, 0xc8, 0x03, inner.len() as u8]; // Field 119693434
+    bytes.extend_from_slice(&inner);
+    general_purpose::URL_SAFE.encode(&bytes).replace('=', "%3D")
 }
 
 /// 実データと同じ形の emojiFountainDataEntity を作る（1 秒単位のバケット）

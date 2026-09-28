@@ -363,27 +363,47 @@ InnerTubeClient の所有権は監視タスクに一本化されており、コ�
 ```
 set_chat_mode(connection_id, mode)
   → StreamConnection.chat_mode_tx.send(mode)  // watch チャネルで送信
-  → 監視ループの次回ポーリング前に chat_mode_rx.has_changed() で検知
-  → client.set_chat_mode(mode) を適用
+  → 監視ループがポーリングのたびに chat_mode_rx の最新値（選ばれたモード）を読む
+  → クライアントの現在のモードと違えば client.set_chat_mode(mode) を適用（失敗したら次のポーリングでやり直す）
   → 次のAPIリクエストで新しいcontinuation tokenが使用される
 ```
 
 > **注意**: モード変更は非同期で適用される。`set_chat_mode` コマンドの戻り値 `true` は「要求受付成功」を意味し、「即時適用完了」ではない。
 
+#### 切り替えの振る舞い
+
+| 状況 | 結果 |
+|------|------|
+| 接続中に「全て」を選ぶ | 次のポーリングから「全て」で取得する |
+| continuation token の書き換えに失敗した（形式が想定外など） | warn ログを出し、次のポーリングで新しい token に対してやり直す。反映されるまで毎回試す |
+| 反映前に別のモードを選び直した | 最後に選んだモードだけを反映する |
+
 #### InnerTubeClient内部の切り替え方式
 
-**方式1: Binary Modification（高速）**
+continuation token の中のチャットモードの値を書き換える（Binary Modification）。
 
-Continuation tokenのバイト列を直接修正する。
+**token の形式（実データで確認）:**
 
-```
-Field 16内のNested Field 1を探索
-値: 0x04 = TopChat, 0x01 = AllChat
-```
+| 項目 | 内容 |
+|------|------|
+| 文字 | URL-safe base64（`-` `_` を使う） |
+| パディング | 付くことがあり、`=` はパーセントエンコードされて `%3D` で届く（観測では約26%） |
+| 構造 | protobuf。field 119693434（メッセージ）→ field 16（メッセージ）→ field 1（varint）がチャットモード。4 = TopChat、1 = AllChat |
 
-**方式2: Reload Token経由（確実）**
+**書き換え:**
 
-HTMLから取得した`reload_token`を使用して新しいcontinuation tokenを取得する。
+1. `%3D` を `=` に戻し、パディングの有無どちらでも URL-safe base64 として読む
+2. protobuf として上の経路をたどり、field 1 の値を書き換える（1 と 4 はどちらも1バイトなので長さは変わらない）。それ以外のバイトは変えない
+3. URL-safe base64（パディング無し）で書き戻す
+
+| 入力 | 結果 |
+|------|------|
+| field 16 の field 1 = 4 の token を AllChat に | field 1 だけが 1 になった token |
+| 末尾が `%3D` の token | 同じく書き換えられる |
+| 経路のどこかが無い・protobuf として読めない | 失敗（None）。token は変えない |
+| すでに目的のモード | そのまま成功 |
+
+経路はバイト列の見た目ではなく protobuf の構造でたどる。見た目で探すと、時刻などの別の値の中にある同じバイト列を書き換えてしまう（実データで8件観測）。
 
 ### 認証ヘッダー（メンバー限定配信用）
 

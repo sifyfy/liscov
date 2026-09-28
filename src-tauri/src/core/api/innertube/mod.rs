@@ -197,6 +197,11 @@ impl InnerTubeClient {
             }
         }
 
+        // 初期 token のモードを現在のモードとして持つ
+        if let Some(token) = self.continuation.take() {
+            self.adopt_continuation(token);
+        }
+
         Ok(ConnectionStatus {
             is_connected: self.continuation.is_some(),
             stream_title: self.stream_title.clone(),
@@ -253,7 +258,7 @@ impl InnerTubeClient {
         let data: serde_json::Value = serde_json::from_str(&raw_json)?;
 
         if let Some(new_continuation) = client::extract_continuation(&data) {
-            self.continuation = Some(new_continuation);
+            self.adopt_continuation(new_continuation);
         }
 
         Ok(ChatFetch {
@@ -261,6 +266,17 @@ impl InnerTubeClient {
             reactions: reaction_parser::parse_reaction_updates(&data),
             raw_json,
         })
+    }
+
+    /// 届いた continuation token を使うようにし、そのモードを現在のモードとして持つ
+    ///
+    /// YouTube は受け取った token のモードを保って次の token を返すが、切替の要否は
+    /// 実際の token で判定したいので、読めたときはそのモードに合わせる。
+    fn adopt_continuation(&mut self, token: String) {
+        if let Some(mode) = super::continuation_builder::detect_chat_mode(&token) {
+            self.chat_mode = mode;
+        }
+        self.continuation = Some(token);
     }
 
     /// 現在の接続状態を返す
@@ -280,6 +296,7 @@ impl InnerTubeClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::api::continuation_builder::test_token;
 
     #[test]
     fn test_set_chat_mode_without_continuation() {
@@ -305,73 +322,51 @@ mod tests {
 
     #[test]
     fn test_set_chat_mode_with_valid_token() {
-        use base64::{Engine as _, engine::general_purpose};
-
-        // 有効な chattype フィールド構造を持つトークンを作成する
-        // Field 16 (0x82 0x01) + length(2) + Field 1 (0x08) + value(4=TopChat)
-        let inner = vec![
-            0xd2, 0x87, 0xcc, 0xc8, 0x03, // YouTube ヘッダー
-            0x10, 0x00, // フィールド
-            0x82, 0x01, 0x02, 0x08, 0x04, // Field 16: chattype=4 (TopChat)
-            0x20, 0x00, // 末尾フィールド
-        ];
-        let token = general_purpose::URL_SAFE_NO_PAD.encode(&inner);
-
         let mut client = InnerTubeClient::new("test_video");
-        client.continuation = Some(token);
+        client.continuation = Some(test_token(4, true));
 
-        // AllChat に切り替える
-        let result = client.set_chat_mode(ChatMode::AllChat);
-        assert!(result, "有効なトークンで成功すること");
+        assert!(client.set_chat_mode(ChatMode::AllChat));
         assert_eq!(client.get_chat_mode(), ChatMode::AllChat);
+        assert_eq!(client.detect_chat_mode(), Some(ChatMode::AllChat));
 
-        // トークンが変更されていることを確認する
-        let new_token = client.continuation.as_ref().unwrap();
-        let decoded = general_purpose::URL_SAFE_NO_PAD.decode(new_token).unwrap();
-        assert_eq!(
-            decoded[11], 0x01,
-            "chattype が 1 (AllChat) になっていること"
-        );
+        assert!(client.set_chat_mode(ChatMode::TopChat));
+        assert_eq!(client.get_chat_mode(), ChatMode::TopChat);
+        assert_eq!(client.detect_chat_mode(), Some(ChatMode::TopChat));
+    }
 
-        // TopChat に戻す
-        let result = client.set_chat_mode(ChatMode::TopChat);
-        assert!(result, "TopChat への切り替えが成功すること");
+    // 02_chat.md: 書き換えに失敗したら、次のポーリングで新しい token に対してやり直せる
+    #[test]
+    fn test_set_chat_mode_retry_after_failure() {
+        let mut client = InnerTubeClient::new("test_video");
+        client.continuation = Some("broken".to_string());
+        assert!(!client.set_chat_mode(ChatMode::AllChat));
         assert_eq!(client.get_chat_mode(), ChatMode::TopChat);
 
-        let new_token = client.continuation.as_ref().unwrap();
-        let decoded = general_purpose::URL_SAFE_NO_PAD.decode(new_token).unwrap();
-        assert_eq!(
-            decoded[11], 0x04,
-            "chattype が 4 (TopChat) になっていること"
-        );
+        // 次のポーリングで届いた token
+        client.adopt_continuation(test_token(4, false));
+        assert!(client.set_chat_mode(ChatMode::AllChat));
+        assert_eq!(client.detect_chat_mode(), Some(ChatMode::AllChat));
+    }
+
+    // 届いた token のモードをクライアントの現在のモードとして持つ（切替要否の判定を実態に合わせる）
+    #[test]
+    fn test_adopt_continuation_follows_token_mode() {
+        let mut client = InnerTubeClient::new("test_video");
+        client.adopt_continuation(test_token(1, true));
+        assert_eq!(client.get_chat_mode(), ChatMode::AllChat);
+
+        // モードを読めない token ではモードを変えない
+        client.adopt_continuation("broken".to_string());
+        assert_eq!(client.get_chat_mode(), ChatMode::AllChat);
     }
 
     #[test]
     fn test_detect_chat_mode() {
-        use base64::{Engine as _, engine::general_purpose};
-
-        // TopChat トークン
-        let inner_top = vec![
-            0xd2, 0x87, 0xcc, 0xc8, 0x03, 0x10, 0x00, 0x82, 0x01, 0x02, 0x08,
-            0x04, // chattype=4 (TopChat)
-            0x20, 0x00,
-        ];
-        let top_token = general_purpose::URL_SAFE_NO_PAD.encode(&inner_top);
-
         let mut client = InnerTubeClient::new("test_video");
-        client.continuation = Some(top_token);
-
+        client.continuation = Some(test_token(4, false));
         assert_eq!(client.detect_chat_mode(), Some(ChatMode::TopChat));
 
-        // AllChat トークン
-        let inner_all = vec![
-            0xd2, 0x87, 0xcc, 0xc8, 0x03, 0x10, 0x00, 0x82, 0x01, 0x02, 0x08,
-            0x01, // chattype=1 (AllChat)
-            0x20, 0x00,
-        ];
-        let all_token = general_purpose::URL_SAFE_NO_PAD.encode(&inner_all);
-        client.continuation = Some(all_token);
-
+        client.continuation = Some(test_token(1, true));
         assert_eq!(client.detect_chat_mode(), Some(ChatMode::AllChat));
     }
 }

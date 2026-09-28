@@ -174,20 +174,21 @@ pub async fn run_monitoring_loop<F, G, H>(
             break;
         }
 
-        // チャットモード変更要求があれば適用（クライアントを戻す前に処理）
-        if chat_mode_rx.has_changed().unwrap_or(false) {
-            let new_mode = *chat_mode_rx.borrow_and_update();
-            if client.set_chat_mode(new_mode) {
+        // 選ばれたモードと token のモードが違えば適用する（クライアントを戻す前に処理）
+        // 書き換えに失敗しても、次のポーリングで新しい token に対してやり直す（02_chat.md）
+        let desired_mode = *chat_mode_rx.borrow_and_update();
+        if client.get_chat_mode() != desired_mode {
+            if client.set_chat_mode(desired_mode) {
                 tracing::info!(
                     "チャットモード変更適用: connection_id={}, mode={:?}",
                     connection_id,
-                    new_mode
+                    desired_mode
                 );
             } else {
                 tracing::warn!(
-                    "チャットモード変更失敗: connection_id={}, mode={:?}",
+                    "チャットモード変更失敗（次のポーリングで再試行）: connection_id={}, mode={:?}",
                     connection_id,
-                    new_mode
+                    desired_mode
                 );
             }
         }
