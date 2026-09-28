@@ -8,6 +8,7 @@
 mod chat_parser;
 mod client;
 mod initial_data;
+mod reaction_parser;
 
 use crate::core::models::*;
 use anyhow::{Result, anyhow};
@@ -15,6 +16,14 @@ use reqwest::Client;
 
 pub use chat_parser::parse_chat_actions;
 pub use client::{get_innertube_api_url, get_youtube_base_url};
+
+/// 1 回のポーリングで取れたもの
+pub struct ChatFetch {
+    pub messages: Vec<ChatMessage>,
+    pub reactions: Vec<ReactionUpdate>,
+    /// 生のレスポンス JSON（05_raw_response.md の保存用）
+    pub raw_json: String,
+}
 
 /// InnerTube API クライアント
 pub struct InnerTubeClient {
@@ -205,12 +214,11 @@ impl InnerTubeClient {
 
     /// チャットメッセージを取得する（メッセージのみを返す）
     pub async fn fetch_messages(&mut self) -> Result<Vec<ChatMessage>> {
-        let (messages, _) = self.fetch_messages_with_raw().await?;
-        Ok(messages)
+        Ok(self.fetch_chat().await?.messages)
     }
 
-    /// チャットメッセージを取得し、生のレスポンス JSON も返す
-    pub async fn fetch_messages_with_raw(&mut self) -> Result<(Vec<ChatMessage>, String)> {
+    /// チャットメッセージ・ライブリアクションと生のレスポンス JSON を取得する
+    pub async fn fetch_chat(&mut self) -> Result<ChatFetch> {
         let continuation = self
             .continuation
             .as_ref()
@@ -248,8 +256,11 @@ impl InnerTubeClient {
             self.continuation = Some(new_continuation);
         }
 
-        let messages = chat_parser::parse_chat_actions(&data);
-        Ok((messages, raw_json))
+        Ok(ChatFetch {
+            messages: chat_parser::parse_chat_actions(&data),
+            reactions: reaction_parser::parse_reaction_updates(&data),
+            raw_json,
+        })
     }
 
     /// 現在の接続状態を返す

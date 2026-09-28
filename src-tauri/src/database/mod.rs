@@ -3,9 +3,11 @@
 mod crud;
 mod migrations;
 pub mod models;
+mod reactions;
 
 pub use crud::*;
 pub use models::*;
+pub use reactions::*;
 
 use anyhow::Result;
 use rusqlite::Connection;

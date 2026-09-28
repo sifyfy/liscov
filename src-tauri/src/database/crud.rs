@@ -297,12 +297,17 @@ pub fn upsert_viewer_stream(
     Ok(())
 }
 
+/// sessions.stream_url から同じ配信（video_id）のセッションを引く LIKE パターン
+pub(super) fn stream_url_pattern(video_id: &str) -> String {
+    format!("%watch?v={}%", video_id)
+}
+
 /// Get in-stream comment counts per channel_id for a given video_id
 pub fn get_in_stream_comment_counts(
     conn: &Connection,
     video_id: &str,
 ) -> Result<std::collections::HashMap<String, u32>> {
-    let like_pattern = format!("%watch?v={}%", video_id);
+    let like_pattern = stream_url_pattern(video_id);
     let mut stmt = conn.prepare(
         "SELECT m.channel_id, COUNT(*) as cnt
          FROM messages m

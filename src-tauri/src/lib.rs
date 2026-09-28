@@ -43,6 +43,7 @@ use commands::{
     disconnect_stream,
     export_current_messages,
     export_session_data,
+    get_connection_reactions,
     get_connections,
     // Analytics (spec: 07_revenue.md)
     get_revenue_analytics,
@@ -176,6 +177,7 @@ pub fn run() {
             disconnect_stream,
             disconnect_all_streams,
             get_connections,
+            get_connection_reactions,
             set_chat_mode,
             // Config (spec: 09_config.md)
             config_load,

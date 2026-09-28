@@ -6,7 +6,10 @@ use crate::commands::config::ConfigState;
 use crate::connection::{ConnectionInfo, MAX_CONNECTIONS, StreamConnection};
 use crate::core::api::InnerTubeClient;
 use crate::core::chat_runtime::{MonitoringDeps, run_monitoring_loop};
-use crate::core::models::{ChatMessage, ChatMode, ConnectionStatus, Platform, extract_video_id};
+use crate::core::models::{
+    ChatMessage, ChatMode, ConnectionStatus, Platform, ReactionSummary, ReactionUpdate,
+    extract_video_id,
+};
 use crate::database;
 use crate::errors::CommandError;
 use serde::{Deserialize, Serialize};
@@ -242,6 +245,16 @@ impl GuiChatMessage {
     }
 }
 
+/// Tauri イベント `chat:reaction` のペイロード（02_chat.md GuiReactionUpdate）
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
+pub struct GuiReactionUpdate {
+    pub connection_id: u64,
+    #[serde(flatten)]
+    #[ts(flatten)]
+    pub update: ReactionUpdate,
+}
+
 /// Connect to a YouTube live stream and start monitoring chat
 #[tauri::command]
 pub async fn connect_to_stream(
@@ -422,6 +435,13 @@ pub async fn connect_to_stream(
                     );
                     let _ = app.emit("chat:message", &gui_msg);
                 },
+                move |app, update| {
+                    let gui_update = GuiReactionUpdate {
+                        connection_id: conn_id,
+                        update: update.clone(),
+                    };
+                    let _ = app.emit("chat:reaction", &gui_update);
+                },
             )
             .await;
 
@@ -581,6 +601,33 @@ pub async fn get_connections(
 ) -> Result<Vec<ConnectionInfo>, CommandError> {
     let connections = state.connections.read().await;
     Ok(connections.values().map(ConnectionInfo::from).collect())
+}
+
+/// リアクションメーターの「勢い」の窓（02_chat.md: 直近60秒）
+const REACTION_RECENT_WINDOW_USEC: i64 = 60 * 1_000_000;
+
+/// その接続の配信のリアクション累計と直近60秒の更新を返す（F5 リロード後のメーター復元用）
+#[tauri::command]
+pub async fn get_connection_reactions(
+    state: State<'_, AppState>,
+    connection_id: u64,
+) -> Result<ReactionSummary, CommandError> {
+    let stream_url = {
+        let connections = state.connections.read().await;
+        connections
+            .get(&connection_id)
+            .map(|conn| conn.stream_url.clone())
+            .ok_or_else(|| {
+                CommandError::NotConnected(format!("接続 {} が見つかりません", connection_id))
+            })?
+    };
+    let video_id = extract_video_id(&stream_url)
+        .ok_or_else(|| CommandError::InvalidInput("Invalid YouTube URL".to_string()))?;
+    let since_usec = chrono::Utc::now().timestamp_micros() - REACTION_RECENT_WINDOW_USEC;
+
+    let conn = state.db_connection().await?;
+    database::get_reaction_summary(&conn, &video_id, since_usec)
+        .map_err(|e| CommandError::DatabaseError(e.to_string()))
 }
 
 /// チャットモード（TopChat/AllChat）を変更する

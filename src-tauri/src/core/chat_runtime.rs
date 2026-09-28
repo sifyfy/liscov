@@ -11,7 +11,7 @@ use tokio_util::sync::CancellationToken;
 use tauri::AppHandle;
 
 use crate::core::api::{InnerTubeClient, WebSocketServer};
-use crate::core::models::{ChatMessage, ChatMode, MessageType};
+use crate::core::models::{ChatMessage, ChatMode, MessageType, ReactionUpdate};
 use crate::core::raw_response::{RawResponseSaver, SaveConfig};
 use crate::database::{self, Database};
 use crate::state::MAX_MESSAGES;
@@ -61,8 +61,9 @@ impl MonitoringDeps {
 /// - `current_save_config` — その時点のレスポンス保存設定を返す（接続中の設定変更を反映するため毎回呼ぶ）
 /// - `chat_mode_rx` — チャットモード変更要求を受信する watch チャネル
 /// - `emit_gui_message` — ChatMessage を GUI 用に変換して emit するコールバック
+/// - `emit_gui_reaction` — ReactionUpdate を GUI 用に変換して emit するコールバック
 #[allow(clippy::too_many_arguments)]
-pub async fn run_monitoring_loop<F, G>(
+pub async fn run_monitoring_loop<F, G, H>(
     deps: MonitoringDeps,
     innertube_client: Arc<RwLock<Option<InnerTubeClient>>>,
     app: AppHandle,
@@ -74,9 +75,11 @@ pub async fn run_monitoring_loop<F, G>(
     current_save_config: G,
     mut chat_mode_rx: watch::Receiver<ChatMode>,
     emit_gui_message: F,
+    emit_gui_reaction: H,
 ) where
     F: Fn(&AppHandle, &ChatMessage) + Send + Sync + 'static,
     G: Fn() -> SaveConfig + Send + Sync + 'static,
+    H: Fn(&AppHandle, &ReactionUpdate) + Send + Sync + 'static,
 {
     tracing::info!("チャット監視タスク開始 connection_id: {}", connection_id);
     let poll_interval = std::time::Duration::from_millis(1500);
@@ -112,6 +115,9 @@ pub async fn run_monitoring_loop<F, G>(
     // この接続で見た handle → channel_id（ギフトの視聴者特定用）
     let mut known_handles: HashMap<String, String> = HashMap::new();
 
+    // この接続で最後に受けたリアクション更新の時刻（再送を捨てるため）
+    let mut last_reaction_time: Option<i64> = None;
+
     loop {
         // CancellationToken でループ停止を確認
         if cancellation_token.is_cancelled() {
@@ -146,16 +152,16 @@ pub async fn run_monitoring_loop<F, G>(
         }
 
         // メッセージをフェッチ（ロックを保持しない）
-        let (new_messages, raw_response) = match client.fetch_messages_with_raw().await {
-            Ok((msgs, raw)) => {
-                if !msgs.is_empty() {
-                    tracing::debug!("ポーリング {}: {} 件取得", poll_count, msgs.len());
+        let (new_messages, new_reactions, raw_response) = match client.fetch_chat().await {
+            Ok(fetch) => {
+                if !fetch.messages.is_empty() {
+                    tracing::debug!("ポーリング {}: {} 件取得", poll_count, fetch.messages.len());
                 }
-                (msgs, Some(raw))
+                (fetch.messages, fetch.reactions, Some(fetch.raw_json))
             }
             Err(e) => {
                 tracing::warn!("ポーリング {}: メッセージ取得失敗: {}", poll_count, e);
-                (vec![], None)
+                (vec![], vec![], None)
             }
         };
 
@@ -231,6 +237,33 @@ pub async fn run_monitoring_loop<F, G>(
 
             // TTS キューに追加
             enqueue_tts(&deps.tts_manager, &msg).await;
+        }
+
+        // ライブリアクション: 保存・GUI・WebSocket（読み上げはしない）
+        for update in new_reactions {
+            if !is_new_reaction(last_reaction_time, &update) {
+                continue;
+            }
+            last_reaction_time = Some(update.update_time_usec());
+
+            if let Some(sid) = &session_id {
+                let db_guard = deps.database.read().await;
+                if let Some(db) = db_guard.as_ref() {
+                    let conn = db.connection().await;
+                    if let Err(e) = database::save_reaction_update(&conn, sid, &update) {
+                        tracing::warn!("リアクション保存失敗: {}", e);
+                    }
+                }
+            }
+
+            emit_gui_reaction(&app, &update);
+
+            let ws = deps.websocket_server.read().await;
+            if let Some(server) = ws.as_ref() {
+                server
+                    .broadcast_reaction(broadcaster_id.as_deref(), &update)
+                    .await;
+            }
         }
 
         // スリープ中もキャンセルを検知できるように select! を使用
@@ -337,6 +370,11 @@ fn resolve_gift_channel_id(
         .flatten()
 }
 
+/// 同じ接続で前回受けた更新より新しいか（02_chat.md「ライブリアクション」の再送判定）
+fn is_new_reaction(last_update_time_usec: Option<i64>, update: &ReactionUpdate) -> bool {
+    last_update_time_usec.is_none_or(|last| update.update_time_usec() > last)
+}
+
 /// その時点の保存設定で生レスポンスを保存する（05_raw_response.md 書き込み処理）
 async fn save_raw_response(config: &SaveConfig, raw_json: &str) {
     if !config.enabled {
@@ -429,6 +467,24 @@ async fn finish_session(deps: &MonitoringDeps, connection_id: u64, session_id: &
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn reaction_at(time: i64) -> ReactionUpdate {
+        let counts = std::collections::BTreeMap::from([("❤".to_string(), 1)]);
+        ReactionUpdate::new(time, 1, counts).unwrap()
+    }
+
+    // 02_chat.md: 同じ接続で update_time_usec が前回受けた値以下なら捨てる（同じ更新の再送）
+    #[test]
+    fn reaction_newer_than_last_is_new() {
+        assert!(is_new_reaction(None, &reaction_at(100)));
+        assert!(is_new_reaction(Some(100), &reaction_at(101)));
+    }
+
+    #[test]
+    fn reaction_not_newer_than_last_is_resend() {
+        assert!(!is_new_reaction(Some(100), &reaction_at(100)));
+        assert!(!is_new_reaction(Some(100), &reaction_at(99)));
+    }
 
     // 02_chat.md「視聴者の特定」の例（配信者 UCown）
     async fn resolve_with_db(

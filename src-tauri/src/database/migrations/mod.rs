@@ -30,6 +30,10 @@ const MIGRATIONS: &[Migration] = &[
         name: "003_backfill_viewer_streams",
         sql: include_str!("003_backfill_viewer_streams.sql"),
     },
+    Migration {
+        name: "004_reactions",
+        sql: include_str!("004_reactions.sql"),
+    },
 ];
 
 /// Run all pending migrations

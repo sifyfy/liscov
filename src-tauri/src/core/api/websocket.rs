@@ -1,6 +1,6 @@
 //! WebSocket server for external app integration
 
-use crate::core::models::ChatMessage;
+use crate::core::models::{ChatMessage, ReactionUpdate};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -20,12 +20,19 @@ pub enum ClientEvent {
     Disconnected { client_id: u64 },
 }
 
-/// Server to client message
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Server to client message（サーバーから送るだけなので Deserialize は持たない）
+#[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", content = "data")]
 #[allow(clippy::large_enum_variant)]
 pub enum ServerMessage {
     ChatMessage(ChatMessage),
+    /// ライブリアクションの更新（前回からの差分）
+    Reaction {
+        /// 多接続時にどの配信のリアクションかを区別する
+        broadcaster_channel_id: Option<String>,
+        #[serde(flatten)]
+        update: ReactionUpdate,
+    },
     Connected {
         client_id: ClientId,
     },
@@ -199,6 +206,17 @@ impl WebSocketServer {
     pub async fn broadcast_message(&self, message: &ChatMessage) {
         let server_msg = ServerMessage::ChatMessage(message.clone());
         let _ = self.message_tx.send(server_msg);
+    }
+
+    pub async fn broadcast_reaction(
+        &self,
+        broadcaster_channel_id: Option<&str>,
+        update: &ReactionUpdate,
+    ) {
+        let _ = self.message_tx.send(ServerMessage::Reaction {
+            broadcaster_channel_id: broadcaster_channel_id.map(str::to_string),
+            update: update.clone(),
+        });
     }
 
     pub async fn connected_clients(&self) -> u32 {

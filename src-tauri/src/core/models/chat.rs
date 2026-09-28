@@ -1,6 +1,8 @@
 //! Chat message models
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use ts_rs::TS;
 
 /// Chat message type
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -107,6 +109,67 @@ pub struct ChatMessage {
     pub is_member: bool,
     pub is_first_time_viewer: bool,
     pub in_stream_comment_count: Option<u32>,
+}
+
+/// ライブリアクションの 1 回の更新（02_chat.md「ライブリアクション」）
+///
+/// `new` でしか作れず、件数 1 以上の絵文字だけを持ち、total は常に counts の合計になる。
+/// 0 件の更新は作れない（保存もイベントも出さない、という仕様を型で守る）。
+#[derive(Debug, Clone, Serialize, PartialEq, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
+pub struct ReactionUpdate {
+    #[ts(type = "number")]
+    update_time_usec: i64,
+    duration_seconds: u32,
+    #[ts(type = "Record<string, number>")]
+    counts: BTreeMap<String, u32>,
+    total: u32,
+}
+
+impl ReactionUpdate {
+    /// 0 件の絵文字を除き、合計が 0 なら None を返す
+    pub fn new(
+        update_time_usec: i64,
+        duration_seconds: u32,
+        counts: BTreeMap<String, u32>,
+    ) -> Option<Self> {
+        let counts: BTreeMap<String, u32> =
+            counts.into_iter().filter(|(_, count)| *count > 0).collect();
+        let total = counts.values().sum();
+        (total > 0).then_some(Self {
+            update_time_usec,
+            duration_seconds,
+            counts,
+            total,
+        })
+    }
+
+    pub fn update_time_usec(&self) -> i64 {
+        self.update_time_usec
+    }
+
+    pub fn duration_seconds(&self) -> u32 {
+        self.duration_seconds
+    }
+
+    pub fn counts(&self) -> &BTreeMap<String, u32> {
+        &self.counts
+    }
+
+    pub fn total(&self) -> u32 {
+        self.total
+    }
+}
+
+/// 配信（video_id）単位のリアクションのまとめ（`get_connection_reactions` の戻り値）
+#[derive(Debug, Clone, Default, Serialize, PartialEq, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
+pub struct ReactionSummary {
+    // 絵文字別の累計（ts-rs がフィールドの doc コメントを行末空白付きで出力するため // にする）
+    #[ts(type = "Record<string, number>")]
+    pub totals: BTreeMap<String, u64>,
+    // 指定時刻以降の更新（古い順）
+    pub recent: Vec<ReactionUpdate>,
 }
 
 /// Chat statistics
@@ -298,5 +361,40 @@ mod tests {
             serde_json::json!({"Gift": {"gift_name": "Press F", "gift_image_url": null, "jewel_count": 10}})
         );
         assert_eq!(gift.as_str(), "gift");
+    }
+
+    fn counts(pairs: &[(&str, u32)]) -> BTreeMap<String, u32> {
+        pairs.iter().map(|(e, c)| (e.to_string(), *c)).collect()
+    }
+
+    // spec: 03_websocket.md「Reaction」の data の形
+    #[test]
+    fn reaction_update_serializes_with_total() {
+        let update =
+            ReactionUpdate::new(1790422357025983, 2, counts(&[("❤", 3), ("🎉", 5)])).unwrap();
+        assert_eq!(
+            serde_json::to_value(&update).unwrap(),
+            serde_json::json!({
+                "update_time_usec": 1790422357025983_i64,
+                "duration_seconds": 2,
+                "counts": {"❤": 3, "🎉": 5},
+                "total": 8
+            })
+        );
+    }
+
+    // spec: 02_chat.md「ライブリアクション」— 0件の更新は捨てる
+    #[test]
+    fn reaction_update_with_no_reactions_is_none() {
+        assert_eq!(ReactionUpdate::new(1, 1, counts(&[])), None);
+        assert_eq!(ReactionUpdate::new(1, 1, counts(&[("❤", 0)])), None);
+    }
+
+    // spec: 02_chat.md「ReactionUpdate」— 0件の絵文字は含めない
+    #[test]
+    fn reaction_update_drops_zero_count_emoji() {
+        let update = ReactionUpdate::new(1, 1, counts(&[("❤", 0), ("😄", 1)])).unwrap();
+        assert_eq!(update.counts(), &counts(&[("😄", 1)]));
+        assert_eq!(update.total(), 1);
     }
 }

@@ -942,3 +942,51 @@ async fn test_new_client_does_not_receive_past_messages() {
 
     server.stop().await;
 }
+
+// ============================================================================
+// Reaction (03_websocket.md「Reaction」)
+// ============================================================================
+
+#[tokio::test]
+#[serial]
+async fn test_reaction_json_format_matches_spec() {
+    let port = get_test_port().await;
+    let server = WebSocketServer::new(port);
+    let actual_port = server.start().await.expect("Failed to start");
+
+    let (_write, mut read) = connect_client(actual_port).await;
+    let _ = read.next().await; // Connected を読み捨てる
+
+    let counts = [("❤", 3), ("🎉", 5)]
+        .into_iter()
+        .map(|(e, c)| (e.to_string(), c))
+        .collect();
+    let update =
+        app_lib::core::models::ReactionUpdate::new(1790422357025983, 2, counts).unwrap();
+    server
+        .broadcast_reaction(Some("UCxxxxxxxxxxxx"), &update)
+        .await;
+
+    let msg = timeout(Duration::from_secs(5), read.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let json = parse_server_message(&msg).expect("Failed to parse");
+
+    assert_eq!(
+        json,
+        serde_json::json!({
+            "type": "Reaction",
+            "data": {
+                "broadcaster_channel_id": "UCxxxxxxxxxxxx",
+                "update_time_usec": 1790422357025983_i64,
+                "duration_seconds": 2,
+                "counts": { "❤": 3, "🎉": 5 },
+                "total": 8
+            }
+        })
+    );
+
+    server.stop().await;
+}
