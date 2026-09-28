@@ -1,5 +1,5 @@
 // Config state management using Svelte 5 runes
-import type { Config, StorageMode, Theme } from '$lib/types';
+import type { ChatModeSetting, Config, StorageMode, Theme } from '$lib/types';
 import { DEFAULT_CONFIG } from '$lib/types';
 import { normalizeError } from '$lib/tauri/errors';
 import * as configApi from '$lib/tauri/config';
@@ -80,6 +80,16 @@ function createConfigStore() {
     }
   }
 
+  async function setChatMode(mode: ChatModeSetting): Promise<void> {
+    config.chat_display.chat_mode = mode;
+    try {
+      await configApi.configSetValue('chat_display', 'chat_mode', mode);
+      error = null;
+    } catch (e) {
+      error = normalizeError(e).message;
+    }
+  }
+
   async function setTheme(theme: Theme): Promise<void> {
     config.ui.theme = theme;
     applyTheme(theme);
@@ -114,6 +124,9 @@ function createConfigStore() {
     get autoScrollEnabled() {
       return config.chat_display.auto_scroll_enabled;
     },
+    get chatMode() {
+      return config.chat_display.chat_mode;
+    },
     get theme() {
       return config.ui.theme;
     },
@@ -131,6 +144,7 @@ function createConfigStore() {
     setMessageFontSize,
     setShowTimestamps,
     setAutoScrollEnabled,
+    setChatMode,
     setTheme
   };
 }

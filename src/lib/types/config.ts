@@ -4,6 +4,9 @@ export type StorageMode = 'secure' | 'fallback';
 
 export type Theme = 'dark' | 'light';
 
+// 最後に選んだチャットモード（02_chat.md チャットモード）
+export type ChatModeSetting = 'top' | 'all';
+
 export interface StorageConfig {
   mode: StorageMode;
 }
@@ -12,6 +15,7 @@ export interface ChatDisplayConfig {
   message_font_size: number;
   show_timestamps: boolean;
   auto_scroll_enabled: boolean;
+  chat_mode: ChatModeSetting;
 }
 
 export interface UiConfig {
@@ -32,7 +36,8 @@ export const DEFAULT_CONFIG: Config = {
   chat_display: {
     message_font_size: 13,
     show_timestamps: true,
-    auto_scroll_enabled: true
+    auto_scroll_enabled: true,
+    chat_mode: 'top'
   },
   ui: {
     theme: 'dark'

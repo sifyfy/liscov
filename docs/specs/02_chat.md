@@ -374,6 +374,8 @@ set_chat_mode(connection_id, mode)
 
 | 状況 | 結果 |
 |------|------|
+| 「全て」を選んでアプリを再起動する | 前回選んだ「全て」のまま始まる（config.toml の `chat_display.chat_mode`、[09_config.md](09_config.md)） |
+| F5 リロード | config.toml の値でボタンの表示を戻す（選択はすべての接続に送るので、接続中のモードと一致する） |
 | 接続中に「全て」を選ぶ | 次のポーリングから「全て」で取得する |
 | continuation token の書き換えに失敗した（形式が想定外など） | warn ログを出し、次のポーリングで新しい token に対してやり直す。反映されるまで毎回試す |
 | 反映前に別のモードを選び直した | 最後に選んだモードだけを反映する |
@@ -647,7 +649,7 @@ GROUP BY m.channel_id
 | `streamTitle` | `string \| null` | 後方互換（最初の接続のタイトル）。ヘッダーでの表示は廃止（接続リストと重複するため） |
 | `broadcasterName` | `string \| null` | 後方互換（最初の接続の配信者名） |
 | `broadcasterChannelId` | `string \| null` | 後方互換（最初の接続のチャンネルID） |
-| `chatMode` | `ChatMode` | TopChat / AllChat |
+| `chatMode` | `ChatMode` | TopChat / AllChat。起動時・F5 後は config.toml の `chat_display.chat_mode` で初期化し、選び直すたびに保存する |
 | `error` | `string \| null` | エラーメッセージ |
 
 #### 表示設定関連
@@ -687,7 +689,7 @@ interface ChatFilter {
 | 個別「切断」クリック | `disconnect_stream(connection_id)`呼び出し |
 | 「全切断」クリック | `disconnect_all_streams`呼び出し |
 | 「クリア」クリック | メッセージ配列をクリア（確認ダイアログ付き） |
-| チャットモード切り替え | `set_chat_mode` で全接続に変更要求を送信（次回ポーリングで適用） |
+| チャットモード切り替え | `set_chat_mode` で全接続に変更要求を送信（次回ポーリングで適用）し、config.toml に保存する |
 | フィルタ選択 | ローカルでフィルタリング |
 | フォントサイズ変更 | ローカル設定を更新 |
 | F5リロード | バックエンドの接続状態を `get_connections` で取得し、フロントエンドに復元 |

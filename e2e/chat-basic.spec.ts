@@ -1,5 +1,7 @@
 import { test, expect } from './utils/fixtures';
 import type { BrowserContext, Page, Browser } from '@playwright/test';
+import * as fs from 'fs';
+import * as path from 'path';
 import { log } from './utils/logger';
 import {
   MOCK_SERVER_URL,
@@ -9,7 +11,18 @@ import {
   addMockMessage,
   disconnectAndInitialize,
   setStreamState,
+  getTestAppDataDir,
 } from './utils/test-helpers';
+
+// config.toml の chat_display.chat_mode を読む（09_config.md）
+function readConfigChatMode(): string | null {
+  const configPath = path.join(getTestAppDataDir(), 'config.toml');
+  if (!fs.existsSync(configPath)) {
+    return null;
+  }
+  const match = fs.readFileSync(configPath, 'utf-8').match(/chat_mode\s*=\s*"(\w+)"/);
+  return match ? match[1] : null;
+}
 
 /**
  * E2E tests for Chat Display — basic connection, mode selection, filtering, and clear.
@@ -340,6 +353,34 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
       await expect(chatModeButton).toHaveText(/全て/);
 
       // Disconnect
+      await disconnectAndInitialize(mainPage);
+    });
+
+    // 02_chat.md: 選んだモードは config.toml に保存し、F5・再起動後もそのモードで始める
+    test('should remember chat mode in config.toml across reload', async () => {
+      const chatModeButton = mainPage.locator('button[title="チャットモード切り替え"]');
+      if ((await chatModeButton.textContent())?.includes('トップ')) {
+        await chatModeButton.click();
+      }
+      await expect(chatModeButton).toHaveText(/全て/);
+      await expect.poll(readConfigChatMode).toBe('all');
+
+      await mainPage.reload();
+      await expect(mainPage.locator('nav button:has-text("Chat")')).toBeVisible({ timeout: 30000 });
+      await expect(chatModeButton).toHaveText(/全て/, { timeout: 10000 });
+
+      // 切り替えずに接続しても、最初のポーリングから全てで取得する
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_remember_mode`);
+      await mainPage.locator('button:has-text("開始")').click();
+      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await expect.poll(getChatModeStatus, { timeout: 15000 }).toBe('AllChat');
+
+      // トップに戻すと config.toml も戻る
+      await chatModeButton.click();
+      await expect(chatModeButton).toHaveText(/トップ/);
+      await expect.poll(readConfigChatMode).toBe('top');
+
       await disconnectAndInitialize(mainPage);
     });
   });

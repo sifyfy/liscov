@@ -57,6 +57,15 @@ impl Default for UiConfig {
     }
 }
 
+/// 最後に選んだチャットモード（02_chat.md チャットモード）。再起動・F5 後もこのモードで始める
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ChatModeSetting {
+    #[default]
+    Top,
+    All,
+}
+
 /// Chat display configuration section
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -64,6 +73,7 @@ pub struct ChatDisplayConfig {
     pub message_font_size: u32,
     pub show_timestamps: bool,
     pub auto_scroll_enabled: bool,
+    pub chat_mode: ChatModeSetting,
 }
 
 impl Default for ChatDisplayConfig {
@@ -72,6 +82,7 @@ impl Default for ChatDisplayConfig {
             message_font_size: 13,
             show_timestamps: true,
             auto_scroll_enabled: true,
+            chat_mode: ChatModeSetting::Top,
         }
     }
 }
@@ -236,6 +247,7 @@ pub(crate) fn config_lookup(config: &Config, section: &str, key: &str) -> Option
             "auto_scroll_enabled" => {
                 Some(serde_json::to_value(config.chat_display.auto_scroll_enabled).unwrap())
             }
+            "chat_mode" => Some(serde_json::to_value(config.chat_display.chat_mode).unwrap()),
             _ => None,
         },
         "ui" => match key {
@@ -309,6 +321,11 @@ pub(crate) fn config_apply_value(
                             e
                         ))
                     })?;
+            }
+            "chat_mode" => {
+                new_config.chat_display.chat_mode = serde_json::from_value(value).map_err(|e| {
+                    CommandError::InvalidInput(format!("Invalid chat_mode value: {}", e))
+                })?;
             }
             _ => {
                 return Err(CommandError::InvalidInput(format!(
@@ -873,5 +890,80 @@ theme = "dark"
         let merged = config_for_save(&current, incoming);
         assert!(merged.raw_response.enabled);
         assert_eq!(merged.chat_display.message_font_size, 18);
+    }
+
+    // ========================================================================
+    // チャットモード（09_config.md chat_display.chat_mode、02_chat.md チャットモード）
+    // ========================================================================
+
+    #[test]
+    fn chat_mode_defaults_to_top() {
+        let config = Config::default();
+        assert_eq!(config.chat_display.chat_mode, ChatModeSetting::Top);
+        assert_eq!(
+            config_lookup(&config, "chat_display", "chat_mode"),
+            Some(serde_json::json!("top"))
+        );
+    }
+
+    #[test]
+    fn chat_mode_is_read_from_toml() {
+        let config: Config = toml::from_str(
+            "[chat_display]
+chat_mode = \"all\"
+",
+        )
+        .unwrap();
+        assert_eq!(config.chat_display.chat_mode, ChatModeSetting::All);
+        // 他のキーはデフォルトで補完される
+        assert_eq!(config.chat_display.message_font_size, 13);
+    }
+
+    #[test]
+    fn chat_mode_missing_in_old_toml_is_top() {
+        let config: Config = toml::from_str(
+            "[chat_display]
+message_font_size = 16
+",
+        )
+        .unwrap();
+        assert_eq!(config.chat_display.chat_mode, ChatModeSetting::Top);
+    }
+
+    #[test]
+    fn config_apply_value_chat_mode_all() {
+        let config = Config::default();
+        let new_config = config_apply_value(
+            &config,
+            "chat_display",
+            "chat_mode",
+            serde_json::json!("all"),
+        )
+        .unwrap();
+        assert_eq!(new_config.chat_display.chat_mode, ChatModeSetting::All);
+        assert_eq!(
+            config_lookup(&new_config, "chat_display", "chat_mode"),
+            Some(serde_json::json!("all"))
+        );
+    }
+
+    #[test]
+    fn config_apply_value_chat_mode_invalid() {
+        let config = Config::default();
+        let result = config_apply_value(
+            &config,
+            "chat_display",
+            "chat_mode",
+            serde_json::json!("latest"),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn chat_mode_is_saved_as_lowercase() {
+        let mut config = Config::default();
+        config.chat_display.chat_mode = ChatModeSetting::All;
+        let toml_string = toml::to_string_pretty(&config).unwrap();
+        assert!(toml_string.contains("chat_mode = \"all\""), "{toml_string}");
     }
 }

@@ -58,6 +58,7 @@ mode = "secure"  # "secure" or "fallback"
 message_font_size = 13
 show_timestamps = true
 auto_scroll_enabled = true
+chat_mode = "top"  # "top" or "all"
 
 [ui]
 theme = "dark"  # "dark" or "light"
@@ -89,6 +90,7 @@ max_backup_files = 5
 | `message_font_size` | integer | `13` | 10〜24 | メッセージフォントサイズ（px） |
 | `show_timestamps` | boolean | `true` | - | タイムスタンプ表示 |
 | `auto_scroll_enabled` | boolean | `true` | - | 自動スクロール有効 |
+| `chat_mode` | string | `"top"` | `top` / `all` | チャットモード（トップ / 全て）。最後に選んだモードを覚えておき、次の起動でもそのモードで接続する |
 
 ### ui セクション
 
@@ -129,6 +131,12 @@ pub struct ChatDisplayConfig {
     pub message_font_size: u32,
     pub show_timestamps: bool,
     pub auto_scroll_enabled: bool,
+    pub chat_mode: ChatModeSetting,
+}
+
+pub enum ChatModeSetting {
+    Top,  // "top"
+    All,  // "all"
 }
 
 pub enum Theme {

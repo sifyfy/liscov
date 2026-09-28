@@ -320,6 +320,8 @@ function createChatStore() {
 
   async function setChatModeAction(mode: ChatMode): Promise<void> {
     chatMode = mode;
+    // 永続化 (spec: 02_chat.md チャットモード、09_config.md)
+    configStore.setChatMode(mode);
     // 全接続にチャットモード変更要求を送信（watch チャネル経由で次回ポーリング時に適用）
     for (const [connId] of connections) {
       try {
@@ -475,6 +477,7 @@ function createChatStore() {
       messageFontSize = configStore.messageFontSize;
       showTimestamps = configStore.showTimestamps;
       autoScroll = configStore.autoScrollEnabled;
+      chatMode = configStore.chatMode;
     }
   }
 

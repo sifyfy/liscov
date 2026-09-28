@@ -21,7 +21,9 @@ vi.mock('./config.svelte', () => ({
 		messageFontSize: 13,
 		showTimestamps: true,
 		autoScrollEnabled: true,
+		chatMode: 'top',
 		setMessageFontSize: vi.fn(),
+		setChatMode: vi.fn(),
 	},
 }));
 
@@ -393,6 +395,7 @@ describe('chatStore 接続管理', () => {
 					showTimestamps: true,
 					autoScrollEnabled: true,
 					setMessageFontSize: vi.fn(),
+					setChatMode: vi.fn(),
 				},
 			}));
 
@@ -1075,6 +1078,7 @@ describe('chatStore 追加補強テスト', () => {
 				showTimestamps: true,
 				autoScrollEnabled: true,
 				setMessageFontSize: vi.fn(),
+				setChatMode: vi.fn(),
 			},
 		}));
 
@@ -1206,6 +1210,7 @@ describe('chatStore 追加補強テスト', () => {
 				showTimestamps: true,
 				autoScrollEnabled: true,
 				setMessageFontSize: vi.fn(),
+				setChatMode: vi.fn(),
 			},
 		}));
 
@@ -1383,6 +1388,7 @@ describe('chatStore initDisplaySettings', () => {
 				showTimestamps: false,
 				autoScrollEnabled: false,
 				setMessageFontSize: vi.fn(),
+				setChatMode: vi.fn(),
 			},
 		}));
 
@@ -1418,6 +1424,7 @@ describe('chatStore initDisplaySettings', () => {
 				showTimestamps: false,
 				autoScrollEnabled: false,
 				setMessageFontSize: vi.fn(),
+				setChatMode: vi.fn(),
 			},
 		}));
 
@@ -1503,6 +1510,7 @@ describe('chatStore ジュエル数を取れない接続の注記', () => {
 				showTimestamps: true,
 				autoScrollEnabled: true,
 				setMessageFontSize: vi.fn(),
+				setChatMode: vi.fn(),
 			},
 		}));
 		const mod = await import('./chat.svelte');
@@ -1591,6 +1599,7 @@ describe('chatStore リアクションメーター', () => {
 				showTimestamps: true,
 				autoScrollEnabled: true,
 				setMessageFontSize: vi.fn(),
+				setChatMode: vi.fn(),
 			},
 		}));
 		const mod = await import('./chat.svelte');
@@ -1670,5 +1679,79 @@ describe('chatStore リアクションメーター', () => {
 		expect(store.connections.get(5)?.connectionState).toBe('connected');
 		expect(store.connections.get(5)?.reactions.totals).toEqual({});
 		warn.mockRestore();
+	});
+});
+
+// spec: 02_chat.md チャットモード「再起動・F5 → 前回のモード」「ユーザー操作 → config.toml に保存」
+// initDisplaySettings と同じく vi.doMock で configStore の状態をテストごとに与える
+describe('chatStore チャットモードの記憶', () => {
+	async function loadStore(config: { isLoaded: boolean; chatMode: 'top' | 'all' }) {
+		vi.resetModules();
+		const chatApiMock = {
+			connectToStream: vi.fn().mockResolvedValue(makeSuccessResult()),
+			disconnectStream: vi.fn(),
+			disconnectAllStreams: vi.fn(),
+			setChatMode: vi.fn().mockResolvedValue(true),
+			getConnections: vi.fn(),
+			getConnectionReactions: vi.fn().mockResolvedValue({ totals: {}, recent: [] }),
+		};
+		const configStoreMock = {
+			...config,
+			messageFontSize: 13,
+			showTimestamps: true,
+			autoScrollEnabled: true,
+			setMessageFontSize: vi.fn(),
+			setChatMode: vi.fn(),
+		};
+		vi.doMock('$lib/tauri/chat', () => chatApiMock);
+		vi.doMock('./config.svelte', () => ({ configStore: configStoreMock }));
+		const { chatStore } = await import('./chat.svelte');
+		return { chatStore, chatApiMock, configStoreMock };
+	}
+
+	afterEach(() => {
+		vi.doUnmock('$lib/tauri/chat');
+		vi.doUnmock('./config.svelte');
+		vi.resetModules();
+	});
+
+	it('config に保存された「全て」で表示を始める', async () => {
+		const { chatStore } = await loadStore({ isLoaded: true, chatMode: 'all' });
+		chatStore.initDisplaySettings();
+		expect(chatStore.chatMode).toBe('all');
+		chatStore.cleanup();
+	});
+
+	it('config を読み込めていないときは「トップ」のまま', async () => {
+		const { chatStore } = await loadStore({ isLoaded: false, chatMode: 'all' });
+		chatStore.initDisplaySettings();
+		expect(chatStore.chatMode).toBe('top');
+		chatStore.cleanup();
+	});
+
+	it('モードを選ぶと config に保存し、接続にも送る', async () => {
+		const { chatStore, chatApiMock, configStoreMock } = await loadStore({
+			isLoaded: true,
+			chatMode: 'top',
+		});
+		await chatStore.connect('https://example.com');
+
+		await chatStore.setChatMode('all');
+
+		expect(chatStore.chatMode).toBe('all');
+		expect(configStoreMock.setChatMode).toHaveBeenCalledWith('all');
+		expect(chatApiMock.setChatMode).toHaveBeenCalledWith(1, 'all');
+		chatStore.cleanup();
+	});
+
+	it('接続が無くてもモードを保存する', async () => {
+		const { chatStore, chatApiMock, configStoreMock } = await loadStore({
+			isLoaded: true,
+			chatMode: 'top',
+		});
+		await chatStore.setChatMode('all');
+		expect(configStoreMock.setChatMode).toHaveBeenCalledWith('all');
+		expect(chatApiMock.setChatMode).not.toHaveBeenCalled();
+		chatStore.cleanup();
 	});
 });
