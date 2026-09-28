@@ -51,7 +51,7 @@
 | タイムスタンプ | 受信した時刻 |
 | バッジ・メンバー情報 | 無し（is_member = false、badges は空） |
 
-ジュエル数は配信者本人としてログインした接続でのみ本文に入ると見られる（観測は2件）。
+ジュエル数は配信者本人としてログインした接続でのみ本文に入ると見られる（観測は3件: ログインあり2件はジュエル数あり、ログインなし1件は無し）。
 
 **視聴者の特定（handle → channel_id）:** 次の順に探し、最初に見つかったものを使う。
 
@@ -83,6 +83,58 @@
 
 ダイアログや通知は出さない（配信中の操作を妨げない）。
 
+### ライブリアクション
+
+視聴者がチャット欄から送る絵文字リアクション（❤ 🎉 😄 💯 😳 など）。チャットメッセージではなく、送り主は分からない。InnerTube では応答の `frameworkUpdates.entityBatchUpdate.mutations[].payload.emojiFountainDataEntity` で、前回の更新からの差分として届く（変化が無いときは届かない）。
+
+**パース（1つの `emojiFountainDataEntity` → 1つの ReactionUpdate）:** `reactionBuckets[]`（1秒単位の区切り）を合算する。
+
+| 入力 | 結果 |
+|------|------|
+| `updateTimeUsec` = `1790422357025983`、バケット2つ（どちらも `duration.seconds` = `1`、`reactionsData` = `[{"unicodeEmojiId":"🎉","reactionCount":4}]`） | update_time_usec = 1790422357025983、duration_seconds = 2、counts = {🎉: 8}、total = 8 |
+| バケット1つ（`reactionsData` = `[{"unicodeEmojiId":"❤","reactionCount":3},{"unicodeEmojiId":"😄","reactionCount":1}]`）とバケット1つ（`totalReactions` = 0、`reactionsData` 無し） | duration_seconds = 2、counts = {❤: 3, 😄: 1}、total = 4 |
+| すべてのバケットが `totalReactions` = 0 | 捨てる（保存もイベントも出さない） |
+| `unicodeEmojiId` か `reactionCount` が無い要素 | その要素だけ無視する |
+| `duration` が無いバケット | 1秒として数える（観測ではすべて1秒） |
+| `updateTimeUsec` が無い | 捨てる。warn ログを出す |
+| 同じ接続で、update_time_usec が前回受けた値以下 | 捨てる（同じ更新の再送） |
+
+- total は counts の合計（`totalReactions` は使わない。件数の出どころを1つにする）
+- `intensityScore` は使わない（観測では件数ありで 0.75、0件で 1 の2値だけで情報が無い）
+- 1回の更新の中のバケットの時間順は応答から判別できないため、1秒ごとの時刻は付けない。分析の細かさは更新ごと（観測では間隔の中央値1.6秒）
+
+**扱い:**
+
+| 項目 | 扱い |
+|------|------|
+| DB | `reactions` テーブルに更新×絵文字ごとに1行（[08_database.md](08_database.md)） |
+| チャット欄 | メッセージとしては流さない。リアクションメーターに出す |
+| 読み上げ | しない |
+| WebSocket | `Reaction` を配信する（[03_websocket.md](03_websocket.md)） |
+| 視聴者・初見判定・配信内コメント回数 | 関係しない（送り主が分からない） |
+
+**リアクションメーター:** 接続ごとに1行。チャット欄の上に出す。
+
+```
+■ 配信者名A  ❤ 430  🎉 418  😄 94  💯 56  😳 1   勢い [■■■■□□□□] 38/分
+```
+
+| 項目 | 仕様 |
+|------|------|
+| 累計 | 配信（video_id）単位の絵文字別件数。多い順に並べる。同じ配信に再接続したら、DB から続きを数える |
+| 勢い | 直近60秒の件数（/分）。チャット率と同じ「1分あたり」に揃える。60秒の判定は update_time_usec と現在時刻で行い、1秒ごとに表示を更新する（リアクションが止まれば0に下がる） |
+| 勢いのバー | その接続で表示を始めてからの勢いの最大値を満タンとする |
+| 表示条件 | その接続で1件以上のリアクションがあるとき。無い接続の行は出さない |
+| 配信元の区別 | 左端に配信元色（メッセージの色ラインと同じ色）と配信者名 |
+
+| 状況 | 結果 |
+|------|------|
+| 🎉4（2秒）→ 30秒後に ❤3 | 累計 ❤ 3・🎉 4、勢い 7/分 |
+| 最後の更新から60秒を超えた | 累計はそのまま、勢い 0/分 |
+| F5リロード | 累計と直近60秒の件数を `get_connection_reactions` で読み直す。バーの最大値は読み直した勢いから数え直す |
+| 同じ配信に再接続 | 累計は DB の続きから。勢いは直近60秒の DB の記録から |
+| 切断 | その接続の行を消す |
+
 ### 多接続
 
 | 操作 | 結果 |
@@ -104,6 +156,8 @@
 | ギフトの handle から channel_id を引くとき、候補が2件以上なら特定しない | 別人に紐付けると読み仮名・初見判定・集計がすべて誤る。特定しないだけなら表示と保存は正しい |
 | 特定できないギフトの channel_id は `""` とし、viewer_profiles を作らない | 仮のIDでプロフィールを作ると本物の channel_id と二重になる |
 | ジュエル数は本文から読めたときだけ記録し、推測しない | ギフトの価格は YouTube 側で変わりうる |
+| リアクションは更新（`emojiFountainDataEntity`）単位で記録し、1秒ごとの時刻を推測で振らない | バケットの時間順が応答から判別できない。推測した時刻は分析結果を誤らせる |
+| リアクションの件数は `reactionsData[].reactionCount` だけから数える | `totalReactions` と二重の出どころを持つと、食い違ったときにどちらが正か決められない |
 
 ## バックエンドコマンド
 
@@ -114,6 +168,7 @@
 | `disconnect_all_streams` | なし | `()` | 全接続を一括切断 |
 | `get_connections` | なし | `Vec<ConnectionInfo>` | アクティブな全接続情報を取得 |
 | `set_chat_mode` | `connection_id: u64, mode: String` | `Result<bool, Error>` | チャットモード切り替え（watchチャネル経由で次回ポーリング時に適用） |
+| `get_connection_reactions` | `connection_id: u64` | `Result<ReactionSummary, Error>` | その接続の配信（video_id）のリアクション累計と、直近60秒の更新（F5リロード後のメーター復元用） |
 
 ## データモデル
 
@@ -198,6 +253,31 @@ pub struct BadgeInfo {
     pub label: String,             // 表示ラベル
     pub tooltip: Option<String>,   // ツールチップテキスト
     pub image_url: Option<String>, // バッジ画像URL
+}
+```
+
+### ReactionUpdate / GuiReactionUpdate / ReactionSummary
+
+```rust
+/// 1回のリアクション更新（コア。WebSocket と DB 保存に使う）
+pub struct ReactionUpdate {
+    pub update_time_usec: i64,                 // YouTube 側の更新時刻（マイクロ秒）
+    pub duration_seconds: u32,                 // この更新が表す秒数（バケット数）
+    pub counts: BTreeMap<String, u32>,         // 絵文字 → 件数（0件の絵文字は含めない）
+    pub total: u32,                            // counts の合計
+}
+
+/// Tauri イベント `chat:reaction` のペイロード
+pub struct GuiReactionUpdate {
+    pub connection_id: u64,
+    #[serde(flatten)]
+    pub update: ReactionUpdate,
+}
+
+/// `get_connection_reactions` の戻り値
+pub struct ReactionSummary {
+    pub totals: BTreeMap<String, u64>,         // 配信（video_id）単位の絵文字別累計
+    pub recent: Vec<ReactionUpdate>,           // update_time_usec が現在から60秒以内の更新（古い順）
 }
 ```
 
@@ -366,7 +446,12 @@ Origin: https://www.youtube.com
 │    ├─ メモリバッファに追加                     │
 │    ├─ GuiChatMessageに初見・回数を付与         │
 │    └─ Tauriイベントを発行                     │
-│ 5. sleep(1500ms)                              │
+│ 5. リアクション更新を処理:                     │
+│    ├─ 前回以下の update_time_usec なら捨てる   │
+│    ├─ DBに保存（reactions）                   │
+│    ├─ Tauriイベント chat:reaction を発行       │
+│    └─ WebSocket に Reaction を配信            │
+│ 6. sleep(1500ms)                              │
 └───────────────────────────────────────────────┘
 ```
 
@@ -474,6 +559,7 @@ GROUP BY m.channel_id
 |-----------|-----------|------|
 | `chat:connection` | `ConnectionResult` | 接続状態変更 |
 | `chat:message` | `GuiChatMessage` | 新着メッセージ |
+| `chat:reaction` | `GuiReactionUpdate` | リアクション更新（0件の更新・再送は発行しない） |
 
 ## フロントエンド
 
@@ -484,6 +570,7 @@ GROUP BY m.channel_id
 | `ChatTab.svelte` | チャットタブ全体のレイアウト管理（リサイズハンドル含む） |
 | `InputSection.svelte` | URL入力、接続開始、「接続設定」ラベル（常時表示、多接続対応） |
 | `ConnectionList.svelte` | アクティブ接続アイテムリスト、個別切断ボタン、ジュエル数を取れない接続の注記 |
+| `ReactionMeter.svelte` | 接続ごとのライブリアクションの累計と勢い（リアクションのある接続だけ1行ずつ） |
 | `ChatDisplay.svelte` | メッセージ一覧表示（配信元色ライン付き） |
 | `FilterPanel.svelte` | メッセージフィルタリング、表示制御、メッセージクリア |
 
@@ -505,6 +592,8 @@ GROUP BY m.channel_id
 │ ═══════════ リサイズハンドル ═══════════ │ ← Pointer Capture APIで実装
 ├─────────────────────────────────────────┤
 │ [フィルター] [自動スクロール] [設定...]   │ ← FilterPanel
+├─────────────────────────────────────────┤
+│ ■ 配信者名A ❤ 430 🎉 418 … 勢い 38/分   │ ← ReactionMeter（リアクションのある接続だけ）
 ├─────────────────────────────────────────┤
 │                                         │
 │           チャットメッセージ              │ ← ChatDisplay（flex-1）
@@ -531,6 +620,7 @@ GROUP BY m.channel_id
 | `displayedMessages` | `ChatMessage[]` | displayLimit適用後の表示用メッセージ（derived） |
 | `connections` | `Map<number, FrontendConnectionState>` | アクティブ接続マップ（connection_id → 状態） |
 | `connections[id].jewelCountUnavailable` | `boolean` | その接続で jewel_count = null のギフトを受けたら true（フロントエンドのみの状態。バックエンドには持たない） |
+| `connections[id].reactions` | `{ totals: Record<string, number>; recent: ReactionUpdate[]; peakPerMinute: number }` | リアクションメーターの状態。`recent` は update_time_usec が60秒以内のものだけ残す。勢い（/分）は `recent` の total の合計（derived） |
 | `isConnected` | `boolean` | いずれかの接続がアクティブ（derived: connections.size > 0） |
 | `isConnecting` | `boolean` | 接続処理中の接続が存在（derived） |
 | `connectionState` | `string` | 後方互換（idle/connecting/connected） |
@@ -590,7 +680,7 @@ interface ChatFilter {
 |------|------|
 | メソッド | `chatStore.restoreConnections()` |
 | 呼び出しタイミング | `+page.svelte` の `onMount` で `setupEventListeners()` の後に実行 |
-| 実行内容 | `get_connections` コマンドで全接続情報を取得し、`FrontendConnectionState` に変換してMapに追加 |
+| 実行内容 | `get_connections` コマンドで全接続情報を取得し、`FrontendConnectionState` に変換してMapに追加。各接続の `get_connection_reactions` でリアクションメーターを復元する（失敗したらその接続のメーターは空から始める） |
 | 復元後の動作 | バックエンドの監視ループは継続しているため、復元後は新着メッセージが正常に受信される |
 | 失敗時 | `console.warn` でログ出力、アプリは正常に動作（接続リストが空のまま） |
 

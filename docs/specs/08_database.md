@@ -12,6 +12,7 @@
 |---------|------|
 | 配信に接続 | UUID v4でセッションIDを生成し、sessionsテーブルにINSERT（end_time = NULL） |
 | メッセージ受信 | messagesテーブルにINSERT + viewer_profilesをUPSERT |
+| ライブリアクションの更新を受信 | reactionsテーブルに絵文字ごとに INSERT OR IGNORE（0件の更新は保存しない） |
 | 配信から切断 | sessionsテーブルのend_timeを更新、統計（total_messages, total_revenue）を最終集計 |
 
 ### メッセージ重複排除
@@ -62,6 +63,7 @@
 |---------|------|
 | `sessions` | セッション情報 |
 | `messages` | チャットメッセージ |
+| `reactions` | ライブリアクション（更新×絵文字ごとの件数） |
 | `viewer_profiles` | 視聴者プロフィール |
 | `viewer_custom_info` | 視聴者カスタム情報 |
 | `broadcaster_profiles` | 配信者プロフィール |
@@ -160,6 +162,47 @@ CREATE UNIQUE INDEX idx_messages_unique ON messages(session_id, message_id);
 | `metadata` | `{"gift_name":"Press F","gift_image_url":"https://...","jewel_count":10}`（jewel_count は取れなければ null） |
 
 分析では `json_extract(metadata, '$.jewel_count')` で引ける。`channel_id = ''` の行は視聴者を特定できなかったギフトで、`author` の handle で後から紐付けられる。
+
+### reactions テーブル
+
+ライブリアクション（[02_chat.md](02_chat.md#ライブリアクション)）を、後から分析できる形で残す。1回の更新（`emojiFountainDataEntity`）の絵文字ごとに1行。
+
+```sql
+CREATE TABLE IF NOT EXISTS reactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    update_time_usec INTEGER NOT NULL,      -- YouTube 側の更新時刻（マイクロ秒）
+    duration_seconds INTEGER NOT NULL,      -- この更新が表す秒数
+    emoji TEXT NOT NULL,                    -- unicodeEmojiId（例: ❤）
+    count INTEGER NOT NULL,                 -- 件数（1以上）
+    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+    UNIQUE(session_id, update_time_usec, emoji)
+);
+
+CREATE INDEX IF NOT EXISTS idx_reactions_session_time ON reactions(session_id, update_time_usec);
+```
+
+| 状況 | 保存される行 |
+|------|-------------|
+| 更新（update_time_usec = 1790422357025983、2秒、❤3・🎉5） | `(s1, 1790422357025983, 2, '❤', 3)` と `(s1, 1790422357025983, 2, '🎉', 5)` |
+| 0件の更新 | 保存しない |
+| 同じセッションで同じ更新をもう一度保存 | INSERT OR IGNORE で無視（UNIQUE） |
+
+- 1秒ごとの時刻は持たない。分析の細かさは更新ごと（観測では約1.6秒）
+- 「どの時間帯に何件」は `update_time_usec` で区切って `SUM(count)` する。同じ更新の行は同じ `update_time_usec` を持つので、更新単位の合計は `GROUP BY update_time_usec` で出る
+- 送り主が分からないため、視聴者系のテーブルとは紐づかない
+
+**配信（video_id）単位の累計**（`get_connection_reactions` の totals。再接続・F5 後のメーター復元用）:
+
+```sql
+SELECT r.emoji, SUM(r.count)
+FROM reactions r
+JOIN sessions s ON r.session_id = s.id
+WHERE s.stream_url LIKE '%{video_id}%'
+GROUP BY r.emoji
+```
+
+直近60秒（recent）は同じ条件に `r.update_time_usec >= {現在 − 60秒}` を足し、更新ごとにまとめて古い順に返す。
 
 ### viewer_profiles テーブル
 
@@ -474,6 +517,7 @@ interface ViewerCustomInfo {
 | `idx_messages_channel_id` | messages(channel_id) | 投稿者別メッセージ検索 |
 | `idx_messages_type` | messages(message_type) | タイプ別メッセージ検索 |
 | `idx_messages_unique` | messages(session_id, message_id) | 重複防止 |
+| `idx_reactions_session_time` | reactions(session_id, update_time_usec) | セッション・時間帯別のリアクション集計 |
 | `idx_viewer_profiles_broadcaster` | viewer_profiles(broadcaster_channel_id) | 配信者別視聴者検索 |
 | `idx_viewer_profiles_message_count` | viewer_profiles(broadcaster_channel_id, message_count DESC) | アクティブ順ソート |
 | `idx_viewer_profiles_contribution` | viewer_profiles(broadcaster_channel_id, total_contribution DESC) | 貢献額順ソート |
@@ -532,6 +576,7 @@ interface ViewerCustomInfo {
 | 親テーブル | 子テーブル | ON DELETE |
 |-----------|-----------|-----------|
 | sessions | messages | CASCADE |
+| sessions | reactions | CASCADE |
 | sessions | hourly_stats | CASCADE |
 | sessions | contributor_stats | CASCADE |
 | viewer_profiles | viewer_custom_info | CASCADE |

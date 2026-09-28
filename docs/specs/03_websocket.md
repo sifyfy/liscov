@@ -21,6 +21,7 @@ OBSオーバーレイ、カスタムボット、外部分析ツールなど、�
 | `ws://127.0.0.1:{port}` に接続 | `Connected` メッセージ（client_id付き）を受信 |
 | 接続中にチャットメッセージ受信 | 全クライアントに `ChatMessage` をブロードキャスト |
 | 接続中にギフト受信 | 全クライアントに `ChatMessage`（`message_type` = `Gift`）をブロードキャスト。新しいメッセージ種別は作らない |
+| 接続中にライブリアクションの更新を受信 | 全クライアントに `Reaction` をブロードキャスト（0件の更新・再送は送らない） |
 | `GetInfo` を送信 | `ServerInfo`（バージョン、接続クライアント数）を受信 |
 | 接続直後 | **過去メッセージは送信されない**。接続後の新着メッセージのみ |
 
@@ -33,6 +34,7 @@ OBSオーバーレイ、カスタムボット、外部分析ツールなど、�
 | 過去メッセージは送信しない | シンプルな設計を優先。履歴が必要な場合はDB API経由で取得 |
 | WebSocketはコア `ChatMessage` 構造体をブロードキャストし、GUI向け `GuiChatMessage` とはフィールドが異なる | WebSocket APIとフロントエンドは別の消費者であり、それぞれに最適な形式を提供する |
 | ポート範囲は8765〜8774（10ポート） | 複数インスタンス起動への対応と、ポート枯渇の妥当な上限 |
+| クライアントは知らない `type` のメッセージを無視する（プロトコルの約束） | サーバーが新しい種類（例: `Reaction`）を足しても既存のクライアントが壊れないようにする |
 
 ## サーバー設定
 
@@ -195,6 +197,31 @@ pub struct WebSocketStatus {
 { "Emoji": { "emoji_id": "🎉", "image_url": "https://...", "alt_text": ":party:" } }
 ```
 
+#### Reaction
+
+ライブリアクションの更新（[02_chat.md](02_chat.md#ライブリアクション)）を受けたときにブロードキャスト。前回の更新からの差分で、累計ではない。
+
+```json
+{
+  "type": "Reaction",
+  "data": {
+    "broadcaster_channel_id": "UCxxxxxxxxxxxx",
+    "update_time_usec": 1790422357025983,
+    "duration_seconds": 2,
+    "counts": { "❤": 3, "🎉": 5 },
+    "total": 8
+  }
+}
+```
+
+| フィールド | 説明 |
+|-----------|------|
+| `broadcaster_channel_id` | どの配信のリアクションか（多接続時の区別用。分からなければ null） |
+| `update_time_usec` | YouTube 側の更新時刻（マイクロ秒、数値） |
+| `duration_seconds` | この更新が表す秒数 |
+| `counts` | 絵文字 → 件数。0件の絵文字は含めない |
+| `total` | `counts` の合計 |
+
 #### ServerInfo
 
 `GetInfo` リクエストへの応答。
@@ -250,6 +277,7 @@ pub struct WebSocketStatus {
 pub enum ServerMessage {
     Connected { client_id: u64 },
     ChatMessage(GuiChatMessage),
+    Reaction { broadcaster_channel_id: Option<String>, #[serde(flatten)] update: ReactionUpdate },
     ServerInfo { version: String, connected_clients: u32 },
     Error { message: String },
 }
