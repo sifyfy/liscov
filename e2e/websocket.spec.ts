@@ -8,6 +8,7 @@ import {
   teardownTestEnvironment,
   resetMockServer,
   addMockMessage,
+  addMockReaction,
   disconnectAndInitialize,
 } from './utils/test-helpers';
 
@@ -283,6 +284,40 @@ test.describe('WebSocket API (03_websocket.md)', () => {
   });
 
   test.describe('Complete Data Flow: YouTube → App → WebSocket → Client', () => {
+    // spec: 03_websocket.md「Reaction」— ライブリアクションの更新を差分で配信する
+    test('should receive live reactions as Reaction through WebSocket API', async () => {
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_reaction_ws`);
+      await mainPage.locator('button:has-text("開始")').click();
+      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+
+      const port = await getWebSocketPort(mainPage);
+      const { ws } = await connectWebSocket(`ws://127.0.0.1:${port}`);
+
+      await addMockReaction({ '❤': 3, '🎉': 5 }, 2);
+
+      const messages = await collectMessages(ws, 5000);
+      const reactions = messages.filter((m: unknown) => (m as { type: string }).type === 'Reaction');
+      expect(reactions).toHaveLength(1);
+
+      const reaction = reactions[0] as {
+        data: {
+          broadcaster_channel_id: string | null;
+          update_time_usec: number;
+          duration_seconds: number;
+          counts: Record<string, number>;
+          total: number;
+        };
+      };
+      expect(reaction.data.broadcaster_channel_id).toBe('UC_mock');
+      expect(typeof reaction.data.update_time_usec).toBe('number');
+      expect(reaction.data.duration_seconds).toBe(2);
+      expect(reaction.data.counts).toEqual({ '❤': 3, '🎉': 5 });
+      expect(reaction.data.total).toBe(8);
+
+      ws.close();
+    });
+
     test('should receive text message through WebSocket API', async () => {
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);

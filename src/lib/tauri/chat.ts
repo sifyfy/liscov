@@ -1,6 +1,6 @@
 // チャット関連の Tauri コマンドラッパー
 import { invoke } from '@tauri-apps/api/core';
-import type { ConnectionResult, ConnectionInfo, ChatMode } from '$lib/types';
+import type { ConnectionResult, ConnectionInfo, ChatMode, ReactionSummary } from '$lib/types';
 import { normalizeError } from './errors';
 
 /**
@@ -48,6 +48,17 @@ export async function disconnectAllStreams(): Promise<void> {
 export async function getConnections(): Promise<ConnectionInfo[]> {
   try {
     return await invoke('get_connections');
+  } catch (e) {
+    throw normalizeError(e);
+  }
+}
+
+/**
+ * その接続の配信のリアクション累計と直近60秒の更新を取得する
+ */
+export async function getConnectionReactions(connectionId: number): Promise<ReactionSummary> {
+  try {
+    return await invoke('get_connection_reactions', { connectionId });
   } catch (e) {
     throw normalizeError(e);
   }

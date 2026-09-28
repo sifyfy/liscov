@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { listen } from '@tauri-apps/api/event';
 import * as chatApi from '$lib/tauri/chat';
 import type { ChatMessage, ConnectionResult, ConnectionInfo } from '$lib/types';
+import type { GuiReactionUpdate } from '$lib/types/generated/GuiReactionUpdate';
 
 // chatApiをモック（setupファイルより前に宣言することでホイスティングを確保）
 vi.mock('$lib/tauri/chat', () => ({
@@ -1544,5 +1545,130 @@ describe('chatStore ジュエル数を取れない接続の注記', () => {
 		vi.mocked(connectToStream).mockResolvedValueOnce(makeSuccessResult({ connection_id: BigInt(3) }));
 		await store.connect('https://www.youtube.com/watch?v=a');
 		expect(store.connections.get(3)?.jewelCountUnavailable).toBe(false);
+	});
+});
+
+// spec: docs/specs/02_chat.md「リアクションメーター」
+describe('chatStore リアクションメーター', () => {
+	let store: typeof import('./chat.svelte').chatStore;
+	let emitReaction: (update: GuiReactionUpdate) => void;
+	const nowUsec = () => Date.now() * 1000;
+
+	function reaction(connectionId: number, counts: Record<string, number>): GuiReactionUpdate {
+		const total = Object.values(counts).reduce((a, b) => a + b, 0);
+		return {
+			connection_id: BigInt(connectionId),
+			update_time_usec: nowUsec(),
+			duration_seconds: 1,
+			counts,
+			total,
+		};
+	}
+
+	beforeEach(async () => {
+		vi.clearAllMocks();
+		vi.mocked(listen).mockReset();
+		vi.mocked(listen).mockImplementation(async (event: string, handler: unknown) => {
+			if (event === 'chat:reaction') {
+				emitReaction = (update: GuiReactionUpdate) =>
+					(handler as (e: { payload: GuiReactionUpdate }) => void)({ payload: update });
+			}
+			return () => {};
+		});
+		vi.resetModules();
+		vi.doMock('$lib/tauri/chat', () => ({
+			connectToStream: vi.fn(),
+			disconnectStream: vi.fn(),
+			disconnectAllStreams: vi.fn(),
+			setChatMode: vi.fn(),
+			getConnections: vi.fn(),
+			getConnectionReactions: vi.fn().mockResolvedValue({ totals: {}, recent: [] }),
+		}));
+		vi.doMock('./config.svelte', () => ({
+			configStore: {
+				isLoaded: false,
+				messageFontSize: 13,
+				showTimestamps: true,
+				autoScrollEnabled: true,
+				setMessageFontSize: vi.fn(),
+			},
+		}));
+		const mod = await import('./chat.svelte');
+		store = mod.chatStore;
+		await store.setupEventListeners();
+
+		const { connectToStream } = await import('$lib/tauri/chat');
+		vi.mocked(connectToStream)
+			.mockResolvedValueOnce(makeSuccessResult({ connection_id: BigInt(1) }))
+			.mockResolvedValueOnce(makeSuccessResult({ connection_id: BigInt(2), broadcaster_channel_id: 'UC_bob' }));
+		await store.connect('https://www.youtube.com/watch?v=a');
+		await store.connect('https://www.youtube.com/watch?v=b');
+	});
+
+	afterEach(() => {
+		store.cleanup();
+		vi.doUnmock('$lib/tauri/chat');
+		vi.doUnmock('./config.svelte');
+	});
+
+	it('接続直後はリアクションが無い', () => {
+		expect(store.connections.get(1)?.reactions.totals).toEqual({});
+	});
+
+	it('chat:reaction をその接続のメーターに加える', () => {
+		emitReaction(reaction(1, { '🎉': 4 }));
+		emitReaction(reaction(1, { '❤': 3 }));
+
+		expect(store.connections.get(1)?.reactions.totals).toEqual({ '🎉': 4, '❤': 3 });
+		expect(store.connections.get(1)?.reactions.recent).toHaveLength(2);
+		expect(store.connections.get(2)?.reactions.totals).toEqual({});
+	});
+
+	it('存在しない接続のリアクションは無視する', () => {
+		emitReaction(reaction(99, { '❤': 1 }));
+		expect(store.connections.has(99)).toBe(false);
+	});
+
+	// spec: 同じ配信に再接続 → 累計は DB の続きから
+	it('接続したら DB の累計を読み込む', async () => {
+		const { connectToStream, getConnectionReactions } = await import('$lib/tauri/chat');
+		vi.mocked(getConnectionReactions).mockResolvedValueOnce({ totals: { '❤': 430 }, recent: [] });
+		vi.mocked(connectToStream).mockResolvedValueOnce(makeSuccessResult({ connection_id: BigInt(3) }));
+
+		await store.connect('https://www.youtube.com/watch?v=a');
+
+		expect(getConnectionReactions).toHaveBeenCalledWith(3);
+		expect(store.connections.get(3)?.reactions.totals).toEqual({ '❤': 430 });
+	});
+
+	// spec: F5リロード → get_connection_reactions で読み直す
+	it('復元した接続のメーターを読み直す', async () => {
+		await store.initialize();
+		const { getConnections, getConnectionReactions } = await import('$lib/tauri/chat');
+		vi.mocked(getConnections).mockResolvedValueOnce([makeConnectionInfo({ id: BigInt(5) })]);
+		vi.mocked(getConnectionReactions).mockResolvedValueOnce({
+			totals: { '🎉': 2 },
+			recent: [{ update_time_usec: nowUsec(), duration_seconds: 1, counts: { '🎉': 2 }, total: 2 }],
+		});
+
+		await store.restoreConnections();
+
+		expect(store.connections.get(5)?.reactions.totals).toEqual({ '🎉': 2 });
+		expect(store.connections.get(5)?.reactions.peakPerMinute).toBe(2);
+	});
+
+	// spec: 読み直しに失敗したらその接続のメーターは空から始める
+	it('読み直しに失敗しても接続は復元する', async () => {
+		await store.initialize();
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		const { getConnections, getConnectionReactions } = await import('$lib/tauri/chat');
+		vi.mocked(getConnections).mockResolvedValueOnce([makeConnectionInfo({ id: BigInt(5) })]);
+		vi.mocked(getConnectionReactions).mockRejectedValueOnce(new Error('db'));
+
+		await store.restoreConnections();
+
+		expect(store.connections.get(5)?.connectionState).toBe('connected');
+		expect(store.connections.get(5)?.reactions.totals).toEqual({});
+		warn.mockRestore();
 	});
 });

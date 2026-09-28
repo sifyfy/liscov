@@ -13,7 +13,7 @@ use base64::{Engine as _, engine::general_purpose};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::net::SocketAddr;
@@ -216,6 +216,10 @@ struct LastRequestCookies {
 struct ServerState {
     config: ServerConfig,
     message_queue: Mutex<VecDeque<Value>>,
+    /// ライブリアクション（emojiFountainDataEntity）の待ち行列。1 応答に 1 件ずつ返す（実データと同じ）
+    reaction_queue: Mutex<VecDeque<Value>>,
+    /// 最後に割り当てた updateTimeUsec（同じ値にならないよう単調増加させる）
+    last_reaction_time_usec: AtomicU64,
     replay_state: Mutex<ReplayState>,
     request_count: AtomicU64,
     message_counter: AtomicU64,
@@ -320,6 +324,8 @@ async fn main() {
             replay_loop: args.r#loop,
         },
         message_queue: Mutex::new(VecDeque::new()),
+        reaction_queue: Mutex::new(VecDeque::new()),
+        last_reaction_time_usec: AtomicU64::new(0),
         replay_state: Mutex::new(ReplayState {
             current_index: 0,
             start_time: None,
@@ -503,7 +509,11 @@ fn build_routes(
                     tv.decoded_length = 0;
                     tv.validation_count += 1;
                 }
-                Ok::<_, warp::Rejection>(warp::reply::json(&build_resp(get_actions(&sa), chattype)))
+                let mut resp = build_resp(get_actions(&sa), chattype);
+                if let Some(entity) = sa.reaction_queue.lock().unwrap().pop_front() {
+                    resp["frameworkUpdates"] = json!({"entityBatchUpdate":{"mutations":[{"entityKey":"mock_emoji_fountain","type":"ENTITY_MUTATION_TYPE_REPLACE","payload":{"emojiFountainDataEntity":entity}}]}});
+                }
+                Ok::<_, warp::Rejection>(warp::reply::json(&resp))
             }
         });
     let sac = Arc::clone(&state);
@@ -566,6 +576,28 @@ fn build_routes(
                 .push_back(gen_msg(&sad, &b));
             warp::reply::json(&json!({"status":"ok"}))
         });
+    // ライブリアクションを 1 回分キューに積む（次のポーリング応答に frameworkUpdates として載る）
+    let sar = Arc::clone(&state);
+    let add_reaction = warp::path("add_reaction")
+        .and(warp::post())
+        .and(warp::body::json())
+        .map(move |b: ARR| {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_micros() as u64;
+            let prev = sar.last_reaction_time_usec.fetch_max(now, Ordering::SeqCst);
+            let time = if now > prev {
+                now
+            } else {
+                sar.last_reaction_time_usec.fetch_add(1, Ordering::SeqCst) + 1
+            };
+            sar.reaction_queue
+                .lock()
+                .unwrap()
+                .push_back(gen_reaction_entity(time, &b));
+            warp::reply::json(&json!({"status":"ok","update_time_usec":time}))
+        });
     // Set stream state (member_only, require_auth, channel_id, channel_name, delays)
     let sss = Arc::clone(&state);
     let setstream = warp::path("set_stream_state")
@@ -620,6 +652,7 @@ fn build_routes(
         r.start_time = None;
         r.base_timestamp = None;
         srs.message_queue.lock().unwrap().clear();
+        srs.reaction_queue.lock().unwrap().clear();
         *srs.auth_state.lock().unwrap() = AuthState::default();
         *srs.stream_state.lock().unwrap() = StreamState::default();
         *srs.last_chat_mode.lock().unwrap() = None;
@@ -708,6 +741,7 @@ fn build_routes(
         .or(authst)
         .or(status)
         .or(add)
+        .or(add_reaction)
         .or(setstream)
         .or(chat_mode_status)
         .or(token_validation)
@@ -737,6 +771,18 @@ struct AMR {
     gift_count: Option<u32>,
     /// ギフト（jewel）の画像 URL。実データと同じくスキーム無しを既定にする
     gift_image_url: Option<String>,
+}
+/// /add_reaction の本文
+#[derive(Debug, Deserialize)]
+struct ARR {
+    /// 絵文字 → 件数（すべて最初の 1 秒のバケットに入れる）
+    counts: BTreeMap<String, u32>,
+    /// バケット数（秒）。2 以上なら残りは 0 件のバケットにする
+    #[serde(default = "one")]
+    duration_seconds: u32,
+}
+fn one() -> u32 {
+    1
 }
 #[derive(Debug, Deserialize)]
 struct SAR {
@@ -1088,6 +1134,22 @@ fn generate_mock_continuation_token(chattype: u8) -> String {
         ((random_data >> 8) & 0xFF) as u8, // Trailing field
     ];
     general_purpose::URL_SAFE_NO_PAD.encode(&bytes)
+}
+
+/// 実データと同じ形の emojiFountainDataEntity を作る（1 秒単位のバケット）
+fn gen_reaction_entity(update_time_usec: u64, r: &ARR) -> Value {
+    let reactions: Vec<Value> = r
+        .counts
+        .iter()
+        .map(|(emoji, count)| json!({"unicodeEmojiId":emoji,"reactionCount":count}))
+        .collect();
+    let total: u32 = r.counts.values().sum();
+    let first = json!({"duration":{"seconds":"1"},"intensityScore":0.75,"reactionsData":reactions,"totalReactions":total});
+    let empty = json!({"duration":{"seconds":"1"},"intensityScore":1,"totalReactions":0});
+    let buckets: Vec<Value> = std::iter::once(first)
+        .chain(std::iter::repeat_n(empty, r.duration_seconds.saturating_sub(1) as usize))
+        .collect();
+    json!({"key":"mock_emoji_fountain","reactionBuckets":buckets,"updateTimeUsec":update_time_usec.to_string()})
 }
 
 fn build_resp(acts: Vec<Value>, chattype: u8) -> Value {

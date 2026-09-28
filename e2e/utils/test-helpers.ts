@@ -509,6 +509,18 @@ export async function addMockMessage(message: {
 }
 
 /**
+ * モックサーバーにライブリアクションを 1 回分積む（次のポーリング応答に載る）
+ * durationSeconds が 2 以上なら、残りは 0 件のバケットになる
+ */
+export async function addMockReaction(counts: Record<string, number>, durationSeconds = 1): Promise<void> {
+  await fetch(`${MOCK_SERVER_URL}/add_reaction`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ counts, duration_seconds: durationSeconds }),
+  });
+}
+
+/**
  * E2Eテスト共通セットアップ
  */
 export async function setupTestEnvironment(): Promise<{ browser: Browser; context: BrowserContext; page: Page }> {

@@ -198,7 +198,7 @@ CREATE INDEX IF NOT EXISTS idx_reactions_session_time ON reactions(session_id, u
 SELECT r.emoji, SUM(r.count)
 FROM reactions r
 JOIN sessions s ON r.session_id = s.id
-WHERE s.stream_url LIKE '%{video_id}%'
+WHERE s.stream_url LIKE '%watch?v={video_id}%'   -- 配信内コメント数カウンタの復元と同じ条件
 GROUP BY r.emoji
 ```
 

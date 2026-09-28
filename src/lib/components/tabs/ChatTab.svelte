@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChatDisplay, ConnectionList, FilterPanel, InputSection } from '$lib/components/chat';
+  import { ChatDisplay, ConnectionList, FilterPanel, InputSection, ReactionMeter } from '$lib/components/chat';
   import { chatStore } from '$lib/stores';
 
   // 接続リストパネルの高さ管理
@@ -92,8 +92,9 @@
     </div>
   {/if}
 
-  <!-- 下部パネル: フィルター + チャット表示 -->
+  <!-- 下部パネル: フィルター + リアクションメーター + チャット表示 -->
   <FilterPanel />
+  <ReactionMeter />
   <div class="flex-1 overflow-hidden">
     <ChatDisplay />
   </div>

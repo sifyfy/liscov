@@ -1,10 +1,18 @@
 // Chat state management using Svelte 5 runes
 import { listen } from '@tauri-apps/api/event';
 import { normalizeError } from '$lib/tauri/errors';
-import type { ChatMessage, ConnectionResult, ChatMode, ChatFilter, FrontendConnectionState } from '$lib/types';
+import type {
+  ChatMessage,
+  ConnectionResult,
+  ChatMode,
+  ChatFilter,
+  FrontendConnectionState,
+  GuiReactionUpdate
+} from '$lib/types';
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import * as chatApi from '$lib/tauri/chat';
 import { getConnectionColor } from '$lib/utils/connection-colors';
+import { applyReactionUpdate, emptyReactionMeter, restoreReactionMeter } from '$lib/utils/reactions';
 import { configStore } from './config.svelte';
 
 // ファクトリ関数：テスト時に独立したストアインスタンスを生成できる
@@ -140,6 +148,36 @@ function createChatStore() {
     connections = next;
   }
 
+  // 現在時刻（マイクロ秒）。リアクションの60秒窓の判定に使う
+  function nowUsec(): number {
+    return Date.now() * 1000;
+  }
+
+  // リアクション更新をその接続のメーターに加える（02_chat.md「リアクションメーター」）
+  function addReaction(update: GuiReactionUpdate): void {
+    const connId = Number(update.connection_id);
+    const conn = connections.get(connId);
+    if (!conn) return;
+    const next = new SvelteMap(connections);
+    next.set(connId, { ...conn, reactions: applyReactionUpdate(conn.reactions, update, nowUsec()) });
+    connections = next;
+  }
+
+  // 配信（video_id）単位の累計と直近60秒を DB から読み込む（再接続・F5 リロード後）
+  // 失敗したらそのメーターは空から始める
+  async function loadReactions(connId: number): Promise<void> {
+    try {
+      const summary = await chatApi.getConnectionReactions(connId);
+      const conn = connections.get(connId);
+      if (!conn) return;
+      const next = new SvelteMap(connections);
+      next.set(connId, { ...conn, reactions: restoreReactionMeter(summary, nowUsec()) });
+      connections = next;
+    } catch (e) {
+      console.warn(`リアクションの読み込みに失敗 (connection ${connId}):`, e);
+    }
+  }
+
   // アクション
   // 接続中エントリの仮IDカウンタ（API応答前に一意なキーが必要）
   let nextTempConnId = -1;
@@ -158,7 +196,8 @@ function createChatStore() {
       broadcasterChannelId: '',
       connectionState: 'connecting',
       color: getConnectionColor(String(tempId)),
-      jewelCountUnavailable: false
+      jewelCountUnavailable: false,
+      reactions: emptyReactionMeter
     };
     const beforeConnect = new SvelteMap(connections);
     beforeConnect.set(tempId, connectingConn);
@@ -182,13 +221,17 @@ function createChatStore() {
           broadcasterChannelId: result.broadcaster_channel_id ?? '',
           connectionState: 'connected',
           color: getConnectionColor(result.broadcaster_channel_id ?? String(connId)),
-          jewelCountUnavailable: false
+          jewelCountUnavailable: false,
+          reactions: emptyReactionMeter
         });
       } else {
         error = result.error;
       }
 
       connections = next;
+      if (result.success) {
+        await loadReactions(Number(result.connection_id));
+      }
       return result;
     } catch (e) {
       // 仮エントリを削除
@@ -375,9 +418,15 @@ function createChatStore() {
       }
     });
 
+    // ライブリアクションの更新を購読
+    const unlistenReaction = await listen<GuiReactionUpdate>('chat:reaction', (event) => {
+      addReaction(event.payload);
+    });
+
     unlisten = () => {
       unlistenMessage();
       unlistenConnection();
+      unlistenReaction();
     };
   }
 
@@ -409,10 +458,12 @@ function createChatStore() {
           broadcasterChannelId: info.broadcaster_channel_id,
           connectionState: info.is_monitoring ? 'connected' : 'disconnecting',
           color: getConnectionColor(info.broadcaster_channel_id || String(connId)),
-          jewelCountUnavailable: false
+          jewelCountUnavailable: false,
+          reactions: emptyReactionMeter
         });
       }
       connections = next;
+      await Promise.all(backendConnections.map((info) => loadReactions(Number(info.id))));
     } catch (e) {
       console.warn('接続状態の復元に失敗:', e);
     }
