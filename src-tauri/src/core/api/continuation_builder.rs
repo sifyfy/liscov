@@ -193,10 +193,15 @@ mod tests {
     #[test]
     fn fails_on_broken_token() {
         // 長さが実データより長い（途中で切れている）
-        let bytes = [0xd2, 0x87, 0xcc, 0xc8, 0x03, 0x40, 0x82, 0x01, 0x02, 0x08, 0x04];
+        let bytes = [
+            0xd2, 0x87, 0xcc, 0xc8, 0x03, 0x40, 0x82, 0x01, 0x02, 0x08, 0x04,
+        ];
         let token = general_purpose::URL_SAFE_NO_PAD.encode(bytes);
         assert_eq!(modify_continuation_mode(&token, ChatMode::AllChat), None);
-        assert_eq!(modify_continuation_mode("not base64 !!", ChatMode::AllChat), None);
+        assert_eq!(
+            modify_continuation_mode("not base64 !!", ChatMode::AllChat),
+            None
+        );
     }
 
     #[test]

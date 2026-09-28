@@ -58,7 +58,11 @@ pub fn get_reaction_summary(
     let rows = stmt
         .query_map(params![pattern, since_usec], |row| {
             Ok((
-                (row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, u32>(2)?),
+                (
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, u32>(2)?,
+                ),
                 (row.get::<_, String>(3)?, row.get::<_, u32>(4)?),
             ))
         })?
@@ -67,7 +71,10 @@ pub fn get_reaction_summary(
         .chunk_by(|(a, _), (b, _)| a == b)
         .filter_map(|group| {
             let (_, time, duration) = group[0].0;
-            let counts = group.iter().map(|(_, emoji_count)| emoji_count.clone()).collect();
+            let counts = group
+                .iter()
+                .map(|(_, emoji_count)| emoji_count.clone())
+                .collect();
             ReactionUpdate::new(time, duration, counts)
         })
         .collect();
@@ -114,8 +121,12 @@ mod tests {
         let conn = db.connection().await;
         let s1 = session(&conn, "vid1");
 
-        save_reaction_update(&conn, &s1, &update(1790422357025983, 2, &[("❤", 3), ("🎉", 5)]))
-            .unwrap();
+        save_reaction_update(
+            &conn,
+            &s1,
+            &update(1790422357025983, 2, &[("❤", 3), ("🎉", 5)]),
+        )
+        .unwrap();
 
         assert_eq!(
             rows(&conn),
@@ -148,7 +159,8 @@ mod tests {
         let s1 = session(&conn, "vid1");
         save_reaction_update(&conn, &s1, &update(100, 1, &[("❤", 3)])).unwrap();
 
-        conn.execute("DELETE FROM sessions WHERE id = ?1", [&s1]).unwrap();
+        conn.execute("DELETE FROM sessions WHERE id = ?1", [&s1])
+            .unwrap();
 
         assert!(rows(&conn).is_empty());
     }

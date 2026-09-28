@@ -961,8 +961,7 @@ async fn test_reaction_json_format_matches_spec() {
         .into_iter()
         .map(|(e, c)| (e.to_string(), c))
         .collect();
-    let update =
-        app_lib::core::models::ReactionUpdate::new(1790422357025983, 2, counts).unwrap();
+    let update = app_lib::core::models::ReactionUpdate::new(1790422357025983, 2, counts).unwrap();
     server
         .broadcast_reaction(Some("UCxxxxxxxxxxxx"), &update)
         .await;
