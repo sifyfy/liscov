@@ -167,16 +167,11 @@ impl TtsConfig {
     pub fn save(&self) -> Result<(), String> {
         let path = Self::config_path()?;
 
-        // Create parent directory if needed
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create config directory: {}", e))?;
-        }
-
         let toml_str = toml::to_string_pretty(self)
             .map_err(|e| format!("Failed to serialize TTS config: {}", e))?;
 
-        fs::write(&path, toml_str).map_err(|e| format!("Failed to write TTS config: {}", e))?;
+        crate::atomic_file::write(&path, &toml_str)
+            .map_err(|e| format!("Failed to write TTS config: {}", e))?;
 
         log::info!("TTS config saved to {:?}", path);
         Ok(())

@@ -2,7 +2,7 @@
 //!
 //! 保存設定は ConfigState（config.toml の [raw_response]）が正本（05_raw_response.md）
 
-use crate::commands::config::{Config, ConfigState, save_config_to_file};
+use crate::commands::config::{Config, ConfigState};
 use crate::core::raw_response::{SaveConfig, resolve_save_path, validate_file_path};
 use crate::errors::CommandError;
 use serde::{Deserialize, Serialize};
@@ -66,15 +66,15 @@ pub fn raw_response_update_config(
     state: State<'_, ConfigState>,
     config: GuiSaveConfig,
 ) -> Result<(), CommandError> {
-    let new_config = config_apply_raw_response(&state.get(), SaveConfig::from(config))?;
-    state.set(new_config.clone());
+    let updated =
+        state.update(|current| config_apply_raw_response(current, SaveConfig::from(config)))?;
     tracing::info!(
         "💾 Save config updated: enabled={}",
-        new_config.raw_response.enabled
+        updated.config.raw_response.enabled
     );
 
-    // ファイル保存を試行。失敗してもメモリ上の変更は維持（09_config.md）
-    if let Err(e) = save_config_to_file(&new_config) {
+    // 書き込みに失敗してもメモリ上の変更は維持（09_config.md）
+    if let Err(e) = updated.saved {
         tracing::error!("Failed to save config: {}", e);
     }
     Ok(())

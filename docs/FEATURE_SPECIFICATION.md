@@ -26,6 +26,9 @@
 | raw_responses.ndjson | ユーザー指定パス（デフォルト: `raw_responses.ndjson`） | NDJSON | 生APIレスポンス（任意） |
 | liscov.log | `%APPDATA%/liscov-tauri/logs/liscov.log` | テキスト | バックエンドのログ |
 
+設定・認証の TOML（config.toml・credentials.toml・tts_config.toml）は、同じフォルダの一時ファイル（`<名前>.tmp`）に書いてディスクに書き出してから、元のファイルと置き換える。
+書き込みの途中でアプリや PC が止まっても、前の内容か新しい内容のどちらかが残り、空や途中までのファイルにならない。
+
 ### バックエンドのログ
 
 配信中に起きた失敗（取得・保存・読み上げ）を後から調べられるように、リリースビルドでもログをファイルに残す。

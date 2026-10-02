@@ -1,6 +1,7 @@
 //! Liscov - YouTube Live Chat Monitor
 //! Tauri backend implementation
 
+pub mod atomic_file;
 pub mod commands;
 pub mod connection;
 pub mod core;
