@@ -11,7 +11,7 @@ pub use reactions::*;
 
 use anyhow::Result;
 use rusqlite::Connection;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -30,10 +30,7 @@ impl Database {
             std::fs::create_dir_all(parent)?;
         }
 
-        let conn = Connection::open(&path)?;
-
-        // Enable foreign keys
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        let conn = open_file_database(&path)?;
 
         // Run migrations
         migrations::run_migrations(&conn)?;
@@ -77,6 +74,20 @@ impl Database {
     }
 }
 
+/// DB ファイルを開いて接続の設定をする（08_database.md「書き込み」）
+///
+/// WAL + synchronous = NORMAL にして、コミットのたびに fsync しない。
+fn open_file_database(path: &Path) -> Result<Connection> {
+    let conn = Connection::open(path)?;
+    conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA synchronous = NORMAL;")?;
+    // journal_mode は結果の行を返すので query_row で設定し、WAL になったか確かめる
+    let mode: String = conn.query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))?;
+    if !mode.eq_ignore_ascii_case("wal") {
+        tracing::warn!("DB を WAL にできなかった（journal_mode = {}）", mode);
+    }
+    Ok(conn)
+}
+
 /// データベースファイルのパスを返す
 fn get_database_path() -> Result<PathBuf> {
     crate::paths::database_path().map_err(|e| anyhow::anyhow!(e))
@@ -85,4 +96,32 @@ fn get_database_path() -> Result<PathBuf> {
 /// バックアップディレクトリのパスを返す
 pub fn get_backup_dir() -> Result<PathBuf> {
     crate::paths::backup_dir().map_err(|e| anyhow::anyhow!(e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // 08_database.md「書き込み」: DB を開くと WAL・synchronous = NORMAL になる
+    #[test]
+    fn file_database_uses_wal_and_normal_sync() {
+        let dir = std::env::temp_dir().join("liscov_test_database_open");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let conn = open_file_database(&dir.join("liscov.db")).unwrap();
+
+        let journal_mode: String = conn
+            .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+            .unwrap();
+        let synchronous: i64 = conn
+            .query_row("PRAGMA synchronous", [], |row| row.get(0))
+            .unwrap();
+        let foreign_keys: i64 = conn
+            .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(journal_mode, "wal");
+        assert_eq!(synchronous, 1, "NORMAL");
+        assert_eq!(foreign_keys, 1);
+    }
 }

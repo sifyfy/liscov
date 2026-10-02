@@ -17,6 +17,7 @@ use crate::core::raw_response::{RawResponseSaver, SaveConfig};
 use crate::database::{self, Database};
 use crate::state::MAX_MESSAGES;
 use crate::tts::{TtsManager, TtsPriority, TtsQueueItem};
+use rusqlite::Connection;
 
 /// 接続ごとに覚える受信済み message_id の件数（02_chat.md「設定値」）
 const RECENT_MESSAGE_IDS_CAPACITY: usize = 10_000;
@@ -259,51 +260,68 @@ where
             save_raw_response(&current_save_config(), &raw_json).await;
         }
 
-        // 各メッセージを処理
-        for mut msg in new_messages {
-            // 再送は保存・集計・GUI・WebSocket・TTS のどれにも流さない
-            if !recent_message_ids.insert(&msg.id) {
-                tracing::debug!(
-                    "再送されたメッセージを捨てる connection_id: {} message_id: {}",
-                    connection_id,
-                    msg.id
-                );
-                continue;
-            }
+        // 再送は保存・集計・GUI・WebSocket・TTS のどれにも流さない
+        let mut fresh: Vec<ChatMessage> = new_messages
+            .into_iter()
+            .filter(|msg| {
+                let is_new = recent_message_ids.insert(&msg.id);
+                if !is_new {
+                    tracing::debug!(
+                        "再送されたメッセージを捨てる connection_id: {} message_id: {}",
+                        connection_id,
+                        msg.id
+                    );
+                }
+                is_new
+            })
+            .collect();
 
-            process_message(
-                &mut msg,
-                &video_id,
-                &session_id,
-                &broadcaster_id,
+        // DB への保存と判定（DB のロックは 1 回、1 トランザクション。08_database.md「書き込み」）
+        if !fresh.is_empty() {
+            let target = MessageTarget {
+                video_id: &video_id,
+                session_id: session_id.as_deref(),
+                broadcaster_id: broadcaster_id.as_deref(),
+            };
+            let db_guard = deps.database.read().await;
+            let conn = match db_guard.as_ref() {
+                Some(db) => Some(db.connection().await),
+                None => None,
+            };
+            process_messages(
+                &mut fresh,
+                conn.as_deref(),
+                &target,
                 &mut in_stream_counts,
                 &mut known_handles,
-                &deps,
-            )
-            .await;
+            );
+        }
 
-            // メッセージバッファに追加
-            {
-                let mut msgs = deps.messages.write().await;
+        // メッセージバッファに追加
+        {
+            let mut msgs = deps.messages.write().await;
+            for msg in &fresh {
                 if msgs.len() >= MAX_MESSAGES {
                     msgs.pop_front();
                 }
                 msgs.push_back(msg.clone());
             }
+        }
 
+        for msg in &fresh {
             // GUI メッセージをフロントエンドに emit（コールバック経由）
-            emit_gui_message(&app, &msg);
+            emit_gui_message(&app, msg);
 
             // WebSocket クライアントへブロードキャスト
             {
                 let ws = deps.websocket_server.read().await;
                 if let Some(server) = ws.as_ref() {
-                    server.broadcast_message(&msg).await;
+                    server.broadcast_message(msg).await;
                 }
             }
 
             // TTS キューに追加
-            enqueue_tts(&deps.tts_manager, &msg).await;
+            enqueue_tts(&deps.tts_manager, msg).await;
         }
 
         // ライブリアクション: 保存・GUI・WebSocket（読み上げはしない）
@@ -364,26 +382,54 @@ where
     end
 }
 
-/// 1 件のメッセージに対して、DB 保存・初回視聴者判定・in-stream カウント更新を行う
-async fn process_message(
-    msg: &mut ChatMessage,
-    video_id: &str,
-    session_id: &Option<String>,
-    broadcaster_id: &Option<String>,
+/// メッセージの保存先（どの配信・セッションのメッセージか）
+struct MessageTarget<'a> {
+    video_id: &'a str,
+    session_id: Option<&'a str>,
+    broadcaster_id: Option<&'a str>,
+}
+
+/// 1 回のポーリングで届いた新しいメッセージを、1 つのトランザクションで保存・判定する（08_database.md「書き込み」）
+///
+/// 1 件の保存に失敗しても警告ログを出して次へ進む。トランザクションを始められなければ 1 件ずつ保存する。
+fn process_messages(
+    msgs: &mut [ChatMessage],
+    conn: Option<&Connection>,
+    target: &MessageTarget,
     in_stream_counts: &mut HashMap<String, u32>,
     known_handles: &mut HashMap<String, String>,
-    deps: &MonitoringDeps,
+) {
+    let tx = conn.and_then(|conn| {
+        conn.unchecked_transaction()
+            .inspect_err(|e| {
+                tracing::warn!("トランザクションを始められない（1 件ずつ保存する）: {}", e)
+            })
+            .ok()
+    });
+    let db = tx.as_deref().or(conn);
+    for msg in msgs.iter_mut() {
+        process_message(msg, db, target, in_stream_counts, known_handles);
+    }
+    if let Some(tx) = tx {
+        if let Err(e) = tx.commit() {
+            tracing::warn!("メッセージ保存のコミットに失敗: {}", e);
+        }
+    }
+}
+
+/// 1 件のメッセージに対して、DB 保存・初回視聴者判定・in-stream カウント更新を行う
+fn process_message(
+    msg: &mut ChatMessage,
+    db: Option<&Connection>,
+    target: &MessageTarget,
+    in_stream_counts: &mut HashMap<String, u32>,
+    known_handles: &mut HashMap<String, String>,
 ) {
     let is_system = matches!(msg.message_type, MessageType::System);
 
     // ギフトには channel_id が届かないので handle から特定する（特定できなければ空のまま）
     if matches!(msg.message_type, MessageType::Gift(_)) && msg.channel_id.is_empty() {
-        let db_guard = deps.database.read().await;
-        let conn = match db_guard.as_ref() {
-            Some(db) => Some(db.connection().await),
-            None => None,
-        };
-        let db_scope = conn.as_deref().zip(broadcaster_id.as_deref());
+        let db_scope = db.zip(target.broadcaster_id);
         msg.channel_id =
             resolve_gift_channel_id(known_handles, &msg.author, db_scope).unwrap_or_default();
     }
@@ -400,29 +446,25 @@ async fn process_message(
         msg.in_stream_comment_count = Some(*count);
     }
 
+    let Some(db) = db else {
+        return;
+    };
+
     // DB に保存（viewer_profile + viewer_stream を生成・更新）
-    if let Some(sid) = session_id {
-        let db_guard = deps.database.read().await;
-        if let Some(db) = db_guard.as_ref() {
-            let conn = db.connection().await;
-            if let Err(e) =
-                database::save_message(&conn, sid, broadcaster_id.as_deref(), msg, Some(video_id))
-            {
-                tracing::warn!("メッセージ保存失敗: {}", e);
-            }
+    if let Some(sid) = target.session_id {
+        if let Err(e) =
+            database::save_message(db, sid, target.broadcaster_id, msg, Some(target.video_id))
+        {
+            tracing::warn!("メッセージ保存失敗: {}", e);
         }
     }
 
     // DB 保存後に初回視聴者かどうかを判定（viewer_streams が更新済みのため）
     if !is_system && has_viewer {
-        if let Some(bid) = broadcaster_id {
-            let db_guard = deps.database.read().await;
-            if let Some(db) = db_guard.as_ref() {
-                let conn = db.connection().await;
-                msg.is_first_time_viewer =
-                    database::is_first_time_viewer(&conn, bid, &msg.channel_id, video_id)
-                        .unwrap_or(false);
-            }
+        if let Some(bid) = target.broadcaster_id {
+            msg.is_first_time_viewer =
+                database::is_first_time_viewer(db, bid, &msg.channel_id, target.video_id)
+                    .unwrap_or(false);
         }
     }
 }
@@ -749,5 +791,75 @@ mod tests {
             Some("UCa")
         );
         assert_eq!(resolve_gift_channel_id(&known, "@b", None), None);
+    }
+
+    fn text_message(id: &str, channel_id: &str) -> ChatMessage {
+        ChatMessage {
+            id: id.to_string(),
+            timestamp: "12:00:00".to_string(),
+            timestamp_usec: "1000000".to_string(),
+            message_type: MessageType::Text,
+            author: format!("@{channel_id}"),
+            author_icon_url: None,
+            channel_id: channel_id.to_string(),
+            content: "こんにちは".to_string(),
+            runs: vec![],
+            metadata: None,
+            is_member: false,
+            is_first_time_viewer: false,
+            in_stream_comment_count: None,
+        }
+    }
+
+    // 08_database.md「書き込み」: 1 回のポーリング分をまとめて保存し、1 件の失敗はほかを止めない。
+    // 初見判定は保存したあとに同じトランザクションの中で行う
+    #[tokio::test]
+    async fn batch_saves_messages_and_skips_only_the_failed_one() {
+        let db = Database::new_in_memory().expect("in-memory DB");
+        let conn = db.connection().await;
+        let session_id = database::create_session(
+            &conn,
+            Some("https://www.youtube.com/watch?v=abc"),
+            None,
+            Some("UCown"),
+            None,
+        )
+        .unwrap();
+        conn.execute_batch(
+            "CREATE TRIGGER fail_bad BEFORE INSERT ON messages WHEN NEW.message_id = 'bad'
+             BEGIN SELECT RAISE(ABORT, 'test'); END;",
+        )
+        .unwrap();
+
+        let mut msgs = vec![
+            text_message("A", "UCa"),
+            text_message("bad", "UCx"),
+            text_message("B", "UCb"),
+            text_message("A2", "UCa"),
+        ];
+        let target = MessageTarget {
+            video_id: "abc",
+            session_id: Some(&session_id),
+            broadcaster_id: Some("UCown"),
+        };
+        process_messages(
+            &mut msgs,
+            Some(&conn),
+            &target,
+            &mut HashMap::new(),
+            &mut HashMap::new(),
+        );
+
+        let saved: Vec<String> = conn
+            .prepare("SELECT message_id FROM messages ORDER BY id")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(saved, ["A", "B", "A2"]);
+        assert!(msgs[0].is_first_time_viewer);
+        assert!(msgs[2].is_first_time_viewer);
+        assert_eq!(msgs[3].in_stream_comment_count, Some(2));
     }
 }

@@ -22,7 +22,7 @@
 | config.toml | `%APPDATA%/liscov-tauri/config.toml` | TOML | アプリケーション設定 |
 | credentials.toml | `%APPDATA%/liscov-tauri/credentials.toml` | TOML | YouTube認証情報（fallbackモード時） |
 | tts_config.toml | `%APPDATA%/liscov-tauri/tts_config.toml` | TOML | TTS設定 |
-| liscov.db | `%APPDATA%/liscov-tauri/liscov.db` | SQLite | セッション・メッセージ・視聴者情報 |
+| liscov.db | `%APPDATA%/liscov-tauri/liscov.db` | SQLite | セッション・メッセージ・視聴者情報（WAL。実行中は `liscov.db-wal`・`liscov.db-shm` も並ぶ） |
 | raw_responses.ndjson | ユーザー指定パス（デフォルト: `raw_responses.ndjson`） | NDJSON | 生APIレスポンス（任意） |
 | liscov.log | `%APPDATA%/liscov-tauri/logs/liscov.log` | テキスト | バックエンドのログ |
 
