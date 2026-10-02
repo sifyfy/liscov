@@ -298,64 +298,16 @@ describe('chatStore 接続管理', () => {
 	});
 
 	// =====================================================================
-	// connectionState getter
+	// broadcasterChannelId getter（最初の接続の配信者チャンネル ID）
 	// =====================================================================
-	describe('connectionState getter', () => {
-		// spec: 接続0件のとき 'idle'
-		it('接続0件で connectionState が idle', () => {
-			expect(chatStore.connectionState).toBe('idle');
-		});
-
-		// spec: connected 接続がある場合 'connected'
-		it('connected接続がある場合 connectionState が connected', async () => {
-			const { connectToStream } = await import('$lib/tauri/chat');
-			vi.mocked(connectToStream).mockResolvedValue(makeSuccessResult());
-
-			await chatStore.connect('https://example.com');
-
-			expect(chatStore.connectionState).toBe('connected');
-		});
-
-		// spec: some vs every 変異対策 — 1つがdisconnecting、1つがconnectedのとき 'connected' を返す (ID:279,293)
-		it('connected のみの場合 connected を返す（some → every 変異対策）', async () => {
-			// 2つの接続を追加して両方 connected にする
-			const { connectToStream, disconnectStream } = await import('$lib/tauri/chat');
-			vi.mocked(connectToStream)
-				.mockResolvedValueOnce(makeSuccessResult({ connection_id: BigInt(1) }))
-				.mockResolvedValueOnce(makeSuccessResult({ connection_id: BigInt(2) }));
-			await chatStore.connect('https://example.com/1');
-			await chatStore.connect('https://example.com/2');
-
-			// disconnecting を1つ混ぜる（永久にpending）
-			vi.mocked(disconnectStream).mockImplementation(
-				() => new Promise<void>(() => {}) // 永久にpending
-			);
-			const disconnectPromise = chatStore.disconnect(1);
-
-			// 1つ connected + 1つ disconnecting
-			// some(s === 'connected') = true, every(s === 'connected') = false
-			expect(chatStore.connectionState).toBe('connected');
-
-			// cleanup: 後続テストに影響しないようにdisconnectStreamを解決する
-			vi.mocked(disconnectStream).mockResolvedValue(undefined);
-			// disconnectPromise は永久pendingのため、cleanup() で対処
-			void disconnectPromise;
-		});
-	});
-
-	// =====================================================================
-	// 後方互換 getter (streamTitle, broadcasterName, broadcasterChannelId)
-	// =====================================================================
-	describe('後方互換 getter', () => {
+	describe('broadcasterChannelId getter', () => {
 		// spec: 接続0件のとき null
-		it('接続0件のとき streamTitle / broadcasterName / broadcasterChannelId が null', () => {
-			expect(chatStore.streamTitle).toBeNull();
-			expect(chatStore.broadcasterName).toBeNull();
+		it('接続0件のとき broadcasterChannelId が null', () => {
 			expect(chatStore.broadcasterChannelId).toBeNull();
 		});
 
 		// spec: 接続ありのとき最初の接続の値を返す
-		it('接続ありのとき最初の接続の streamTitle / broadcasterName / broadcasterChannelId を返す', async () => {
+		it('接続ありのとき最初の接続の broadcasterChannelId を返す', async () => {
 			const { connectToStream } = await import('$lib/tauri/chat');
 			vi.mocked(connectToStream).mockResolvedValue(makeSuccessResult({
 				stream_title: 'Test Stream',
@@ -365,13 +317,11 @@ describe('chatStore 接続管理', () => {
 
 			await chatStore.connect('https://example.com');
 
-			expect(chatStore.streamTitle).toBe('Test Stream');
-			expect(chatStore.broadcasterName).toBe('Alice');
 			expect(chatStore.broadcasterChannelId).toBe('UC_alice');
 		});
 
-		// spec: streamTitle が空文字の場合 null を返す
-		it('streamTitle が空文字の接続では null を返す', async () => {
+		// spec: broadcasterChannelId が空文字の場合 null を返す
+		it('broadcasterChannelId が空文字の接続では null を返す', async () => {
 			const { connectToStream } = await import('$lib/tauri/chat');
 			vi.mocked(connectToStream).mockResolvedValue(makeSuccessResult({
 				stream_title: null,
@@ -382,8 +332,6 @@ describe('chatStore 接続管理', () => {
 			await chatStore.connect('https://example.com');
 
 			// '' || null → null
-			expect(chatStore.streamTitle).toBeNull();
-			expect(chatStore.broadcasterName).toBeNull();
 			expect(chatStore.broadcasterChannelId).toBeNull();
 		});
 	});
@@ -575,8 +523,6 @@ describe('chatStore 接続管理', () => {
 			expect(chatStore.messages).toHaveLength(0);
 			// spec: error が null になる
 			expect(chatStore.error).toBeNull();
-			// spec: connectionState が idle
-			expect(chatStore.connectionState).toBe('idle');
 		});
 
 		// spec: initialize() 後に再接続できる
@@ -693,7 +639,6 @@ describe('chatStore 接続管理', () => {
 
 			// API応答前: connecting 状態のエントリが存在する
 			expect(chatStore.isConnecting).toBe(true);
-			expect(chatStore.connectionState).toBe('connecting');
 			expect(chatStore.connections.size).toBe(1);
 
 			// API応答を返す
@@ -702,7 +647,7 @@ describe('chatStore 接続管理', () => {
 
 			// API応答後: connected に遷移
 			expect(chatStore.isConnecting).toBe(false);
-			expect(chatStore.connectionState).toBe('connected');
+			expect([...chatStore.connections.values()][0].connectionState).toBe('connected');
 		});
 
 		it('connect() 失敗時に connecting エントリが削除される', async () => {
@@ -724,29 +669,6 @@ describe('chatStore 接続管理', () => {
 
 			expect(chatStore.isConnecting).toBe(false);
 			expect(chatStore.connections.size).toBe(0);
-		});
-
-		it('connectionState は connecting > connected の優先度で判定する', async () => {
-			// 1つ目の接続を成功させる
-			vi.mocked(chatApi.connectToStream).mockResolvedValueOnce(makeSuccessResult());
-			await chatStore.connect('https://example.com/1');
-			expect(chatStore.connectionState).toBe('connected');
-
-			// 2つ目の接続を保留にする
-			let resolveConnect!: (result: ConnectionResult) => void;
-			vi.mocked(chatApi.connectToStream).mockImplementation(
-				() => new Promise<ConnectionResult>(resolve => { resolveConnect = resolve; })
-			);
-
-			const connectPromise = chatStore.connect('https://example.com/2');
-
-			// connected + connecting の混在 → connecting が優先
-			expect(chatStore.connectionState).toBe('connecting');
-
-			resolveConnect(makeSuccessResult({ connection_id: BigInt(2) }));
-			await connectPromise;
-
-			expect(chatStore.connectionState).toBe('connected');
 		});
 
 		// spec: connecting中の仮エントリのフィールドが正しく設定される (ID:114,116,118,119,120,121)
@@ -976,41 +898,6 @@ describe('chatStore 追加補強テスト', () => {
 
 	afterEach(() => {
 		chatStore.cleanup();
-	});
-
-	// =====================================================================
-	// 1. pause() が disconnectAll を実行すること
-	// spec: pause() は disconnectAll のエイリアス — disconnectAllStreams が呼ばれ connections が空になる
-	// =====================================================================
-	it('pause() 後に connections.size === 0 かつ disconnectAllStreams が呼ばれる', async () => {
-		const { connectToStream, disconnectAllStreams } = await import('$lib/tauri/chat');
-		vi.mocked(connectToStream).mockResolvedValue(makeSuccessResult());
-		vi.mocked(disconnectAllStreams).mockResolvedValue(undefined);
-
-		await chatStore.connect('https://example.com');
-		expect(chatStore.connections.size).toBe(1);
-
-		await chatStore.pause();
-
-		// spec: pause() 後は全接続が削除される
-		expect(chatStore.connections.size).toBe(0);
-		// spec: disconnectAllStreams が呼ばれる
-		expect(disconnectAllStreams).toHaveBeenCalled();
-	});
-
-	// =====================================================================
-	// 2. resume() の戻り値が仕様通りであること
-	// spec: resume() は多接続では廃止 — success=false, is_replay=false, エラーメッセージを返す
-	// =====================================================================
-	it('resume() は success=false, is_replay=false, error メッセージを返す', async () => {
-		const result = await chatStore.resume();
-
-		// spec: success は false
-		expect(result.success).toBe(false);
-		// spec: is_replay は false
-		expect(result.is_replay).toBe(false);
-		// spec: error に規定のメッセージ
-		expect(result.error).toBe('resume() is not supported in multi-stream mode');
 	});
 
 	// =====================================================================
@@ -1357,32 +1244,6 @@ describe('chatStore 追加補強テスト', () => {
 
 		// spec: 例外時の戻り値 is_replay は false
 		expect(result.is_replay).toBe(false);
-	});
-
-	// =====================================================================
-	// 12. connectionState — 'disconnecting' のみの接続がある場合
-	// spec: disconnecting のみの接続では connectionState は 'idle'（connecting でも connected でもない）
-	// =====================================================================
-	it('disconnecting のみの接続がある場合 connectionState が idle', async () => {
-		const { connectToStream, disconnectStream } = await import('$lib/tauri/chat');
-		vi.mocked(connectToStream).mockResolvedValue(makeSuccessResult({ connection_id: BigInt(1) }));
-
-		const pendingResolve: (() => void)[] = [];
-		vi.mocked(disconnectStream).mockImplementation(
-			() => new Promise<void>((resolve) => { pendingResolve.push(resolve); })
-		);
-
-		await chatStore.connect('https://example.com');
-		// disconnect() を開始（pending状態 — disconnecting になる）
-		const disconnectPromise = chatStore.disconnect(1);
-
-		// この時点で connectionState は disconnecting のみ
-		// spec: disconnecting のみなら 'idle'（connecting でも connected でもない）
-		expect(chatStore.connectionState).toBe('idle');
-
-		// クリーンアップ
-		pendingResolve[0]();
-		await disconnectPromise;
 	});
 });
 

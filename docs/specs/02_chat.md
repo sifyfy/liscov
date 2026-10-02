@@ -698,10 +698,7 @@ YouTube 側の一時的な不調ならそのまま続け、復旧しそうにな
 | `connections[id].reactions` | `{ totals: Record<string, number>; recent: ReactionUpdate[]; peakPerMinute: number }` | リアクションメーターの状態。`recent` は update_time_usec が60秒以内のものだけ残す。勢い（/分）は `recent` の total の合計（derived） |
 | `isConnected` | `boolean` | いずれかの接続がアクティブ（derived: connections.size > 0） |
 | `isConnecting` | `boolean` | 接続処理中の接続が存在（derived） |
-| `connectionState` | `string` | 後方互換（idle/connecting/connected） |
-| `streamTitle` | `string \| null` | 後方互換（最初の接続のタイトル）。ヘッダーでの表示は廃止（接続リストと重複するため） |
-| `broadcasterName` | `string \| null` | 後方互換（最初の接続の配信者名） |
-| `broadcasterChannelId` | `string \| null` | 後方互換（最初の接続のチャンネルID） |
+| `broadcasterChannelId` | `string \| null` | 最初の接続の配信者チャンネル ID（視聴者情報パネル・視聴者タブの既定の配信者） |
 | `chatMode` | `ChatMode` | TopChat / AllChat。起動時・F5 後は config.toml の `chat_display.chat_mode` で初期化し、選び直すたびに保存する |
 | `error` | `string \| null` | エラーメッセージ |
 

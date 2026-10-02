@@ -29,8 +29,6 @@ function createChatStore() {
   // 多接続ベースの派生状態
   let isConnected = $derived(connections.size > 0);
   let isConnecting = $derived([...connections.values()].some(c => c.connectionState === 'connecting'));
-  // 多接続ではglobalなpauseはない（常にfalse）
-  let isPaused = $derived(false);
 
   // チャット表示設定
   const MIN_FONT_SIZE = 10;
@@ -192,26 +190,6 @@ function createChatStore() {
         [...connections].filter(([, conn]) => conn.connectionState === 'connecting')
       );
     }
-  }
-
-  // pause は多接続では非推奨 → disconnectAllのエイリアス
-  async function pause(): Promise<void> {
-    await disconnectAll();
-  }
-
-  // resume は多接続では廃止（ユーザーがURLを再入力して接続）
-  // 後方互換のため空実装を残す
-  async function resume(): Promise<ConnectionResult> {
-    return {
-      success: false,
-      stream_title: null,
-      broadcaster_channel_id: null,
-      broadcaster_name: null,
-      is_replay: false,
-      error: 'resume() is not supported in multi-stream mode',
-      session_id: null,
-      connection_id: BigInt(0)
-    };
   }
 
   // 初期化（全てクリアしてidle状態に戻る）
@@ -391,24 +369,10 @@ function createChatStore() {
     get isConnected() {
       return isConnected;
     },
-    // 後方互換のため残す（最初の接続のstreamTitle）
-    get streamTitle() {
-      if (connections.size === 0) return null;
-      return [...connections.values()][0].streamTitle || null;
-    },
-    // 後方互換のため残す（最初の接続のbroadcasterName）
-    get broadcasterName() {
-      if (connections.size === 0) return null;
-      return [...connections.values()][0].broadcasterName || null;
-    },
-    // 後方互換のため残す（最初の接続のbroadcasterChannelId）
+    // 最初の接続の配信者チャンネル ID（視聴者情報パネル・視聴者タブの既定の配信者）
     get broadcasterChannelId() {
       if (connections.size === 0) return null;
       return [...connections.values()][0].broadcasterChannelId || null;
-    },
-    // 後方互換のため残す（常にfalse）
-    get isReplay() {
-      return false;
     },
     get chatMode() {
       return chatMode;
@@ -428,17 +392,6 @@ function createChatStore() {
     get showTimestamps() {
       return showTimestamps;
     },
-    get isPaused() {
-      return isPaused;
-    },
-    // 後方互換のため残す（多接続では常に'idle'か'connected'相当）
-    get connectionState() {
-      if (connections.size === 0) return 'idle' as const;
-      const states = [...connections.values()].map(c => c.connectionState);
-      if (states.some(s => s === 'connecting')) return 'connecting' as const;
-      if (states.some(s => s === 'connected')) return 'connected' as const;
-      return 'idle' as const;
-    },
     get autoScroll() {
       return autoScroll;
     },
@@ -453,8 +406,6 @@ function createChatStore() {
     connect,
     disconnect,
     disconnectAll,
-    pause,
-    resume,
     initialize,
     setChatMode: setChatModeAction,
     setFilter: list.setFilter,

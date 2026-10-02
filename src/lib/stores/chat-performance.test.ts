@@ -546,11 +546,6 @@ describe('chatStore パフォーマンス最適化', () => {
 
 	// spec: 多接続モードの初期状態確認
 	describe('多接続モード初期値', () => {
-		// isPaused は多接続では常に false（グローバルpauseなし）
-		it('isPaused の初期値は false', () => {
-			expect(chatStore.isPaused).toBe(false);
-		});
-
 		// connections は初期状態で空のMap
 		it('connections の初期値は空のMap', () => {
 			expect(chatStore.connections).toBeInstanceOf(Map);
@@ -560,11 +555,6 @@ describe('chatStore パフォーマンス最適化', () => {
 		// isConnected は connections.size === 0 なので false
 		it('isConnected の初期値は false', () => {
 			expect(chatStore.isConnected).toBe(false);
-		});
-
-		// isReplay は後方互換のため常に false
-		it('isReplay は常に false', () => {
-			expect(chatStore.isReplay).toBe(false);
 		});
 
 		// cleanup() を複数回呼んでも安全であること
@@ -582,11 +572,6 @@ describe('chatStore パフォーマンス最適化', () => {
 		// error は初期状態で null
 		it('error の初期値は null', () => {
 			expect(chatStore.error).toBeNull();
-		});
-
-		// connectionState は connections.size === 0 のとき 'idle'
-		it('connectionState の初期値は idle', () => {
-			expect(chatStore.connectionState).toBe('idle');
 		});
 	});
 
