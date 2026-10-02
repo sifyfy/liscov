@@ -3,9 +3,12 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use ts_rs::TS;
 
 /// TTS backend type
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
+#[ts(rename = "TtsBackend")]
 #[serde(rename_all = "lowercase")]
 pub enum TtsBackendType {
     #[default]

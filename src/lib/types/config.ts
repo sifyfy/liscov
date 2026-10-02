@@ -1,32 +1,18 @@
 // Configuration types (09_config.md)
 
-export type StorageMode = 'secure' | 'fallback';
-
-export type Theme = 'dark' | 'light';
-
+// Rust 型（commands/config.rs）から ts-rs で生成した型を re-export する
+export type { StorageMode } from './generated/StorageMode';
+export type { Theme } from './generated/Theme';
 // 最後に選んだチャットモード（02_chat.md チャットモード）
-export type ChatModeSetting = 'top' | 'all';
+export type { ChatModeSetting } from './generated/ChatModeSetting';
+export type { StorageConfig } from './generated/StorageConfig';
+export type { ChatDisplayConfig } from './generated/ChatDisplayConfig';
+export type { UiConfig } from './generated/UiConfig';
+export type { Config } from './generated/Config';
+// 生レスポンス保存設定（05_raw_response.md）
+export type { SaveConfig } from './generated/SaveConfig';
 
-export interface StorageConfig {
-  mode: StorageMode;
-}
-
-export interface ChatDisplayConfig {
-  message_font_size: number;
-  show_timestamps: boolean;
-  auto_scroll_enabled: boolean;
-  chat_mode: ChatModeSetting;
-}
-
-export interface UiConfig {
-  theme: Theme;
-}
-
-export interface Config {
-  storage: StorageConfig;
-  chat_display: ChatDisplayConfig;
-  ui: UiConfig;
-}
+import type { Config } from './generated/Config';
 
 // Default values
 export const DEFAULT_CONFIG: Config = {

@@ -326,8 +326,11 @@ pub struct ResponseEntry {
 
 ### SaveConfig（TypeScript）
 
+Rust の型から ts-rs で `src/lib/types/generated/` に生成する（手で書かない。型を変えたら `cargo test --manifest-path src-tauri/Cargo.toml export_bindings` で生成し直してコミットする。`make typecheck` が古い生成物を検出する）。
+`Config` の TS の型には `raw_response` を出さない（画面の設定保存 `config_save` では扱わず、`raw_response_update_config` だけが変える）。
+
 ```typescript
-interface SaveConfig {
+type SaveConfig = {
     enabled: boolean;
     file_path: string;
     max_file_size_mb: number;

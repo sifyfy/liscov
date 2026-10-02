@@ -8,6 +8,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 use tracing::{info, warn};
+use ts_rs::TS;
 
 /// 生レスポンスファイルへの書き込み（ローテーションを含む）を直列化するロック
 ///
@@ -16,18 +17,21 @@ use tracing::{info, warn};
 static WRITE_LOCK: Mutex<()> = Mutex::new(());
 
 /// 保存設定（config.toml の [raw_response]。無いキーはデフォルト値で補完する）
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 #[serde(default)]
+// フィールドのコメントは // にする（/// だと ts-rs が行末に空白を付けた TS を出す）
 pub struct SaveConfig {
-    /// レスポンス保存を有効にするか
+    // レスポンス保存を有効にするか
     pub enabled: bool,
-    /// 保存先ファイルパス
+    // 保存先ファイルパス
     pub file_path: String,
-    /// 最大ファイルサイズ(MB)
+    // 最大ファイルサイズ(MB)
+    #[ts(type = "number")]
     pub max_file_size_mb: u64,
-    /// ファイルローテーションを有効にするか
+    // ファイルローテーションを有効にするか
     pub enable_rotation: bool,
-    /// 最大保持ファイル数
+    // 最大保持ファイル数
     pub max_backup_files: u32,
 }
 

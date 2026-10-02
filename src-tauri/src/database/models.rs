@@ -1,9 +1,11 @@
 //! Database models
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// Session record
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub struct Session {
     pub id: String,
     pub start_time: String,
@@ -12,6 +14,8 @@ pub struct Session {
     pub stream_title: Option<String>,
     pub broadcaster_channel_id: Option<String>,
     pub broadcaster_name: Option<String>,
+    // JS number の安全整数範囲内
+    #[ts(type = "number")]
     pub total_messages: i64,
     pub total_revenue: f64,
     pub created_at: Option<String>,

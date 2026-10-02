@@ -1,20 +1,10 @@
 // フロントエンド側のエラー正規化層
 // Rust CommandError の JSON をパースし、構造化エラーとして扱う
 
+import type { CommandError } from '$lib/types/generated/CommandError';
+
 /** Rust CommandError の各バリアントに対応するエラーコード */
-export type ErrorCode =
-  | 'AuthRequired'
-  | 'AuthFailed'
-  | 'StorageError'
-  | 'ConnectionFailed'
-  | 'NotConnected'
-  | 'DatabaseError'
-  | 'NotFound'
-  | 'ApiError'
-  | 'TtsError'
-  | 'InvalidInput'
-  | 'IoError'
-  | 'Internal';
+export type ErrorCode = CommandError['kind'];
 
 /** フロントエンドで扱う構造化エラー */
 export interface AppError {

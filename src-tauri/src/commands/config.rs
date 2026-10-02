@@ -10,9 +10,11 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::RwLock;
 use tauri::State;
+use ts_rs::TS;
 
 /// Storage mode for credentials
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 #[serde(rename_all = "lowercase")]
 pub enum StorageMode {
     #[default]
@@ -21,7 +23,8 @@ pub enum StorageMode {
 }
 
 /// Storage configuration section
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub struct StorageConfig {
     #[serde(default)]
     pub mode: StorageMode,
@@ -36,7 +39,8 @@ impl Default for StorageConfig {
 }
 
 /// UI theme
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 #[serde(rename_all = "lowercase")]
 pub enum Theme {
     #[default]
@@ -45,7 +49,8 @@ pub enum Theme {
 }
 
 /// UI configuration section
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub struct UiConfig {
     #[serde(default)]
     pub theme: Theme,
@@ -58,7 +63,8 @@ impl Default for UiConfig {
 }
 
 /// 最後に選んだチャットモード（02_chat.md チャットモード）。再起動・F5 後もこのモードで始める
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 #[serde(rename_all = "lowercase")]
 pub enum ChatModeSetting {
     #[default]
@@ -67,7 +73,8 @@ pub enum ChatModeSetting {
 }
 
 /// Chat display configuration section
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 #[serde(default)]
 pub struct ChatDisplayConfig {
     pub message_font_size: u32,
@@ -88,7 +95,8 @@ impl Default for ChatDisplayConfig {
 }
 
 /// Application configuration
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub struct Config {
     #[serde(default)]
     pub storage: StorageConfig,
@@ -97,7 +105,9 @@ pub struct Config {
     #[serde(default)]
     pub ui: UiConfig,
     /// 生レスポンス保存設定（05_raw_response.md）。変更は raw_response_update_config だけが行う
+    // 画面の設定 (config_save) では扱わないので TS の型には出さない（config_for_save が引き継ぐ）
     #[serde(default)]
+    #[ts(skip)]
     pub raw_response: SaveConfig,
 }
 

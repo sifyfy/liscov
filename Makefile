@@ -12,7 +12,7 @@
 
 .PHONY: help install lint fix format typecheck test secscan all clean
 .PHONY: lint-rs lint-ts fix-rs fix-ts format-rs format-ts
-.PHONY: typecheck-rs typecheck-ts test-rs test-ts secscan-rs secscan-ts
+.PHONY: typecheck-rs typecheck-ts typecheck-bindings test-rs test-ts secscan-rs secscan-ts
 .PHONY: secscan-staged
 
 # デフォルトターゲット: ヘルプ表示
@@ -30,6 +30,7 @@ help:
 	@echo ""
 	@echo "==== 言語別 (debug 用) ===="
 	@echo "  make lint-rs / lint-ts"
+	@echo "  make typecheck-bindings - ts-rs の生成物が Rust の型と一致しているか"
 	@echo "  make fix-rs / fix-ts"
 	@echo "  make test-rs / test-ts"
 	@echo "  make secscan-rs / secscan-ts"
@@ -51,7 +52,7 @@ fix: fix-rs fix-ts
 
 format: format-rs format-ts
 
-typecheck: typecheck-rs typecheck-ts
+typecheck: typecheck-rs typecheck-bindings typecheck-ts
 
 test: test-rs test-ts
 
@@ -102,6 +103,14 @@ format-ts:
 
 typecheck-ts:
 	pnpm typecheck
+
+# ts-rs の生成物 (src/lib/types/generated) が Rust の型と一致しているか。
+# 生成し直して差分 (変更・追加) が出たら失敗する。Rust の型を変えたら生成物もコミットする
+# (レシピ行に日本語を書かない: BusyBox の make が文字を壊してクォートが閉じなくなる)
+typecheck-bindings:
+	cargo test --manifest-path src-tauri/Cargo.toml export_bindings
+	@git status --short -- src/lib/types/generated
+	@test -z "$$(git status --porcelain -- src/lib/types/generated)" || (echo "generated bindings are stale: commit the files above"; exit 1)
 
 test-ts:
 	pnpm test:run

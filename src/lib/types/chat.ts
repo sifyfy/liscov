@@ -27,8 +27,8 @@ export type MessageType =
   | 'gift'
   | 'system';
 
-// チャットモード（フロントエンド固有）
-export type ChatMode = 'top' | 'all';
+// チャットモード（connect_to_stream・set_chat_mode に渡す値。設定に残す値と同じ）
+export type { ChatModeSetting as ChatMode } from './generated/ChatModeSetting';
 
 // チャットフィルター（フロントエンド固有）
 export interface ChatFilter {

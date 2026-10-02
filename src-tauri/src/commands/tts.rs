@@ -6,12 +6,17 @@ use crate::tts::{TtsBackendType, TtsConfig, TtsPriority, TtsProcessManager, TtsQ
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, State};
 use tauri_plugin_dialog::DialogExt;
+use ts_rs::TS;
 
 /// TTS configuration for frontend
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
+#[ts(rename = "TtsConfig")]
 pub struct TtsConfigDto {
     pub enabled: bool,
-    pub backend: String, // "none", "bouyomichan", "voicevox"
+    // "none" | "bouyomichan" | "voicevox"。それ以外は "none" として扱う
+    #[ts(as = "TtsBackendType")]
+    pub backend: String,
     pub read_author_name: bool,
     pub add_honorific: bool,
     pub strip_at_prefix: bool,
@@ -142,7 +147,8 @@ impl Default for TtsConfigDto {
 }
 
 /// TTS status information
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub struct TtsStatus {
     pub is_processing: bool,
     pub queue_size: usize,
@@ -264,7 +270,8 @@ pub async fn tts_get_status(state: State<'_, AppState>) -> Result<TtsStatus, Com
 }
 
 /// TTS backend launch status
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub struct TtsLaunchStatus {
     pub bouyomichan_launched: bool,
     pub voicevox_launched: bool,

@@ -521,8 +521,12 @@ pub struct ViewerCustomInfo {
 
 ## TypeScript型定義
 
+`Session` は Rust の型から ts-rs で `src/lib/types/generated/` に生成する（手で書かない。型を変えたら `cargo test --manifest-path src-tauri/Cargo.toml export_bindings` で生成し直してコミットする。`make typecheck` が古い生成物を検出する）。
+`StoredMessage` と `ViewerProfile` は TS の型を持たない（画面には `GuiChatMessage` / `GuiViewerProfile` を渡す）。
+`ViewerCustomInfo` も TS の型は持たない（画面は `GuiViewerWithInfo` で読み、`viewer_upsert_custom_info` に値を渡す）。
+
 ```typescript
-interface Session {
+type Session = {
     id: string;
     start_time: string;
     end_time: string | null;
@@ -532,43 +536,9 @@ interface Session {
     broadcaster_name: string | null;
     total_messages: number;
     total_revenue: number;
-}
-
-interface StoredMessage {
-    id: number;
-    session_id: string;
-    message_id: string;
-    timestamp: string;
-    timestamp_usec: string;
-    author: string;
-    author_icon_url: string | null;
-    channel_id: string;
-    content: string;
-    message_type: string;
-    amount: string | null;
-    is_member: boolean;
-    metadata: string | null;
-}
-
-interface ViewerProfile {
-    id: number;
-    broadcaster_channel_id: string;
-    channel_id: string;
-    display_name: string;
-    first_seen: string;
-    last_seen: string;
-    message_count: number;
-    total_contribution: number;
-    membership_level: string | null;
-    tags: string[];
-}
-
-interface ViewerCustomInfo {
-    viewer_profile_id: number;
-    reading: string | null;
-    notes: string | null;
-    custom_data: string | null;
-}
+    created_at: string | null;
+    updated_at: string | null;
+};
 ```
 
 ## インデックス一覧

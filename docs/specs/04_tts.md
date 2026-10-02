@@ -705,10 +705,16 @@ pub struct VoicevoxConfig {
 
 ### TtsConfigDto（TypeScript）
 
+Rust の型から ts-rs で `src/lib/types/generated/` に生成する（手で書かない。型を変えたら `cargo test --manifest-path src-tauri/Cargo.toml export_bindings` で生成し直してコミットする。`make typecheck` が古い生成物を検出する）。
+`TtsConfigDto` は TS では `TtsConfig`、`TtsBackendType` は `TtsBackend` という名前で出る。
+IPC では Rust の `TtsConfig` の入れ子（`bouyomichan` / `voicevox`）を平らにして、`bouyomichan_` / `voicevox_` を頭に付けたフィールドで渡す。
+
 ```typescript
-interface TtsConfigDto {
+type TtsBackend = "none" | "bouyomichan" | "voicevox";
+
+type TtsConfig = {
     enabled: boolean;
-    backend: 'none' | 'bouyomichan' | 'voicevox';
+    backend: TtsBackend;  // Rust 側は文字列で受け、ほかの値は "none" として扱う
     read_author_name: boolean;
     add_honorific: boolean;
     strip_at_prefix: boolean;
@@ -719,37 +725,35 @@ interface TtsConfigDto {
     first_comment_prefix_enabled: boolean;
     first_comment_prefix: string;
     first_comment_only: boolean;
-    bouyomichan: BouyomichanConfig;
-    voicevox: VoicevoxConfig;
-}
+    bouyomichan_host: string;
+    bouyomichan_port: number;
+    bouyomichan_voice: number;
+    bouyomichan_volume: number;
+    bouyomichan_speed: number;
+    bouyomichan_tone: number;
+    bouyomichan_auto_launch: boolean;
+    bouyomichan_exe_path: string | null;
+    bouyomichan_auto_close: boolean;
+    voicevox_host: string;
+    voicevox_port: number;
+    voicevox_speaker_id: number;
+    voicevox_volume_scale: number;
+    voicevox_speed_scale: number;
+    voicevox_pitch_scale: number;
+    voicevox_intonation_scale: number;
+    voicevox_auto_launch: boolean;
+    voicevox_exe_path: string | null;
+    voicevox_auto_close: boolean;
+};
 
-interface BouyomichanConfig {
-    host: string;
-    port: number;
-    voice: number;
-    volume: number;
-    speed: number;
-    tone: number;
-    auto_launch: boolean;
-    exe_path: string | null;
-    auto_close: boolean;
-}
+type TtsStatus = {
+    is_processing: boolean;
+    queue_size: number;
+    backend_name: string | null;
+};
 
-interface VoicevoxConfig {
-    host: string;
-    port: number;
-    speaker_id: number;
-    volume_scale: number;
-    speed_scale: number;
-    pitch_scale: number;
-    intonation_scale: number;
-    auto_launch: boolean;
-    exe_path: string | null;
-    auto_close: boolean;
-}
-
-interface TtsLaunchStatus {
+type TtsLaunchStatus = {
     bouyomichan_launched: boolean;
     voicevox_launched: boolean;
-}
+};
 ```

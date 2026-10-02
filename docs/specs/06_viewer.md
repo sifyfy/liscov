@@ -412,6 +412,10 @@ ViewerManagement.svelte
 
 ## TypeScript型定義
 
+Rust の型から ts-rs で `src/lib/types/generated/` に生成する（手で書かない。型を変えたら `cargo test --manifest-path src-tauri/Cargo.toml export_bindings` で生成し直してコミットする。`make typecheck` が古い生成物を検出する）。
+TS ではフロントエンドの呼び名で re-export する（`GuiViewerProfile` → `ViewerProfile`、`GuiViewerWithInfo` → `ViewerWithCustomInfo`、`GuiBroadcasterChannel` → `BroadcasterChannel`）。
+`ViewerCustomInfo` 単体の TS の型は持たない（読むときは `ViewerWithCustomInfo`）。
+
 ```typescript
 interface ViewerProfile {
     id: number;
@@ -424,13 +428,6 @@ interface ViewerProfile {
     total_contribution: number;
     membership_level: string | null;
     tags: string[];
-}
-
-interface ViewerCustomInfo {
-    viewer_profile_id: number;
-    reading: string | null;
-    notes: string | null;
-    custom_data: string | null;
 }
 
 interface ViewerWithCustomInfo extends ViewerProfile {

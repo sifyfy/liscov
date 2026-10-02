@@ -1,7 +1,3 @@
-// WebSocket API type definitions
+// WebSocket API type definitions（Rust 型 commands/websocket.rs から ts-rs で生成）
 
-export interface WebSocketStatus {
-  is_running: boolean;
-  actual_port: number | null;
-  connected_clients: number;
-}
+export type { WebSocketStatus } from './generated/WebSocketStatus';

@@ -4,8 +4,10 @@
 //! JSON シリアライズ時は { "kind": "ErrorVariant", "message": "詳細" } の形式。
 
 use serde::Serialize;
+use ts_rs::TS;
 
-#[derive(Debug, Serialize, thiserror::Error)]
+#[derive(Debug, Serialize, thiserror::Error, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 #[serde(tag = "kind", content = "message")]
 pub enum CommandError {
     /// 認証が必要（未ログイン）
