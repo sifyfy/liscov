@@ -251,6 +251,40 @@ describe('chatStore パフォーマンス最適化', () => {
 		});
 	});
 
+	// spec: 02_chat.md 実装詳細 — フィルタが変わらない間は増えた分だけ判定する。結果は全件を判定したときと同じ
+	describe('フィルタの差分適用', () => {
+		const ids = () => chatStore.filteredMessages.map((m) => m.id);
+
+		it('フィルタ中に届いたメッセージも、合うものだけが後ろに加わる', () => {
+			chatStore.setFilter({ showText: false });
+			addAndFlush([createMessage('d1', { message_type: 'superchat' }), createMessage('d2')]);
+			expect(ids()).toEqual(['d1']);
+
+			addAndFlush([createMessage('d3'), createMessage('d4', { message_type: 'superchat' })]);
+			expect(ids()).toEqual(['d1', 'd4']);
+		});
+
+		it('フィルタを変えたら全件を判定し直す', () => {
+			chatStore.setFilter({ showText: false });
+			addAndFlush([createMessage('e1', { message_type: 'superchat' }), createMessage('e2', { content: 'りんご' })]);
+			expect(ids()).toEqual(['e1']);
+
+			chatStore.setFilter({ showText: true, searchQuery: 'りんご' });
+			expect(ids()).toEqual(['e2']);
+
+			addAndFlush([createMessage('e3', { content: 'りんごジュース' }), createMessage('e4')]);
+			expect(ids()).toEqual(['e2', 'e3']);
+		});
+
+		it('クリアしたあとは、新しく届いたものだけで判定する', () => {
+			chatStore.setFilter({ showText: false });
+			addAndFlush([createMessage('f1', { message_type: 'superchat' })]);
+			chatStore.clearMessages();
+			addAndFlush([createMessage('f2', { message_type: 'superchat' }), createMessage('f3')]);
+			expect(ids()).toEqual(['f2']);
+		});
+	});
+
 	describe('channelIdインデックス (Phase 2)', () => {
 		it('getMessagesForChannelで特定チャンネルのメッセージを取得できる', () => {
 			addAndFlush([

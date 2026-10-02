@@ -9,7 +9,7 @@ import type {
   FrontendConnectionState,
   GuiReactionUpdate
 } from '$lib/types';
-import { SvelteMap, SvelteSet } from 'svelte/reactivity';
+import { SvelteMap } from 'svelte/reactivity';
 import * as chatApi from '$lib/tauri/chat';
 import { getConnectionColor } from '$lib/utils/connection-colors';
 import { messageKey, type MessageKey } from '$lib/utils/message-key';
@@ -19,7 +19,8 @@ import { configStore } from './config.svelte';
 // ファクトリ関数：テスト時に独立したストアインスタンスを生成できる
 function createChatStore() {
   // リアクティブ状態
-  let messages = $state<ChatMessage[]>([]);
+  // メッセージは受け取ったまま変えないので深いリアクティブにしない。足すときは配列ごと差し替える
+  let messages = $state.raw<ChatMessage[]>([]);
   // 多接続状態マップ（キー: connection_id as number）
   // eslint-disable-next-line svelte/no-unnecessary-state-wrap -- 再代入パターン (connections = new SvelteMap(...)) でリアクティビティをトリガーするため$state必須
   let connections = $state<SvelteMap<number, FrontendConnectionState>>(new SvelteMap());
@@ -48,48 +49,65 @@ function createChatStore() {
   let displayLimit = $state<number | null>(null);
   let scrollToLatestTrigger = $state(0); // インクリメントでスクロールをトリガー
 
-  // O(1)検索のための重複チェック用セット（複合キー: connection_id:message_id）
-  let messageIds = new SvelteSet<MessageKey>();
+  // 重複チェック用セット（複合キー: connection_id:message_id）。受け取った時点（バッチ待ちを含む）で入れる
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity -- 画面から読まない。受信ごとの通知を起こさないため素の Set
+  const messageIds = new Set<MessageKey>();
 
-  // O(1)ビューワーメッセージ検索のためのチャンネルIDインデックス
-  let messagesByChannel = new SvelteMap<string, ChatMessage[]>();
+  // 視聴者ごとのメッセージ（視聴者情報パネル用）。届いたら配列ごと差し替えて、開いているパネルにも反映する
+  const messagesByChannel = new SvelteMap<string, ChatMessage[]>();
+
+  // 一覧にいる視聴者の数（視聴者を特定できないギフトの channel_id '' は数えない。02_chat.md「接続設定の統計」）
+  let viewerCount = $derived(messagesByChannel.size - (messagesByChannel.has('') ? 1 : 0));
 
   // フィルターがデフォルト状態かどうか（全タイプ表示かつ検索クエリなし）
   let isDefaultFilter = $derived(
     filter.showText && filter.showSuperchat && filter.showMembership && !filter.searchQuery
   );
 
+  // フィルタに合うか（02_chat.md「フィルタ機能」）
+  function matchesFilter(msg: ChatMessage, current: ChatFilter): boolean {
+    if (!current.showText && msg.message_type === 'text') return false;
+    if (
+      !current.showSuperchat &&
+      (msg.message_type === 'superchat' ||
+        msg.message_type === 'supersticker' ||
+        msg.message_type === 'gift')
+    )
+      return false;
+    if (
+      !current.showMembership &&
+      (msg.message_type === 'membership' || msg.message_type === 'membership_gift')
+    )
+      return false;
+
+    if (current.searchQuery) {
+      const query = current.searchQuery.toLowerCase();
+      return msg.content.toLowerCase().includes(query) || msg.author.toLowerCase().includes(query);
+    }
+    return true;
+  }
+
+  // 前回のフィルタ結果。messages は追記とクリアでしか変わらないので、
+  // 同じフィルタ（setFilter は filter を差し替える）で前回の messages が今回の先頭なら、増えた分だけ判定する
+  let lastFiltered: { source: ChatMessage[]; filter: ChatFilter; result: ChatMessage[] } | null = null;
+
   // 派生状態：フィルタ済みメッセージ（カウント表示用）
   let filteredMessages = $derived.by(() => {
     if (isDefaultFilter) {
+      lastFiltered = null;
       return messages; // O(1)：参照をそのまま返す
     }
-    return messages.filter((msg) => {
-      // メッセージタイプでフィルタ
-      if (!filter.showText && msg.message_type === 'text') return false;
-      if (
-        !filter.showSuperchat &&
-        (msg.message_type === 'superchat' ||
-          msg.message_type === 'supersticker' ||
-          msg.message_type === 'gift')
-      )
-        return false;
-      if (
-        !filter.showMembership &&
-        (msg.message_type === 'membership' || msg.message_type === 'membership_gift')
-      )
-        return false;
-
-      // 検索クエリでフィルタ
-      if (filter.searchQuery) {
-        const query = filter.searchQuery.toLowerCase();
-        return (
-          msg.content.toLowerCase().includes(query) || msg.author.toLowerCase().includes(query)
-        );
-      }
-
-      return true;
-    });
+    const prev = lastFiltered;
+    const extendsPrev =
+      prev !== null &&
+      prev.filter === filter &&
+      messages.length >= prev.source.length &&
+      messages[prev.source.length - 1] === prev.source[prev.source.length - 1];
+    const result = extendsPrev
+      ? [...prev.result, ...messages.slice(prev.source.length).filter((m) => matchesFilter(m, filter))]
+      : messages.filter((m) => matchesFilter(m, filter));
+    lastFiltered = { source: messages, filter, result };
+    return result;
   });
 
   // 派生状態：表示メッセージ（displayLimit適用済み、レンダリング用）
@@ -108,14 +126,12 @@ function createChatStore() {
   function flushPendingMessages(): void {
     if (pendingMessages.length === 0) return;
 
-    for (const msg of pendingMessages) {
-      messageIds.add(messageKey(msg));
-      // チャンネルインデックスを更新
-      const arr = messagesByChannel.get(msg.channel_id);
-      if (arr) arr.push(msg);
-      else messagesByChannel.set(msg.channel_id, [msg]);
+    // チャンネルインデックスを更新（視聴者ごとに 1 回だけ差し替える）
+    const byChannel = Map.groupBy(pendingMessages, (msg) => msg.channel_id);
+    for (const [channelId, added] of byChannel) {
+      messagesByChannel.set(channelId, [...(messagesByChannel.get(channelId) ?? []), ...added]);
     }
-    messages.push(...pendingMessages);
+    messages = [...messages, ...pendingMessages];
     pendingMessages = [];
     batchTimeout = null;
   }
@@ -123,10 +139,11 @@ function createChatStore() {
   function addMessage(message: ChatMessage): void {
     // 複合キー（connection_id:message_id）で重複チェック
     const key = messageKey(message);
-    if (messageIds.has(key) || pendingMessages.some((m) => messageKey(m) === key)) {
+    if (messageIds.has(key)) {
       return;
     }
 
+    messageIds.add(key);
     pendingMessages.push(message);
     markJewelCountUnavailable(message);
 
@@ -484,6 +501,9 @@ function createChatStore() {
 
   return {
     // Getters (リアクティブ)
+    get viewerCount() {
+      return viewerCount;
+    },
     get messages() {
       return messages;
     },
