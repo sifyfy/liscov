@@ -10,6 +10,7 @@ import {
   startTauriApp,
   connectToApp,
   killTauriApp,
+  killProcessesStartedFrom,
   cleanupTestData,
   cleanupTestCredentials,
 } from './utils/test-helpers';
@@ -55,35 +56,10 @@ function isVoicevoxRunning(): boolean {
   }
 }
 
-// Kill all VOICEVOX processes
+// テストが起動した VOICEVOX を止める（beforeAll で、テスト前から動いている VOICEVOX があればスキップしている）
 function killVoicevox(): void {
-  try {
-    execSync('taskkill /F /IM VOICEVOX.exe 2>nul', { stdio: 'ignore' });
-  } catch {
-    // Process may not exist, which is fine
-  }
-}
-
-// Helper to gracefully close Tauri app (triggers ExitRequested event)
-async function closeTauriAppGracefully(): Promise<void> {
-  try {
-    if (process.platform === 'win32') {
-      // Send WM_CLOSE message instead of force kill
-      execSync('taskkill /IM liscov-tauri.exe 2>nul', { stdio: 'ignore' });
-      // Wait for graceful shutdown
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      // Force kill if still running
-      execSync('taskkill /F /IM liscov-tauri.exe 2>nul', { stdio: 'ignore' });
-    } else {
-      execSync('pkill -TERM -f liscov-tauri', { stdio: 'ignore' });
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      execSync('pkill -KILL -f liscov-tauri', { stdio: 'ignore' });
-    }
-  } catch {
-    // Process may not exist
-  }
-  // Wait for port to be released
-  await new Promise(resolve => setTimeout(resolve, 1000));
+  const voicevoxPath = getVoicevoxPath();
+  if (voicevoxPath) killProcessesStartedFrom(voicevoxPath);
 }
 
 // Navigate to TTS settings tab
@@ -152,6 +128,13 @@ test.describe('TTS VOICEVOX Auto-Launch', () => {
     }
 
     log.info(`VOICEVOX found at: ${voicevoxPath}`);
+
+    // ユーザーが使っている VOICEVOX（配信中など）を止めないよう、テスト前から動いていればスキップする
+    if (isVoicevoxRunning()) {
+      log.warn('VOICEVOX が起動中のためスキップする（ユーザーの VOICEVOX を止めない）');
+      test.skip();
+      return;
+    }
 
     // Step 1: Kill any existing processes
     log.info('Killing any existing Tauri app and VOICEVOX...');
@@ -408,7 +391,7 @@ test.describe('TTS VOICEVOX Auto-Launch', () => {
 
     // Step 3: Exit the app gracefully (triggers ExitRequested event which triggers auto-close)
     await browser.close();
-    await closeTauriAppGracefully();
+    await killTauriApp(); // ウィンドウを閉じる終了を先に試す（ExitRequested で自動終了が走る）
 
     // Step 4: Verify VOICEVOX was auto-closed
     // Wait a bit for auto-close to take effect

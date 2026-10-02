@@ -244,6 +244,32 @@ async function waitForPortFree(port: number, timeout: number): Promise<void> {
 /**
  * Tauriアプリを終了する（graceful shutdown → 強制終了の順で試行）
  */
+/**
+ * 指定した実行ファイルから起動したプロセス（とその子プロセス）だけを強制終了する
+ *
+ * 名前で止めると、同じ名前の本番アプリ（liscov-tauri.exe）やユーザーのプロセスまで止めてしまう。
+ * 配信中に E2E を走らせても本番に触れないよう、実行ファイルのパスで絞る。
+ */
+export function killProcessesStartedFrom(exePath: string): void {
+  try {
+    if (process.platform === 'win32') {
+      const name = path.basename(exePath, '.exe').replace(/'/g, "''");
+      const target = exePath.replace(/'/g, "''");
+      const ids = execSync(
+        `powershell -NoProfile -NonInteractive -Command "Get-Process -Name '${name}' -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq '${target}' } | ForEach-Object { $_.Id }"`,
+        { encoding: 'utf8' }
+      )
+        .split(/\s+/)
+        .filter(Boolean);
+      for (const id of ids) {
+        execSync(`taskkill /F /T /PID ${id} 2>nul`, { stdio: 'ignore' });
+      }
+    } else {
+      execSync(`pkill -f '${exePath}'`, { stdio: 'ignore' });
+    }
+  } catch { /* プロセスが存在しない場合は無視 */ }
+}
+
 export async function killTauriApp(): Promise<void> {
   log.debug('Killing Tauri app...');
   if (tauriProcess) {
@@ -262,14 +288,8 @@ export async function killTauriApp(): Promise<void> {
     }
     tauriProcess = null;
   }
-  // 孤立プロセスのフォールバック: プロセスツリーごと強制終了
-  try {
-    if (process.platform === 'win32') {
-      execSync('taskkill /F /T /IM liscov-tauri.exe 2>nul', { stdio: 'ignore' });
-    } else {
-      execSync('pkill -f liscov-tauri', { stdio: 'ignore' });
-    }
-  } catch { /* プロセスが存在しない場合は無視 */ }
+  // 孤立プロセスのフォールバック: テスト用の実行ファイルから起動したものだけをプロセスツリーごと強制終了
+  killProcessesStartedFrom(PREBUILT_TAURI_APP_PATH);
   // CDP ポートが解放されるまで待機（Windowsではプロセスツリー終了が遅延するため長めに設定）
   await waitForPortFree(9222, 10000);
 }
@@ -411,14 +431,8 @@ export async function killMockServer(): Promise<void> {
     }
     mockServerProcess = null;
   }
-  // 孤立プロセスのフォールバック
-  try {
-    if (process.platform === 'win32') {
-      execSync('taskkill /F /T /IM mock-server.exe 2>nul', { stdio: 'ignore' });
-    } else {
-      execSync('pkill -f mock-server', { stdio: 'ignore' });
-    }
-  } catch { /* プロセスが存在しない場合は無視 */ }
+  // 孤立プロセスのフォールバック（テスト用の実行ファイルから起動したものだけ）
+  killProcessesStartedFrom(PREBUILT_MOCK_SERVER_PATH);
   await waitForPortFree(3456, 3000);
 }
 
