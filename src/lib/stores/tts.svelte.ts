@@ -57,16 +57,16 @@ function createTtsStore() {
       }
     },
 
+    // isLoading は立てない（設定画面が「読み込み中...」に切り替わり、入力中のフォームが作り直されるため）
+    // 呼び出し側の $state をそのまま持たないよう、その時点の値を写して持つ
     async saveConfig(newConfig: TtsConfig) {
-      isLoading = true;
       error = null;
+      const snapshot = $state.snapshot(newConfig);
       try {
-        await ttsApi.ttsUpdateConfig(newConfig);
-        config = newConfig;
+        await ttsApi.ttsUpdateConfig(snapshot);
+        config = snapshot;
       } catch (e) {
         error = normalizeError(e).message;
-      } finally {
-        isLoading = false;
       }
     },
 
