@@ -3,8 +3,9 @@
 //! Handles schema versioning and migrations to ensure the database
 //! schema is always up-to-date with the application code.
 
+use crate::core::models::extract_video_id;
 use anyhow::{Context, Result};
-use rusqlite::Connection;
+use rusqlite::{Connection, params};
 use std::collections::HashSet;
 
 /// Migration definition
@@ -13,6 +14,8 @@ struct Migration {
     name: &'static str,
     /// SQL to execute for this migration
     sql: &'static str,
+    /// SQL のあとに同じトランザクションで実行する既存データの埋め直し（SQL だけでは書けないもの）
+    backfill: Option<fn(&Connection) -> Result<()>>,
 }
 
 /// All migrations in order of application
@@ -21,22 +24,32 @@ const MIGRATIONS: &[Migration] = &[
     Migration {
         name: "001_initial",
         sql: include_str!("001_initial.sql"),
+        backfill: None,
     },
     Migration {
         name: "002_viewer_streams",
         sql: include_str!("002_viewer_streams.sql"),
+        backfill: None,
     },
     Migration {
         name: "003_backfill_viewer_streams",
         sql: include_str!("003_backfill_viewer_streams.sql"),
+        backfill: None,
     },
     Migration {
         name: "004_reactions",
         sql: include_str!("004_reactions.sql"),
+        backfill: None,
     },
     Migration {
         name: "005_message_badges",
         sql: include_str!("005_message_badges.sql"),
+        backfill: None,
+    },
+    Migration {
+        name: "006_session_video_id",
+        sql: include_str!("006_session_video_id.sql"),
+        backfill: Some(backfill_session_video_id),
     },
 ];
 
@@ -70,12 +83,35 @@ fn apply_migrations(conn: &Connection, migrations: &[Migration]) -> Result<()> {
         let tx = conn.unchecked_transaction()?;
         tx.execute_batch(migration.sql)
             .with_context(|| format!("Failed to apply migration: {}", migration.name))?;
+        if let Some(backfill) = migration.backfill {
+            backfill(&tx)
+                .with_context(|| format!("Failed to backfill migration: {}", migration.name))?;
+        }
         record_migration(&tx, migration.name)?;
         tx.commit()?;
 
         tracing::info!("Migration applied successfully: {}", migration.name);
     }
 
+    Ok(())
+}
+
+/// 既存セッションの video_id を stream_url から埋める（006、08_database.md sessions.video_id）
+///
+/// 接続時と同じ `extract_video_id` で取り出す。URL の解析を SQL で書き直すと、書き方の対応が食い違うため。
+fn backfill_session_video_id(conn: &Connection) -> Result<()> {
+    let sessions = conn
+        .prepare("SELECT id, stream_url FROM sessions WHERE stream_url IS NOT NULL")?
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut update = conn.prepare("UPDATE sessions SET video_id = ?1 WHERE id = ?2")?;
+    for (id, url) in sessions {
+        if let Some(video_id) = extract_video_id(&url) {
+            update.execute(params![video_id, id])?;
+        }
+    }
     Ok(())
 }
 
@@ -397,16 +433,25 @@ mod tests {
         let broken = [Migration {
             name: "999_broken",
             sql: "ALTER TABLE t ADD COLUMN a TEXT; ALTER TABLE missing ADD COLUMN b TEXT;",
+            backfill: None,
         }];
 
         assert!(apply_migrations(&conn, &broken).is_err());
 
-        assert!(!has_column(&conn, "t", "a"), "失敗したマイグレーションの列が残っている");
-        assert!(!get_applied_migrations(&conn).unwrap().contains("999_broken"));
+        assert!(
+            !has_column(&conn, "t", "a"),
+            "失敗したマイグレーションの列が残っている"
+        );
+        assert!(
+            !get_applied_migrations(&conn)
+                .unwrap()
+                .contains("999_broken")
+        );
         // 直したものを流し直せる（半端に適用されていないので ALTER が重複しない）
         let fixed = [Migration {
             name: "999_broken",
             sql: "ALTER TABLE t ADD COLUMN a TEXT;",
+            backfill: None,
         }];
         apply_migrations(&conn, &fixed).unwrap();
         assert!(has_column(&conn, "t", "a"));
@@ -419,6 +464,47 @@ mod tests {
         run_migrations(&conn).unwrap();
         for column in ["superchat_color", "is_moderator", "is_verified", "badges"] {
             assert!(has_column(&conn, "messages", column), "{column}");
+        }
+    }
+
+    // 08_database.md sessions.video_id: 006 は既存セッションの stream_url から video_id を埋める
+    #[test]
+    fn migration_006_backfills_video_id_from_stream_url() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_schema_versions_table(&conn).unwrap();
+        let before_006 = MIGRATIONS
+            .iter()
+            .position(|m| m.name == "006_session_video_id")
+            .unwrap();
+        apply_migrations(&conn, &MIGRATIONS[..before_006]).unwrap();
+        let urls = [
+            ("watch", Some("https://www.youtube.com/watch?v=dQw4w9WgXcQ")),
+            ("live", Some("https://www.youtube.com/live/dQw4w9WgXcQ")),
+            (
+                "share",
+                Some("https://youtube.com/live/dQw4w9WgXcQ?feature=share"),
+            ),
+            ("short", Some("https://youtu.be/dQw4w9WgXcQ")),
+            ("null", None),
+        ];
+        for (id, url) in urls {
+            conn.execute(
+                "INSERT INTO sessions (id, start_time, stream_url) VALUES (?1, '2026-01-01T00:00:00Z', ?2)",
+                rusqlite::params![id, url],
+            )
+            .unwrap();
+        }
+
+        run_migrations(&conn).unwrap();
+
+        for (id, url) in urls {
+            let video_id: Option<String> = conn
+                .query_row("SELECT video_id FROM sessions WHERE id = ?1", [id], |r| {
+                    r.get(0)
+                })
+                .unwrap();
+            let expected = url.map(|_| "dQw4w9WgXcQ");
+            assert_eq!(video_id.as_deref(), expected, "{id}");
         }
     }
 }

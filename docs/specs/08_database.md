@@ -26,6 +26,7 @@
 
 各マイグレーションは 1 つのトランザクションで適用し、`schema_versions` への記録も同じトランザクションに含める。
 途中の文で失敗したら全体を戻す（ALTER TABLE ADD COLUMN は 2 回実行できないので、半端に適用されると次の起動で失敗し続ける）。
+既存データの埋め直しに SQL 以外の処理（URL の解析など）が要るマイグレーションは、SQL のあとに Rust の処理を同じトランザクションで実行する。
 
 | 変更種別 | 方法 |
 |---------|------|
@@ -89,8 +90,12 @@ CREATE TABLE sessions (
     total_messages INTEGER DEFAULT 0,
     total_revenue REAL DEFAULT 0.0,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    -- 006 で追加
+    video_id TEXT
 );
+
+CREATE INDEX IF NOT EXISTS idx_sessions_video_id ON sessions(video_id);
 
 CREATE TRIGGER update_sessions_timestamp
     AFTER UPDATE ON sessions
@@ -110,6 +115,20 @@ END;
 | `broadcaster_name` | TEXT | 配信者名 |
 | `total_messages` | INTEGER | 合計メッセージ数 |
 | `total_revenue` | REAL | 合計収益（SuperChat等） |
+| `video_id` | TEXT | 配信の video_id。`stream_url` から取り出したもの（取り出せない URL は NULL） |
+
+`video_id` は同じ配信のセッションを引くための列。`stream_url` の書き方（`watch?v=`・`/live/`・`youtu.be/`）によらず、
+同じ配信なら同じ値になる。取り出しは接続時の URL 解析（`extract_video_id`）と同じ関数を使う。
+
+| stream_url | video_id |
+|-----------|----------|
+| `https://www.youtube.com/watch?v=dQw4w9WgXcQ` | `dQw4w9WgXcQ` |
+| `https://www.youtube.com/live/dQw4w9WgXcQ` | `dQw4w9WgXcQ` |
+| `https://youtube.com/live/dQw4w9WgXcQ?feature=share` | `dQw4w9WgXcQ` |
+| `https://youtu.be/dQw4w9WgXcQ` | `dQw4w9WgXcQ` |
+| NULL | NULL |
+
+マイグレーション 006 は列を足したあと、既存のセッションの `stream_url` から同じ関数で埋める（SQL で URL を解析しない）。
 
 ### messages テーブル
 
@@ -214,7 +233,7 @@ CREATE INDEX IF NOT EXISTS idx_reactions_session_time ON reactions(session_id, u
 SELECT r.emoji, SUM(r.count)
 FROM reactions r
 JOIN sessions s ON r.session_id = s.id
-WHERE s.stream_url LIKE '%watch?v={video_id}%'   -- 配信内コメント数カウンタの復元と同じ条件
+WHERE s.video_id = {video_id}   -- 配信内コメント数カウンタの復元と同じ条件
 GROUP BY r.emoji
 ```
 

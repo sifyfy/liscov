@@ -1,7 +1,7 @@
 //! CRUD operations for the database
 
 use super::models::*;
-use crate::core::models::ChatMessage;
+use crate::core::models::{ChatMessage, extract_video_id};
 use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -28,11 +28,12 @@ pub fn create_session(
 
     let id = uuid::Uuid::new_v4().to_string();
     let start_time = chrono::Utc::now().to_rfc3339();
+    let video_id = stream_url.and_then(extract_video_id);
 
     conn.execute(
-        "INSERT INTO sessions (id, start_time, stream_url, stream_title, broadcaster_channel_id, broadcaster_name)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![id, start_time, stream_url, stream_title, broadcaster_channel_id, broadcaster_name],
+        "INSERT INTO sessions (id, start_time, stream_url, stream_title, broadcaster_channel_id, broadcaster_name, video_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![id, start_time, stream_url, stream_title, broadcaster_channel_id, broadcaster_name, video_id],
     )?;
 
     // Also save broadcaster profile if we have broadcaster info
@@ -306,28 +307,22 @@ pub fn upsert_viewer_stream(
     Ok(())
 }
 
-/// sessions.stream_url から同じ配信（video_id）のセッションを引く LIKE パターン
-pub(super) fn stream_url_pattern(video_id: &str) -> String {
-    format!("%watch?v={}%", video_id)
-}
-
 /// Get in-stream comment counts per channel_id for a given video_id
 pub fn get_in_stream_comment_counts(
     conn: &Connection,
     video_id: &str,
 ) -> Result<std::collections::HashMap<String, u32>> {
-    let like_pattern = stream_url_pattern(video_id);
     let mut stmt = conn.prepare(
         "SELECT m.channel_id, COUNT(*) as cnt
          FROM messages m
          JOIN sessions s ON m.session_id = s.id
-         WHERE s.stream_url LIKE ?1
+         WHERE s.video_id = ?1
            AND m.message_type != 'system'
            AND m.channel_id <> ''
          GROUP BY m.channel_id",
     )?;
     let counts = stmt
-        .query_map(params![like_pattern], |row| {
+        .query_map(params![video_id], |row| {
             let channel_id: String = row.get(0)?;
             let count: u32 = row.get(1)?;
             Ok((channel_id, count))
@@ -1563,6 +1558,77 @@ mod tests {
         let counts = get_in_stream_comment_counts(&conn, video_id).unwrap();
         assert_eq!(counts.get("UC_a"), Some(&3u32));
         assert_eq!(counts.get("UC_b"), Some(&2u32));
+    }
+
+    // 02_chat.md 配信内コメント数: URL の書き方が前回と違っても同じ配信として数える
+    #[tokio::test]
+    async fn get_in_stream_comment_counts_matches_any_url_form_of_same_video() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let urls = [
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "https://www.youtube.com/live/dQw4w9WgXcQ",
+            "https://youtube.com/live/dQw4w9WgXcQ?feature=share",
+            "https://youtu.be/dQw4w9WgXcQ",
+        ];
+        for (i, url) in urls.iter().enumerate() {
+            let session_id =
+                create_session(&conn, Some(url), None, Some("UC_bc"), Some("BC")).unwrap();
+            let id = format!("m{i}");
+            save_message(
+                &conn,
+                &session_id,
+                Some("UC_bc"),
+                &make_text_message(&id, "A", "UC_a", "hi"),
+                None,
+            )
+            .unwrap();
+        }
+        let other = create_session(
+            &conn,
+            Some("https://www.youtube.com/live/otherVideo1"),
+            None,
+            Some("UC_bc"),
+            Some("BC"),
+        )
+        .unwrap();
+        save_message(
+            &conn,
+            &other,
+            Some("UC_bc"),
+            &make_text_message("x", "A", "UC_a", "hi"),
+            None,
+        )
+        .unwrap();
+
+        let counts = get_in_stream_comment_counts(&conn, "dQw4w9WgXcQ").unwrap();
+
+        assert_eq!(counts.get("UC_a"), Some(&4u32));
+    }
+
+    // 08_database.md sessions.video_id: stream_url から取り出した video_id を保存する。取り出せなければ NULL
+    #[tokio::test]
+    async fn create_session_stores_video_id_from_stream_url() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let live = create_session(
+            &conn,
+            Some("https://youtube.com/live/dQw4w9WgXcQ?feature=share"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let none = create_session(&conn, None, None, None, None).unwrap();
+        let video_id = |id: &str| -> Option<String> {
+            conn.query_row("SELECT video_id FROM sessions WHERE id = ?1", [id], |r| {
+                r.get(0)
+            })
+            .unwrap()
+        };
+
+        assert_eq!(video_id(&live).as_deref(), Some("dQw4w9WgXcQ"));
+        assert_eq!(video_id(&none), None);
     }
 
     #[tokio::test]

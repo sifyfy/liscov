@@ -548,7 +548,7 @@ type InStreamCommentCounter = HashMap<String, u32>;
 | イベント | 動作 |
 |---------|------|
 | 新規接続 | 空のHashMapを作成 |
-| 再接続（同一video_id） | DBから該当セッションのメッセージを集計し、channel_idごとのカウントで初期化 |
+| 再接続（同一video_id） | DBから該当セッションのメッセージを集計し、channel_idごとのカウントで初期化。URL の書き方（`watch?v=`・`/live/`・`youtu.be/`）が前回と違っても同じ配信として数える |
 | メッセージ受信 | カウンタをインクリメントし、現在値を `in_stream_comment_count` に設定 |
 | 切断 | カウンタを破棄（DBにメッセージが保存されているため復元可能） |
 
@@ -558,7 +558,8 @@ type InStreamCommentCounter = HashMap<String, u32>;
 SELECT m.channel_id, COUNT(*) as count
 FROM messages m
 JOIN sessions s ON m.session_id = s.id
-WHERE s.stream_url LIKE '%{video_id}%'
+WHERE s.video_id = {video_id}
+  AND m.message_type != 'system'
   AND m.channel_id <> ''
 GROUP BY m.channel_id
 ```
@@ -1456,7 +1457,8 @@ CREATE TABLE sessions (
     started_at TEXT,
     ended_at TEXT,
     total_messages INTEGER,
-    total_revenue REAL
+    total_revenue REAL,
+    video_id TEXT  -- 同じ配信のセッションを引く（列の詳細は 08_database.md）
 );
 ```
 
