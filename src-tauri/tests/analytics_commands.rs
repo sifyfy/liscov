@@ -10,7 +10,7 @@ use app_lib::core::{ChatMessage, MessageType};
 use app_lib::database::{self, Database};
 use app_lib::state::AppState;
 use common::{invoke_no_args, invoke_with_args};
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets};
@@ -57,7 +57,6 @@ async fn build_app_state(messages: Vec<ChatMessage>) -> (AppState, tempfile::Tem
 fn app_state_with(database: Option<Database>) -> AppState {
     AppState {
         websocket_server: Arc::new(RwLock::new(None)),
-        messages: Arc::new(RwLock::new(VecDeque::new())),
         database: Arc::new(RwLock::new(database)),
         tts_manager: Arc::new(app_lib::tts::TtsManager::default()),
         tts_process_manager: Arc::new(app_lib::tts::TtsProcessManager::new()),

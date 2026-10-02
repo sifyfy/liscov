@@ -468,24 +468,26 @@ Origin: https://www.youtube.com
 │    └─ 新しいcontinuation tokenを取得          │
 │ 3. chat_mode_rx でモード変更要求を確認         │
 │    └─ 変更あり → client.set_chat_mode(mode)  │
-│ 4. 各メッセージを処理:                         │
-│    ├─ この接続で受け取り済みの id なら捨てる    │
+│ 4. この接続で受け取り済みの id を捨てる        │
+│ 5. 残りを 1 トランザクションで処理（1件ずつ）: │
 │    ├─ ギフトなら handle から channel_id を特定  │
 │    ├─ 配信内コメント数カウンタ更新              │
 │    ├─ DBに保存（save_message）                │
 │    │   ├─ INSERT OR IGNORE (messages)         │
 │    │   ├─ upsert_viewer_profile               │
 │    │   └─ upsert_viewer_stream(video_id)      │
-│    ├─ is_first_time_viewer(video_id)で初見判定 │
-│    ├─ メモリバッファに追加                     │
-│    ├─ GuiChatMessageに初見・回数を付与         │
-│    └─ Tauriイベントを発行                     │
-│ 5. リアクション更新を処理:                     │
+│    └─ is_first_time_viewer(video_id)で初見判定 │
+│ 6. 各メッセージを送る:                         │
+│    ├─ GuiChatMessageに初見・回数を付与し、     │
+│    │   Tauriイベントを発行                    │
+│    ├─ WebSocket に配信                        │
+│    └─ TTS キューに追加                        │
+│ 7. リアクション更新を処理:                     │
 │    ├─ 前回以下の update_time_usec なら捨てる   │
 │    ├─ DBに保存（reactions）                   │
 │    ├─ Tauriイベント chat:reaction を発行       │
 │    └─ WebSocket に Reaction を配信            │
-│ 6. 次の取得まで待つ（通常1500ms。失敗が続くと │
+│ 8. 次の取得まで待つ（通常1500ms。失敗が続くと │
 │    延ばし、15回続いたら切断して抜ける）        │
 └───────────────────────────────────────────────┘
 ```
@@ -624,7 +626,6 @@ YouTube 側の一時的な不調ならそのまま続け、復旧しそうにな
 | HTTP タイムアウト | 全体15秒、接続5秒 |
 | 自動切断するまでの連続失敗回数 | 15回（11回目から待ちを倍々に延ばす） |
 | 受信済み message_id の記憶件数（接続ごと） | 10,000件 |
-| メモリバッファ上限（Backend） | 1,000件 |
 | デフォルトAPI Key | `AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8` |
 
 ## Tauriイベント

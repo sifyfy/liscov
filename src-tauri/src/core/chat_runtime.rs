@@ -15,7 +15,6 @@ use crate::core::api::{InnerTubeClient, WebSocketServer};
 use crate::core::models::{ChatMessage, ChatMode, MessageType, ReactionUpdate};
 use crate::core::raw_response::{RawResponseSaver, SaveConfig};
 use crate::database::{self, Database};
-use crate::state::MAX_MESSAGES;
 use crate::tts::{TtsManager, TtsPriority, TtsQueueItem};
 use rusqlite::Connection;
 
@@ -55,11 +54,9 @@ impl MonitoringEnd {
 
 /// 監視タスクが必要とする共有依存をまとめた構造体
 ///
-/// 複数接続間で共有されるリソース（メッセージバッファ、DB、WebSocket、TTS）を保持する。
+/// 複数接続間で共有されるリソース（DB、WebSocket、TTS）を保持する。
 /// 接続固有の情報（session_id, broadcaster_id, client）は run_monitoring_loop の引数で渡す。
 pub struct MonitoringDeps {
-    /// 全接続のメッセージを統合するグローバルバッファ
-    pub messages: Arc<RwLock<VecDeque<ChatMessage>>>,
     /// データベース接続
     pub database: Arc<RwLock<Option<Database>>>,
     /// WebSocket サーバー（外部アプリへのブロードキャスト）
@@ -72,7 +69,6 @@ impl MonitoringDeps {
     /// AppState の各フィールドから Arc::clone して MonitoringDeps を構築する
     pub fn from_state(state: &crate::AppState) -> Self {
         Self {
-            messages: Arc::clone(&state.messages),
             database: Arc::clone(&state.database),
             websocket_server: Arc::clone(&state.websocket_server),
             tts_manager: Arc::clone(&state.tts_manager),
@@ -295,17 +291,6 @@ where
                 &mut in_stream_counts,
                 &mut known_handles,
             );
-        }
-
-        // メッセージバッファに追加
-        {
-            let mut msgs = deps.messages.write().await;
-            for msg in &fresh {
-                if msgs.len() >= MAX_MESSAGES {
-                    msgs.pop_front();
-                }
-                msgs.push_back(msg.clone());
-            }
         }
 
         for msg in &fresh {
