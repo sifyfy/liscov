@@ -24,6 +24,9 @@
 
 ### マイグレーション
 
+各マイグレーションは 1 つのトランザクションで適用し、`schema_versions` への記録も同じトランザクションに含める。
+途中の文で失敗したら全体を戻す（ALTER TABLE ADD COLUMN は 2 回実行できないので、半端に適用されると次の起動で失敗し続ける）。
+
 | 変更種別 | 方法 |
 |---------|------|
 | 新規カラム追加 | ALTER TABLE + DEFAULT値（既存データに影響なし） |
@@ -126,6 +129,11 @@ CREATE TABLE messages (
     is_member INTEGER DEFAULT 0,
     metadata TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    -- 005 で追加
+    superchat_color TEXT,
+    is_moderator INTEGER,
+    is_verified INTEGER,
+    badges TEXT,
     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 );
 
@@ -150,6 +158,14 @@ CREATE UNIQUE INDEX idx_messages_unique ON messages(session_id, message_id);
 | `amount` | TEXT | SuperChat金額（通貨記号含む、例: "¥500"） |
 | `is_member` | INTEGER | メンバーシップ加入者フラグ（0/1） |
 | `metadata` | TEXT | JSON形式のメタデータ（現在は gift のみ。他の種別は NULL） |
+| `superchat_color` | TEXT | スーパーチャットのヘッダー背景色 `#RRGGBB`（段階の判定に使う。07_revenue.md）。superchat 以外は NULL |
+| `is_moderator` | INTEGER | モデレーターのバッジがあるか（0/1） |
+| `is_verified` | INTEGER | 認証済みのバッジがあるか（0/1） |
+| `badges` | TEXT | バッジの種類の JSON 配列（例: `["moderator","member"]`。02_chat.md「バッジの種類」） |
+
+`is_moderator`・`is_verified`・`badges` は、発言者のバッジを読める種類（text・superchat・supersticker・membership）だけに入れる。
+それ以外の種類（membership_gift・gift・system）と、005 より前に保存した行は NULL（不明）。
+NULL は「バッジが無い」ではなく「分からない」を表す。分析・エクスポートは NULL を false や空配列として扱わない。
 
 **ギフト（`message_type = 'gift'`）の保存形式:**
 

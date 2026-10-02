@@ -34,6 +34,10 @@ const MIGRATIONS: &[Migration] = &[
         name: "004_reactions",
         sql: include_str!("004_reactions.sql"),
     },
+    Migration {
+        name: "005_message_badges",
+        sql: include_str!("005_message_badges.sql"),
+    },
 ];
 
 /// Run all pending migrations
@@ -46,21 +50,30 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
     // Ensure schema_versions table exists
     create_schema_versions_table(conn)?;
 
-    // Get already applied migrations
+    apply_migrations(conn, MIGRATIONS)
+}
+
+/// 未適用のマイグレーションを順に適用する
+///
+/// 1 つのマイグレーションと schema_versions への記録を同じトランザクションで行う。
+/// 途中の文で失敗したら全体が戻るので、ALTER TABLE ADD COLUMN のように 2 回実行できない文も
+/// 半端に適用されたまま残らない（08_database.md「マイグレーション」）。
+fn apply_migrations(conn: &Connection, migrations: &[Migration]) -> Result<()> {
     let applied = get_applied_migrations(conn)?;
 
-    // Run pending migrations
-    for migration in MIGRATIONS {
-        if !applied.contains(migration.name) {
-            tracing::info!("Applying migration: {}", migration.name);
-
-            conn.execute_batch(migration.sql)
-                .with_context(|| format!("Failed to apply migration: {}", migration.name))?;
-
-            record_migration(conn, migration.name)?;
-
-            tracing::info!("Migration applied successfully: {}", migration.name);
+    for migration in migrations {
+        if applied.contains(migration.name) {
+            continue;
         }
+        tracing::info!("Applying migration: {}", migration.name);
+
+        let tx = conn.unchecked_transaction()?;
+        tx.execute_batch(migration.sql)
+            .with_context(|| format!("Failed to apply migration: {}", migration.name))?;
+        record_migration(&tx, migration.name)?;
+        tx.commit()?;
+
+        tracing::info!("Migration applied successfully: {}", migration.name);
     }
 
     Ok(())
@@ -365,5 +378,47 @@ mod tests {
 
         // Should detect as legacy
         assert!(is_legacy_database(&conn).unwrap());
+    }
+    fn has_column(conn: &Connection, table: &str, column: &str) -> bool {
+        conn.query_row(
+            "SELECT COUNT(*) > 0 FROM pragma_table_info(?1) WHERE name = ?2",
+            [table, column],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    // 08_database.md「マイグレーション」: 途中の文で失敗したら全体を戻し、適用済みにしない
+    #[test]
+    fn failed_migration_is_rolled_back() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE t (id INTEGER);").unwrap();
+        create_schema_versions_table(&conn).unwrap();
+        let broken = [Migration {
+            name: "999_broken",
+            sql: "ALTER TABLE t ADD COLUMN a TEXT; ALTER TABLE missing ADD COLUMN b TEXT;",
+        }];
+
+        assert!(apply_migrations(&conn, &broken).is_err());
+
+        assert!(!has_column(&conn, "t", "a"), "失敗したマイグレーションの列が残っている");
+        assert!(!get_applied_migrations(&conn).unwrap().contains("999_broken"));
+        // 直したものを流し直せる（半端に適用されていないので ALTER が重複しない）
+        let fixed = [Migration {
+            name: "999_broken",
+            sql: "ALTER TABLE t ADD COLUMN a TEXT;",
+        }];
+        apply_migrations(&conn, &fixed).unwrap();
+        assert!(has_column(&conn, "t", "a"));
+    }
+
+    // 08_database.md messages テーブル: 005 でスパチャの色とバッジの列を足す
+    #[test]
+    fn migration_005_adds_color_and_badge_columns() {
+        let conn = Connection::open_in_memory().unwrap();
+        run_migrations(&conn).unwrap();
+        for column in ["superchat_color", "is_moderator", "is_verified", "badges"] {
+            assert!(has_column(&conn, "messages", column), "{column}");
+        }
     }
 }

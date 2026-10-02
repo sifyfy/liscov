@@ -3,4 +3,4 @@
 /**
  * SuperChat tier statistics
  */
-export type SuperChatTierStats = { tier_red: number, tier_magenta: number, tier_orange: number, tier_yellow: number, tier_green: number, tier_cyan: number, tier_blue: number, };
+export type SuperChatTierStats = { tier_red: number, tier_magenta: number, tier_orange: number, tier_yellow: number, tier_green: number, tier_cyan: number, tier_blue: number, tier_unknown: number, };

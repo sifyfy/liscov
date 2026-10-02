@@ -10,15 +10,26 @@
 
 SuperChatの色情報（`headerBackgroundColor`）に基づいてtierを判定し、tier別に件数を集計する。**金額の数値計算は行わない。**
 
-| Tier | 色 | USD相当額の目安 |
-|------|----|----------------|
-| Blue | 青 | $1-2 |
-| Cyan | 水色 | $2-5 |
-| Green | 緑 | $5-10 |
-| Yellow | 黄 | $10-20 |
-| Orange | オレンジ | $20-50 |
-| Magenta | マゼンタ | $50-100 |
-| Red | 赤 | $100-500 |
+判定はヘッダー背景色（`#RRGGBB`）が下の表と完全に一致するかで行う（大文字小文字は区別しない）。どれにも一致しない色と、色が分からないもの（色を保存する前の過去セッション）は **段階不明**（`tier_unknown`）に数える。金額から段階を推定しない。
+
+| Tier | 色 | ヘッダー背景色 | USD相当額の目安 | 実データの例 |
+|------|----|------|----------------|------|
+| Blue | 青 | `#1565C0` | $1-2 | ¥100 |
+| Cyan | 水色 | `#00B8D4` | $2-5 | ¥200, ¥320 |
+| Green | 緑 | `#00BFA5` | $5-10 | ¥500, ¥800, HK$25.00 |
+| Yellow | 黄 | `#FFB300` | $10-20 | ¥1,000, ¥1,600 |
+| Orange | オレンジ | `#E65100` | $20-50 | ¥2,222, ¥3,200 |
+| Magenta | マゼンタ | `#C2185B` | $50-100 | ¥5,000, ¥9,999 |
+| Red | 赤 | `#D00000` | $100-500 | （実データ未確認） |
+
+実データの例は、2026-09 の配信の生レスポンスで確かめたもの。赤だけは実データが無く、YouTube の配色から決めている。
+
+| 状況 | 結果 |
+|------|------|
+| ヘッダー背景色が `#00BFA5` の ¥500 | Green |
+| ヘッダー背景色が表に無い色 | 段階不明 |
+| 色を保存する前（マイグレーション 005 より前）の過去セッションのスーパーチャット | 段階不明 |
+| ダッシュボード | 段階不明が 1 件以上あれば「段階不明: N件」も出す |
 
 ### エクスポート
 
@@ -121,6 +132,7 @@ pub struct SuperChatTierStats {
     pub tier_green: usize,    // USD $5-10相当
     pub tier_cyan: usize,     // USD $2-5相当
     pub tier_blue: usize,     // 最低tier（USD $1-2相当）
+    pub tier_unknown: usize,  // 段階不明（色が表に無い・分からない）
 }
 ```
 
@@ -184,14 +196,8 @@ pub struct LiveChatPaidMessageRenderer {
 
 ### Tier判定ロジック
 
-`header_background_color` の値からtierを判定：
-
-```rust
-fn determine_tier(header_background_color: u64) -> SuperChatTier {
-    // YouTubeの色コードからtierを判定
-    // 実装時に実際の色コードを確認して定義
-}
-```
+パーサがヘッダー背景色を `#RRGGBB` にし（`SuperChatColors.header_background`）、[Tier別集計](#tier別集計) の表と完全一致で判定する。一致しなければ段階不明。
+過去セッションは DB の `messages.superchat_color`（08_database.md）から同じ判定をする。
 
 ### 設計理由
 
@@ -261,13 +267,20 @@ pub struct ExportableData {
     pub content: String,
     pub message_type: String,
     pub amount_display: Option<String>,  // 表示用金額文字列（"¥500"等）
-    pub tier: Option<SuperChatTier>,     // SuperChatのtier
-    pub is_moderator: bool,
+    pub tier: Option<SuperChatTier>,     // SuperChatのtier（superchat 以外と段階不明は None）
+    pub is_moderator: Option<bool>,      // None = 不明
     pub is_member: bool,
-    pub is_verified: bool,
-    pub badges: Vec<String>,
+    pub is_verified: Option<bool>,       // None = 不明
+    pub badges: Option<Vec<String>>,     // None = 不明
 }
 ```
+
+`is_moderator`・`is_verified`・`badges` は、バッジを読めない種類（membership_gift・gift・system）と、バッジを保存する前（マイグレーション 005 より前）の過去セッションの行では不明（None）にする（08_database.md）。不明を false や空配列にしない。
+
+| 出力 | 不明のとき |
+|------|-----------|
+| CSV | 空欄 |
+| JSON | `null` |
 
 ### CSV形式
 

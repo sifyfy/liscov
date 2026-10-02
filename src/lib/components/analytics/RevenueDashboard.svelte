@@ -124,6 +124,12 @@
           </div>
         {/each}
       </div>
+      <!-- 色が表に無い・色を保存する前のスパチャ (07_revenue.md「Tier別集計」) -->
+      {#if analyticsStore.analytics.super_chat_by_tier.tier_unknown > 0}
+        <p class="mt-3 text-sm text-[var(--text-muted)]" data-testid="tier-unknown">
+          段階不明: {analyticsStore.analytics.super_chat_by_tier.tier_unknown}件
+        </p>
+      {/if}
     </div>
 
     <!-- Gifts（ジュエル）: 既存の収益集計とは別枠 (07_revenue.md ギフト集計) -->

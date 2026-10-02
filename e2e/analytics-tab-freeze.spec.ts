@@ -216,4 +216,43 @@ test.describe('Analytics Tab Freeze Bug', () => {
     await navigateToTab(mainPage, 'Chat');
     await disconnectAndInitialize(mainPage);
   });
+
+  test('スパチャがヘッダー色の段階に数えられる (07_revenue.md「Tier別集計」)', async () => {
+    const analyticsContainer = mainPage
+      .locator('.overflow-y-auto')
+      .filter({ has: mainPage.locator('text=Revenue Analytics') });
+    // 段階の行（ラベルと件数）
+    const tierCount = (label: string) =>
+      analyticsContainer
+        .locator('div.flex.items-center.gap-3')
+        .filter({ has: mainPage.getByText(label, { exact: true }) })
+        .locator('span.text-right');
+    const readCounts = async () => {
+      await navigateToTab(mainPage, 'Analytics');
+      await mainPage.locator('button:has-text("Refresh")').click();
+      await expect(analyticsContainer).toContainText('Super Chat Tier Distribution', { timeout: 10000 });
+      return {
+        green: Number(await tierCount('Green').textContent()),
+        red: Number(await tierCount('Red').textContent()),
+        blue: Number(await tierCount('Blue').textContent()),
+      };
+    };
+
+    await connectToMockStream(mainPage);
+    const before = await readCounts();
+
+    // ヘッダー色 #00BFA5（緑）と #D00000（赤）のスパチャ
+    await navigateToTab(mainPage, 'Chat');
+    await addMockMessage({ message_type: 'superchat', author: 'GreenDonor', content: 'green-tier', amount: '¥500', tier: 'green', channel_id: 'UC_green' });
+    await addMockMessage({ message_type: 'superchat', author: 'RedDonor', content: 'red-tier', amount: '¥10,000', tier: 'red', channel_id: 'UC_red' });
+    await expect(mainPage.locator('text=red-tier').first()).toBeVisible({ timeout: 10000 });
+
+    const after = await readCounts();
+    expect(after.green - before.green).toBe(1);
+    expect(after.red - before.red).toBe(1);
+    expect(after.blue - before.blue).toBe(0);
+
+    await navigateToTab(mainPage, 'Chat');
+    await disconnectAndInitialize(mainPage);
+  });
 });

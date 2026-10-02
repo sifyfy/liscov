@@ -89,7 +89,8 @@ function createAnalyticsStore() {
     get totalTierCount() {
       if (!analytics) return 0;
       const t = analytics.super_chat_by_tier;
-      return t.tier_red + t.tier_magenta + t.tier_orange + t.tier_yellow + t.tier_green + t.tier_cyan + t.tier_blue;
+      // 段階不明も含める（棒の長さを全スパチャに対する割合にする）
+      return t.tier_red + t.tier_magenta + t.tier_orange + t.tier_yellow + t.tier_green + t.tier_cyan + t.tier_blue + t.tier_unknown;
     },
 
     // アクション

@@ -167,12 +167,17 @@ pub fn save_message(
         _ => None,
     };
 
+    // バッジを読めない種類は NULL（不明）。08_database.md messages テーブル
+    let badges = message.author_badge_metadata();
+    let badges_json = badges.and_then(|m| serde_json::to_string(&m.badges).ok());
+
     // Insert message (ignore duplicates)
     conn.execute(
         "INSERT OR IGNORE INTO messages
          (session_id, message_id, timestamp, timestamp_usec, author, author_icon_url,
-          channel_id, content, message_type, amount, is_member, metadata)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+          channel_id, content, message_type, amount, is_member, metadata,
+          superchat_color, is_moderator, is_verified, badges)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
         params![
             session_id,
             message.id,
@@ -186,6 +191,10 @@ pub fn save_message(
             amount,
             message.is_member,
             metadata,
+            message.superchat_header_color(),
+            badges.map(|m| m.is_moderator),
+            badges.map(|m| m.is_verified),
+            badges_json,
         ],
     )?;
 

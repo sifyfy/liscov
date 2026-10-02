@@ -82,7 +82,7 @@ pub struct SuperChatColors {
 }
 
 /// Message metadata
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MessageMetadata {
     pub amount: Option<String>,
     pub badges: Vec<String>,
@@ -109,6 +109,37 @@ pub struct ChatMessage {
     pub is_member: bool,
     pub is_first_time_viewer: bool,
     pub in_stream_comment_count: Option<u32>,
+}
+
+impl ChatMessage {
+    /// スーパーチャットのヘッダー背景色（`#RRGGBB`）。段階の判定に使う（07_revenue.md）
+    pub fn superchat_header_color(&self) -> Option<&str> {
+        match self.message_type {
+            MessageType::SuperChat { .. } => self
+                .metadata
+                .as_ref()?
+                .superchat_colors
+                .as_ref()
+                .map(|colors| colors.header_background.as_str()),
+            _ => None,
+        }
+    }
+
+    /// 発言者のバッジを読める種類なら、そのバッジを持つ metadata を返す
+    ///
+    /// バッジを読めない種類（メンバーシップギフト・ギフト・システム）は None（不明）。
+    /// 不明を「バッジ無し」と区別するため、保存・エクスポートはこれを通す（08_database.md）。
+    pub fn author_badge_metadata(&self) -> Option<&MessageMetadata> {
+        match self.message_type {
+            MessageType::Text
+            | MessageType::SuperChat { .. }
+            | MessageType::SuperSticker { .. }
+            | MessageType::Membership { .. } => self.metadata.as_ref(),
+            MessageType::MembershipGift { .. } | MessageType::Gift(_) | MessageType::System => {
+                None
+            }
+        }
+    }
 }
 
 /// ライブリアクションの 1 回の更新（02_chat.md「ライブリアクション」）

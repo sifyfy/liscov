@@ -40,19 +40,33 @@ pub struct SuperChatTierStats {
     pub tier_green: usize,
     pub tier_cyan: usize,
     pub tier_blue: usize,
+    // 段階不明（ヘッダー色が表に無い・色が分からない）
+    pub tier_unknown: usize,
 }
 
 impl SuperChatTierStats {
+    /// 1 件のスーパーチャットを数える。段階が分からなければ None
+    pub fn record(&mut self, tier: Option<SuperChatTier>) {
+        self.add(tier, 1);
+    }
+
     pub fn increment(&mut self, tier: SuperChatTier) {
-        match tier {
-            SuperChatTier::Red => self.tier_red += 1,
-            SuperChatTier::Magenta => self.tier_magenta += 1,
-            SuperChatTier::Orange => self.tier_orange += 1,
-            SuperChatTier::Yellow => self.tier_yellow += 1,
-            SuperChatTier::Green => self.tier_green += 1,
-            SuperChatTier::Cyan => self.tier_cyan += 1,
-            SuperChatTier::Blue => self.tier_blue += 1,
-        }
+        self.add(Some(tier), 1);
+    }
+
+    /// 同じ段階のスーパーチャットを count 件数える。段階が分からなければ None
+    pub fn add(&mut self, tier: Option<SuperChatTier>, count: usize) {
+        let slot = match tier {
+            Some(SuperChatTier::Red) => &mut self.tier_red,
+            Some(SuperChatTier::Magenta) => &mut self.tier_magenta,
+            Some(SuperChatTier::Orange) => &mut self.tier_orange,
+            Some(SuperChatTier::Yellow) => &mut self.tier_yellow,
+            Some(SuperChatTier::Green) => &mut self.tier_green,
+            Some(SuperChatTier::Cyan) => &mut self.tier_cyan,
+            Some(SuperChatTier::Blue) => &mut self.tier_blue,
+            None => &mut self.tier_unknown,
+        };
+        *slot += count;
     }
 
     pub fn total(&self) -> usize {
@@ -63,6 +77,7 @@ impl SuperChatTierStats {
             + self.tier_green
             + self.tier_cyan
             + self.tier_blue
+            + self.tier_unknown
     }
 }
 
@@ -221,11 +236,15 @@ pub struct ExportMessage {
     pub content: String,
     pub message_type: String,
     pub amount_display: Option<String>,
+    /// superchat 以外と段階不明は None
     pub tier: Option<SuperChatTier>,
-    pub is_moderator: bool,
+    /// None = 不明（バッジを読めない種類・保存する前の過去分。08_database.md）
+    pub is_moderator: Option<bool>,
     pub is_member: bool,
-    pub is_verified: bool,
-    pub badges: Vec<String>,
+    /// None = 不明
+    pub is_verified: Option<bool>,
+    /// None = 不明
+    pub badges: Option<Vec<String>>,
 }
 
 /// Session statistics
@@ -239,79 +258,26 @@ pub struct SessionStatistics {
     pub gifts: GiftStats,
 }
 
-/// Determine SuperChat tier from header_background_color
-/// YouTube uses specific colors for different tier levels
-fn determine_tier_from_color(header_color: &str) -> SuperChatTier {
-    // Common YouTube SuperChat header background colors (hex without #)
-    // These values may need adjustment based on actual YouTube API responses
-    let color = header_color.to_lowercase().replace('#', "");
+/// スーパーチャットのヘッダー背景色と段階（07_revenue.md「Tier別集計」の表。実データで確認した色）
+const TIER_HEADER_COLORS: [(&str, SuperChatTier); 7] = [
+    ("#1565C0", SuperChatTier::Blue),
+    ("#00B8D4", SuperChatTier::Cyan),
+    ("#00BFA5", SuperChatTier::Green),
+    ("#FFB300", SuperChatTier::Yellow),
+    ("#E65100", SuperChatTier::Orange),
+    ("#C2185B", SuperChatTier::Magenta),
+    ("#D00000", SuperChatTier::Red),
+];
 
-    // Try to parse as hex color and determine tier
-    // YouTube uses specific color ranges for tiers
-    match color.as_str() {
-        // Orange tier (check before Red to avoid starts_with("e6") false positive on e65100)
-        c if c.contains("ff5722") || c.contains("e65100") || c.contains("f57c00") => {
-            SuperChatTier::Orange
-        }
-        // Red tier (highest)
-        c if c.contains("e62117") || c.contains("ff0000") || c.starts_with("e6") => {
-            SuperChatTier::Red
-        }
-        // Magenta tier
-        c if c.contains("e91e63") || c.contains("c2185b") => SuperChatTier::Magenta,
-        // Yellow tier
-        c if c.contains("ffb300") || c.contains("ffca28") || c.contains("ffc107") => {
-            SuperChatTier::Yellow
-        }
-        // Green tier
-        c if c.contains("00e676") || c.contains("1de9b6") || c.contains("00c853") => {
-            SuperChatTier::Green
-        }
-        // Cyan tier
-        c if c.contains("00bcd4") || c.contains("00b8d4") || c.contains("00acc1") => {
-            SuperChatTier::Cyan
-        }
-        // Blue tier (lowest) - default for unrecognized colors
-        _ => SuperChatTier::Blue,
-    }
-}
-
-/// Determine tier from amount string as fallback
-fn determine_tier_from_amount(amount: &str) -> SuperChatTier {
-    // This is a fallback when color info is not available
-    // Parse the numeric value and estimate tier based on common ranges
-    let value = parse_amount_value(amount).unwrap_or(0.0);
-
-    // These are rough estimates based on USD equivalent
-    // Real tier determination should use color from YouTube API
-    if value >= 100.0 {
-        SuperChatTier::Red
-    } else if value >= 50.0 {
-        SuperChatTier::Magenta
-    } else if value >= 20.0 {
-        SuperChatTier::Orange
-    } else if value >= 10.0 {
-        SuperChatTier::Yellow
-    } else if value >= 5.0 {
-        SuperChatTier::Green
-    } else if value >= 2.0 {
-        SuperChatTier::Cyan
-    } else {
-        SuperChatTier::Blue
-    }
-}
-
-fn parse_amount_value(amount_str: &str) -> Option<f64> {
-    if amount_str.is_empty() {
-        return None;
-    }
-
-    let clean_amount: String = amount_str
-        .chars()
-        .filter(|c| c.is_ascii_digit() || *c == '.')
-        .collect();
-
-    clean_amount.parse::<f64>().ok()
+/// ヘッダー背景色（`#RRGGBB`）から段階を判定する。表に無い色・色が無ければ None（段階不明）
+///
+/// 金額からは推定しない（通貨が混ざるため。07_revenue.md「制約・不変条件」）。
+fn tier_from_header_color(color: Option<&str>) -> Option<SuperChatTier> {
+    let color = color?;
+    TIER_HEADER_COLORS
+        .iter()
+        .find(|(header, _)| header.eq_ignore_ascii_case(color))
+        .map(|(_, tier)| *tier)
 }
 
 /// メッセージリストからRevenueAnalyticsを計算する純粋関数
@@ -325,21 +291,11 @@ pub(crate) fn compute_revenue_analytics(messages: &[ChatMessage]) -> RevenueAnal
 
     for message in messages {
         match &message.message_type {
-            MessageType::SuperChat { amount } => {
+            MessageType::SuperChat { .. } => {
                 analytics.super_chat_count += 1;
 
-                // 色情報があればそこからtierを判定、なければ金額からフォールバック
-                let tier = if let Some(ref metadata) = message.metadata {
-                    if let Some(ref colors) = metadata.superchat_colors {
-                        determine_tier_from_color(&colors.header_background)
-                    } else {
-                        determine_tier_from_amount(amount)
-                    }
-                } else {
-                    determine_tier_from_amount(amount)
-                };
-
-                analytics.super_chat_by_tier.increment(tier);
+                let tier = tier_from_header_color(message.superchat_header_color());
+                analytics.super_chat_by_tier.record(tier);
 
                 // 貢献者情報を更新
                 let entry = contributors.entry(message.channel_id.clone()).or_insert((
@@ -348,9 +304,9 @@ pub(crate) fn compute_revenue_analytics(messages: &[ChatMessage]) -> RevenueAnal
                     None,
                 ));
                 entry.1 += 1;
-                // より高いtierがあれば更新
-                if entry.2.is_none_or(|existing| tier > existing) {
-                    entry.2 = Some(tier);
+                // より高いtierがあれば更新（段階不明は比べない）
+                if tier > entry.2 {
+                    entry.2 = tier;
                 }
             }
             MessageType::SuperSticker { amount: _ } => {
@@ -407,40 +363,51 @@ pub async fn get_revenue_analytics(
     Ok(compute_revenue_analytics(&messages_vec))
 }
 
-/// DB行データからRevenueAnalyticsを計算する純粋関数
+/// DB の集計行から RevenueAnalytics を計算する純粋関数
 ///
-/// 各行は (message_type, amount, header_color) のタプル
+/// 各行は (message_type, superchat_color, 件数)。superchat_color は色を保存する前の行では NULL（段階不明）
 pub(crate) fn compute_session_analytics_from_rows(
-    rows: &[(String, Option<String>, Option<String>)],
+    rows: &[(String, Option<String>, usize)],
 ) -> RevenueAnalytics {
     let mut analytics = RevenueAnalytics::default();
 
-    for (message_type, amount_str, header_color) in rows {
+    for (message_type, superchat_color, count) in rows {
         match message_type.as_str() {
             "superchat" => {
-                analytics.super_chat_count += 1;
-
-                let tier = if let Some(color) = header_color {
-                    determine_tier_from_color(color)
-                } else if let Some(amt) = amount_str {
-                    determine_tier_from_amount(amt)
-                } else {
-                    SuperChatTier::Blue
-                };
-
-                analytics.super_chat_by_tier.increment(tier);
+                analytics.super_chat_count += count;
+                let tier = tier_from_header_color(superchat_color.as_deref());
+                analytics.super_chat_by_tier.add(tier, *count);
             }
-            "supersticker" => {
-                analytics.super_sticker_count += 1;
-            }
-            "membership" | "membership_gift" => {
-                analytics.membership_gains += 1;
-            }
+            "supersticker" => analytics.super_sticker_count += count,
+            "membership" | "membership_gift" => analytics.membership_gains += count,
             _ => {}
         }
     }
 
     analytics
+}
+
+/// 過去セッションの分析を DB から集計する（07_revenue.md `get_session_analytics`）
+pub(crate) fn session_analytics(
+    conn: &rusqlite::Connection,
+    session_id: &str,
+) -> Result<RevenueAnalytics, CommandError> {
+    // 件数だけ要るので、種類と色ごとに DB で数える（メッセージを全件読まない）
+    let mut stmt = conn
+        .prepare(
+            "SELECT message_type, superchat_color, COUNT(*) FROM messages
+             WHERE session_id = ? GROUP BY message_type, superchat_color",
+        )
+        .map_err(|e| CommandError::DatabaseError(e.to_string()))?;
+    let rows: Vec<(String, Option<String>, usize)> = stmt
+        .query_map([session_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .map_err(|e| CommandError::DatabaseError(e.to_string()))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| CommandError::DatabaseError(e.to_string()))?;
+
+    let mut analytics = compute_session_analytics_from_rows(&rows);
+    analytics.gifts = gift_stats_from_metadata(&query_gift_metadata(conn, session_id)?);
+    Ok(analytics)
 }
 
 /// Get analytics for a specific session from database
@@ -450,27 +417,7 @@ pub async fn get_session_analytics(
     session_id: String,
 ) -> Result<RevenueAnalytics, CommandError> {
     let conn = state.db_connection().await?;
-
-    // セッションのメッセージをカラー情報と一緒に取得
-    let mut stmt = conn
-        .prepare("SELECT message_type, amount, header_color FROM messages WHERE session_id = ?")
-        .map_err(|e| CommandError::DatabaseError(e.to_string()))?;
-
-    let rows: Vec<(String, Option<String>, Option<String>)> = stmt
-        .query_map([&session_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, Option<String>>(2)?,
-            ))
-        })
-        .map_err(|e| CommandError::DatabaseError(e.to_string()))?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| CommandError::DatabaseError(e.to_string()))?;
-
-    let mut analytics = compute_session_analytics_from_rows(&rows);
-    analytics.gifts = gift_stats_from_metadata(&query_gift_metadata(&conn, &session_id)?);
-    Ok(analytics)
+    session_analytics(&conn, &session_id)
 }
 
 /// セッション内の gift 行の metadata を取得する
@@ -487,23 +434,20 @@ fn query_gift_metadata(
         .map_err(|e| CommandError::DatabaseError(e.to_string()))
 }
 
-/// Export session data to file
-#[tauri::command]
-pub async fn export_session_data(
-    state: State<'_, AppState>,
-    session_id: String,
-    file_path: String,
-    config: ExportConfig,
-) -> Result<(), CommandError> {
-    let conn = state.db_connection().await?;
+/// 過去セッションのエクスポート用データを DB から読む（07_revenue.md `export_session_data`）
+pub(crate) fn session_export_data(
+    conn: &rusqlite::Connection,
+    session_id: &str,
+    config: &ExportConfig,
+) -> Result<SessionExportData, CommandError> {
+    let db_err = |e: rusqlite::Error| CommandError::DatabaseError(e.to_string());
 
-    // セッションメタデータを取得
     let session = conn
         .query_row(
             "SELECT id, start_time, end_time, stream_url, stream_title,
-                    broadcaster_channel_id, broadcaster_name, total_messages, total_revenue
+                    broadcaster_channel_id, broadcaster_name
              FROM sessions WHERE id = ?",
-            [&session_id],
+            [session_id],
             |row| {
                 Ok(SessionMetadata {
                     session_id: row.get(0)?,
@@ -519,43 +463,35 @@ pub async fn export_session_data(
         )
         .map_err(|e| CommandError::NotFound(format!("Session not found: {}", e)))?;
 
-    // メッセージを取得
-    let limit_clause = config
-        .max_records
-        .map(|n| format!(" LIMIT {}", n))
-        .unwrap_or_default();
-    let query = format!(
-        "SELECT id, timestamp, author, channel_id, content, message_type, amount, is_member,
-                is_moderator, is_verified, badges, header_color, metadata
-         FROM messages WHERE session_id = ? ORDER BY timestamp{}",
-        limit_clause
-    );
-
+    // LIMIT -1 は SQLite で「上限なし」
+    let limit = config.max_records.map_or(-1, |n| n as i64);
     let mut stmt = conn
-        .prepare(&query)
-        .map_err(|e| CommandError::DatabaseError(e.to_string()))?;
+        .prepare(
+            "SELECT message_id, timestamp, author, channel_id, content, message_type, amount,
+                    is_member, is_moderator, is_verified, badges, superchat_color, metadata
+             FROM messages WHERE session_id = ?1 ORDER BY timestamp LIMIT ?2",
+        )
+        .map_err(db_err)?;
 
     let messages: Vec<ExportMessage> = stmt
-        .query_map([&session_id], |row| {
+        .query_map(rusqlite::params![session_id, limit], |row| {
             let message_type: String = row.get(5)?;
             let amount: Option<String> = row.get(6)?;
-            let header_color: Option<String> = row.get(11)?;
+            let superchat_color: Option<String> = row.get(11)?;
             let badges_json: Option<String> = row.get(10)?;
             let metadata_json: Option<String> = row.get(12)?;
 
-            let tier = if message_type == "superchat" {
-                if let Some(ref color) = header_color {
-                    Some(determine_tier_from_color(color))
-                } else {
-                    amount.as_deref().map(determine_tier_from_amount)
-                }
+            let tier = (message_type == "superchat")
+                .then(|| tier_from_header_color(superchat_color.as_deref()))
+                .flatten();
+            let amount_display = if message_type == "gift" {
+                metadata_json
+                    .and_then(|j| serde_json::from_str::<GiftDetails>(&j).ok())
+                    .and_then(|g| g.jewel_count)
+                    .map(format_jewels)
             } else {
-                None
+                amount
             };
-
-            let badges: Vec<String> = badges_json
-                .and_then(|j| serde_json::from_str(&j).ok())
-                .unwrap_or_default();
 
             Ok(ExportMessage {
                 id: row.get(0)?,
@@ -563,39 +499,55 @@ pub async fn export_session_data(
                 author: row.get(2)?,
                 author_id: row.get(3)?,
                 content: row.get(4)?,
-                amount_display: if message_type == "gift" {
-                    metadata_json
-                        .and_then(|j| serde_json::from_str::<GiftDetails>(&j).ok())
-                        .and_then(|g| g.jewel_count)
-                        .map(format_jewels)
-                } else {
-                    amount
-                },
+                amount_display,
                 message_type,
                 tier,
                 is_member: row.get(7)?,
-                is_moderator: row.get(8).unwrap_or(false),
-                is_verified: row.get(9).unwrap_or(false),
-                badges,
+                // NULL は不明（バッジを保存する前の行・バッジを読めない種類。08_database.md）
+                is_moderator: row.get(8)?,
+                is_verified: row.get(9)?,
+                badges: badges_json.and_then(|j| serde_json::from_str(&j).ok()),
             })
         })
-        .map_err(|e| CommandError::DatabaseError(e.to_string()))?
-        .filter_map(|r| r.ok())
-        .collect();
+        .map_err(db_err)?
+        .collect::<Result<_, _>>()
+        .map_err(db_err)?;
 
-    let gifts = gift_stats_from_metadata(&query_gift_metadata(&conn, &session_id)?);
+    let gifts = gift_stats_from_metadata(&query_gift_metadata(conn, session_id)?);
     let statistics = calculate_session_statistics(&messages, gifts);
 
-    let export_data = SessionExportData {
+    Ok(SessionExportData {
         metadata: session,
         messages,
         statistics,
-    };
+    })
+}
 
-    // フォーマットに応じてエクスポート
+/// Export session data to file
+#[tauri::command]
+pub async fn export_session_data(
+    state: State<'_, AppState>,
+    session_id: String,
+    file_path: String,
+    config: ExportConfig,
+) -> Result<(), CommandError> {
+    // ファイルへの書き出しの間、DB のロックを握らない
+    let export_data = {
+        let conn = state.db_connection().await?;
+        session_export_data(&conn, &session_id, &config)?
+    };
+    write_export(&export_data, &config, &file_path)
+}
+
+/// 形式に合わせて整形し、ファイルに書き出す
+fn write_export(
+    data: &SessionExportData,
+    config: &ExportConfig,
+    file_path: &str,
+) -> Result<(), CommandError> {
     let content = match config.format.as_str() {
-        "json" => export_to_json(&export_data, &config)?,
-        "csv" => export_to_csv(&export_data, &config)?,
+        "json" => export_to_json(data, config)?,
+        "csv" => export_to_csv(data, config)?,
         _ => {
             return Err(CommandError::InvalidInput(format!(
                 "Unsupported format: {}",
@@ -604,14 +556,10 @@ pub async fn export_session_data(
         }
     };
 
-    // ファイルに書き出し
-    let mut file = File::create(&file_path)
+    let mut file = File::create(file_path)
         .map_err(|e| CommandError::IoError(format!("Failed to create file: {}", e)))?;
-
     file.write_all(content.as_bytes())
-        .map_err(|e| CommandError::IoError(format!("Failed to write file: {}", e)))?;
-
-    Ok(())
+        .map_err(|e| CommandError::IoError(format!("Failed to write file: {}", e)))
 }
 
 /// ChatMessageリストからExportMessageリストへの変換
@@ -627,18 +575,11 @@ pub(crate) fn convert_messages_to_export(
         .map(|msg| {
             let (message_type_str, amount_display, tier) = match &msg.message_type {
                 MessageType::Text => ("text".to_string(), None, None),
-                MessageType::SuperChat { amount } => {
-                    let t = if let Some(ref metadata) = msg.metadata {
-                        if let Some(ref colors) = metadata.superchat_colors {
-                            determine_tier_from_color(&colors.header_background)
-                        } else {
-                            determine_tier_from_amount(amount)
-                        }
-                    } else {
-                        determine_tier_from_amount(amount)
-                    };
-                    ("superchat".to_string(), Some(amount.clone()), Some(t))
-                }
+                MessageType::SuperChat { amount } => (
+                    "superchat".to_string(),
+                    Some(amount.clone()),
+                    tier_from_header_color(msg.superchat_header_color()),
+                ),
                 MessageType::SuperSticker { amount } => {
                     ("supersticker".to_string(), Some(amount.clone()), None)
                 }
@@ -652,15 +593,8 @@ pub(crate) fn convert_messages_to_export(
                 MessageType::System => ("system".to_string(), None, None),
             };
 
-            let (is_moderator, is_verified, badges) = if let Some(ref metadata) = msg.metadata {
-                (
-                    metadata.is_moderator,
-                    metadata.is_verified,
-                    metadata.badges.clone(),
-                )
-            } else {
-                (false, false, vec![])
-            };
+            // バッジを読めない種類は不明（None）。08_database.md の保存と同じ規則
+            let badges = msg.author_badge_metadata();
 
             ExportMessage {
                 id: msg.id.clone(),
@@ -671,10 +605,10 @@ pub(crate) fn convert_messages_to_export(
                 message_type: message_type_str,
                 amount_display,
                 tier,
-                is_moderator,
+                is_moderator: badges.map(|m| m.is_moderator),
                 is_member: msg.is_member,
-                is_verified,
-                badges,
+                is_verified: badges.map(|m| m.is_verified),
+                badges: badges.map(|m| m.badges.clone()),
             }
         })
         .collect()
@@ -687,7 +621,15 @@ pub async fn export_current_messages(
     file_path: String,
     config: ExportConfig,
 ) -> Result<(), CommandError> {
-    let messages = state.messages.read().await;
+    // 必要な分を複製したらすぐ手放す（監視ループの追加を待たせない）
+    let messages_vec: Vec<ChatMessage> = state
+        .messages
+        .read()
+        .await
+        .iter()
+        .take(config.max_records.unwrap_or(usize::MAX))
+        .cloned()
+        .collect();
 
     // 多接続モデル: 最初の接続からセッションID・配信者IDを取得（エクスポートヘッダ用）
     let (session_id, broadcaster_id) = {
@@ -705,12 +647,6 @@ pub async fn export_current_messages(
         (session_id, broadcaster_id)
     };
 
-    // VecDequeをVecに変換して純粋関数に渡す
-    let messages_vec: Vec<ChatMessage> = messages
-        .iter()
-        .take(config.max_records.unwrap_or(usize::MAX))
-        .cloned()
-        .collect();
     let export_messages = convert_messages_to_export(&messages_vec, &session_id, &broadcaster_id);
 
     let statistics = calculate_session_statistics(
@@ -732,25 +668,7 @@ pub async fn export_current_messages(
         statistics,
         messages: export_messages,
     };
-
-    let content = match config.format.as_str() {
-        "json" => export_to_json(&export_data, &config)?,
-        "csv" => export_to_csv(&export_data, &config)?,
-        _ => {
-            return Err(CommandError::InvalidInput(format!(
-                "Unsupported format: {}",
-                config.format
-            )));
-        }
-    };
-
-    let mut file = File::create(&file_path)
-        .map_err(|e| CommandError::IoError(format!("Failed to create file: {}", e)))?;
-
-    file.write_all(content.as_bytes())
-        .map_err(|e| CommandError::IoError(format!("Failed to write file: {}", e)))?;
-
-    Ok(())
+    write_export(&export_data, &config, &file_path)
 }
 
 // Helper functions
@@ -768,9 +686,7 @@ fn calculate_session_statistics(messages: &[ExportMessage], gifts: GiftStats) ->
         match msg.message_type.as_str() {
             "superchat" => {
                 super_chat_count += 1;
-                if let Some(tier) = msg.tier {
-                    super_chat_by_tier.increment(tier);
-                }
+                super_chat_by_tier.record(msg.tier);
             }
             "membership" | "membership_gift" => {
                 membership_count += 1;
@@ -846,7 +762,9 @@ fn export_to_csv(data: &SessionExportData, config: &ExportConfig) -> Result<Stri
             .map(|t| format!("{:?}", t).to_lowercase())
             .unwrap_or_default();
         let content_escaped = msg.content.replace('"', "\"\"");
-        let badges_str = msg.badges.join(";");
+        // 不明（None）は空欄にする（07_revenue.md）
+        let badges_str = msg.badges.as_ref().map(|b| b.join(";")).unwrap_or_default();
+        let flag = |value: Option<bool>| value.map(|v| v.to_string()).unwrap_or_default();
 
         csv.push_str(&format!(
             "\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",{},{},{},\"{}\"\n",
@@ -858,9 +776,9 @@ fn export_to_csv(data: &SessionExportData, config: &ExportConfig) -> Result<Stri
             msg.message_type,
             amount_str,
             tier_str,
-            msg.is_moderator,
+            flag(msg.is_moderator),
             msg.is_member,
-            msg.is_verified,
+            flag(msg.is_verified),
             badges_str
         ));
     }
@@ -874,143 +792,54 @@ mod tests {
     use crate::core::{MessageMetadata, SuperChatColors};
 
     // ========================================================================
-    // determine_tier_from_color (07_revenue.md: Tier判定 - 色ベース)
+    // tier_from_header_color (07_revenue.md「Tier別集計」の表)
     // ========================================================================
 
     #[test]
-    fn tier_from_color_red() {
-        assert_eq!(determine_tier_from_color("#e62117"), SuperChatTier::Red);
-        assert_eq!(determine_tier_from_color("ff0000"), SuperChatTier::Red);
-        assert_eq!(determine_tier_from_color("e6abcd"), SuperChatTier::Red); // starts_with("e6")
+    fn tier_from_header_color_matches_spec_table() {
+        let cases = [
+            ("#1565C0", SuperChatTier::Blue),
+            ("#00B8D4", SuperChatTier::Cyan),
+            ("#00BFA5", SuperChatTier::Green),
+            ("#FFB300", SuperChatTier::Yellow),
+            ("#E65100", SuperChatTier::Orange),
+            ("#C2185B", SuperChatTier::Magenta),
+            ("#D00000", SuperChatTier::Red),
+        ];
+        for (color, tier) in cases {
+            assert_eq!(tier_from_header_color(Some(color)), Some(tier), "{color}");
+        }
     }
 
     #[test]
-    fn tier_from_color_magenta() {
-        assert_eq!(determine_tier_from_color("e91e63"), SuperChatTier::Magenta);
-        assert_eq!(determine_tier_from_color("#c2185b"), SuperChatTier::Magenta);
+    fn tier_from_header_color_ignores_case() {
+        assert_eq!(
+            tier_from_header_color(Some("#00bfa5")),
+            Some(SuperChatTier::Green)
+        );
     }
 
     #[test]
-    fn tier_from_color_orange() {
-        assert_eq!(determine_tier_from_color("ff5722"), SuperChatTier::Orange);
-        assert_eq!(determine_tier_from_color("e65100"), SuperChatTier::Orange);
-        assert_eq!(determine_tier_from_color("f57c00"), SuperChatTier::Orange);
+    fn tier_from_header_color_not_in_table_is_unknown() {
+        // 本文の背景色（緑 #1DE9B6・赤 #E62117）はヘッダー色ではない
+        assert_eq!(tier_from_header_color(Some("#1DE9B6")), None);
+        assert_eq!(tier_from_header_color(Some("#E62117")), None);
+        assert_eq!(tier_from_header_color(Some("")), None);
     }
 
     #[test]
-    fn tier_from_color_yellow() {
-        assert_eq!(determine_tier_from_color("ffb300"), SuperChatTier::Yellow);
-        assert_eq!(determine_tier_from_color("ffca28"), SuperChatTier::Yellow);
-        assert_eq!(determine_tier_from_color("ffc107"), SuperChatTier::Yellow);
+    fn tier_from_header_color_without_color_is_unknown() {
+        assert_eq!(tier_from_header_color(None), None);
     }
 
     #[test]
-    fn tier_from_color_green() {
-        assert_eq!(determine_tier_from_color("00e676"), SuperChatTier::Green);
-        assert_eq!(determine_tier_from_color("1de9b6"), SuperChatTier::Green);
-        assert_eq!(determine_tier_from_color("00c853"), SuperChatTier::Green);
-    }
-
-    #[test]
-    fn tier_from_color_cyan() {
-        assert_eq!(determine_tier_from_color("00bcd4"), SuperChatTier::Cyan);
-        assert_eq!(determine_tier_from_color("00b8d4"), SuperChatTier::Cyan);
-        assert_eq!(determine_tier_from_color("00acc1"), SuperChatTier::Cyan);
-    }
-
-    #[test]
-    fn tier_from_color_blue_default() {
-        assert_eq!(determine_tier_from_color("1565c0"), SuperChatTier::Blue);
-        assert_eq!(determine_tier_from_color("unknown"), SuperChatTier::Blue);
-        assert_eq!(determine_tier_from_color(""), SuperChatTier::Blue);
-    }
-
-    #[test]
-    fn tier_from_color_case_insensitive() {
-        assert_eq!(determine_tier_from_color("E62117"), SuperChatTier::Red);
-        assert_eq!(determine_tier_from_color("#E91E63"), SuperChatTier::Magenta);
-    }
-
-    // ========================================================================
-    // determine_tier_from_amount (07_revenue.md: Tier判定 - 金額ベース)
-    // ========================================================================
-
-    #[test]
-    fn tier_from_amount_red() {
-        assert_eq!(determine_tier_from_amount("$200.00"), SuperChatTier::Red);
-        assert_eq!(determine_tier_from_amount("¥10000"), SuperChatTier::Red); // 10000 >= 100
-    }
-
-    #[test]
-    fn tier_from_amount_magenta() {
-        assert_eq!(determine_tier_from_amount("$75.00"), SuperChatTier::Magenta);
-        assert_eq!(determine_tier_from_amount("$50.00"), SuperChatTier::Magenta);
-    }
-
-    #[test]
-    fn tier_from_amount_orange() {
-        assert_eq!(determine_tier_from_amount("$30.00"), SuperChatTier::Orange);
-        assert_eq!(determine_tier_from_amount("$20.00"), SuperChatTier::Orange);
-    }
-
-    #[test]
-    fn tier_from_amount_yellow() {
-        assert_eq!(determine_tier_from_amount("$15.00"), SuperChatTier::Yellow);
-        assert_eq!(determine_tier_from_amount("$10.00"), SuperChatTier::Yellow);
-    }
-
-    #[test]
-    fn tier_from_amount_green() {
-        assert_eq!(determine_tier_from_amount("$7.00"), SuperChatTier::Green);
-        assert_eq!(determine_tier_from_amount("$5.00"), SuperChatTier::Green);
-    }
-
-    #[test]
-    fn tier_from_amount_cyan() {
-        assert_eq!(determine_tier_from_amount("$3.00"), SuperChatTier::Cyan);
-        assert_eq!(determine_tier_from_amount("$2.00"), SuperChatTier::Cyan);
-    }
-
-    #[test]
-    fn tier_from_amount_blue() {
-        assert_eq!(determine_tier_from_amount("$1.00"), SuperChatTier::Blue);
-        assert_eq!(determine_tier_from_amount("$0.50"), SuperChatTier::Blue);
-    }
-
-    #[test]
-    fn tier_from_amount_unparseable() {
-        assert_eq!(determine_tier_from_amount(""), SuperChatTier::Blue);
-        assert_eq!(determine_tier_from_amount("free"), SuperChatTier::Blue);
-    }
-
-    // ========================================================================
-    // parse_amount_value (07_revenue.md: 金額パース)
-    // ========================================================================
-
-    #[test]
-    fn parse_amount_value_usd() {
-        assert_eq!(parse_amount_value("$10.00"), Some(10.0));
-    }
-
-    #[test]
-    fn parse_amount_value_yen() {
-        assert_eq!(parse_amount_value("¥1000"), Some(1000.0));
-    }
-
-    #[test]
-    fn parse_amount_value_euro() {
-        // ',' is filtered out by parse_amount_value since it only keeps digits and '.'
-        assert_eq!(parse_amount_value("€5.50"), Some(5.5));
-    }
-
-    #[test]
-    fn parse_amount_value_empty() {
-        assert_eq!(parse_amount_value(""), None);
-    }
-
-    #[test]
-    fn parse_amount_value_no_digits() {
-        assert_eq!(parse_amount_value("$"), None);
+    fn tier_stats_record_unknown() {
+        let mut stats = SuperChatTierStats::default();
+        stats.record(None);
+        stats.record(Some(SuperChatTier::Green));
+        assert_eq!(stats.tier_unknown, 1);
+        assert_eq!(stats.tier_green, 1);
+        assert_eq!(stats.total(), 2);
     }
 
     // ========================================================================
@@ -1072,10 +901,10 @@ mod tests {
                     message_type: "text".to_string(),
                     amount_display: None,
                     tier: None,
-                    is_moderator: false,
+                    is_moderator: Some(false),
                     is_member: false,
-                    is_verified: false,
-                    badges: vec![],
+                    is_verified: Some(false),
+                    badges: Some(vec![]),
                 },
                 ExportMessage {
                     id: "msg2".to_string(),
@@ -1086,10 +915,10 @@ mod tests {
                     message_type: "superchat".to_string(),
                     amount_display: Some("$10.00".to_string()),
                     tier: Some(SuperChatTier::Yellow),
-                    is_moderator: false,
+                    is_moderator: Some(false),
                     is_member: true,
-                    is_verified: false,
-                    badges: vec!["member".to_string()],
+                    is_verified: Some(false),
+                    badges: Some(vec!["member".to_string()]),
                 },
             ],
             statistics: SessionStatistics {
@@ -1321,10 +1150,10 @@ mod tests {
             message_type: message_type.to_string(),
             amount_display: None,
             tier,
-            is_moderator: false,
+            is_moderator: Some(false),
             is_member: false,
-            is_verified: false,
-            badges: vec![],
+            is_verified: Some(false),
+            badges: Some(vec![]),
         }
     }
 
@@ -1488,7 +1317,7 @@ mod tests {
                 },
                 Some(MessageMetadata {
                     superchat_colors: Some(SuperChatColors {
-                        header_background: "#e62117".to_string(), // Red tier
+                        header_background: "#D00000".to_string(), // Red tier
                         header_text: "#ffffff".to_string(),
                         body_background: "#e62117".to_string(),
                         body_text: "#ffffff".to_string(),
@@ -1567,7 +1396,7 @@ mod tests {
                 },
                 Some(MessageMetadata {
                     superchat_colors: Some(SuperChatColors {
-                        header_background: "#e62117".to_string(),
+                        header_background: "#D00000".to_string(),
                         header_text: "#ffffff".to_string(),
                         body_background: "#e62117".to_string(),
                         body_text: "#ffffff".to_string(),
@@ -1667,7 +1496,7 @@ mod tests {
                 },
                 Some(MessageMetadata {
                     superchat_colors: Some(SuperChatColors {
-                        header_background: "#e62117".to_string(),
+                        header_background: "#D00000".to_string(),
                         header_text: "#ffffff".to_string(),
                         body_background: "#e62117".to_string(),
                         body_text: "#ffffff".to_string(),
@@ -1713,22 +1542,14 @@ mod tests {
 
     #[test]
     fn compute_session_analytics_from_rows_mixed() {
-        // 07_revenue.md: superchat行 + supersticker行 + membership行 → 正しい集計
+        // 07_revenue.md: 種類と色ごとの件数から集計する
         let rows = vec![
-            (
-                "superchat".to_string(),
-                Some("$10.00".to_string()),
-                Some("#ffb300".to_string()),
-            ), // Yellow
-            (
-                "superchat".to_string(),
-                Some("$200.00".to_string()),
-                Some("#e62117".to_string()),
-            ), // Red
-            ("supersticker".to_string(), Some("$5.00".to_string()), None),
-            ("membership".to_string(), None, None),
-            ("membership_gift".to_string(), None, None),
-            ("text".to_string(), None, None),
+            ("superchat".to_string(), Some("#FFB300".to_string()), 1), // Yellow
+            ("superchat".to_string(), Some("#D00000".to_string()), 1), // Red
+            ("supersticker".to_string(), None, 1),
+            ("membership".to_string(), None, 1),
+            ("membership_gift".to_string(), None, 1),
+            ("text".to_string(), None, 1),
         ];
 
         let analytics = compute_session_analytics_from_rows(&rows);
@@ -1744,6 +1565,14 @@ mod tests {
     }
 
     #[test]
+    fn compute_session_analytics_from_rows_counts_each_row() {
+        let rows = vec![("superchat".to_string(), Some("#00BFA5".to_string()), 3)];
+        let analytics = compute_session_analytics_from_rows(&rows);
+        assert_eq!(analytics.super_chat_count, 3);
+        assert_eq!(analytics.super_chat_by_tier.tier_green, 3);
+    }
+
+    #[test]
     fn compute_session_analytics_from_rows_empty() {
         // 07_revenue.md: 空の行リスト → デフォルトのRevenueAnalytics
         let analytics = compute_session_analytics_from_rows(&[]);
@@ -1755,27 +1584,15 @@ mod tests {
     }
 
     #[test]
-    fn compute_session_analytics_from_rows_superchat_fallback_to_amount() {
-        // 07_revenue.md: header_colorがNoneの場合、amountからtierをフォールバック判定
-        let rows = vec![
-            ("superchat".to_string(), Some("$200.00".to_string()), None), // amountフォールバック → Red
-        ];
+    fn compute_session_analytics_from_rows_superchat_without_color_is_unknown() {
+        // 07_revenue.md: 色を保存する前の過去セッションのスーパーチャット → 段階不明（金額から推定しない）
+        let rows = vec![("superchat".to_string(), None, 2)];
 
         let analytics = compute_session_analytics_from_rows(&rows);
 
-        assert_eq!(analytics.super_chat_count, 1);
-        assert_eq!(analytics.super_chat_by_tier.tier_red, 1);
-    }
-
-    #[test]
-    fn compute_session_analytics_from_rows_superchat_no_color_no_amount() {
-        // 07_revenue.md: header_colorもamountもNoneの場合 → Blue(デフォルト)
-        let rows = vec![("superchat".to_string(), None, None)];
-
-        let analytics = compute_session_analytics_from_rows(&rows);
-
-        assert_eq!(analytics.super_chat_count, 1);
-        assert_eq!(analytics.super_chat_by_tier.tier_blue, 1);
+        assert_eq!(analytics.super_chat_count, 2);
+        assert_eq!(analytics.super_chat_by_tier.tier_unknown, 2);
+        assert_eq!(analytics.super_chat_by_tier.tier_blue, 0);
     }
 
     // ========================================================================
@@ -1806,9 +1623,10 @@ mod tests {
         assert_eq!(exports[0].content, "Hello");
         assert!(exports[0].amount_display.is_none());
         assert!(exports[0].tier.is_none());
-        assert!(!exports[0].is_moderator);
+        // metadata が無ければバッジは不明（08_database.md）
+        assert_eq!(exports[0].is_moderator, None);
         assert!(!exports[0].is_member);
-        assert!(!exports[0].is_verified);
+        assert_eq!(exports[0].is_verified, None);
     }
 
     #[test]
@@ -1825,7 +1643,7 @@ mod tests {
             },
             metadata: Some(MessageMetadata {
                 superchat_colors: Some(SuperChatColors {
-                    header_background: "#e91e63".to_string(), // Magenta
+                    header_background: "#C2185B".to_string(), // Magenta
                     header_text: "#ffffff".to_string(),
                     body_background: "#e91e63".to_string(),
                     body_text: "#ffffff".to_string(),
@@ -1847,9 +1665,9 @@ mod tests {
         assert_eq!(exports[0].message_type, "superchat");
         assert_eq!(exports[0].amount_display, Some("$50.00".to_string()));
         assert_eq!(exports[0].tier, Some(SuperChatTier::Magenta));
-        assert!(exports[0].is_moderator);
+        assert_eq!(exports[0].is_moderator, Some(true));
         assert!(exports[0].is_member);
-        assert_eq!(exports[0].badges, vec!["member".to_string()]);
+        assert_eq!(exports[0].badges, Some(vec!["member".to_string()]));
     }
 
     #[test]
@@ -2213,5 +2031,182 @@ mod tests {
             serde_json::from_str(&export_to_json(&data, &config).unwrap()).unwrap();
         assert_eq!(json["statistics"]["gifts"]["gift_count"], 1);
         assert_eq!(json["statistics"]["gifts"]["total_jewels"], 10);
+    }
+
+    // ========================================================================
+    // 過去セッションの分析・エクスポートを実際の DB で通す
+    // (07_revenue.md / 08_database.md。SQL の列名の誤りは純粋関数のテストでは見つからない)
+    // ========================================================================
+
+    mod with_db {
+        use super::*;
+        use crate::core::{BadgeInfo, MessageMetadata, SuperChatColors};
+        use crate::database::{self, Database};
+
+        fn superchat(id: &str, header: &str) -> ChatMessage {
+            ChatMessage {
+                id: id.to_string(),
+                timestamp: "2026-09-28T12:00:00Z".to_string(),
+                timestamp_usec: "1790000000000000".to_string(),
+                author: "@donor".to_string(),
+                channel_id: "UC_donor".to_string(),
+                content: "応援してます".to_string(),
+                message_type: MessageType::SuperChat {
+                    amount: "¥500".to_string(),
+                },
+                metadata: Some(MessageMetadata {
+                    amount: Some("¥500".to_string()),
+                    superchat_colors: Some(SuperChatColors {
+                        header_background: header.to_string(),
+                        header_text: "#FFFFFF".to_string(),
+                        body_background: header.to_string(),
+                        body_text: "#FFFFFF".to_string(),
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }
+        }
+
+        fn moderator_text(id: &str) -> ChatMessage {
+            ChatMessage {
+                id: id.to_string(),
+                timestamp: "2026-09-28T12:00:01Z".to_string(),
+                timestamp_usec: "1790000001000000".to_string(),
+                author: "@mod".to_string(),
+                channel_id: "UC_mod".to_string(),
+                content: "モデレーターです".to_string(),
+                message_type: MessageType::Text,
+                metadata: Some(MessageMetadata {
+                    badges: vec!["moderator".to_string()],
+                    badge_info: vec![BadgeInfo {
+                        badge_type: "moderator".to_string(),
+                        label: "Moderator".to_string(),
+                        tooltip: Some("Moderator".to_string()),
+                        icon_url: None,
+                    }],
+                    is_moderator: true,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }
+        }
+
+        fn gift(id: &str) -> ChatMessage {
+            ChatMessage {
+                id: id.to_string(),
+                timestamp: "2026-09-28T12:00:02Z".to_string(),
+                timestamp_usec: "1790000002000000".to_string(),
+                author: "@gifter".to_string(),
+                content: "Press F".to_string(),
+                message_type: MessageType::Gift(GiftDetails {
+                    gift_name: "Press F".to_string(),
+                    gift_image_url: None,
+                    jewel_count: Some(10),
+                }),
+                ..Default::default()
+            }
+        }
+
+        /// 005 より前に保存した行を再現する（色とバッジを NULL に戻す）
+        fn forget_columns(conn: &rusqlite::Connection, message_id: &str) {
+            conn.execute(
+                "UPDATE messages SET superchat_color = NULL, is_moderator = NULL,
+                        is_verified = NULL, badges = NULL WHERE message_id = ?1",
+                [message_id],
+            )
+            .unwrap();
+        }
+
+        async fn session_with(messages: &[ChatMessage], old: &[&str]) -> (Database, String) {
+            let db = Database::new_in_memory().unwrap();
+            let session_id = {
+                let conn = db.connection().await;
+                let session_id =
+                    database::create_session(&conn, None, Some("配信"), None, None).unwrap();
+                for message in messages {
+                    database::save_message(&conn, &session_id, None, message, None).unwrap();
+                }
+                for id in old {
+                    forget_columns(&conn, id);
+                }
+                session_id
+            };
+            (db, session_id)
+        }
+
+        fn export_config() -> ExportConfig {
+            ExportConfig {
+                format: "json".to_string(),
+                include_metadata: true,
+                include_system_messages: true,
+                max_records: None,
+                sort_order: None,
+            }
+        }
+
+        #[tokio::test]
+        async fn session_analytics_counts_saved_color_and_old_rows_as_unknown() {
+            // 色を保存した緑のスパチャ 1 件 + 色を保存する前のスパチャ 1 件
+            let messages = [superchat("sc_new", "#00BFA5"), superchat("sc_old", "#00BFA5"), gift("g1")];
+            let (db, session_id) = session_with(&messages, &["sc_old"]).await;
+            let conn = db.connection().await;
+
+            let analytics = session_analytics(&conn, &session_id).unwrap();
+
+            assert_eq!(analytics.super_chat_count, 2);
+            assert_eq!(analytics.super_chat_by_tier.tier_green, 1);
+            assert_eq!(analytics.super_chat_by_tier.tier_unknown, 1);
+            assert_eq!(analytics.gifts.gift_count, 1);
+        }
+
+        #[tokio::test]
+        async fn session_export_reads_saved_badges_and_leaves_unknown_as_none() {
+            let messages = [
+                moderator_text("mod_new"),
+                moderator_text("mod_old"),
+                superchat("sc1", "#C2185B"),
+                gift("g1"),
+            ];
+            let (db, session_id) = session_with(&messages, &["mod_old"]).await;
+            let conn = db.connection().await;
+
+            let data = session_export_data(&conn, &session_id, &export_config()).unwrap();
+            let by_id = |id: &str| data.messages.iter().find(|m| m.id == id).unwrap();
+
+            // id は YouTube のメッセージ ID
+            assert_eq!(data.messages.len(), 4);
+            let saved = by_id("mod_new");
+            assert_eq!(saved.is_moderator, Some(true));
+            assert_eq!(saved.is_verified, Some(false));
+            assert_eq!(saved.badges, Some(vec!["moderator".to_string()]));
+            // 005 より前の行は不明
+            let old = by_id("mod_old");
+            assert_eq!(old.is_moderator, None);
+            assert_eq!(old.badges, None);
+            // バッジを読めない種類（ギフト）は不明
+            assert_eq!(by_id("g1").is_moderator, None);
+            assert_eq!(by_id("g1").amount_display.as_deref(), Some("10 Jewels"));
+            // 段階は保存した色から
+            assert_eq!(by_id("sc1").tier, Some(SuperChatTier::Magenta));
+        }
+
+        #[tokio::test]
+        async fn session_export_csv_leaves_unknown_blank() {
+            let (db, session_id) = session_with(&[moderator_text("mod_old")], &["mod_old"]).await;
+            let conn = db.connection().await;
+            let config = ExportConfig {
+                format: "csv".to_string(),
+                include_metadata: false,
+                ..export_config()
+            };
+
+            let data = session_export_data(&conn, &session_id, &config).unwrap();
+            let csv = export_to_csv(&data, &config).unwrap();
+            let row = csv.lines().nth(1).unwrap();
+
+            // ...,tier,is_moderator,is_member,is_verified,badges
+            assert!(row.ends_with(r#","",,false,,"""#), "{row}");
+        }
     }
 }
