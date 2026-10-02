@@ -109,7 +109,10 @@ fn log_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
             file_name: Some("liscov".to_string()),
         })),
         // ログの置き場所が無くても起動はする（標準出力には出る）
-        Err(e) => eprintln!("ログディレクトリを特定できないため、ファイルに残さない: {}", e),
+        Err(e) => eprintln!(
+            "ログディレクトリを特定できないため、ファイルに残さない: {}",
+            e
+        ),
     }
     if cfg!(debug_assertions) {
         targets.push(Target::new(TargetKind::Stdout));
@@ -146,7 +149,10 @@ pub fn run() {
         .setup(|app| {
             // AppState はロガーより先に作られるので、DB 初期化の失敗はここで書き出す
             if let Some(e) = &app.state::<AppState>().database_init_error {
-                log::error!("データベースの初期化に失敗したため、保存せずに動作する: {}", e);
+                log::error!(
+                    "データベースの初期化に失敗したため、保存せずに動作する: {}",
+                    e
+                );
             }
 
             // Show window after state restoration (window starts hidden)

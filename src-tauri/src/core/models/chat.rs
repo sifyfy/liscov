@@ -135,9 +135,7 @@ impl ChatMessage {
             | MessageType::SuperChat { .. }
             | MessageType::SuperSticker { .. }
             | MessageType::Membership { .. } => self.metadata.as_ref(),
-            MessageType::MembershipGift { .. } | MessageType::Gift(_) | MessageType::System => {
-                None
-            }
+            MessageType::MembershipGift { .. } | MessageType::Gift(_) | MessageType::System => None,
         }
     }
 }

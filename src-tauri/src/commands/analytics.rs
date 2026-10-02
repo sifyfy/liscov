@@ -400,7 +400,9 @@ pub(crate) fn session_analytics(
         )
         .map_err(|e| CommandError::DatabaseError(e.to_string()))?;
     let rows: Vec<(String, Option<String>, usize)> = stmt
-        .query_map([session_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .query_map([session_id], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })
         .map_err(|e| CommandError::DatabaseError(e.to_string()))?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| CommandError::DatabaseError(e.to_string()))?;
@@ -2148,7 +2150,11 @@ mod tests {
         #[tokio::test]
         async fn session_analytics_counts_saved_color_and_old_rows_as_unknown() {
             // 色を保存した緑のスパチャ 1 件 + 色を保存する前のスパチャ 1 件
-            let messages = [superchat("sc_new", "#00BFA5"), superchat("sc_old", "#00BFA5"), gift("g1")];
+            let messages = [
+                superchat("sc_new", "#00BFA5"),
+                superchat("sc_old", "#00BFA5"),
+                gift("g1"),
+            ];
             let (db, session_id) = session_with(&messages, &["sc_old"]).await;
             let conn = db.connection().await;
 

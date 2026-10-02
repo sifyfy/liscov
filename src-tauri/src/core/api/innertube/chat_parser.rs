@@ -1237,7 +1237,10 @@ mod tests {
     }
 
     fn badge_types(msg: &ChatMessage) -> Vec<String> {
-        msg.metadata.as_ref().map(|m| m.badges.clone()).unwrap_or_default()
+        msg.metadata
+            .as_ref()
+            .map(|m| m.badges.clone())
+            .unwrap_or_default()
     }
 
     #[test]
@@ -1303,7 +1306,10 @@ mod tests {
         assert_eq!(metadata.badges, ["member"]);
         // 色情報はそのまま残る
         assert_eq!(
-            metadata.superchat_colors.as_ref().map(|c| c.header_background.as_str()),
+            metadata
+                .superchat_colors
+                .as_ref()
+                .map(|c| c.header_background.as_str()),
             Some("#00BFA5")
         );
     }

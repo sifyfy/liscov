@@ -423,7 +423,10 @@ mod tests {
         .resolved_for_write(&data_dir)
         .unwrap();
         // 1 回の書き込みで済まない程度に大きいレスポンス
-        let response = format!(r#"{{"actions": [], "padding": "{}"}}"#, "x".repeat(64 * 1024));
+        let response = format!(
+            r#"{{"actions": [], "padding": "{}"}}"#,
+            "x".repeat(64 * 1024)
+        );
 
         let handles: Vec<_> = (0..TASKS)
             .map(|_| {
