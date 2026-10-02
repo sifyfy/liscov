@@ -170,22 +170,6 @@ impl TtsManager {
         }
     }
 
-    /// Format text for TTS reading
-    pub async fn format_text(&self, item: &TtsQueueItem) -> String {
-        let config = self.config.read().await;
-        build_tts_text(
-            item.author_name.as_deref(),
-            item.amount.as_deref(),
-            &item.text,
-            config.read_author_name,
-            config.strip_at_prefix,
-            config.strip_handle_suffix,
-            config.add_honorific,
-            config.read_superchat_amount,
-            config.max_text_length,
-        )
-    }
-
     /// Add item to queue
     pub async fn enqueue(&self, item: TtsQueueItem) {
         let config = self.config.read().await;
@@ -264,30 +248,7 @@ impl TtsManager {
                         };
 
                         if let Some(item) = item {
-                            // Format text using shared helper
-                            let text = {
-                                let cfg = config.read().await;
-                                let base = build_tts_text(
-                                    item.author_name.as_deref(),
-                                    item.amount.as_deref(),
-                                    &item.text,
-                                    cfg.read_author_name,
-                                    cfg.strip_at_prefix,
-                                    cfg.strip_handle_suffix,
-                                    cfg.add_honorific,
-                                    cfg.read_superchat_amount,
-                                    cfg.max_text_length,
-                                );
-                                // 初回コメントプレフィックス
-                                match build_first_comment_prefix(
-                                    cfg.first_comment_prefix_enabled,
-                                    &cfg.first_comment_prefix,
-                                    item.in_stream_comment_count,
-                                ) {
-                                    Some(prefix) => format!("{}{}", prefix, base),
-                                    None => base,
-                                }
-                            };
+                            let text = speech_text(&*config.read().await, &item);
 
                             // Speak（ロックを握ったまま読み上げない。差し替えは次のメッセージから効く）
                             let current = backend.read().await.clone();
@@ -491,6 +452,31 @@ pub(crate) fn build_tts_text(
     parts.push(truncate_text(&sanitized, max_text_length));
 
     parts.join("、")
+}
+
+/// キューの 1 件を、読み上げる文に整える（04_tts.md「読み上げテキスト生成」「初回コメント読み上げ」）
+///
+/// 初回コメントならプレフィックスを先頭に付ける。キュー処理はこの関数だけで文を作る。
+pub(crate) fn speech_text(config: &TtsConfig, item: &TtsQueueItem) -> String {
+    let base = build_tts_text(
+        item.author_name.as_deref(),
+        item.amount.as_deref(),
+        &item.text,
+        config.read_author_name,
+        config.strip_at_prefix,
+        config.strip_handle_suffix,
+        config.add_honorific,
+        config.read_superchat_amount,
+        config.max_text_length,
+    );
+    match build_first_comment_prefix(
+        config.first_comment_prefix_enabled,
+        &config.first_comment_prefix,
+        item.in_stream_comment_count,
+    ) {
+        Some(prefix) => format!("{}{}", prefix, base),
+        None => base,
+    }
 }
 
 /// ギフトの読み上げ本文（04_tts.md「ギフトの読み上げ」）
@@ -1190,17 +1176,17 @@ mod tests {
     }
 
     // ========================================================================
-    // TtsManager::format_text（L114のmutantをkill）
+    // speech_text（キュー処理が読み上げる文）
     // ========================================================================
 
-    #[tokio::test]
-    async fn format_text_uses_config_to_build_text() {
-        // spec: add_honorific=true の設定で format_text は著者名に「さん」を付与する
-        let manager = TtsManager::new(TtsConfig {
+    #[test]
+    fn speech_text_uses_config_to_build_text() {
+        // spec: add_honorific=true の設定で著者名に「さん」を付与する
+        let config = TtsConfig {
             add_honorific: true,
             read_author_name: true,
             ..TtsConfig::default()
-        });
+        };
         let item = TtsQueueItem {
             text: "こんにちは".to_string(),
             priority: TtsPriority::Normal,
@@ -1209,12 +1195,31 @@ mod tests {
             in_stream_comment_count: None,
             message_id: None,
         };
-        let result = manager.format_text(&item).await;
-        // 空文字でもなく、元テキストそのままでもない（著者名が付加される）
-        assert!(!result.is_empty());
-        assert_ne!(result, "");
-        // add_honorific=true なので「田中さん」が含まれる
-        assert!(result.contains("田中さん"));
+        assert_eq!(speech_text(&config, &item), "田中さん、こんにちは");
+    }
+
+    #[test]
+    fn speech_text_prepends_first_comment_prefix() {
+        // spec: 初回コメントプレフィックス ON + 1 回目のコメント → 先頭に付く
+        let config = TtsConfig {
+            read_author_name: true,
+            add_honorific: true,
+            first_comment_prefix_enabled: true,
+            first_comment_prefix: String::new(),
+            ..TtsConfig::default()
+        };
+        let item = TtsQueueItem {
+            text: "こんにちは".to_string(),
+            priority: TtsPriority::Normal,
+            author_name: Some("田中".to_string()),
+            amount: None,
+            in_stream_comment_count: Some(1),
+            message_id: None,
+        };
+        assert_eq!(
+            speech_text(&config, &item),
+            "1回目のコメント。田中さん、こんにちは"
+        );
     }
 
     // ========================================================================
