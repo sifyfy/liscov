@@ -23,6 +23,11 @@ pub struct AppState {
     pub messages: Arc<RwLock<VecDeque<ChatMessage>>>,
     /// Database connection
     pub database: Arc<RwLock<Option<Database>>>,
+    /// データベースの初期化に失敗した理由（成功したら None）
+    ///
+    /// AppState はロガーの準備より先に作られるため、失敗をその場でログに残せない。
+    /// 理由を持っておき、ロガーの準備後に書き出す。
+    pub database_init_error: Option<String>,
     /// TTS manager
     pub tts_manager: Arc<TtsManager>,
     /// TTS process manager
@@ -36,12 +41,9 @@ pub struct AppState {
 impl AppState {
     pub fn new() -> Self {
         // データベースを初期化
-        let database = match Database::new() {
-            Ok(db) => Some(db),
-            Err(e) => {
-                tracing::error!("Failed to initialize database: {}", e);
-                None
-            }
+        let (database, database_init_error) = match Database::new() {
+            Ok(db) => (Some(db), None),
+            Err(e) => (None, Some(e.to_string())),
         };
 
         // TTS マネージャーをデフォルト設定で初期化
@@ -54,6 +56,7 @@ impl AppState {
             websocket_server: Arc::new(RwLock::new(None)),
             messages: Arc::new(RwLock::new(VecDeque::with_capacity(MAX_MESSAGES))),
             database: Arc::new(RwLock::new(database)),
+            database_init_error,
             tts_manager: Arc::new(tts_manager),
             tts_process_manager: Arc::new(tts_process_manager),
             next_connection_id: Arc::new(AtomicU64::new(0)),

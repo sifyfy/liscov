@@ -57,6 +57,11 @@ pub fn backup_dir() -> Result<PathBuf, String> {
     Ok(data_dir()?.join("backups"))
 }
 
+/// ログディレクトリのパスを返す（data_dir + "logs"）
+pub fn log_dir() -> Result<PathBuf, String> {
+    Ok(data_dir()?.join("logs"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -176,5 +181,17 @@ mod tests {
         unsafe { std::env::remove_var("LISCOV_APP_NAME") };
         let path = backup_dir().expect("backup_dir should succeed");
         assert!(path.ends_with("backups"));
+    }
+
+    #[test]
+    #[serial(liscov_env)]
+    fn log_dir_is_logs_under_data_dir() {
+        // FEATURE_SPECIFICATION.md: ログは LISCOV_APP_NAME に従うデータディレクトリの logs/
+        // SAFETY: テスト環境でのみ実行。#[serial] で直列化済み
+        unsafe { std::env::set_var("LISCOV_APP_NAME", "liscov-test") };
+        let path = log_dir();
+        let data = data_dir();
+        unsafe { std::env::remove_var("LISCOV_APP_NAME") };
+        assert_eq!(path.unwrap(), data.unwrap().join("logs"));
     }
 }

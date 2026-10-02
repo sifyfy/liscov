@@ -24,6 +24,20 @@
 | tts_config.toml | `%APPDATA%/liscov-tauri/tts_config.toml` | TOML | TTS設定 |
 | liscov.db | `%APPDATA%/liscov-tauri/liscov.db` | SQLite | セッション・メッセージ・視聴者情報 |
 | raw_responses.ndjson | ユーザー指定パス（デフォルト: `raw_responses.ndjson`） | NDJSON | 生APIレスポンス（任意） |
+| liscov.log | `%APPDATA%/liscov-tauri/logs/liscov.log` | テキスト | バックエンドのログ |
+
+### バックエンドのログ
+
+配信中に起きた失敗（取得・保存・読み上げ）を後から調べられるように、リリースビルドでもログをファイルに残す。
+
+| 項目 | 値 |
+|------|-----|
+| 出力するレベル | リリースビルドは info 以上、debug ビルドは debug 以上 |
+| ファイルの切り替え | 10MB を超えたら切り替え、古いものは5世代まで残す |
+| 出力先の分離 | `LISCOV_APP_NAME` に従う（E2E のログが本番のログに混ざらない） |
+| debug ビルドの標準出力 | ファイルと同じ内容を標準出力にも出す（E2E がテスト失敗時に添付する。ADR-004） |
+
+info 以上のログに、コメント本文・認証情報・ログイン中の URL（クエリに一時的な値を含みうる）を出さない。調査に要るときは debug で出す。
 
 ## テスト要件
 

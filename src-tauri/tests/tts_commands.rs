@@ -80,6 +80,7 @@ fn build_app_state(tts_manager: TtsManager) -> AppState {
         websocket_server: Arc::new(RwLock::new(None)),
         messages: Arc::new(RwLock::new(VecDeque::new())),
         database: Arc::new(RwLock::new(None)),
+        database_init_error: None,
         tts_manager: Arc::new(tts_manager),
         tts_process_manager: Arc::new(TtsProcessManager::new()),
         next_connection_id: Arc::new(AtomicU64::new(0)),

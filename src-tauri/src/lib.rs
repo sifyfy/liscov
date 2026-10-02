@@ -91,11 +91,51 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! Welcome to Liscov.", name)
 }
 
+/// ログのプラグインを作る（FEATURE_SPECIFICATION.md「バックエンドのログ」）
+///
+/// `tracing::` のログも tracing の "log" feature で log に流れ、ここに集まる。
+fn log_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
+
+    let level = if cfg!(debug_assertions) {
+        log::LevelFilter::Debug
+    } else {
+        log::LevelFilter::Info
+    };
+    let mut targets = Vec::new();
+    match paths::log_dir() {
+        Ok(path) => targets.push(Target::new(TargetKind::Folder {
+            path,
+            file_name: Some("liscov".to_string()),
+        })),
+        // ログの置き場所が無くても起動はする（標準出力には出る）
+        Err(e) => eprintln!("ログディレクトリを特定できないため、ファイルに残さない: {}", e),
+    }
+    if cfg!(debug_assertions) {
+        targets.push(Target::new(TargetKind::Stdout));
+    }
+
+    tauri_plugin_log::Builder::default()
+        .clear_targets()
+        .targets(targets)
+        .level(level)
+        // HTTP 層の debug ログは量が多く、調べたいログが埋もれる
+        .level_for("hyper", log::LevelFilter::Info)
+        .level_for("hyper_util", log::LevelFilter::Info)
+        .level_for("h2", log::LevelFilter::Info)
+        .level_for("reqwest", log::LevelFilter::Info)
+        .max_file_size(10 * 1024 * 1024)
+        .rotation_strategy(RotationStrategy::KeepSome(5))
+        .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
+        .build()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(AppState::new())
         .manage(ConfigState::load_from_file())
+        .plugin(log_plugin())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(
@@ -104,12 +144,9 @@ pub fn run() {
                 .build(),
         )
         .setup(|app| {
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Debug)
-                        .build(),
-                )?;
+            // AppState はロガーより先に作られるので、DB 初期化の失敗はここで書き出す
+            if let Some(e) = &app.state::<AppState>().database_init_error {
+                log::error!("データベースの初期化に失敗したため、保存せずに動作する: {}", e);
             }
 
             // Show window after state restoration (window starts hidden)

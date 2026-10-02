@@ -155,7 +155,7 @@ pub async fn open_auth_window(app: AppHandle) -> AuthResult {
         // (モックサーバー使用時も動作するよう、youtube.com判定を削除)
         if let Ok(url) = auth_window.url() {
             let url_str = url.to_string();
-            tracing::info!("📍 Current URL: {}", url_str);
+            tracing::debug!("📍 Current URL: {}", url_str);
 
             // about:blank, Googleのログインページの場合はスキップ
             if url_str == "about:blank" || url_str.contains("accounts.google.com") {
