@@ -775,6 +775,8 @@ struct AMR {
     gift_count: Option<u32>,
     /// ギフト（jewel）の画像 URL。実データと同じくスキーム無しを既定にする
     gift_image_url: Option<String>,
+    /// メッセージ ID。同じ ID を再び積むと YouTube の再送を再現できる。省略時は採番する
+    id: Option<String>,
 }
 /// /add_reaction の本文
 #[derive(Debug, Deserialize)]
@@ -1161,10 +1163,12 @@ fn build_resp(acts: Vec<Value>, chattype: u8) -> Value {
 }
 
 fn gen_msg(s: &ServerState, r: &AMR) -> Value {
-    let id = format!(
-        "mock_msg_{}",
-        s.message_counter.fetch_add(1, Ordering::SeqCst)
-    );
+    let id = r.id.clone().unwrap_or_else(|| {
+        format!(
+            "mock_msg_{}",
+            s.message_counter.fetch_add(1, Ordering::SeqCst)
+        )
+    });
     let ts = format!(
         "{}",
         std::time::SystemTime::now()

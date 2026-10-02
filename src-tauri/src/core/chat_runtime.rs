@@ -3,7 +3,7 @@
 //! connect_to_stream コマンドから抽出された監視ロジック。
 //! コマンド層は入出力の変換と MonitoringDeps / run_monitoring_loop への委譲のみを担う。
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::{RwLock, watch};
 use tokio_util::sync::CancellationToken;
@@ -16,6 +16,9 @@ use crate::core::raw_response::{RawResponseSaver, SaveConfig};
 use crate::database::{self, Database};
 use crate::state::MAX_MESSAGES;
 use crate::tts::{TtsManager, TtsPriority, TtsQueueItem};
+
+/// 接続ごとに覚える受信済み message_id の件数（02_chat.md「設定値」）
+const RECENT_MESSAGE_IDS_CAPACITY: usize = 10_000;
 
 /// 監視タスクが必要とする共有依存をまとめた構造体
 ///
@@ -118,6 +121,9 @@ pub async fn run_monitoring_loop<F, G, H>(
     // この接続で最後に受けたリアクション更新の時刻（再送を捨てるため）
     let mut last_reaction_time: Option<i64> = None;
 
+    // この接続で受け取った message_id（YouTube の再送を捨てるため）
+    let mut recent_message_ids = RecentMessageIds::new(RECENT_MESSAGE_IDS_CAPACITY);
+
     loop {
         // CancellationToken でループ停止を確認
         if cancellation_token.is_cancelled() {
@@ -205,6 +211,16 @@ pub async fn run_monitoring_loop<F, G, H>(
 
         // 各メッセージを処理
         for mut msg in new_messages {
+            // 再送は保存・集計・GUI・WebSocket・TTS のどれにも流さない
+            if !recent_message_ids.insert(&msg.id) {
+                tracing::debug!(
+                    "再送されたメッセージを捨てる connection_id: {} message_id: {}",
+                    connection_id,
+                    msg.id
+                );
+                continue;
+            }
+
             process_message(
                 &mut msg,
                 &video_id,
@@ -350,6 +366,46 @@ async fn process_message(
     }
 }
 
+/// この接続で受け取った message_id の記憶（02_chat.md「受信済み message_id の記憶」）
+///
+/// 直近 `capacity` 件だけを覚え、超えたら古いものから忘れる。
+/// id は `Arc<str>` で順序と集合に共有し、1 件 1 回の確保で済ませる。
+struct RecentMessageIds {
+    capacity: usize,
+    order: VecDeque<Arc<str>>,
+    ids: HashSet<Arc<str>>,
+}
+
+impl RecentMessageIds {
+    fn new(capacity: usize) -> Self {
+        debug_assert!(capacity > 0, "記憶件数は1以上");
+        Self {
+            capacity,
+            order: VecDeque::with_capacity(capacity),
+            ids: HashSet::with_capacity(capacity),
+        }
+    }
+
+    /// 初めて見る id なら覚えて true、受け取り済みなら false を返す。空の id は常に true
+    fn insert(&mut self, id: &str) -> bool {
+        if id.is_empty() {
+            return true;
+        }
+        if self.ids.contains(id) {
+            return false;
+        }
+        if self.order.len() >= self.capacity {
+            if let Some(oldest) = self.order.pop_front() {
+                self.ids.remove(&oldest);
+            }
+        }
+        let id: Arc<str> = Arc::from(id);
+        self.order.push_back(Arc::clone(&id));
+        self.ids.insert(id);
+        true
+    }
+}
+
 /// ギフトの handle から channel_id を特定する（02_chat.md「視聴者の特定」）
 ///
 /// 1. この接続で見た handle → channel_id
@@ -479,6 +535,34 @@ mod tests {
     fn reaction_newer_than_last_is_new() {
         assert!(is_new_reaction(None, &reaction_at(100)));
         assert!(is_new_reaction(Some(100), &reaction_at(101)));
+    }
+
+    /// 届いた順に id を渡し、処理されたもの（初めて見たもの）だけを返す
+    fn processed(capacity: usize, ids: &[&str]) -> Vec<String> {
+        let mut seen = RecentMessageIds::new(capacity);
+        ids.iter()
+            .filter(|id| seen.insert(id))
+            .map(|id| id.to_string())
+            .collect()
+    }
+
+    // 02_chat.md「受信済み message_id の記憶」の例（上限3件）
+    #[test]
+    fn resent_message_is_dropped() {
+        assert_eq!(processed(3, &["A", "B", "A"]), ["A", "B"]);
+    }
+
+    #[test]
+    fn forgotten_message_is_processed_again() {
+        assert_eq!(
+            processed(3, &["A", "B", "C", "D", "A"]),
+            ["A", "B", "C", "D", "A"]
+        );
+    }
+
+    #[test]
+    fn empty_message_id_is_always_processed() {
+        assert_eq!(processed(3, &["", "A", ""]), ["", "A", ""]);
     }
 
     #[test]

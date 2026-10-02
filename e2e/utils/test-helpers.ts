@@ -500,6 +500,8 @@ export async function addMockMessage(message: {
   milestone_months?: number;
   gift_count?: number;
   gift_image_url?: string;
+  /** 同じ id を再び積むと YouTube の再送を再現できる。省略時はモックが採番する */
+  id?: string;
 }): Promise<void> {
   await fetch(`${MOCK_SERVER_URL}/add_message`, {
     method: 'POST',
