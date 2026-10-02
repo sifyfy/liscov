@@ -1154,7 +1154,10 @@ fn gen_reaction_entity(update_time_usec: u64, r: &ARR) -> Value {
     let first = json!({"duration":{"seconds":"1"},"intensityScore":0.75,"reactionsData":reactions,"totalReactions":total});
     let empty = json!({"duration":{"seconds":"1"},"intensityScore":1,"totalReactions":0});
     let buckets: Vec<Value> = std::iter::once(first)
-        .chain(std::iter::repeat_n(empty, r.duration_seconds.saturating_sub(1) as usize))
+        .chain(std::iter::repeat_n(
+            empty,
+            r.duration_seconds.saturating_sub(1) as usize,
+        ))
         .collect();
     json!({"key":"mock_emoji_fountain","reactionBuckets":buckets,"updateTimeUsec":update_time_usec.to_string()})
 }
@@ -1211,9 +1214,10 @@ fn gen_msg(s: &ServerState, r: &AMR) -> Value {
         "gift" => {
             // ジュエルで送るギフト: channelId・timestampUsec が無く、authorName は末尾に空白が付く（実データ準拠）
             // content は本文（例: "sent Press F for 10 Jewels"）
-            let image = r.gift_image_url.as_deref().unwrap_or(
-                "//www.gstatic.com/youtube/img/pdg/gift/assets/press_f.png=w480-h480",
-            );
+            let image = r
+                .gift_image_url
+                .as_deref()
+                .unwrap_or("//www.gstatic.com/youtube/img/pdg/gift/assets/press_f.png=w480-h480");
             let name = r.content.strip_prefix("sent ").unwrap_or(&r.content);
             let name = name.split(" for ").next().unwrap_or(name);
             json!({"addChatItemAction":{"item":{"giftMessageViewModel":{"id":id,"authorName":{"content":format!("{} ", r.author)},"authorAvatar":{"avatarViewModel":{"image":{"sources":[{"url":"https://example.com/av.png"}]}}},"text":{"content":&r.content},"giftImage":{"sources":[{"url":image,"width":480,"height":480}]},"giftImageA11yLabel":format!("{} sent a gift, {}", r.author, name)}}}})
