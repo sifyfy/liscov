@@ -45,6 +45,7 @@ fn build_app_state(messages: Vec<ChatMessage>) -> AppState {
         tts_process_manager: Arc::new(app_lib::tts::TtsProcessManager::new()),
         next_connection_id: Arc::new(AtomicU64::new(0)),
         connections: Arc::new(RwLock::new(HashMap::new())),
+        connection_slots: Default::default(),
     }
 }
 

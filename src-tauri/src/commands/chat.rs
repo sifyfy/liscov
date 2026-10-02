@@ -266,16 +266,13 @@ pub async fn connect_to_stream(
     url: String,
     chat_mode: Option<String>,
 ) -> Result<ConnectionResult, CommandError> {
-    // 同時接続数の上限チェック
-    {
-        let connections = state.connections.read().await;
-        if connections.len() >= MAX_CONNECTIONS {
-            return Err(CommandError::InvalidInput(format!(
-                "同時接続数の上限（{}）に達しています",
-                MAX_CONNECTIONS
-            )));
-        }
-    }
+    // 同時接続の枠を取る（接続中も数える。接続に失敗したら drop で空く。02_chat.md「多接続」）
+    let slot = state.connection_slots.try_reserve().ok_or_else(|| {
+        CommandError::InvalidInput(format!(
+            "同時接続数の上限（{}）に達しています",
+            MAX_CONNECTIONS
+        ))
+    })?;
 
     // 新しい接続IDを採番
     let connection_id = state.next_connection_id.fetch_add(1, Ordering::SeqCst) + 1;
@@ -403,6 +400,7 @@ pub async fn connect_to_stream(
             cancellation_token: cancellation_token.clone(),
             task_handle: None, // spawn後に設定
             chat_mode_tx,
+            slot,
         };
 
         {

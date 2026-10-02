@@ -1,6 +1,6 @@
 //! Application state management
 
-use crate::connection::StreamConnection;
+use crate::connection::{ConnectionSlots, StreamConnection};
 use crate::core::api::WebSocketServer;
 use crate::core::models::ChatMessage;
 use crate::database::Database;
@@ -31,6 +31,8 @@ pub struct AppState {
     pub next_connection_id: Arc<AtomicU64>,
     /// アクティブな接続のマップ（connection_id -> StreamConnection）
     pub connections: Arc<RwLock<HashMap<u64, StreamConnection>>>,
+    /// 同時接続の枠（接続済みと接続中を合わせて MAX_CONNECTIONS 件まで）
+    pub connection_slots: ConnectionSlots,
 }
 
 impl AppState {
@@ -59,6 +61,7 @@ impl AppState {
             tts_process_manager: Arc::new(tts_process_manager),
             next_connection_id: Arc::new(AtomicU64::new(0)),
             connections: Arc::new(RwLock::new(HashMap::new())),
+            connection_slots: ConnectionSlots::default(),
         }
     }
 

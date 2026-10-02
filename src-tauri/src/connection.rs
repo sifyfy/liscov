@@ -3,14 +3,42 @@
 use crate::core::models::{ChatMode, Platform};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{RwLock, watch};
+use tokio::sync::{OwnedSemaphorePermit, RwLock, Semaphore, watch};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use ts_rs::TS;
 
 /// 同時接続数の上限
 pub const MAX_CONNECTIONS: usize = 32;
+
+/// 同時接続の枠（02_chat.md「多接続」）。接続済みと接続中を合わせて `MAX_CONNECTIONS` 件まで
+///
+/// 「開始」の時点で枠を取り、接続が一覧から消える（切断・接続失敗）と枠が空く。
+/// 一覧の件数を見てから追加するまでの間に別の接続が入り込まないよう、件数ではなく枠で数える。
+#[derive(Debug, Clone)]
+pub struct ConnectionSlots(Arc<Semaphore>);
+
+impl Default for ConnectionSlots {
+    fn default() -> Self {
+        Self(Arc::new(Semaphore::new(MAX_CONNECTIONS)))
+    }
+}
+
+impl ConnectionSlots {
+    /// 枠を 1 つ取る。空いていなければ `None`
+    pub fn try_reserve(&self) -> Option<ConnectionSlot> {
+        let permit = Arc::clone(&self.0).try_acquire_owned().ok()?;
+        Some(ConnectionSlot { _permit: permit })
+    }
+}
+
+/// 取った枠。drop すると空く
+#[derive(Debug)]
+pub struct ConnectionSlot {
+    _permit: OwnedSemaphorePermit,
+}
 
 /// 切断・アプリ終了で監視タスクの終了処理（セッションを閉じる）を待つ上限
 pub const DISCONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -34,6 +62,8 @@ pub struct StreamConnection {
     pub task_handle: Option<JoinHandle<()>>,
     /// チャットモード変更要求を監視タスクに伝達する watch チャネル
     pub chat_mode_tx: watch::Sender<ChatMode>,
+    /// この接続が使っている同時接続の枠（一覧から消えると空く）
+    pub slot: ConnectionSlot,
 }
 
 /// フロントエンドに公開する接続情報（シリアライズ可能）
@@ -123,6 +153,7 @@ mod tests {
             cancellation_token: CancellationToken::new(),
             task_handle: None,
             chat_mode_tx,
+            slot: ConnectionSlots::default().try_reserve().unwrap(),
         }
     }
 
@@ -155,7 +186,6 @@ mod tests {
     // 02_chat.md 多接続: 全切断は押した時点の接続だけを切り、終了処理を待つ。切断の途中で成立した接続は残る
     #[tokio::test]
     async fn disconnect_all_keeps_connection_established_during_disconnect() {
-        use std::sync::Arc;
         use std::sync::atomic::{AtomicBool, Ordering};
 
         let connections: Arc<RwLock<HashMap<u64, StreamConnection>>> = Arc::default();
@@ -181,6 +211,20 @@ mod tests {
         let remaining = connections.read().await;
         assert_eq!(remaining.keys().copied().collect::<Vec<_>>(), vec![2]);
         assert!(!remaining[&2].cancellation_token.is_cancelled());
+    }
+
+    // 02_chat.md 多接続: 接続済みと接続中を合わせて 32 件まで。切断・接続失敗で枠が空く
+    #[test]
+    fn connection_slots_allow_up_to_max_connections() {
+        let slots = ConnectionSlots::default();
+        let reserved: Vec<_> = (0..MAX_CONNECTIONS)
+            .map(|_| slots.try_reserve().expect("上限までは取れる"))
+            .collect();
+
+        assert!(slots.try_reserve().is_none(), "33 件目が取れた");
+
+        drop(reserved.into_iter().next());
+        assert!(slots.try_reserve().is_some(), "1 件空いたのに取れない");
     }
 
     #[test]
