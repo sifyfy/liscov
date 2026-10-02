@@ -6,8 +6,14 @@ use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use tokio::fs::metadata;
+use std::sync::{Mutex, PoisonError};
 use tracing::{info, warn};
+
+/// 生レスポンスファイルへの書き込み（ローテーションを含む）を直列化するロック
+///
+/// 保存は接続ごとの監視タスクから並行に呼ばれ、同じファイルに書き込む。
+/// 書き込みが混ざると NDJSON の行が壊れる（05_raw_response.md「1行1JSON」）ため、プロセス内で 1 つずつ書く。
+static WRITE_LOCK: Mutex<()> = Mutex::new(());
 
 /// 保存設定（config.toml の [raw_response]。無いキーはデフォルト値で補完する）
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -117,47 +123,49 @@ impl RawResponseSaver {
             self.config.file_path
         );
 
-        // ファイルサイズチェックとローテーション
-        if self.config.enable_rotation {
-            self.check_and_rotate_file().await?;
-        }
-
-        // タイムスタンプを追加してJSON行を作成
+        // タイムスタンプを追加してJSON行を作成（重い処理はロックの外で済ませる）
         let entry = serde_json::json!({
             "timestamp": Utc::now().timestamp(),
             "response": serde_json::from_str::<serde_json::Value>(response_json)
                 .unwrap_or_else(|_| serde_json::Value::String(response_json.to_string()))
         });
 
-        let json_line =
+        let mut json_line =
             serde_json::to_string(&entry).context("Failed to serialize response to JSON")?;
+        json_line.push('\n');
 
-        // ファイルに追記
-        self.append_to_file(&json_line).await?;
+        {
+            let _guard = WRITE_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+            if self.config.enable_rotation {
+                self.check_and_rotate_file()?;
+            }
+            self.append_to_file(&json_line)?;
+        }
 
-        tracing::info!(
+        // ポーリングごとに呼ばれるので info にしない（リリースのログが埋まる）
+        tracing::debug!(
             "💾 Raw response saved successfully to: {}",
             self.config.file_path
         );
         Ok(())
     }
 
-    /// ファイルにJSONラインを追記
-    async fn append_to_file(&self, json_line: &str) -> Result<()> {
+    /// ファイルに 1 行（改行込み）を追記する。1 回の write_all で書き、行の途中で他の書き込みが挟まらないようにする
+    fn append_to_file(&self, line: &str) -> Result<()> {
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
             .open(&self.config.file_path)
             .context("Failed to open raw response file")?;
 
-        writeln!(file, "{}", json_line)?;
+        file.write_all(line.as_bytes())?;
         file.flush()?;
 
         Ok(())
     }
 
     /// ファイルサイズをチェックしてローテーション
-    async fn check_and_rotate_file(&self) -> Result<()> {
+    fn check_and_rotate_file(&self) -> Result<()> {
         let file_path = Path::new(&self.config.file_path);
 
         // ファイルが存在しない場合は何もしない
@@ -166,7 +174,7 @@ impl RawResponseSaver {
         }
 
         // ファイルサイズをチェック
-        let meta = metadata(&self.config.file_path).await?;
+        let meta = std::fs::metadata(&self.config.file_path)?;
         let file_size_mb = meta.len() / 1024 / 1024;
 
         if file_size_mb >= self.config.max_file_size_mb {
@@ -174,7 +182,7 @@ impl RawResponseSaver {
                 "File size ({} MB) exceeded limit ({} MB), rotating file",
                 file_size_mb, self.config.max_file_size_mb
             );
-            self.rotate_file().await?;
+            self.rotate_file()?;
         }
 
         Ok(())
@@ -195,7 +203,7 @@ impl RawResponseSaver {
     }
 
     /// ファイルをローテーション
-    async fn rotate_file(&self) -> Result<()> {
+    fn rotate_file(&self) -> Result<()> {
         let file_path = Path::new(&self.config.file_path);
         let (file_stem, file_ext) = self.file_parts();
 
@@ -219,13 +227,13 @@ impl RawResponseSaver {
         );
 
         // 古いバックアップファイルを削除
-        self.cleanup_old_backups().await?;
+        self.cleanup_old_backups()?;
 
         Ok(())
     }
 
     /// 古いバックアップファイルを削除
-    async fn cleanup_old_backups(&self) -> Result<()> {
+    fn cleanup_old_backups(&self) -> Result<()> {
         let file_path = Path::new(&self.config.file_path);
         let dir = file_path.parent().unwrap_or_else(|| Path::new("."));
         let (file_stem, file_ext) = self.file_parts();
@@ -399,6 +407,47 @@ mod tests {
             .unwrap();
 
         assert!(data_dir.join("raw_responses.ndjson").exists());
+    }
+
+    // 05_raw_response.md: 複数の接続が同時に保存しても、1行1JSONを保つ
+    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+    async fn concurrent_saves_keep_one_json_per_line() {
+        const TASKS: usize = 8;
+        const SAVES_PER_TASK: usize = 50;
+        let data_dir = temp_dir_for_test("concurrent_saves");
+        let config = SaveConfig {
+            enabled: true,
+            enable_rotation: false,
+            ..SaveConfig::default()
+        }
+        .resolved_for_write(&data_dir)
+        .unwrap();
+        // 1 回の書き込みで済まない程度に大きいレスポンス
+        let response = format!(r#"{{"actions": [], "padding": "{}"}}"#, "x".repeat(64 * 1024));
+
+        let handles: Vec<_> = (0..TASKS)
+            .map(|_| {
+                let saver = RawResponseSaver::new(config.clone());
+                let response = response.clone();
+                tokio::spawn(async move {
+                    for _ in 0..SAVES_PER_TASK {
+                        saver.save_response(&response).await.unwrap();
+                    }
+                })
+            })
+            .collect();
+        for handle in handles {
+            handle.await.unwrap();
+        }
+
+        let content = fs::read_to_string(data_dir.join("raw_responses.ndjson")).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        let broken = lines
+            .iter()
+            .filter(|line| serde_json::from_str::<serde_json::Value>(line).is_err())
+            .count();
+        assert_eq!(broken, 0, "JSON として読めない行がある");
+        assert_eq!(lines.len(), TASKS * SAVES_PER_TASK);
     }
 
     // ========================================================================
