@@ -111,13 +111,11 @@ impl TtsManager {
 
     /// 設定を保存して差し替え、保存後の enabled に合わせてキュー処理を開始・停止する
     pub async fn update_config(&self, config: TtsConfig) {
-        // Save to file
+        // 保存が続けて届いても、書き込み・差し替え・開始・停止が入れ違わないようにする（04_tts.md「自動開始」）
+        let mut task = self.processing.lock().await;
         if let Err(e) = config.save() {
             log::error!("Failed to save TTS config: {}", e);
         }
-
-        // 保存が続けて届いても、差し替えと開始・停止が入れ違わないようにする（04_tts.md「自動開始」）
-        let mut task = self.processing.lock().await;
         let enabled = config.enabled;
         let backend =
             backends::create_backend(&config.backend, &config.bouyomichan, &config.voicevox)
