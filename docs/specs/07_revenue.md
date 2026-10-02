@@ -6,6 +6,21 @@
 
 ## 振る舞い（What）
 
+### 集計の対象
+
+| コマンド | 対象 |
+|---------|------|
+| `get_revenue_analytics`・`export_current_messages`（「現在」） | この起動で接続したセッションすべて（接続中・切断済み・同じ配信への再接続を含む）。DB に保存したメッセージを数える（画面に出ている件数やメモリ上のバッファの上限に依らない） |
+| `get_session_analytics`・`export_session_data` | 指定した 1 セッション |
+
+| 状況（「現在」） | 結果 |
+|------|------|
+| 1 つの配信で 3000 件を受信し、うち SuperChat が 1500 件 | SuperChat総件数 1500。エクスポートも 3000 件（`max_records` を指定すればその件数まで） |
+| 配信 A に接続 → 切断 → 配信 B に接続 | A と B の合計 |
+| 接続が切れて同じ配信に再接続（別のセッションになる） | 切れる前と後の合計 |
+| アプリを再起動した直後 | 0 件（前回の起動のセッションは `get_session_analytics` で見る） |
+| DB を使えない | エラーを返す |
+
 ### Tier別集計
 
 SuperChatの色情報（`headerBackgroundColor`）に基づいてtierを判定し、tier別に件数を集計する。**金額の数値計算は行わない。**
@@ -42,6 +57,7 @@ SuperChatの色情報（`headerBackgroundColor`）に基づいてtierを判定�
 ### 上位貢献者
 
 SuperChat件数でソートし、上位10人を表示。同一件数の場合は最高tierで比較。ギフトは含めない。
+件数は SuperChat と SuperSticker の合計。表示名はその視聴者の最初の SuperChat・SuperSticker のときの名前。
 
 ### ギフト集計
 
@@ -69,10 +85,10 @@ SuperChat件数でソートし、上位10人を表示。同一件数の場合は
 
 | コマンド | 入力 | 出力 | 説明 |
 |---------|------|------|------|
-| `get_revenue_analytics` | なし | `RevenueAnalytics` | 現在セッションの分析 |
+| `get_revenue_analytics` | なし | `RevenueAnalytics` | この起動で接続したセッションの分析（「集計の対象」） |
 | `get_session_analytics` | `session_id: String` | `RevenueAnalytics` | 過去セッションの分析 |
 | `export_session_data` | `session_id, file_path, config` | `()` | セッションデータエクスポート |
-| `export_current_messages` | `file_path, config` | `()` | 現在メッセージエクスポート（多接続時は全接続のメッセージを対象） |
+| `export_current_messages` | `file_path, config` | `()` | この起動で接続したセッションのメッセージをエクスポート（多接続時は全接続のメッセージを対象。「集計の対象」） |
 
 ## データモデル
 
@@ -97,7 +113,7 @@ pub struct RevenueAnalytics {
 | `super_sticker_count` | usize | SuperSticker総件数 |
 | `membership_gains` | usize | メンバーシップ獲得数 |
 | `hourly_stats` | Vec | 時間別統計データ（現在は常に空。将来実装予定） |
-| `top_contributors` | Vec | 上位貢献者（件数ベース、`get_revenue_analytics`のみで集計） |
+| `top_contributors` | Vec | 上位貢献者（件数ベース。`get_revenue_analytics`・`get_session_analytics` の両方で集計） |
 | `gifts` | GiftStats | ギフト集計（`get_revenue_analytics`・`get_session_analytics` の両方で集計） |
 
 ### GiftStats

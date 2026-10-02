@@ -7,6 +7,7 @@ mod common;
 
 use app_lib::commands::analytics::RevenueAnalytics;
 use app_lib::core::{ChatMessage, MessageType};
+use app_lib::database::{self, Database};
 use app_lib::state::AppState;
 use common::{invoke_no_args, invoke_with_args};
 use std::collections::{HashMap, VecDeque};
@@ -35,17 +36,35 @@ fn make_chat_message(
     }
 }
 
-/// 指定メッセージを持つ AppState を直接構築する
-fn build_app_state(messages: Vec<ChatMessage>) -> AppState {
+/// 一時ディレクトリの DB を持つ AppState を直接構築する。
+/// 起動したあとに接続したセッション 1 つに `messages` を保存する（07_revenue.md「集計の対象」）
+///
+/// TempDir は DB を使い終わるまで持っておく（drop でディレクトリごと消える）
+async fn build_app_state(messages: Vec<ChatMessage>) -> (AppState, tempfile::TempDir) {
+    let dir = tempfile::tempdir().expect("tempdir の作成に失敗");
+    let database = Database::open(&dir.path().join("liscov.db")).expect("DB を開けない");
+    let state = app_state_with(Some(database));
+    {
+        let conn = state.db_connection().await.unwrap();
+        let session_id = database::create_session(&conn, None, None, None, None).unwrap();
+        for message in &messages {
+            database::save_message(&conn, &session_id, None, message, None).unwrap();
+        }
+    }
+    (state, dir)
+}
+
+fn app_state_with(database: Option<Database>) -> AppState {
     AppState {
         websocket_server: Arc::new(RwLock::new(None)),
-        messages: Arc::new(RwLock::new(VecDeque::from(messages))),
-        database: Arc::new(RwLock::new(None)),
+        messages: Arc::new(RwLock::new(VecDeque::new())),
+        database: Arc::new(RwLock::new(database)),
         tts_manager: Arc::new(app_lib::tts::TtsManager::default()),
         tts_process_manager: Arc::new(app_lib::tts::TtsProcessManager::new()),
         next_connection_id: Arc::new(AtomicU64::new(0)),
         connections: Arc::new(RwLock::new(HashMap::new())),
         connection_slots: Default::default(),
+        started_at: chrono::Utc::now(),
     }
 }
 
@@ -68,7 +87,8 @@ fn build_test_app(app_state: AppState) -> tauri::App<tauri::test::MockRuntime> {
 #[tokio::test]
 async fn get_revenue_analytics_empty_messages_returns_default() {
     // 仕様: メッセージなし → 全カウント 0 の RevenueAnalytics を返す
-    let app = build_test_app(build_app_state(vec![]));
+    let (state, _db_dir) = build_app_state(vec![]).await;
+    let app = build_test_app(state);
     let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
         .build()
         .unwrap();
@@ -117,7 +137,8 @@ async fn get_revenue_analytics_with_superchat_messages() {
         ),
     ];
 
-    let app = build_test_app(build_app_state(messages));
+    let (state, _db_dir) = build_app_state(messages).await;
+    let app = build_test_app(state);
     let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
         .build()
         .unwrap();
@@ -172,7 +193,8 @@ async fn get_revenue_analytics_mixed_message_types() {
         make_chat_message("t1", "UserD", "UC_d", MessageType::Text),
     ];
 
-    let app = build_test_app(build_app_state(messages));
+    let (state, _db_dir) = build_app_state(messages).await;
+    let app = build_test_app(state);
     let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
         .build()
         .unwrap();
@@ -189,6 +211,19 @@ async fn get_revenue_analytics_mixed_message_types() {
     assert_eq!(analytics.super_chat_count, 1);
     assert_eq!(analytics.super_sticker_count, 1);
     assert_eq!(analytics.membership_gains, 1);
+}
+
+// 仕様 (07_revenue.md「集計の対象」): DB を使えない → エラーを返す
+#[tokio::test]
+async fn get_revenue_analytics_without_database_returns_error() {
+    let app = build_test_app(app_state_with(None));
+    let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+
+    let response = get_ipc_response(&webview, invoke_no_args("get_revenue_analytics"));
+
+    assert!(response.is_err(), "DB が無ければエラーを返すべき");
 }
 
 // ============================================================================
@@ -210,7 +245,8 @@ async fn export_current_messages_json_format() {
         ),
     ];
 
-    let app = build_test_app(build_app_state(messages));
+    let (state, _db_dir) = build_app_state(messages).await;
+    let app = build_test_app(state);
     let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
         .build()
         .unwrap();
@@ -281,7 +317,8 @@ async fn export_current_messages_csv_format() {
         ),
     ];
 
-    let app = build_test_app(build_app_state(messages));
+    let (state, _db_dir) = build_app_state(messages).await;
+    let app = build_test_app(state);
     let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
         .build()
         .unwrap();
@@ -346,7 +383,8 @@ async fn export_current_messages_empty_connections_uses_default_session_id() {
         MessageType::Text,
     )];
 
-    let app = build_test_app(build_app_state(messages));
+    let (state, _db_dir) = build_app_state(messages).await;
+    let app = build_test_app(state);
     let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
         .build()
         .unwrap();
@@ -397,7 +435,8 @@ async fn export_current_messages_empty_connections_uses_default_session_id() {
 #[tokio::test]
 async fn export_current_messages_unsupported_format_returns_error() {
     // 仕様: サポートされていないフォーマット → エラーを返す
-    let app = build_test_app(build_app_state(vec![]));
+    let (state, _db_dir) = build_app_state(vec![]).await;
+    let app = build_test_app(state);
     let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
         .build()
         .unwrap();

@@ -6,6 +6,7 @@ use crate::core::models::ChatMessage;
 use crate::database::Database;
 use crate::errors::CommandError;
 use crate::tts::{TtsManager, TtsProcessManager};
+use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -33,10 +34,14 @@ pub struct AppState {
     pub connections: Arc<RwLock<HashMap<u64, StreamConnection>>>,
     /// 同時接続の枠（接続済みと接続中を合わせて MAX_CONNECTIONS 件まで）
     pub connection_slots: ConnectionSlots,
+    /// このアプリを起動した時刻。これ以降に始まったセッションが「現在」の分析の対象（07_revenue.md「集計の対象」）
+    pub started_at: DateTime<Utc>,
 }
 
 impl AppState {
     pub fn new() -> Self {
+        let started_at = Utc::now();
+
         // データベースを初期化
         let database = Database::new()
             .inspect_err(|e| {
@@ -62,6 +67,7 @@ impl AppState {
             next_connection_id: Arc::new(AtomicU64::new(0)),
             connections: Arc::new(RwLock::new(HashMap::new())),
             connection_slots: ConnectionSlots::default(),
+            started_at,
         }
     }
 

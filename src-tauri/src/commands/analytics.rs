@@ -4,10 +4,10 @@
 //! Note: SuperChat amounts are NOT calculated numerically due to different currencies.
 //! Instead, we use tier-based aggregation based on YouTube's color scheme.
 
-use crate::core::{ChatMessage, GiftDetails, MessageType};
+use crate::core::GiftDetails;
 use crate::errors::CommandError;
 use crate::state::AppState;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
@@ -150,14 +150,6 @@ impl GiftStats {
     }
 }
 
-/// メッセージ列に含まれるギフトを取り出す
-fn gifts_in(messages: &[ChatMessage]) -> impl Iterator<Item = &GiftDetails> {
-    messages.iter().filter_map(|m| match &m.message_type {
-        MessageType::Gift(gift) => Some(gift),
-        _ => None,
-    })
-}
-
 /// DB の gift 行の metadata JSON（08_database.md）から集計する。読めない行は数えない
 pub(crate) fn gift_stats_from_metadata(rows: &[Option<String>]) -> GiftStats {
     let gifts: Vec<GiftDetails> = rows
@@ -280,87 +272,121 @@ fn tier_from_header_color(color: Option<&str>) -> Option<SuperChatTier> {
         .map(|(_, tier)| *tier)
 }
 
-/// メッセージリストからRevenueAnalyticsを計算する純粋関数
-///
-/// SuperChat/SuperSticker/Membershipの集計、貢献者トラッキング、上位10人truncateを行う
-pub(crate) fn compute_revenue_analytics(messages: &[ChatMessage]) -> RevenueAnalytics {
-    let mut analytics = RevenueAnalytics::default();
-
-    // 貢献者トラッキング: channel_id -> (display_name, count, highest_tier)
-    let mut contributors: HashMap<String, (String, usize, Option<SuperChatTier>)> = HashMap::new();
-
-    for message in messages {
-        match &message.message_type {
-            MessageType::SuperChat { .. } => {
-                analytics.super_chat_count += 1;
-
-                let tier = tier_from_header_color(message.superchat_header_color());
-                analytics.super_chat_by_tier.record(tier);
-
-                // 貢献者情報を更新
-                let entry = contributors.entry(message.channel_id.clone()).or_insert((
-                    message.author.clone(),
-                    0,
-                    None,
-                ));
-                entry.1 += 1;
-                // より高いtierがあれば更新（段階不明は比べない）
-                if tier > entry.2 {
-                    entry.2 = tier;
-                }
-            }
-            MessageType::SuperSticker { amount: _ } => {
-                analytics.super_sticker_count += 1;
-
-                // SuperStickerは件数カウントのみ（tier統計には影響しない）
-                let entry = contributors.entry(message.channel_id.clone()).or_insert((
-                    message.author.clone(),
-                    0,
-                    None,
-                ));
-                entry.1 += 1;
-            }
-            MessageType::Membership { .. } | MessageType::MembershipGift { .. } => {
-                analytics.membership_gains += 1;
-            }
-            _ => {}
-        }
-    }
-
-    // 貢献者リストを件数降順→tier降順でソートし上位10人に絞る
-    let mut contributors_vec: Vec<ContributorInfo> = contributors
-        .into_iter()
-        .map(
-            |(channel_id, (display_name, super_chat_count, highest_tier))| ContributorInfo {
-                channel_id,
-                display_name,
-                super_chat_count,
-                highest_tier,
-            },
-        )
-        .collect();
-
-    contributors_vec.sort_by(|a, b| match b.super_chat_count.cmp(&a.super_chat_count) {
-        std::cmp::Ordering::Equal => b.highest_tier.cmp(&a.highest_tier),
-        other => other,
-    });
-
-    contributors_vec.truncate(10);
-    analytics.top_contributors = contributors_vec;
-    analytics.gifts = GiftStats::from_gifts(gifts_in(messages));
-
-    analytics
+/// 分析・エクスポートの対象のセッション群を、SQL の `json_each(?)` に渡す JSON 配列にする
+fn session_ids_json(session_ids: &[String]) -> String {
+    serde_json::to_string(session_ids).expect("文字列の配列は必ず JSON にできる")
 }
 
-/// Get revenue analytics for current session
+/// この起動で接続したセッション（07_revenue.md「集計の対象」の「現在」）
+pub(crate) fn sessions_started_since(
+    conn: &rusqlite::Connection,
+    since: DateTime<Utc>,
+) -> Result<Vec<String>, CommandError> {
+    let db_err = |e: rusqlite::Error| CommandError::DatabaseError(e.to_string());
+    let mut stmt = conn
+        .prepare(
+            "SELECT id FROM sessions WHERE julianday(start_time) >= julianday(?1)
+             ORDER BY start_time",
+        )
+        .map_err(db_err)?;
+    stmt.query_map([since.to_rfc3339()], |row| row.get(0))
+        .map_err(db_err)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(db_err)
+}
+
+/// この起動で接続したセッションの分析（07_revenue.md「集計の対象」）
 #[tauri::command]
 pub async fn get_revenue_analytics(
     state: State<'_, AppState>,
 ) -> Result<RevenueAnalytics, CommandError> {
-    let messages = state.messages.read().await;
-    // VecDequeをVecに変換して純粋関数に渡す
-    let messages_vec: Vec<ChatMessage> = messages.iter().cloned().collect();
-    Ok(compute_revenue_analytics(&messages_vec))
+    let conn = state.db_connection().await?;
+    let session_ids = sessions_started_since(&conn, state.started_at)?;
+    sessions_analytics(&conn, &session_ids)
+}
+
+/// 上位貢献者を数えるための DB の集計行（貢献者・種類・色ごと）
+pub(crate) struct ContributorRow {
+    pub channel_id: String,
+    // その組み合わせで最初に保存した行の表示名と id
+    pub display_name: String,
+    pub first_row_id: i64,
+    pub message_type: String,
+    pub superchat_color: Option<String>,
+    pub count: usize,
+}
+
+/// 集計行から上位 10 人を決める（07_revenue.md「上位貢献者」）
+///
+/// 件数は SuperChat と SuperSticker の合計。件数の多い順、同数なら最高 tier の高い順。
+/// 表示名はその視聴者の最初の SuperChat・SuperSticker のときの名前。
+pub(crate) fn top_contributors(rows: Vec<ContributorRow>) -> Vec<ContributorInfo> {
+    let mut by_channel: HashMap<String, (i64, ContributorInfo)> = HashMap::new();
+    for row in rows {
+        let tier = (row.message_type == "superchat")
+            .then(|| tier_from_header_color(row.superchat_color.as_deref()))
+            .flatten();
+        let (first_row_id, info) = by_channel.entry(row.channel_id.clone()).or_insert_with(|| {
+            (
+                row.first_row_id,
+                ContributorInfo {
+                    channel_id: row.channel_id,
+                    display_name: row.display_name.clone(),
+                    super_chat_count: 0,
+                    highest_tier: None,
+                },
+            )
+        });
+        if row.first_row_id < *first_row_id {
+            *first_row_id = row.first_row_id;
+            info.display_name = row.display_name;
+        }
+        info.super_chat_count += row.count;
+        // 段階不明（None）は比べない
+        info.highest_tier = info.highest_tier.max(tier);
+    }
+
+    let mut contributors: Vec<ContributorInfo> =
+        by_channel.into_values().map(|(_, info)| info).collect();
+    contributors.sort_by(|a, b| {
+        b.super_chat_count
+            .cmp(&a.super_chat_count)
+            .then_with(|| b.highest_tier.cmp(&a.highest_tier))
+            .then_with(|| a.channel_id.cmp(&b.channel_id))
+    });
+    contributors.truncate(10);
+    contributors
+}
+
+/// SuperChat・SuperSticker を貢献者・種類・色ごとに数える
+fn query_contributor_rows(
+    conn: &rusqlite::Connection,
+    session_ids_json: &str,
+) -> Result<Vec<ContributorRow>, CommandError> {
+    let db_err = |e: rusqlite::Error| CommandError::DatabaseError(e.to_string());
+    // MIN(id) と並べた author は、その最初の行の値になる（SQLite の集約の仕様）
+    let mut stmt = conn
+        .prepare(
+            "SELECT channel_id, author, MIN(id), message_type, superchat_color, COUNT(*)
+             FROM messages
+             WHERE session_id IN (SELECT value FROM json_each(?1))
+               AND message_type IN ('superchat', 'supersticker')
+             GROUP BY channel_id, message_type, superchat_color",
+        )
+        .map_err(db_err)?;
+    stmt.query_map([session_ids_json], |row| {
+        Ok(ContributorRow {
+            channel_id: row.get(0)?,
+            display_name: row.get(1)?,
+            first_row_id: row.get(2)?,
+            message_type: row.get(3)?,
+            superchat_color: row.get(4)?,
+            count: row.get(5)?,
+        })
+    })
+    .map_err(db_err)?
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(db_err)
 }
 
 /// DB の集計行から RevenueAnalytics を計算する純粋関数
@@ -387,28 +413,30 @@ pub(crate) fn compute_session_analytics_from_rows(
     analytics
 }
 
-/// 過去セッションの分析を DB から集計する（07_revenue.md `get_session_analytics`）
-pub(crate) fn session_analytics(
+/// セッション群の分析を DB から集計する（07_revenue.md「集計の対象」）
+pub(crate) fn sessions_analytics(
     conn: &rusqlite::Connection,
-    session_id: &str,
+    session_ids: &[String],
 ) -> Result<RevenueAnalytics, CommandError> {
+    let db_err = |e: rusqlite::Error| CommandError::DatabaseError(e.to_string());
+    let ids = session_ids_json(session_ids);
     // 件数だけ要るので、種類と色ごとに DB で数える（メッセージを全件読まない）
     let mut stmt = conn
         .prepare(
             "SELECT message_type, superchat_color, COUNT(*) FROM messages
-             WHERE session_id = ? GROUP BY message_type, superchat_color",
+             WHERE session_id IN (SELECT value FROM json_each(?1))
+             GROUP BY message_type, superchat_color",
         )
-        .map_err(|e| CommandError::DatabaseError(e.to_string()))?;
+        .map_err(db_err)?;
     let rows: Vec<(String, Option<String>, usize)> = stmt
-        .query_map([session_id], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-        })
-        .map_err(|e| CommandError::DatabaseError(e.to_string()))?
+        .query_map([&ids], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .map_err(db_err)?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| CommandError::DatabaseError(e.to_string()))?;
+        .map_err(db_err)?;
 
     let mut analytics = compute_session_analytics_from_rows(&rows);
-    analytics.gifts = gift_stats_from_metadata(&query_gift_metadata(conn, session_id)?);
+    analytics.top_contributors = top_contributors(query_contributor_rows(conn, &ids)?);
+    analytics.gifts = gift_stats_from_metadata(&query_gift_metadata(conn, &ids)?);
     Ok(analytics)
 }
 
@@ -419,18 +447,21 @@ pub async fn get_session_analytics(
     session_id: String,
 ) -> Result<RevenueAnalytics, CommandError> {
     let conn = state.db_connection().await?;
-    session_analytics(&conn, &session_id)
+    sessions_analytics(&conn, &[session_id])
 }
 
-/// セッション内の gift 行の metadata を取得する
+/// セッション群の gift 行の metadata を取得する
 fn query_gift_metadata(
     conn: &rusqlite::Connection,
-    session_id: &str,
+    session_ids_json: &str,
 ) -> Result<Vec<Option<String>>, CommandError> {
     let mut stmt = conn
-        .prepare("SELECT metadata FROM messages WHERE session_id = ? AND message_type = 'gift'")
+        .prepare(
+            "SELECT metadata FROM messages
+             WHERE session_id IN (SELECT value FROM json_each(?1)) AND message_type = 'gift'",
+        )
         .map_err(|e| CommandError::DatabaseError(e.to_string()))?;
-    stmt.query_map([session_id], |row| row.get::<_, Option<String>>(0))
+    stmt.query_map([session_ids_json], |row| row.get::<_, Option<String>>(0))
         .map_err(|e| CommandError::DatabaseError(e.to_string()))?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| CommandError::DatabaseError(e.to_string()))
@@ -442,8 +473,6 @@ pub(crate) fn session_export_data(
     session_id: &str,
     config: &ExportConfig,
 ) -> Result<SessionExportData, CommandError> {
-    let db_err = |e: rusqlite::Error| CommandError::DatabaseError(e.to_string());
-
     let session = conn
         .query_row(
             "SELECT id, start_time, end_time, stream_url, stream_title,
@@ -465,18 +494,39 @@ pub(crate) fn session_export_data(
         )
         .map_err(|e| CommandError::NotFound(format!("Session not found: {}", e)))?;
 
+    let (messages, statistics) = export_messages(conn, &[session_id.to_string()], config)?;
+
+    Ok(SessionExportData {
+        metadata: session,
+        messages,
+        statistics,
+    })
+}
+
+/// セッション群のメッセージを時系列順に読み、統計と合わせて返す（07_revenue.md エクスポート）
+///
+/// ギフトの統計は `max_records` で切る前の全件から数える。
+fn export_messages(
+    conn: &rusqlite::Connection,
+    session_ids: &[String],
+    config: &ExportConfig,
+) -> Result<(Vec<ExportMessage>, SessionStatistics), CommandError> {
+    let db_err = |e: rusqlite::Error| CommandError::DatabaseError(e.to_string());
+    let ids = session_ids_json(session_ids);
+
     // LIMIT -1 は SQLite で「上限なし」
     let limit = config.max_records.map_or(-1, |n| n as i64);
     let mut stmt = conn
         .prepare(
             "SELECT message_id, timestamp, author, channel_id, content, message_type, amount,
                     is_member, is_moderator, is_verified, badges, superchat_color, metadata
-             FROM messages WHERE session_id = ?1 ORDER BY timestamp LIMIT ?2",
+             FROM messages WHERE session_id IN (SELECT value FROM json_each(?1))
+             ORDER BY timestamp, id LIMIT ?2",
         )
         .map_err(db_err)?;
 
     let messages: Vec<ExportMessage> = stmt
-        .query_map(rusqlite::params![session_id, limit], |row| {
+        .query_map(rusqlite::params![ids, limit], |row| {
             let message_type: String = row.get(5)?;
             let amount: Option<String> = row.get(6)?;
             let superchat_color: Option<String> = row.get(11)?;
@@ -515,14 +565,9 @@ pub(crate) fn session_export_data(
         .collect::<Result<_, _>>()
         .map_err(db_err)?;
 
-    let gifts = gift_stats_from_metadata(&query_gift_metadata(conn, session_id)?);
+    let gifts = gift_stats_from_metadata(&query_gift_metadata(conn, &ids)?);
     let statistics = calculate_session_statistics(&messages, gifts);
-
-    Ok(SessionExportData {
-        metadata: session,
-        messages,
-        statistics,
-    })
+    Ok((messages, statistics))
 }
 
 /// Export session data to file
@@ -564,58 +609,6 @@ fn write_export(
         .map_err(|e| CommandError::IoError(format!("Failed to write file: {}", e)))
 }
 
-/// ChatMessageリストからExportMessageリストへの変換
-///
-/// 各ChatMessageのmessage_type・metadata・色情報からExportMessage形式に変換する
-pub(crate) fn convert_messages_to_export(
-    messages: &[ChatMessage],
-    _session_id: &str,
-    _broadcaster_channel_id: &str,
-) -> Vec<ExportMessage> {
-    messages
-        .iter()
-        .map(|msg| {
-            let (message_type_str, amount_display, tier) = match &msg.message_type {
-                MessageType::Text => ("text".to_string(), None, None),
-                MessageType::SuperChat { amount } => (
-                    "superchat".to_string(),
-                    Some(amount.clone()),
-                    tier_from_header_color(msg.superchat_header_color()),
-                ),
-                MessageType::SuperSticker { amount } => {
-                    ("supersticker".to_string(), Some(amount.clone()), None)
-                }
-                MessageType::Membership { .. } => ("membership".to_string(), None, None),
-                MessageType::MembershipGift { .. } => ("membership_gift".to_string(), None, None),
-                MessageType::Gift(gift) => (
-                    "gift".to_string(),
-                    gift.jewel_count.map(format_jewels),
-                    None,
-                ),
-                MessageType::System => ("system".to_string(), None, None),
-            };
-
-            // バッジを読めない種類は不明（None）。08_database.md の保存と同じ規則
-            let badges = msg.author_badge_metadata();
-
-            ExportMessage {
-                id: msg.id.clone(),
-                timestamp: msg.timestamp.clone(),
-                author: msg.author.clone(),
-                author_id: msg.channel_id.clone(),
-                content: msg.content.clone(),
-                message_type: message_type_str,
-                amount_display,
-                tier,
-                is_moderator: badges.map(|m| m.is_moderator),
-                is_member: msg.is_member,
-                is_verified: badges.map(|m| m.is_verified),
-                badges: badges.map(|m| m.badges.clone()),
-            }
-        })
-        .collect()
-}
-
 /// Export current session messages
 #[tauri::command]
 pub async fn export_current_messages(
@@ -623,15 +616,13 @@ pub async fn export_current_messages(
     file_path: String,
     config: ExportConfig,
 ) -> Result<(), CommandError> {
-    // 必要な分を複製したらすぐ手放す（監視ループの追加を待たせない）
-    let messages_vec: Vec<ChatMessage> = state
-        .messages
-        .read()
-        .await
-        .iter()
-        .take(config.max_records.unwrap_or(usize::MAX))
-        .cloned()
-        .collect();
+    // この起動で接続したセッションのメッセージを DB から読む（07_revenue.md「集計の対象」）。
+    // ファイルへの書き出しの間、DB のロックを握らない
+    let (export_messages, statistics) = {
+        let conn = state.db_connection().await?;
+        let session_ids = sessions_started_since(&conn, state.started_at)?;
+        export_messages(&conn, &session_ids, &config)?
+    };
 
     // 多接続モデル: 最初の接続からセッションID・配信者IDを取得（エクスポートヘッダ用）
     let (session_id, broadcaster_id) = {
@@ -648,13 +639,6 @@ pub async fn export_current_messages(
             .unwrap_or_default();
         (session_id, broadcaster_id)
     };
-
-    let export_messages = convert_messages_to_export(&messages_vec, &session_id, &broadcaster_id);
-
-    let statistics = calculate_session_statistics(
-        &export_messages,
-        GiftStats::from_gifts(gifts_in(&messages_vec)),
-    );
 
     let export_data = SessionExportData {
         metadata: SessionMetadata {
@@ -791,7 +775,7 @@ fn export_to_csv(data: &SessionExportData, config: &ExportConfig) -> Result<Stri
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{MessageMetadata, SuperChatColors};
+    use crate::core::{ChatMessage, MessageMetadata, MessageType, SuperChatColors};
 
     // ========================================================================
     // tier_from_header_color (07_revenue.md「Tier別集計」の表)
@@ -1253,8 +1237,53 @@ mod tests {
     }
 
     // ========================================================================
-    // compute_revenue_analytics (07_revenue.md: メッセージリストから集計)
+    // sessions_analytics (07_revenue.md: 保存したメッセージから集計)
     // ========================================================================
+
+    /// メッセージを 1 つのセッションに保存して、DB から分析する（07_revenue.md「集計の対象」）
+    ///
+    /// make_chat_message は同じ視聴者に同じ id を付けるので、保存の重複排除に掛からないよう番号を足す
+    async fn analytics_of(messages: &[ChatMessage]) -> RevenueAnalytics {
+        let numbered: Vec<ChatMessage> = messages
+            .iter()
+            .enumerate()
+            .map(|(i, message)| ChatMessage {
+                id: format!("{}#{}", message.id, i),
+                ..message.clone()
+            })
+            .collect();
+        let (db, session_id) = saved_session(&numbered).await;
+        let conn = db.connection().await;
+        sessions_analytics(&conn, &[session_id]).unwrap()
+    }
+
+    /// メッセージを 1 つのセッションに保存して、エクスポートの行として読む
+    async fn exports_of(messages: &[ChatMessage]) -> Vec<ExportMessage> {
+        let (db, session_id) = saved_session(messages).await;
+        let conn = db.connection().await;
+        let config = ExportConfig {
+            format: "json".to_string(),
+            include_metadata: false,
+            include_system_messages: true,
+            max_records: None,
+            sort_order: None,
+        };
+        export_messages(&conn, &[session_id], &config).unwrap().0
+    }
+
+    async fn saved_session(messages: &[ChatMessage]) -> (crate::database::Database, String) {
+        let db = crate::database::Database::new_in_memory().unwrap();
+        let session_id = {
+            let conn = db.connection().await;
+            let session_id =
+                crate::database::create_session(&conn, None, None, None, None).unwrap();
+            for message in messages {
+                crate::database::save_message(&conn, &session_id, None, message, None).unwrap();
+            }
+            session_id
+        };
+        (db, session_id)
+    }
 
     /// テスト用ChatMessageヘルパー
     fn make_chat_message(
@@ -1273,10 +1302,10 @@ mod tests {
         }
     }
 
-    #[test]
-    fn compute_revenue_analytics_empty_messages() {
+    #[tokio::test]
+    async fn compute_revenue_analytics_empty_messages() {
         // 07_revenue.md: 空メッセージリスト → デフォルトのRevenueAnalytics
-        let analytics = compute_revenue_analytics(&[]);
+        let analytics = analytics_of(&[]).await;
 
         assert_eq!(analytics.super_chat_count, 0);
         assert_eq!(analytics.super_sticker_count, 0);
@@ -1286,8 +1315,8 @@ mod tests {
         assert!(analytics.hourly_stats.is_empty());
     }
 
-    #[test]
-    fn compute_revenue_analytics_mixed_types() {
+    #[tokio::test]
+    async fn compute_revenue_analytics_mixed_types() {
         // 07_revenue.md: SuperChat×2 + SuperSticker×1 + Membership×1 → 正しい集計
         let messages = vec![
             make_chat_message(
@@ -1350,7 +1379,7 @@ mod tests {
             ),
         ];
 
-        let analytics = compute_revenue_analytics(&messages);
+        let analytics = analytics_of(&messages).await;
 
         assert_eq!(analytics.super_chat_count, 2);
         assert_eq!(analytics.super_sticker_count, 1);
@@ -1362,8 +1391,8 @@ mod tests {
         assert_eq!(analytics.top_contributors.len(), 3);
     }
 
-    #[test]
-    fn compute_revenue_analytics_top_contributors_truncate() {
+    #[tokio::test]
+    async fn compute_revenue_analytics_top_contributors_truncate() {
         // 07_revenue.md: 上位貢献者は10人にtruncateされる
         let messages: Vec<ChatMessage> = (0..15)
             .map(|i| {
@@ -1378,15 +1407,15 @@ mod tests {
             })
             .collect();
 
-        let analytics = compute_revenue_analytics(&messages);
+        let analytics = analytics_of(&messages).await;
 
         assert_eq!(analytics.super_chat_count, 15);
         // 15人の貢献者がいるが上位10人にtruncateされる
         assert_eq!(analytics.top_contributors.len(), 10);
     }
 
-    #[test]
-    fn compute_revenue_analytics_contributors_sorted_by_count_then_tier() {
+    #[tokio::test]
+    async fn compute_revenue_analytics_contributors_sorted_by_count_then_tier() {
         // 07_revenue.md: SuperChat件数でソートし、同一件数の場合は最高tierで比較
         let messages = vec![
             // UC_a: SC×2, 最高tier=Red
@@ -1447,7 +1476,7 @@ mod tests {
             ),
         ];
 
-        let analytics = compute_revenue_analytics(&messages);
+        let analytics = analytics_of(&messages).await;
 
         assert_eq!(analytics.top_contributors.len(), 3);
         // UC_a(2件, Red) と UC_b(2件, Blue) は同件数だがtierでUC_aが上
@@ -1460,8 +1489,8 @@ mod tests {
         assert_eq!(analytics.top_contributors[2].super_chat_count, 1);
     }
 
-    #[test]
-    fn compute_revenue_analytics_membership_gift_counted() {
+    #[tokio::test]
+    async fn compute_revenue_analytics_membership_gift_counted() {
         // 07_revenue.md: MembershipGiftもmembership_gainsにカウントされる
         let messages = vec![make_chat_message(
             "UC_a",
@@ -1470,13 +1499,13 @@ mod tests {
             None,
         )];
 
-        let analytics = compute_revenue_analytics(&messages);
+        let analytics = analytics_of(&messages).await;
 
         assert_eq!(analytics.membership_gains, 1);
     }
 
-    #[test]
-    fn compute_revenue_analytics_tier_escalation() {
+    #[tokio::test]
+    async fn compute_revenue_analytics_tier_escalation() {
         // 同一コントリビューターがBlue(低tier)→Red(高tier)の順で送信した場合、
         // 最高tierはRedに更新されること
         let messages = vec![
@@ -1513,7 +1542,7 @@ mod tests {
             ),
         ];
 
-        let analytics = compute_revenue_analytics(&messages);
+        let analytics = analytics_of(&messages).await;
         assert_eq!(analytics.top_contributors.len(), 1);
         assert_eq!(
             analytics.top_contributors[0].highest_tier,
@@ -1521,8 +1550,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn compute_revenue_analytics_supersticker_contributor_count() {
+    #[tokio::test]
+    async fn compute_revenue_analytics_supersticker_contributor_count() {
         // SuperStickerもcontributor件数にカウントされること
         let messages = vec![make_chat_message(
             "UC_s",
@@ -1533,7 +1562,7 @@ mod tests {
             None,
         )];
 
-        let analytics = compute_revenue_analytics(&messages);
+        let analytics = analytics_of(&messages).await;
         assert_eq!(analytics.top_contributors.len(), 1);
         assert_eq!(analytics.top_contributors[0].super_chat_count, 1);
     }
@@ -1598,11 +1627,11 @@ mod tests {
     }
 
     // ========================================================================
-    // convert_messages_to_export (07_revenue.md: ChatMessage→ExportMessage変換)
+    // export_messages (07_revenue.md: 保存したメッセージ→ExportMessage)
     // ========================================================================
 
-    #[test]
-    fn convert_messages_to_export_text() {
+    #[tokio::test]
+    async fn convert_messages_to_export_text() {
         // 07_revenue.md: TextメッセージはExportMessageのmessage_type="text"に変換
         let messages = vec![ChatMessage {
             id: "msg1".to_string(),
@@ -1615,7 +1644,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let exports = convert_messages_to_export(&messages, "session1", "UC_broadcaster");
+        let exports = exports_of(&messages).await;
 
         assert_eq!(exports.len(), 1);
         assert_eq!(exports[0].message_type, "text");
@@ -1631,8 +1660,8 @@ mod tests {
         assert_eq!(exports[0].is_verified, None);
     }
 
-    #[test]
-    fn convert_messages_to_export_superchat_with_color() {
+    #[tokio::test]
+    async fn convert_messages_to_export_superchat_with_color() {
         // 07_revenue.md: SuperChatは色情報からtierを判定し、amountとtierを含む
         let messages = vec![ChatMessage {
             id: "sc1".to_string(),
@@ -1661,7 +1690,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let exports = convert_messages_to_export(&messages, "session1", "UC_broadcaster");
+        let exports = exports_of(&messages).await;
 
         assert_eq!(exports.len(), 1);
         assert_eq!(exports[0].message_type, "superchat");
@@ -1672,8 +1701,8 @@ mod tests {
         assert_eq!(exports[0].badges, Some(vec!["member".to_string()]));
     }
 
-    #[test]
-    fn convert_messages_to_export_supersticker() {
+    #[tokio::test]
+    async fn convert_messages_to_export_supersticker() {
         // 07_revenue.md: SuperStickerはtierなし、amountあり
         let messages = vec![ChatMessage {
             id: "ss1".to_string(),
@@ -1683,15 +1712,15 @@ mod tests {
             ..Default::default()
         }];
 
-        let exports = convert_messages_to_export(&messages, "session1", "UC_broadcaster");
+        let exports = exports_of(&messages).await;
 
         assert_eq!(exports[0].message_type, "supersticker");
         assert_eq!(exports[0].amount_display, Some("$5.00".to_string()));
         assert!(exports[0].tier.is_none());
     }
 
-    #[test]
-    fn convert_messages_to_export_membership() {
+    #[tokio::test]
+    async fn convert_messages_to_export_membership() {
         // 07_revenue.md: Membershipはmessage_type="membership"
         let messages = vec![ChatMessage {
             id: "m1".to_string(),
@@ -1701,15 +1730,15 @@ mod tests {
             ..Default::default()
         }];
 
-        let exports = convert_messages_to_export(&messages, "session1", "UC_broadcaster");
+        let exports = exports_of(&messages).await;
 
         assert_eq!(exports[0].message_type, "membership");
         assert!(exports[0].amount_display.is_none());
         assert!(exports[0].tier.is_none());
     }
 
-    #[test]
-    fn convert_messages_to_export_membership_gift() {
+    #[tokio::test]
+    async fn convert_messages_to_export_membership_gift() {
         // 07_revenue.md: MembershipGiftはmessage_type="membership_gift"
         let messages = vec![ChatMessage {
             id: "mg1".to_string(),
@@ -1717,13 +1746,13 @@ mod tests {
             ..Default::default()
         }];
 
-        let exports = convert_messages_to_export(&messages, "session1", "UC_broadcaster");
+        let exports = exports_of(&messages).await;
 
         assert_eq!(exports[0].message_type, "membership_gift");
     }
 
-    #[test]
-    fn convert_messages_to_export_system() {
+    #[tokio::test]
+    async fn convert_messages_to_export_system() {
         // 07_revenue.md: Systemはmessage_type="system"
         let messages = vec![ChatMessage {
             id: "sys1".to_string(),
@@ -1731,15 +1760,15 @@ mod tests {
             ..Default::default()
         }];
 
-        let exports = convert_messages_to_export(&messages, "session1", "UC_broadcaster");
+        let exports = exports_of(&messages).await;
 
         assert_eq!(exports[0].message_type, "system");
         assert!(exports[0].amount_display.is_none());
         assert!(exports[0].tier.is_none());
     }
 
-    #[test]
-    fn convert_messages_to_export_all_types() {
+    #[tokio::test]
+    async fn convert_messages_to_export_all_types() {
         // 07_revenue.md: 全MessageTypeを含むリストが正しく変換される
         let messages = vec![
             ChatMessage {
@@ -1780,7 +1809,7 @@ mod tests {
             },
         ];
 
-        let exports = convert_messages_to_export(&messages, "session1", "UC_broadcaster");
+        let exports = exports_of(&messages).await;
 
         assert_eq!(exports.len(), 6);
         assert_eq!(exports[0].message_type, "text");
@@ -1795,8 +1824,8 @@ mod tests {
     // 追加テスト: 残存missed mutantsを殺す
     // ========================================================================
 
-    #[test]
-    fn compute_revenue_analytics_supersticker_multiple_count() {
+    #[tokio::test]
+    async fn compute_revenue_analytics_supersticker_multiple_count() {
         // 07_revenue.md: 同一コントリビューターが複数SuperStickerを送信した場合、
         // contributor件数が正しく加算されること
         // 対象mutant: L278 `entry.1 += 1` → `*= 1`
@@ -1828,7 +1857,7 @@ mod tests {
             ),
         ];
 
-        let analytics = compute_revenue_analytics(&messages);
+        let analytics = analytics_of(&messages).await;
 
         // 3件のSuperStickerで件数は3になるべき (*= 1 mutantでは1になる)
         assert_eq!(analytics.top_contributors.len(), 1);
@@ -1956,8 +1985,8 @@ mod tests {
         assert_eq!(names, vec!["Apple", "Zebra"]);
     }
 
-    #[test]
-    fn compute_revenue_analytics_counts_gifts_separately() {
+    #[tokio::test]
+    async fn compute_revenue_analytics_counts_gifts_separately() {
         let messages = vec![
             make_chat_message("", "@a", MessageType::Gift(gift("Hiding", None)), None),
             make_chat_message(
@@ -1975,7 +2004,7 @@ mod tests {
                 None,
             ),
         ];
-        let analytics = compute_revenue_analytics(&messages);
+        let analytics = analytics_of(&messages).await;
         assert_eq!(analytics.gifts.gift_count, 2);
         assert_eq!(analytics.gifts.total_jewels, 10);
         // 既存の集計には影響しない
@@ -1999,8 +2028,8 @@ mod tests {
         assert_eq!(stats.total_jewels, 10);
     }
 
-    #[test]
-    fn convert_messages_to_export_gift() {
+    #[tokio::test]
+    async fn convert_messages_to_export_gift() {
         // 07_revenue.md: message_type = gift、amount_display = "10 Jewels"（不明なら空）
         let messages = vec![
             make_chat_message(
@@ -2011,7 +2040,7 @@ mod tests {
             ),
             make_chat_message("", "@a", MessageType::Gift(gift("Hiding", None)), None),
         ];
-        let exported = convert_messages_to_export(&messages, "s", "UC_own");
+        let exported = exports_of(&messages).await;
         assert_eq!(exported[0].message_type, "gift");
         assert_eq!(exported[0].amount_display.as_deref(), Some("10 Jewels"));
         assert_eq!(exported[1].message_type, "gift");
@@ -2158,7 +2187,7 @@ mod tests {
             let (db, session_id) = session_with(&messages, &["sc_old"]).await;
             let conn = db.connection().await;
 
-            let analytics = session_analytics(&conn, &session_id).unwrap();
+            let analytics = sessions_analytics(&conn, std::slice::from_ref(&session_id)).unwrap();
 
             assert_eq!(analytics.super_chat_count, 2);
             assert_eq!(analytics.super_chat_by_tier.tier_green, 1);
@@ -2213,6 +2242,92 @@ mod tests {
 
             // ...,tier,is_moderator,is_member,is_verified,badges
             assert!(row.ends_with(r#","",,false,,"""#), "{row}");
+        }
+
+        /// 開始時刻を指定してセッションを作り、SuperChat を `count` 件保存する
+        fn session_at(
+            conn: &rusqlite::Connection,
+            start_time: &str,
+            prefix: &str,
+            count: usize,
+        ) -> String {
+            let session_id = database::create_session(conn, None, None, None, None).unwrap();
+            conn.execute(
+                "UPDATE sessions SET start_time = ?1 WHERE id = ?2",
+                [start_time, &session_id],
+            )
+            .unwrap();
+            for i in 0..count {
+                let message = superchat(&format!("{prefix}{i}"), "#1565C0");
+                database::save_message(conn, &session_id, None, &message, None).unwrap();
+            }
+            session_id
+        }
+
+        // 07_revenue.md「集計の対象」: 配信 A → 切断 → 配信 B なら A と B の合計。前回の起動のセッションは数えない
+        #[tokio::test]
+        async fn current_scope_is_sessions_started_since_launch() {
+            let db = Database::new_in_memory().unwrap();
+            let conn = db.connection().await;
+            let launched_at = DateTime::parse_from_rfc3339("2026-10-03T10:00:00+00:00")
+                .unwrap()
+                .with_timezone(&Utc);
+            session_at(&conn, "2026-10-02T20:00:00+00:00", "prev", 5);
+            let a = session_at(&conn, "2026-10-03T10:05:00+00:00", "a", 2);
+            let b = session_at(&conn, "2026-10-03T11:00:00.123456789+00:00", "b", 3);
+
+            let session_ids = sessions_started_since(&conn, launched_at).unwrap();
+            assert_eq!(session_ids, [a, b]);
+            let analytics = sessions_analytics(&conn, &session_ids).unwrap();
+            assert_eq!(analytics.super_chat_count, 5);
+        }
+
+        // 07_revenue.md「集計の対象」: メモリ上のバッファの上限（1000件）に依らない
+        #[tokio::test]
+        async fn current_scope_counts_beyond_message_buffer() {
+            let db = Database::new_in_memory().unwrap();
+            let conn = db.connection().await;
+            let session_id = session_at(&conn, "2026-10-03T10:05:00+00:00", "sc", 1500);
+            let config = ExportConfig {
+                max_records: None,
+                ..export_config()
+            };
+
+            let analytics = sessions_analytics(&conn, std::slice::from_ref(&session_id)).unwrap();
+            let (messages, statistics) = export_messages(&conn, &[session_id], &config).unwrap();
+
+            assert_eq!(analytics.super_chat_count, 1500);
+            assert_eq!(messages.len(), 1500);
+            assert_eq!(statistics.super_chat_count, 1500);
+        }
+
+        // 07_revenue.md「上位貢献者」: 件数は SuperChat と SuperSticker の合計、表示名は最初のときの名前
+        #[tokio::test]
+        async fn top_contributors_use_first_name_and_count_stickers() {
+            let renamed = ChatMessage {
+                id: "sc2".to_string(),
+                author: "@donor-renamed".to_string(),
+                ..superchat("sc2", "#D00000")
+            };
+            let sticker = ChatMessage {
+                id: "st1".to_string(),
+                message_type: MessageType::SuperSticker {
+                    amount: "¥200".to_string(),
+                },
+                metadata: None,
+                ..superchat("st1", "#00B8D4")
+            };
+            let (db, session_id) =
+                session_with(&[superchat("sc1", "#1565C0"), renamed, sticker], &[]).await;
+            let conn = db.connection().await;
+
+            let analytics = sessions_analytics(&conn, &[session_id]).unwrap();
+
+            assert_eq!(analytics.top_contributors.len(), 1);
+            let top = &analytics.top_contributors[0];
+            assert_eq!(top.display_name, "@donor");
+            assert_eq!(top.super_chat_count, 3);
+            assert_eq!(top.highest_tier, Some(SuperChatTier::Red));
         }
     }
 }

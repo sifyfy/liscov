@@ -21,16 +21,21 @@ pub struct Database {
 }
 
 impl Database {
-    /// Create a new database connection
+    /// アプリのデータディレクトリの DB を開く
     pub fn new() -> Result<Self> {
-        let path = get_database_path()?;
+        Self::open(&get_database_path()?)
+    }
 
+    /// 指定したファイルの DB を開く（無ければ作る）。マイグレーションと、閉じられなかったセッションの回収も行う
+    ///
+    /// 統合テストは一時ディレクトリの DB をこれで開く。
+    pub fn open(path: &Path) -> Result<Self> {
         // Ensure parent directory exists
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
 
-        let conn = open_file_database(&path)?;
+        let conn = open_file_database(path)?;
 
         // Run migrations
         migrations::run_migrations(&conn)?;
