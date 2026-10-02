@@ -149,19 +149,18 @@ impl TtsManager {
 
         let mut queue = self.queue.lock().await;
 
-        // Check queue size limit
-        if queue.len() >= config.queue_size_limit {
-            log::warn!("TTS queue full, dropping oldest message");
-            queue.pop_front();
-        }
-
-        // Insert based on priority (higher priority items go to front)
+        // 優先度の位置に入れる（高い順、同じ優先度は到着順）
         let insert_pos = queue
             .iter()
             .position(|q| q.priority < item.priority)
             .unwrap_or(queue.len());
-
         queue.insert(insert_pos, item);
+
+        // 満杯なら末尾（最も優先度の低いもののうち最後尾）を捨てる。届いたもの自身のこともある
+        if queue.len() > config.queue_size_limit {
+            log::warn!("TTS queue full, dropping the last lowest-priority message");
+            queue.truncate(config.queue_size_limit);
+        }
         log::debug!("TTS queue size: {}", queue.len());
     }
 
@@ -1159,75 +1158,75 @@ mod tests {
     }
 
     // ========================================================================
-    // enqueue がキュー満杯時に最古を破棄する（L149のmutantをkill）
+    // enqueue がキュー満杯時に最低優先度の最後尾を破棄する（04_tts.md「キュー満杯時に捨てるもの」）
     // ========================================================================
 
-    #[tokio::test]
-    async fn enqueue_drops_oldest_when_queue_full() {
-        // spec: queue_size_limit=2 で 3件enqueue すると最古が破棄されてサイズは2
+    fn queue_item(text: &str, priority: TtsPriority) -> TtsQueueItem {
+        TtsQueueItem {
+            text: text.to_string(),
+            priority,
+            author_name: None,
+            amount: None,
+            in_stream_comment_count: None,
+            message_id: None,
+        }
+    }
+
+    /// 上限2件のキューに `queued` を順に入れ、`arrived` を入れたあとのキューの text を返す
+    async fn queue_after_full_enqueue(
+        queued: &[(&str, TtsPriority)],
+        arrived: (&str, TtsPriority),
+    ) -> Vec<String> {
         let manager = TtsManager::new(TtsConfig {
             enabled: true,
             queue_size_limit: 2,
             ..TtsConfig::default()
         });
-        for i in 0..3 {
-            manager
-                .enqueue(TtsQueueItem {
-                    text: format!("メッセージ{}", i),
-                    priority: TtsPriority::Normal,
-                    author_name: None,
-                    amount: None,
-                    in_stream_comment_count: None,
-                    message_id: None,
-                })
-                .await;
+        for (text, priority) in queued.iter().copied().chain([arrived]) {
+            manager.enqueue(queue_item(text, priority)).await;
         }
-        assert_eq!(manager.queue_size().await, 2);
+        let queue = manager.queue.lock().await;
+        queue.iter().map(|q| q.text.clone()).collect()
     }
 
     #[tokio::test]
-    async fn enqueue_oldest_is_dropped_not_newest() {
-        // spec: 満杯時に破棄されるのは最古（先頭）のアイテム
-        let manager = TtsManager::new(TtsConfig {
-            enabled: true,
-            queue_size_limit: 2,
-            ..TtsConfig::default()
-        });
-        manager
-            .enqueue(TtsQueueItem {
-                text: "最古".to_string(),
-                priority: TtsPriority::Normal,
-                author_name: None,
-                amount: None,
-                in_stream_comment_count: None,
-                message_id: None,
-            })
-            .await;
-        manager
-            .enqueue(TtsQueueItem {
-                text: "2番目".to_string(),
-                priority: TtsPriority::Normal,
-                author_name: None,
-                amount: None,
-                in_stream_comment_count: None,
-                message_id: None,
-            })
-            .await;
-        manager
-            .enqueue(TtsQueueItem {
-                text: "最新".to_string(),
-                priority: TtsPriority::Normal,
-                author_name: None,
-                amount: None,
-                in_stream_comment_count: None,
-                message_id: None,
-            })
-            .await;
-        // 最古「最古」が破棄され、「2番目」と「最新」が残る
-        let queue = manager.queue.lock().await;
-        assert_eq!(queue.len(), 2);
-        assert_eq!(queue[0].text, "2番目");
-        assert_eq!(queue[1].text, "最新");
+    async fn full_queue_drops_arriving_normal_after_normals() {
+        use TtsPriority::*;
+        let queue = queue_after_full_enqueue(&[("A", Normal), ("B", Normal)], ("C", Normal)).await;
+        assert_eq!(queue, ["A", "B"]);
+    }
+
+    #[tokio::test]
+    async fn full_queue_keeps_superchat_when_normal_arrives() {
+        use TtsPriority::*;
+        let queue =
+            queue_after_full_enqueue(&[("S", SuperChat), ("A", Normal)], ("B", Normal)).await;
+        assert_eq!(queue, ["S", "A"]);
+    }
+
+    #[tokio::test]
+    async fn full_queue_drops_last_normal_when_superchat_arrives() {
+        use TtsPriority::*;
+        let queue =
+            queue_after_full_enqueue(&[("A", Normal), ("B", Normal)], ("S", SuperChat)).await;
+        assert_eq!(queue, ["S", "A"]);
+    }
+
+    #[tokio::test]
+    async fn full_queue_drops_lowest_priority_when_superchat_arrives() {
+        use TtsPriority::*;
+        let queue =
+            queue_after_full_enqueue(&[("M", Membership), ("A", Normal)], ("S", SuperChat)).await;
+        assert_eq!(queue, ["S", "M"]);
+    }
+
+    #[tokio::test]
+    async fn full_queue_drops_arriving_superchat_after_superchats() {
+        use TtsPriority::*;
+        let queue =
+            queue_after_full_enqueue(&[("S1", SuperChat), ("S2", SuperChat)], ("S3", SuperChat))
+                .await;
+        assert_eq!(queue, ["S1", "S2"]);
     }
 
     // ========================================================================
