@@ -631,7 +631,7 @@ pub fn get_viewers_for_broadcaster(
          FROM viewer_profiles vp
          LEFT JOIN viewer_custom_info vci ON vp.id = vci.viewer_profile_id
          WHERE vp.broadcaster_channel_id = ?1
-           AND (vp.display_name LIKE ?2 OR vci.reading LIKE ?2 OR vci.notes LIKE ?2)
+           AND (vp.display_name LIKE ?2 ESCAPE '\\' OR vci.reading LIKE ?2 ESCAPE '\\' OR vci.notes LIKE ?2 ESCAPE '\\')
          ORDER BY vp.last_seen DESC
          LIMIT ?3 OFFSET ?4"
     } else {
@@ -648,7 +648,7 @@ pub fn get_viewers_for_broadcaster(
 
     let mut stmt = conn.prepare(query)?;
 
-    let search_pattern = search_query.map(|q| format!("%{}%", q));
+    let search_pattern = search_query.map(like_contains_pattern);
 
     let viewers = if let Some(pattern) = &search_pattern {
         stmt.query_map(
@@ -663,6 +663,22 @@ pub fn get_viewers_for_broadcaster(
     };
 
     viewers.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+/// LIKE の部分一致パターンを作る。`%`・`_`・`\` は文字そのものとして探す（06_viewer.md 検索方式）
+///
+/// SQL 側は `ESCAPE '\'` と組で使う。
+fn like_contains_pattern(query: &str) -> String {
+    let mut pattern = String::with_capacity(query.len() + 2);
+    pattern.push('%');
+    for c in query.chars() {
+        if matches!(c, '%' | '_' | '\\') {
+            pattern.push('\\');
+        }
+        pattern.push(c);
+    }
+    pattern.push('%');
+    pattern
 }
 
 fn row_to_viewer(row: &rusqlite::Row) -> rusqlite::Result<ViewerWithCustomInfo> {
@@ -2007,6 +2023,34 @@ mod tests {
         let viewers = get_viewers_for_broadcaster(&conn, "UC_bc", None, 100, 0).unwrap();
         assert!(!viewers.is_empty());
         assert_eq!(viewers[0].channel_id, "UC_v1");
+    }
+
+    fn search_names(conn: &Connection, query: &str) -> Vec<String> {
+        let mut names: Vec<String> =
+            get_viewers_for_broadcaster(conn, "UC_bc", Some(query), 100, 0)
+                .unwrap()
+                .into_iter()
+                .map(|v| v.display_name)
+                .collect();
+        names.sort();
+        names
+    }
+
+    // 06_viewer.md 検索方式: % _ \ は文字そのものとして探す（表の例）
+    #[tokio::test]
+    async fn search_treats_like_wildcards_as_literal_characters() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+        let names = ["a_b", "xa_bx", "axb", "50%off", "500", r"a\b", "ab"];
+        for (i, name) in names.iter().enumerate() {
+            let msg = make_text_message(&format!("m{i}"), name, &format!("UC_v{i}"), "hi");
+            save_message(&conn, &session_id, Some("UC_bc"), &msg, None).unwrap();
+        }
+
+        assert_eq!(search_names(&conn, "a_b"), ["a_b", "xa_bx"]);
+        assert_eq!(search_names(&conn, "50%"), ["50%off"]);
+        assert_eq!(search_names(&conn, r"\"), [r"a\b"]);
     }
 
     /// spec: get_distinct_broadcaster_channels は登録済み配信者のVecを返す

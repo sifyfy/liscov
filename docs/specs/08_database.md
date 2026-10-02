@@ -582,6 +582,7 @@ interface ViewerCustomInfo {
 | `idx_reactions_session_time` | reactions(session_id, update_time_usec) | セッション・時間帯別のリアクション集計 |
 | `idx_viewer_profiles_broadcaster` | viewer_profiles(broadcaster_channel_id) | 配信者別視聴者検索 |
 | `idx_viewer_profiles_message_count` | viewer_profiles(broadcaster_channel_id, message_count DESC) | アクティブ順ソート |
+| `idx_viewer_profiles_last_seen` | viewer_profiles(broadcaster_channel_id, last_seen DESC) | 視聴者一覧（最近アクティブな順。[06_viewer.md](06_viewer.md)） |
 | `idx_viewer_profiles_contribution` | viewer_profiles(broadcaster_channel_id, total_contribution DESC) | 貢献額順ソート |
 | `idx_hourly_stats_session` | hourly_stats(session_id) | セッション別統計検索 |
 | `idx_contributor_stats_session` | contributor_stats(session_id) | セッション別貢献者検索 |

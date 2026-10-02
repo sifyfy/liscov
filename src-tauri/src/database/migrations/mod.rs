@@ -51,6 +51,11 @@ const MIGRATIONS: &[Migration] = &[
         sql: include_str!("006_session_video_id.sql"),
         backfill: Some(backfill_session_video_id),
     },
+    Migration {
+        name: "007_viewer_last_seen_index",
+        sql: include_str!("007_viewer_last_seen_index.sql"),
+        backfill: None,
+    },
 ];
 
 /// Run all pending migrations
@@ -506,5 +511,28 @@ mod tests {
             let expected = url.map(|_| "dQw4w9WgXcQ");
             assert_eq!(video_id.as_deref(), expected, "{id}");
         }
+    }
+
+    // 08_database.md インデックス一覧: 視聴者一覧（配信者ごと・最近アクティブな順）はインデックスで並べる
+    #[test]
+    fn viewer_list_uses_last_seen_index() {
+        let conn = Connection::open_in_memory().unwrap();
+        run_migrations(&conn).unwrap();
+
+        let plan: Vec<String> = conn
+            .prepare(
+                "EXPLAIN QUERY PLAN
+                 SELECT id FROM viewer_profiles
+                 WHERE broadcaster_channel_id = ?1
+                 ORDER BY last_seen DESC LIMIT 50",
+            )
+            .unwrap()
+            .query_map(["UC_bc"], |row| row.get::<_, String>(3))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let plan = plan.join(" / ");
+        assert!(plan.contains("idx_viewer_profiles_last_seen"), "{plan}");
+        assert!(!plan.contains("TEMP B-TREE"), "{plan}");
     }
 }

@@ -307,6 +307,13 @@ pub struct BroadcasterChannel {
 - **部分一致**: `LIKE "%{検索文字}%"`
 - **大文字小文字**: 区別なし
 - **日本語**: 完全対応（UTF-8）
+- **記号**: `%`・`_`・`\` は文字そのものとして探す（LIKE のワイルドカードにしない）
+
+| 検索文字 | 見つかる | 見つからない |
+|---------|---------|-------------|
+| `a_b` | `a_b`、`xa_bx` | `axb` |
+| `50%` | `50%off` | `500` |
+| `\` | `a\b` | `ab` |
 
 ### SQL
 
@@ -318,8 +325,8 @@ SELECT vp.id, vp.broadcaster_channel_id, vp.channel_id, vp.display_name,
 FROM viewer_profiles vp
 LEFT JOIN viewer_custom_info vci ON vp.id = vci.viewer_profile_id
 WHERE vp.broadcaster_channel_id = ?1
-  AND (vp.display_name LIKE ?2 OR vci.reading LIKE ?2 OR vci.notes LIKE ?2)
-ORDER BY vp.message_count DESC
+  AND (vp.display_name LIKE ?2 ESCAPE '\' OR vci.reading LIKE ?2 ESCAPE '\' OR vci.notes LIKE ?2 ESCAPE '\')
+ORDER BY vp.last_seen DESC
 LIMIT ?3 OFFSET ?4
 ```
 
