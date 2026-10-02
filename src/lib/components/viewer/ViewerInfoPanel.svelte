@@ -3,6 +3,7 @@
   import type { ChatMessage } from '$lib/types';
   import { chatStore } from '$lib/stores';
   import { formatTimestamp } from '$lib/utils/format';
+  import { messageKey } from '$lib/utils/message-key';
 
   interface Props {
     viewer: {
@@ -225,8 +226,8 @@
         投稿されたコメント ({viewerMessages.length}件)
       </h3>
       <div class="flex-1 overflow-y-auto space-y-2">
-        {#each [...viewerMessages].reverse() as message (message.id)}
-          {@const isClicked = message.id === viewer.message.id}
+        {#each [...viewerMessages].reverse() as message (messageKey(message))}
+          {@const isClicked = messageKey(message) === messageKey(viewer.message)}
           {@const badge = formatMessageType(message)}
           <button
             class="w-full text-left p-3 rounded-lg cursor-pointer transition-colors"

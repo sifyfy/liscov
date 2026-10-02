@@ -12,6 +12,7 @@ import type {
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import * as chatApi from '$lib/tauri/chat';
 import { getConnectionColor } from '$lib/utils/connection-colors';
+import { messageKey, type MessageKey } from '$lib/utils/message-key';
 import { applyReactionUpdate, emptyReactionMeter, restoreReactionMeter } from '$lib/utils/reactions';
 import { configStore } from './config.svelte';
 
@@ -48,7 +49,7 @@ function createChatStore() {
   let scrollToLatestTrigger = $state(0); // インクリメントでスクロールをトリガー
 
   // O(1)検索のための重複チェック用セット（複合キー: connection_id:message_id）
-  let messageIds = new SvelteSet<string>();
+  let messageIds = new SvelteSet<MessageKey>();
 
   // O(1)ビューワーメッセージ検索のためのチャンネルIDインデックス
   let messagesByChannel = new SvelteMap<string, ChatMessage[]>();
@@ -108,9 +109,7 @@ function createChatStore() {
     if (pendingMessages.length === 0) return;
 
     for (const msg of pendingMessages) {
-      // 複合キー（connection_id:message_id）で重複排除
-      const key = `${msg.connection_id}:${msg.id}`;
-      messageIds.add(key);
+      messageIds.add(messageKey(msg));
       // チャンネルインデックスを更新
       const arr = messagesByChannel.get(msg.channel_id);
       if (arr) arr.push(msg);
@@ -122,9 +121,9 @@ function createChatStore() {
   }
 
   function addMessage(message: ChatMessage): void {
-    // 複合キー（connection_id:message_id）でO(1)重複チェック
-    const key = `${message.connection_id}:${message.id}`;
-    if (messageIds.has(key) || pendingMessages.some((m) => `${m.connection_id}:${m.id}` === key)) {
+    // 複合キー（connection_id:message_id）で重複チェック
+    const key = messageKey(message);
+    if (messageIds.has(key) || pendingMessages.some((m) => messageKey(m) === key)) {
       return;
     }
 
