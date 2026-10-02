@@ -44,6 +44,15 @@ impl Default for SaveConfig {
 }
 
 impl SaveConfig {
+    /// 設定の更新時に検証する（05_raw_response.md 設定の変更）
+    pub fn validate(&self) -> Result<(), String> {
+        validate_file_path(&self.file_path)?;
+        if self.max_file_size_mb == 0 {
+            return Err("max_file_size_mb は 1 以上にしてください".to_string());
+        }
+        Ok(())
+    }
+
     /// 書き込み用に file_path を検証・解決した設定を返す（05_raw_response.md パス解決）
     pub fn resolved_for_write(&self, data_dir: &Path) -> Result<SaveConfig, String> {
         validate_file_path(&self.file_path)?;
@@ -54,6 +63,20 @@ impl SaveConfig {
             ..self.clone()
         })
     }
+}
+
+/// バックアップの命名規則 `{stem}_{YYYYMMDD}_{HHMMSS}.{ext}` に合うか（05_raw_response.md バックアップ削除）
+fn is_backup_name(filename: &str, stem: &str, ext: &str) -> bool {
+    let timestamp = filename
+        .strip_prefix(stem)
+        .and_then(|rest| rest.strip_prefix('_'))
+        .and_then(|rest| rest.strip_suffix(ext))
+        .and_then(|rest| rest.strip_suffix('.'));
+    let Some(timestamp) = timestamp else {
+        return false;
+    };
+    let is_digits = |s: &str, len: usize| s.len() == len && s.bytes().all(|b| b.is_ascii_digit());
+    matches!(timestamp.split_once('_'), Some((date, time)) if is_digits(date, 8) && is_digits(time, 6))
 }
 
 /// 保存先パスを解決する。相対パスは data_dir 基準、絶対パスはそのまま。
@@ -136,8 +159,14 @@ impl RawResponseSaver {
 
         {
             let _guard = WRITE_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+            // ローテーションに失敗しても、その回のレスポンスは今のファイルに書く（次の書き込みで再び試みる）
             if self.config.enable_rotation {
-                self.check_and_rotate_file()?;
+                if let Err(e) = self.check_and_rotate_file() {
+                    tracing::error!(
+                        "生レスポンスのローテーションに失敗（今のファイルに追記を続ける）: {:#}",
+                        e
+                    );
+                }
             }
             self.append_to_file(&json_line)?;
         }
@@ -152,6 +181,9 @@ impl RawResponseSaver {
 
     /// ファイルに 1 行（改行込み）を追記する。1 回の write_all で書き、行の途中で他の書き込みが挟まらないようにする
     fn append_to_file(&self, line: &str) -> Result<()> {
+        if let Some(parent) = Path::new(&self.config.file_path).parent() {
+            std::fs::create_dir_all(parent).context("Failed to create raw response directory")?;
+        }
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -168,8 +200,9 @@ impl RawResponseSaver {
     fn check_and_rotate_file(&self) -> Result<()> {
         let file_path = Path::new(&self.config.file_path);
 
-        // ファイルが存在しない場合は何もしない
-        if !file_path.exists() {
+        // 0 はローテーションしない（毎回ローテーションして記録がバックアップ上限から押し出されるのを防ぐ）
+        // ファイルが存在しない場合も何もしない
+        if self.config.max_file_size_mb == 0 || !file_path.exists() {
             return Ok(());
         }
 
@@ -244,10 +277,7 @@ impl RawResponseSaver {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if let Some(filename) = path.file_name().and_then(|s| s.to_str()) {
-                    // パターンマッチング: {stem}_{timestamp}.{ext}
-                    if filename.starts_with(&format!("{}_", file_stem))
-                        && filename.ends_with(&format!(".{}", file_ext))
-                    {
+                    if is_backup_name(filename, file_stem, file_ext) {
                         if let Ok(meta) = entry.metadata() {
                             if let Ok(created) = meta.created() {
                                 backup_files.push((path, created));
@@ -817,5 +847,121 @@ mod tests {
             "Expected at most 3 backups, got {}",
             backup_count
         );
+    }
+
+    // ========================================================================
+    // 書き込みの失敗に強くする (05_raw_response.md: 保存動作)
+    // ========================================================================
+
+    fn backup_names(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|name| name.starts_with("responses_") && name.ends_with(".ndjson"))
+            .collect();
+        names.sort();
+        names
+    }
+
+    fn write_large_file(path: &Path) {
+        let mut file = fs::File::create(path).unwrap();
+        let line = "x".repeat(1024);
+        for _ in 0..1100 {
+            writeln!(file, "{}", line).unwrap();
+        }
+    }
+
+    fn rotating_config(file_path: &Path, max_file_size_mb: u64) -> SaveConfig {
+        SaveConfig {
+            enabled: true,
+            file_path: file_path.to_string_lossy().to_string(),
+            max_file_size_mb,
+            enable_rotation: true,
+            max_backup_files: 1,
+        }
+    }
+
+    // spec: 保存先のフォルダが無い → フォルダを作ってから書く
+    #[tokio::test]
+    async fn save_creates_missing_parent_dir() {
+        let dir = temp_dir_for_test("missing_parent");
+        let file_path = dir.join("liscov").join("raw.ndjson");
+
+        let saver = RawResponseSaver::new(rotating_config(&file_path, 100));
+        saver.save_response(r#"{"actions": []}"#).await.unwrap();
+
+        let content = fs::read_to_string(&file_path).unwrap();
+        assert_eq!(content.lines().count(), 1);
+    }
+
+    // spec: ローテーションに失敗（他のアプリが削除不可で開いている）→ 今のファイルにそのまま追記する
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn rotation_failure_still_appends() {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_SHARE_READ: u32 = 0x1;
+        const FILE_SHARE_WRITE: u32 = 0x2;
+
+        let dir = temp_dir_for_test("rotation_failure");
+        let file_path = dir.join("responses.ndjson");
+        write_large_file(&file_path);
+        let lines_before = fs::read_to_string(&file_path).unwrap().lines().count();
+
+        // 読み書きは共有するが削除（リネーム）は許さない開き方
+        let _holder = OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .open(&file_path)
+            .unwrap();
+
+        let saver = RawResponseSaver::new(rotating_config(&file_path, 1));
+        saver.save_response(r#"{"kept": true}"#).await.unwrap();
+
+        let content = fs::read_to_string(&file_path).unwrap();
+        assert_eq!(content.lines().count(), lines_before + 1);
+        assert!(content.lines().last().unwrap().contains("\"kept\""));
+        assert!(backup_names(&dir).is_empty());
+    }
+
+    // spec: config.toml の max_file_size_mb が 0 → ローテーションせずに追記する
+    #[tokio::test]
+    async fn zero_max_file_size_does_not_rotate() {
+        let dir = temp_dir_for_test("zero_max_size");
+        let file_path = dir.join("responses.ndjson");
+
+        let saver = RawResponseSaver::new(rotating_config(&file_path, 0));
+        for i in 0..3 {
+            saver
+                .save_response(&format!(r#"{{"n": {}}}"#, i))
+                .await
+                .unwrap();
+        }
+
+        let content = fs::read_to_string(&file_path).unwrap();
+        assert_eq!(content.lines().count(), 3);
+        assert!(backup_names(&dir).is_empty());
+    }
+
+    // spec: 命名規則に合わない似た名前のファイル（例: raw_responses_manual.ndjson）は数えず、消さない
+    #[tokio::test]
+    async fn cleanup_keeps_files_not_matching_backup_naming() {
+        let dir = temp_dir_for_test("cleanup_naming");
+        let file_path = dir.join("responses.ndjson");
+        fs::write(dir.join("responses_manual.ndjson"), "keep").unwrap();
+        fs::write(dir.join("responses_20250101_1200.ndjson"), "keep").unwrap();
+        fs::write(dir.join("responses_20250101_000000.ndjson"), "old").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        write_large_file(&file_path);
+
+        // max_backup_files=1: 新しいバックアップ 1 件だけが残り、命名規則に合うもう 1 件が消える
+        let saver = RawResponseSaver::new(rotating_config(&file_path, 1));
+        saver.save_response(r#"{"test": true}"#).await.unwrap();
+
+        let names = backup_names(&dir);
+        assert!(names.contains(&"responses_manual.ndjson".to_string()));
+        assert!(names.contains(&"responses_20250101_1200.ndjson".to_string()));
+        assert!(!names.contains(&"responses_20250101_000000.ndjson".to_string()));
+        assert_eq!(names.len(), 3, "{:?}", names);
     }
 }
