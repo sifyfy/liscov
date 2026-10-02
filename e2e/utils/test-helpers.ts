@@ -662,6 +662,25 @@ export async function setStreamState(state: {
 }
 
 /**
+ * テスト用に起動したアプリだけを強制終了する（終了処理を走らせない。クラッシュ・強制終了の再現用）
+ *
+ * 自分が起動したプロセスの PID だけを止める。名前で止めると本番のアプリまで止めてしまう。
+ */
+export async function forceKillTauriApp(): Promise<void> {
+  if (tauriProcess?.pid) {
+    if (process.platform === 'win32') {
+      try {
+        execSync(`taskkill /F /T /PID ${tauriProcess.pid} 2>nul`, { stdio: 'ignore' });
+      } catch { /* 既に終了していた場合は無視 */ }
+    } else {
+      tauriProcess.kill('SIGKILL');
+    }
+    tauriProcess = null;
+  }
+  await waitForPortFree(9222, 10000);
+}
+
+/**
  * アプリを再起動して新しいブラウザ接続を返す
  */
 export async function restartApp(): Promise<{

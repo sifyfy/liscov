@@ -62,6 +62,37 @@ pub fn end_session(conn: &Connection, session_id: &str) -> Result<()> {
     Ok(())
 }
 
+/// 前回の終了で閉じられなかったセッションを閉じ、閉じた件数を返す（08_database.md セッションライフサイクル）
+///
+/// 起動時、接続がまだ無いうちに呼ぶ。end_time は最後のメッセージを保存した時刻、無ければ start_time。
+pub fn close_unfinished_sessions(conn: &Connection) -> Result<usize> {
+    let ids = conn
+        .prepare("SELECT id FROM sessions WHERE end_time IS NULL")?
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let tx = conn.unchecked_transaction()?;
+    for id in &ids {
+        // created_at は秒単位なので、開始と同じ秒なら開始より前に見える。開始より前にはしない
+        tx.execute(
+            "UPDATE sessions SET end_time = (
+                SELECT CASE
+                    WHEN last.saved_at IS NOT NULL
+                         AND julianday(last.saved_at) > julianday(sessions.start_time)
+                    THEN last.saved_at
+                    ELSE sessions.start_time
+                END
+                FROM (SELECT strftime('%Y-%m-%dT%H:%M:%S+00:00', MAX(created_at)) AS saved_at
+                      FROM messages WHERE session_id = ?1) AS last)
+             WHERE id = ?1",
+            params![id],
+        )?;
+        update_session_stats(&tx, id)?;
+    }
+    tx.commit()?;
+    Ok(ids.len())
+}
+
 /// Update session statistics
 pub fn update_session_stats(conn: &Connection, session_id: &str) -> Result<()> {
     conn.execute(
@@ -1558,6 +1589,72 @@ mod tests {
         let counts = get_in_stream_comment_counts(&conn, video_id).unwrap();
         assert_eq!(counts.get("UC_a"), Some(&3u32));
         assert_eq!(counts.get("UC_b"), Some(&2u32));
+    }
+
+    // 08_database.md セッションライフサイクル: 起動時に残っていたセッションを閉じる（表の例）
+    #[tokio::test]
+    async fn close_unfinished_sessions_follows_spec_examples() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let with_messages = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+        for id in ["m1", "m2"] {
+            save_message(
+                &conn,
+                &with_messages,
+                Some("UC_bc"),
+                &make_text_message(id, "A", "UC_a", "hi"),
+                None,
+            )
+            .unwrap();
+        }
+        let empty = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+        let same_second = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+        save_message(
+            &conn,
+            &same_second,
+            Some("UC_bc"),
+            &make_text_message("m3", "A", "UC_a", "hi"),
+            None,
+        )
+        .unwrap();
+        let closed = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+        conn.execute_batch(&format!(
+            "UPDATE sessions SET start_time = '2026-10-03T10:00:00+00:00' WHERE id = '{with_messages}';
+             UPDATE messages SET created_at = '2026-10-03 10:05:00' WHERE message_id = 'm1';
+             UPDATE messages SET created_at = '2026-10-03 10:42:00' WHERE message_id = 'm2';
+             UPDATE sessions SET start_time = '2026-10-03T11:00:00+00:00' WHERE id = '{empty}';
+             UPDATE sessions SET start_time = '2026-10-03T13:00:00.5+00:00' WHERE id = '{same_second}';
+             UPDATE messages SET created_at = '2026-10-03 13:00:00' WHERE message_id = 'm3';
+             UPDATE sessions SET end_time = '2026-10-03T12:30:00+00:00' WHERE id = '{closed}';"
+        ))
+        .unwrap();
+        let session = |id: &str| -> (Option<String>, i64) {
+            conn.query_row(
+                "SELECT end_time, total_messages FROM sessions WHERE id = ?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap()
+        };
+
+        assert_eq!(close_unfinished_sessions(&conn).unwrap(), 3);
+
+        assert_eq!(
+            session(&with_messages),
+            (Some("2026-10-03T10:42:00+00:00".to_string()), 2)
+        );
+        assert_eq!(
+            session(&empty),
+            (Some("2026-10-03T11:00:00+00:00".to_string()), 0)
+        );
+        assert_eq!(
+            session(&same_second),
+            (Some("2026-10-03T13:00:00.5+00:00".to_string()), 1)
+        );
+        assert_eq!(
+            session(&closed).0.as_deref(),
+            Some("2026-10-03T12:30:00+00:00")
+        );
     }
 
     // 02_chat.md 配信内コメント数: URL の書き方が前回と違っても同じ配信として数える

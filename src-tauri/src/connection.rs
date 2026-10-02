@@ -2,13 +2,18 @@
 
 use crate::core::models::{ChatMode, Platform};
 use serde::{Deserialize, Serialize};
-use tokio::sync::watch;
+use std::collections::HashMap;
+use std::time::Duration;
+use tokio::sync::{RwLock, watch};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use ts_rs::TS;
 
 /// 同時接続数の上限
 pub const MAX_CONNECTIONS: usize = 32;
+
+/// 切断・アプリ終了で監視タスクの終了処理（セッションを閉じる）を待つ上限
+pub const DISCONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// 個別の配信接続を表す
 ///
@@ -61,6 +66,44 @@ impl From<&StreamConnection> for ConnectionInfo {
     }
 }
 
+/// 今ある全接続を止め、監視タスクの終了処理（セッションを閉じる）を最大 `timeout` 待って一覧から消す
+///
+/// 消すのは止めた接続だけ。待っている間に成立した接続は止めずに残す（02_chat.md「多接続」）。
+pub async fn disconnect_all(
+    connections: &RwLock<HashMap<u64, StreamConnection>>,
+    timeout: Duration,
+) {
+    let (ids, handles): (Vec<u64>, Vec<Option<JoinHandle<()>>>) = {
+        let mut connections = connections.write().await;
+        connections
+            .iter_mut()
+            .map(|(id, conn)| {
+                conn.cancellation_token.cancel();
+                (*id, conn.task_handle.take())
+            })
+            .unzip()
+    };
+
+    // 並列に待つ（直列だと N × timeout になるため）
+    let waits = ids
+        .iter()
+        .zip(handles)
+        .filter_map(|(id, handle)| handle.map(|handle| (*id, handle)))
+        .map(|(id, handle)| async move {
+            match tokio::time::timeout(timeout, handle).await {
+                Ok(Ok(())) => tracing::debug!("disconnect_all: task {} completed", id),
+                Ok(Err(e)) => tracing::warn!("disconnect_all: task {} panicked: {}", id, e),
+                Err(_) => tracing::warn!("disconnect_all: task {} timed out", id),
+            }
+        });
+    futures_util::future::join_all(waits).await;
+
+    let mut connections = connections.write().await;
+    for id in &ids {
+        connections.remove(id);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -107,6 +150,37 @@ mod tests {
 
         let info = ConnectionInfo::from(&conn);
         assert!(info.is_cancelling);
+    }
+
+    // 02_chat.md 多接続: 全切断は押した時点の接続だけを切り、終了処理を待つ。切断の途中で成立した接続は残る
+    #[tokio::test]
+    async fn disconnect_all_keeps_connection_established_during_disconnect() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let connections: Arc<RwLock<HashMap<u64, StreamConnection>>> = Arc::default();
+        let finished = Arc::new(AtomicBool::new(false));
+        let mut first = make_connection(1);
+        first.task_handle = Some({
+            let token = first.cancellation_token.clone();
+            let connections = Arc::clone(&connections);
+            let finished = Arc::clone(&finished);
+            tokio::spawn(async move {
+                token.cancelled().await;
+                // 切断を待っている間に別の接続が成立した
+                connections.write().await.insert(2, make_connection(2));
+                // 監視タスクの終了処理（finish_session）まで終わった
+                finished.store(true, Ordering::SeqCst);
+            })
+        });
+        connections.write().await.insert(1, first);
+
+        disconnect_all(&connections, std::time::Duration::from_secs(1)).await;
+
+        assert!(finished.load(Ordering::SeqCst), "終了処理を待たずに戻った");
+        let remaining = connections.read().await;
+        assert_eq!(remaining.keys().copied().collect::<Vec<_>>(), vec![2]);
+        assert!(!remaining[&2].cancellation_token.is_cancelled());
     }
 
     #[test]

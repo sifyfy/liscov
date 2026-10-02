@@ -3,7 +3,9 @@
 use crate::AppState;
 use crate::commands::auth;
 use crate::commands::config::ConfigState;
-use crate::connection::{ConnectionInfo, MAX_CONNECTIONS, StreamConnection};
+use crate::connection::{
+    ConnectionInfo, DISCONNECT_TIMEOUT, MAX_CONNECTIONS, StreamConnection, disconnect_all,
+};
 use crate::core::api::InnerTubeClient;
 use crate::core::chat_runtime::{MonitoringDeps, run_monitoring_loop};
 use crate::core::models::{
@@ -531,8 +533,7 @@ pub async fn disconnect_stream(
 
     // JoinHandle を待機（タイムアウト付き）
     if let Some(handle) = task_handle {
-        let timeout = std::time::Duration::from_secs(5);
-        match tokio::time::timeout(timeout, handle).await {
+        match tokio::time::timeout(DISCONNECT_TIMEOUT, handle).await {
             Ok(Ok(())) => tracing::debug!("disconnect_stream: task {} completed", connection_id),
             Ok(Err(e)) => {
                 tracing::warn!("disconnect_stream: task {} panicked: {}", connection_id, e)
@@ -554,43 +555,7 @@ pub async fn disconnect_stream(
 #[tauri::command]
 pub async fn disconnect_all_streams(state: State<'_, AppState>) -> Result<(), CommandError> {
     tracing::info!("disconnect_all_streams called");
-
-    // State は Clone でないため Arc を直接操作する
-    let connections_arc = Arc::clone(&state.connections);
-
-    // 全接続のトークンとハンドルを収集してキャンセル
-    let handles: Vec<(u64, tokio::task::JoinHandle<()>)> = {
-        let mut connections = connections_arc.write().await;
-        let mut handles = Vec::new();
-        for (id, conn) in connections.iter_mut() {
-            conn.cancellation_token.cancel();
-            if let Some(handle) = conn.task_handle.take() {
-                handles.push((*id, handle));
-            }
-        }
-        handles
-    };
-
-    // 全タスクを並列待機（直列だと N × timeout になるため）
-    let timeout = std::time::Duration::from_secs(5);
-    let futures: Vec<_> = handles
-        .into_iter()
-        .map(|(id, handle)| async move {
-            match tokio::time::timeout(timeout, handle).await {
-                Ok(Ok(())) => tracing::debug!("disconnect_all: task {} completed", id),
-                Ok(Err(e)) => tracing::warn!("disconnect_all: task {} panicked: {}", id, e),
-                Err(_) => tracing::warn!("disconnect_all: task {} timed out", id),
-            }
-        })
-        .collect();
-    futures_util::future::join_all(futures).await;
-
-    // connections マップをクリア
-    {
-        let mut connections = connections_arc.write().await;
-        connections.clear();
-    }
-
+    disconnect_all(&state.connections, DISCONNECT_TIMEOUT).await;
     Ok(())
 }
 

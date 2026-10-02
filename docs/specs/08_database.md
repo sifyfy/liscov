@@ -14,6 +14,18 @@
 | メッセージ受信 | messagesテーブルにINSERT + viewer_profilesをUPSERT |
 | ライブリアクションの更新を受信 | reactionsテーブルに絵文字ごとに INSERT OR IGNORE（0件の更新は保存しない） |
 | 配信から切断 | sessionsテーブルのend_timeを更新、統計（total_messages, total_revenue）を最終集計 |
+| アプリを終了 | 接続中の全接続を切断と同じく閉じる（end_time と統計）。閉じ終わるのを最大5秒待つ |
+| 起動時に end_time が NULL のセッションがある（前回の強制終了・クラッシュ・閉じ終わる前の終了） | 前回のアプリは動いていないので閉じる。end_time は最後のメッセージを保存した時刻（`messages.created_at` の最大）、メッセージが無ければ start_time。ただし start_time より前にはしない（created_at は秒単位なので、接続直後に止まると開始より前に見える）。統計も集計する |
+
+起動時の回収は、同じデータディレクトリを同時に 1 つのアプリしか開かない前提で行う
+（2 つ目を起動すると、1 つ目の接続中のセッションも閉じたことになる。1 つ目が切断したときに end_time は付け直される）。
+
+| 起動時に残っていたセッション（例） | 閉じたあと |
+|------|------|
+| start 10:00、メッセージを 10:05・10:42 に保存 | end_time = 10:42、total_messages = 2 |
+| start 11:00、メッセージ無し | end_time = 11:00、total_messages = 0 |
+| start 13:00:00.5、メッセージを 13:00:00 に保存（同じ秒） | end_time = start_time（13:00:00.5）、total_messages = 1 |
+| end_time が既に入っている | 変えない |
 
 ### メッセージ重複排除
 

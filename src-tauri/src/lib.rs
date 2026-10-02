@@ -267,8 +267,15 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app_handle, event| {
             if let tauri::RunEvent::ExitRequested { .. } = event {
-                // Kill auto-launched TTS processes on exit
                 let state = app_handle.state::<AppState>();
+
+                // 接続中のセッションを切断と同じく閉じる（08_database.md セッションライフサイクル）
+                let connections = state.connections.clone();
+                tauri::async_runtime::block_on(async move {
+                    connection::disconnect_all(&connections, connection::DISCONNECT_TIMEOUT).await;
+                });
+
+                // Kill auto-launched TTS processes on exit
                 let tts_manager = state.tts_manager.clone();
                 let tts_process_manager = state.tts_process_manager.clone();
 

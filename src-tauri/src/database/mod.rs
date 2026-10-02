@@ -38,6 +38,13 @@ impl Database {
         // Run migrations
         migrations::run_migrations(&conn)?;
 
+        // 前回の強制終了などで閉じられなかったセッションを閉じる（起動を止めるほどの失敗ではない）
+        match crud::close_unfinished_sessions(&conn) {
+            Ok(0) => {}
+            Ok(n) => tracing::info!("前回閉じられなかったセッションを {} 件閉じた", n),
+            Err(e) => tracing::warn!("閉じられなかったセッションの回収に失敗: {:#}", e),
+        }
+
         tracing::info!("Database initialized at {:?}", path);
 
         Ok(Self {
