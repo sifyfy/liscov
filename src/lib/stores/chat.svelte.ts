@@ -124,6 +124,8 @@ function createChatStore() {
   const BATCH_DELAY_MS = 50; // 50ms以内のメッセージをバッチ処理
 
   function flushPendingMessages(): void {
+    // 先に戻す。空のまま戻さずに抜けると、次のメッセージからフラッシュが予約されなくなる
+    batchTimeout = null;
     if (pendingMessages.length === 0) return;
 
     // チャンネルインデックスを更新（視聴者ごとに 1 回だけ差し替える）
@@ -133,7 +135,6 @@ function createChatStore() {
     }
     messages = [...messages, ...pendingMessages];
     pendingMessages = [];
-    batchTimeout = null;
   }
 
   function addMessage(message: ChatMessage): void {

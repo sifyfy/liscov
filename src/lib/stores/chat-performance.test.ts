@@ -252,6 +252,18 @@ describe('chatStore パフォーマンス最適化', () => {
 	});
 
 	// spec: 02_chat.md 実装詳細 — フィルタが変わらない間は増えた分だけ判定する。結果は全件を判定したときと同じ
+	// spec: 02_chat.md「クリア」— クリアしたあとに届いたメッセージは一覧に出る
+	describe('バッチ待ちの間のクリア', () => {
+		it('メッセージが届いて一覧に足される前にクリアしても、そのあとのメッセージは一覧に出る', () => {
+			emitMessage(createMessage('c1'));
+			chatStore.clearMessages();
+			vi.advanceTimersByTime(50);
+
+			addAndFlush([createMessage('c2')]);
+			expect(chatStore.messages.map((m) => m.id)).toEqual(['c2']);
+		});
+	});
+
 	describe('フィルタの差分適用', () => {
 		const ids = () => chatStore.filteredMessages.map((m) => m.id);
 
