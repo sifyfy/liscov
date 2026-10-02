@@ -192,18 +192,8 @@ pub async fn tts_update_config(
     state: State<'_, AppState>,
     config: TtsConfigDto,
 ) -> Result<(), CommandError> {
-    let was_enabled = state.tts_manager.get_config().await.enabled;
-    let will_be_enabled = config.enabled;
-
+    // 保存後の enabled に合わせた開始・停止も update_config が行う（04_tts.md「自動開始」）
     state.tts_manager.update_config(config.into()).await;
-
-    // Start/stop processing based on enabled state change
-    match decide_processing_action(was_enabled, will_be_enabled) {
-        Some(ProcessingAction::Start) => state.tts_manager.start_processing().await,
-        Some(ProcessingAction::Stop) => state.tts_manager.stop_processing().await,
-        None => {}
-    }
-
     Ok(())
 }
 
@@ -278,27 +268,6 @@ pub async fn tts_get_status(state: State<'_, AppState>) -> Result<TtsStatus, Com
 pub struct TtsLaunchStatus {
     pub bouyomichan_launched: bool,
     pub voicevox_launched: bool,
-}
-
-/// TTS処理の有効/無効切り替えアクション
-#[derive(Debug, PartialEq)]
-pub(crate) enum ProcessingAction {
-    Start,
-    Stop,
-}
-
-/// enabled状態の変化からProcessingActionを決定する
-pub(crate) fn decide_processing_action(
-    was_enabled: bool,
-    will_be_enabled: bool,
-) -> Option<ProcessingAction> {
-    if !was_enabled && will_be_enabled {
-        Some(ProcessingAction::Start)
-    } else if was_enabled && !will_be_enabled {
-        Some(ProcessingAction::Stop)
-    } else {
-        None
-    }
 }
 
 /// バックエンド文字列をTtsBackendTypeに変換する
@@ -570,36 +539,6 @@ mod tests {
     #[test]
     fn parse_tts_priority_unknown_returns_normal() {
         assert_eq!(parse_tts_priority(Some("unknown")), TtsPriority::Normal);
-    }
-
-    // ========================================================================
-    // decide_processing_action テスト（enabled変化→ProcessingAction決定）
-    // ========================================================================
-
-    #[test]
-    fn decide_processing_action_disabled_to_enabled_starts() {
-        assert_eq!(
-            decide_processing_action(false, true),
-            Some(ProcessingAction::Start)
-        );
-    }
-
-    #[test]
-    fn decide_processing_action_enabled_to_disabled_stops() {
-        assert_eq!(
-            decide_processing_action(true, false),
-            Some(ProcessingAction::Stop)
-        );
-    }
-
-    #[test]
-    fn decide_processing_action_both_disabled_returns_none() {
-        assert_eq!(decide_processing_action(false, false), None);
-    }
-
-    #[test]
-    fn decide_processing_action_both_enabled_returns_none() {
-        assert_eq!(decide_processing_action(true, true), None);
     }
 
     #[test]

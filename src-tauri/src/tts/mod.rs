@@ -11,7 +11,8 @@ use crate::core::models::GiftDetails;
 use regex::Regex;
 use std::collections::VecDeque;
 use std::sync::{Arc, LazyLock};
-use tokio::sync::{Mutex, RwLock, mpsc};
+use tokio::sync::{Mutex, RwLock};
+use tokio_util::sync::CancellationToken;
 
 pub use backends::{BouyomichanBackend, TtsBackend, TtsError, VoicevoxBackend};
 pub use config::{BouyomichanConfig, TtsBackendType, TtsConfig, VoicevoxConfig};
@@ -43,14 +44,51 @@ pub struct TtsQueueItem {
     pub message_id: Option<String>,
 }
 
+/// 設定の保存でキュー処理をどうするか
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProcessingAction {
+    Start,
+    Stop,
+}
+
+/// キュー処理が動いているかと保存後の enabled から、開始・停止を決める（04_tts.md「自動開始」）
+pub(crate) fn decide_processing_action(running: bool, enabled: bool) -> Option<ProcessingAction> {
+    match (running, enabled) {
+        (false, true) => Some(ProcessingAction::Start),
+        (true, false) => Some(ProcessingAction::Stop),
+        _ => None,
+    }
+}
+
+/// 動いているキュー処理タスク
+struct ProcessingTask {
+    cancel: CancellationToken,
+    handle: tokio::task::JoinHandle<()>,
+}
+
+impl ProcessingTask {
+    /// 終わっていなければ動いている。panic で終わったものは動いていない扱い（04_tts.md）
+    fn is_running(&self) -> bool {
+        !self.handle.is_finished()
+    }
+
+    /// 止めて、終わるまで待つ（読み上げ中の future も捨てる）
+    async fn stop(self) {
+        self.cancel.cancel();
+        if let Err(e) = self.handle.await {
+            log::error!("TTS queue processing ended abnormally: {}", e);
+        }
+    }
+}
+
 /// TTS Manager handles TTS operations
 pub struct TtsManager {
     config: Arc<RwLock<TtsConfig>>,
     /// 使うときは `current_backend` で Arc を取り出し、ロックを握ったまま読み上げない（04_tts.md）
     backend: Arc<RwLock<Option<Arc<dyn TtsBackend>>>>,
     queue: Arc<Mutex<VecDeque<TtsQueueItem>>>,
-    is_processing: Arc<RwLock<bool>>,
-    shutdown_tx: Arc<Mutex<Option<mpsc::Sender<()>>>>,
+    /// キュー処理タスク。開始・停止・設定の差し替えはこのロックの下で 1 つずつ行う
+    processing: Mutex<Option<ProcessingTask>>,
 }
 
 impl TtsManager {
@@ -67,23 +105,36 @@ impl TtsManager {
             config: Arc::new(RwLock::new(config)),
             backend: Arc::new(RwLock::new(backend.map(Arc::from))),
             queue: Arc::new(Mutex::new(VecDeque::new())),
-            is_processing: Arc::new(RwLock::new(false)),
-            shutdown_tx: Arc::new(Mutex::new(None)),
+            processing: Mutex::new(None),
         }
     }
 
-    /// Update configuration and save to file
+    /// 設定を保存して差し替え、保存後の enabled に合わせてキュー処理を開始・停止する
     pub async fn update_config(&self, config: TtsConfig) {
         // Save to file
         if let Err(e) = config.save() {
             log::error!("Failed to save TTS config: {}", e);
         }
 
+        // 保存が続けて届いても、差し替えと開始・停止が入れ違わないようにする（04_tts.md「自動開始」）
+        let mut task = self.processing.lock().await;
+        let enabled = config.enabled;
         let backend =
             backends::create_backend(&config.backend, &config.bouyomichan, &config.voicevox)
                 .map(Arc::from);
         *self.config.write().await = config;
         *self.backend.write().await = backend;
+
+        let running = task.as_ref().is_some_and(ProcessingTask::is_running);
+        match decide_processing_action(running, enabled) {
+            Some(ProcessingAction::Start) => *task = Some(self.spawn_processing()),
+            Some(ProcessingAction::Stop) => {
+                if let Some(running) = task.take() {
+                    running.stop().await;
+                }
+            }
+            None => {}
+        }
     }
 
     /// 今のバックエンドを取り出す（ロックはすぐ放す）
@@ -182,28 +233,28 @@ impl TtsManager {
 
     /// Start queue processing
     pub async fn start_processing(&self) {
-        let mut is_processing = self.is_processing.write().await;
-        if *is_processing {
+        let mut task = self.processing.lock().await;
+        if task.as_ref().is_some_and(ProcessingTask::is_running) {
             log::warn!("TTS processing already running");
             return;
         }
-        *is_processing = true;
-        drop(is_processing);
+        *task = Some(self.spawn_processing());
+    }
 
-        let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
-        *self.shutdown_tx.lock().await = Some(shutdown_tx);
-
+    /// キュー処理タスクを起動する（呼び出し側が `processing` のロックを持つ）
+    fn spawn_processing(&self) -> ProcessingTask {
+        let cancel = CancellationToken::new();
         let queue = Arc::clone(&self.queue);
         let backend = Arc::clone(&self.backend);
         let config = Arc::clone(&self.config);
-        let is_processing = Arc::clone(&self.is_processing);
+        let token = cancel.clone();
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             log::info!("TTS queue processing started");
 
             loop {
                 tokio::select! {
-                    _ = shutdown_rx.recv() => {
+                    _ = token.cancelled() => {
                         log::info!("TTS queue processing shutdown requested");
                         break;
                     }
@@ -259,15 +310,15 @@ impl TtsManager {
                 }
             }
 
-            *is_processing.write().await = false;
             log::info!("TTS queue processing stopped");
         });
+        ProcessingTask { cancel, handle }
     }
 
-    /// Stop queue processing
+    /// Stop queue processing（止まるまで待つ）
     pub async fn stop_processing(&self) {
-        if let Some(tx) = self.shutdown_tx.lock().await.take() {
-            let _ = tx.send(()).await;
+        if let Some(task) = self.processing.lock().await.take() {
+            task.stop().await;
         }
     }
 
@@ -283,7 +334,11 @@ impl TtsManager {
 
     /// Check if processing is running
     pub async fn is_processing(&self) -> bool {
-        *self.is_processing.read().await
+        self.processing
+            .lock()
+            .await
+            .as_ref()
+            .is_some_and(ProcessingTask::is_running)
     }
 
     /// Get backend name
@@ -1495,6 +1550,143 @@ mod tests {
     }
 
     const NOT_BLOCKED: std::time::Duration = std::time::Duration::from_secs(1);
+
+    struct PanickingTtsBackend;
+
+    #[async_trait::async_trait]
+    impl TtsBackend for PanickingTtsBackend {
+        async fn test_connection(&self) -> Result<bool, backends::TtsError> {
+            Ok(true)
+        }
+        async fn speak(&self, _text: &str) -> Result<(), backends::TtsError> {
+            panic!("読み上げ中の panic（テスト）");
+        }
+        fn name(&self) -> &'static str {
+            "Panicking"
+        }
+    }
+
+    fn normal_item(text: &str) -> TtsQueueItem {
+        TtsQueueItem {
+            text: text.to_string(),
+            priority: TtsPriority::Normal,
+            author_name: None,
+            amount: None,
+            in_stream_comment_count: None,
+            message_id: None,
+        }
+    }
+
+    async fn eventually(mut condition: impl AsyncFnMut() -> bool) -> bool {
+        for _ in 0..100 {
+            if condition().await {
+                return true;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        false
+    }
+
+    // 04_tts.md 自動開始: 動いているか × 保存後の enabled
+    #[test]
+    fn decide_processing_action_follows_running_state_and_enabled() {
+        assert_eq!(
+            decide_processing_action(false, true),
+            Some(ProcessingAction::Start)
+        );
+        assert_eq!(
+            decide_processing_action(true, false),
+            Some(ProcessingAction::Stop)
+        );
+        assert_eq!(decide_processing_action(true, true), None);
+        assert_eq!(decide_processing_action(false, false), None);
+    }
+
+    // 04_tts.md キュー処理: 停止の途中で開始しても、停止が終わってから開始し、読み上げが止まったままにならない
+    #[tokio::test]
+    async fn starting_right_after_stopping_keeps_reading() {
+        let mock = MockTtsBackend::connected();
+        let speak_calls = Arc::clone(&mock.speak_calls);
+        let manager = TtsManager::with_backend(
+            TtsConfig {
+                enabled: true,
+                ..TtsConfig::default()
+            },
+            Some(Box::new(mock)),
+        );
+        manager.start_processing().await;
+        manager.stop_processing().await;
+        manager.start_processing().await;
+
+        manager.enqueue(normal_item("再開後")).await;
+
+        assert!(eventually(async || speak_calls.lock().await.len() == 1).await);
+        manager.stop_processing().await;
+    }
+
+    // 04_tts.md キュー処理: 異常終了したら処理中でない扱いになり、再び開始できる
+    #[tokio::test]
+    async fn processing_can_be_restarted_after_panic() {
+        let manager = TtsManager::with_backend(
+            TtsConfig {
+                enabled: true,
+                ..TtsConfig::default()
+            },
+            Some(Box::new(PanickingTtsBackend)),
+        );
+        manager.start_processing().await;
+        manager.enqueue(normal_item("panic させる")).await;
+
+        assert!(
+            eventually(async || !manager.is_processing().await).await,
+            "異常終了しても処理中のまま"
+        );
+        manager.start_processing().await;
+        assert!(manager.is_processing().await);
+        manager.stop_processing().await;
+    }
+
+    // 04_tts.md 自動開始: enabled = true の設定を保存したとき、動いていなければ開始する
+    #[tokio::test]
+    #[serial(liscov_env)]
+    async fn saving_enabled_config_starts_processing_when_not_running() {
+        let manager = TtsManager::with_backend(
+            TtsConfig {
+                enabled: true,
+                ..TtsConfig::default()
+            },
+            None,
+        );
+        assert!(!manager.is_processing().await);
+
+        manager
+            .update_config(TtsConfig {
+                enabled: true,
+                ..TtsConfig::default()
+            })
+            .await;
+
+        assert!(manager.is_processing().await);
+        manager.stop_processing().await;
+    }
+
+    // 04_tts.md 自動開始: enabled = false の設定を保存したとき、動いていれば停止する
+    #[tokio::test]
+    #[serial(liscov_env)]
+    async fn saving_disabled_config_stops_processing() {
+        let manager = TtsManager::with_backend(
+            TtsConfig {
+                enabled: true,
+                ..TtsConfig::default()
+            },
+            None,
+        );
+        manager.start_processing().await;
+
+        manager.update_config(TtsConfig::default()).await;
+
+        assert!(!manager.is_processing().await);
+    }
 
     // 04_tts.md キュー処理: 読み上げ中に設定を保存しても、読み上げの終わりを待たない
     #[tokio::test]
