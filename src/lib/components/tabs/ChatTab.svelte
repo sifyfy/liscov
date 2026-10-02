@@ -1,6 +1,7 @@
 <script lang="ts">
   import { ChatDisplay, ConnectionList, FilterPanel, InputSection, ReactionMeter } from '$lib/components/chat';
   import { chatStore } from '$lib/stores';
+  import ErrorBoundary from '$lib/components/ui/ErrorBoundary.svelte';
 
   // 接続リストパネルの高さ管理
   const MAX_HEIGHT_RATIO = 0.4; // ビューポートの40%まで
@@ -96,6 +97,8 @@
   <FilterPanel />
   <ReactionMeter />
   <div class="flex-1 overflow-hidden">
-    <ChatDisplay />
+    <ErrorBoundary name="チャット一覧">
+      <ChatDisplay />
+    </ErrorBoundary>
   </div>
 </div>
