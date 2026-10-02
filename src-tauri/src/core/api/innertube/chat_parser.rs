@@ -36,6 +36,76 @@ pub fn color_int_to_hex(color: i64) -> String {
     format!("#{:06X}", rgb)
 }
 
+/// 発言者のバッジ（02_chat.md「バッジの種類」）
+#[derive(Default)]
+struct AuthorBadges {
+    badges: Vec<String>,
+    badge_info: Vec<BadgeInfo>,
+    is_member: bool,
+    is_moderator: bool,
+    is_verified: bool,
+}
+
+impl AuthorBadges {
+    /// バッジを入れた MessageMetadata を作る
+    fn into_metadata(
+        self,
+        amount: Option<String>,
+        superchat_colors: Option<SuperChatColors>,
+    ) -> MessageMetadata {
+        MessageMetadata {
+            amount,
+            badges: self.badges,
+            badge_info: self.badge_info,
+            color: None,
+            is_moderator: self.is_moderator,
+            is_verified: self.is_verified,
+            superchat_colors,
+        }
+    }
+}
+
+/// renderer の authorBadges を読む
+///
+/// tooltip は表示言語で変わるので、判定には言語に依らない customThumbnail の有無と icon.iconType を使う。
+fn parse_author_badges(renderer: &Value) -> AuthorBadges {
+    let mut result = AuthorBadges::default();
+    let renderers = renderer
+        .get("authorBadges")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|badge| badge.get("liveChatAuthorBadgeRenderer"));
+    for badge in renderers {
+        let icon_type = badge.pointer("/icon/iconType").and_then(Value::as_str);
+        let badge_type = match (badge.get("customThumbnail").is_some(), icon_type) {
+            (true, _) => "member",
+            (false, Some("MODERATOR")) => "moderator",
+            (false, Some("VERIFIED")) => "verified",
+            (false, Some("OWNER")) => "owner",
+            _ => continue,
+        };
+        match badge_type {
+            "member" => result.is_member = true,
+            "moderator" => result.is_moderator = true,
+            "verified" => result.is_verified = true,
+            _ => {}
+        }
+        let tooltip = badge.get("tooltip").and_then(Value::as_str);
+        result.badges.push(badge_type.to_string());
+        result.badge_info.push(BadgeInfo {
+            badge_type: badge_type.to_string(),
+            label: tooltip.unwrap_or(badge_type).to_string(),
+            tooltip: tooltip.map(str::to_string),
+            icon_url: badge
+                .pointer("/customThumbnail/thumbnails/0/url")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        });
+    }
+    result
+}
+
 /// YouTube API レスポンスから SuperChat の色情報をパースする
 fn parse_superchat_colors(renderer: &Value) -> Option<SuperChatColors> {
     let header_bg = renderer.get("headerBackgroundColor")?.as_i64()?;
@@ -180,18 +250,8 @@ fn parse_text_message(renderer: &Value) -> Option<ChatMessage> {
         .map(|s| s.to_string());
 
     let (content, runs) = parse_message_content(renderer.get("message")?);
-
-    // メンバーバッジ（customThumbnail）の有無でメンバー判定
-    let is_member = renderer
-        .get("authorBadges")
-        .and_then(|v| v.as_array())
-        .map(|badges| {
-            badges.iter().any(|b| {
-                b.pointer("/liveChatAuthorBadgeRenderer/customThumbnail")
-                    .is_some()
-            })
-        })
-        .unwrap_or(false);
+    let badges = parse_author_badges(renderer);
+    let is_member = badges.is_member;
 
     Some(ChatMessage {
         id,
@@ -203,7 +263,7 @@ fn parse_text_message(renderer: &Value) -> Option<ChatMessage> {
         channel_id,
         content,
         runs,
-        metadata: None,
+        metadata: Some(badges.into_metadata(None, None)),
         is_member,
         is_first_time_viewer: false,
         in_stream_comment_count: None,
@@ -245,6 +305,8 @@ fn parse_superchat_message(renderer: &Value) -> Option<ChatMessage> {
 
     // YouTube API から SuperChat の色情報をパース
     let superchat_colors = parse_superchat_colors(renderer);
+    let badges = parse_author_badges(renderer);
+    let is_member = badges.is_member;
 
     Some(ChatMessage {
         id,
@@ -258,16 +320,8 @@ fn parse_superchat_message(renderer: &Value) -> Option<ChatMessage> {
         channel_id,
         content,
         runs,
-        metadata: Some(MessageMetadata {
-            amount: Some(amount),
-            badges: vec![],
-            badge_info: vec![],
-            color: None,
-            is_moderator: false,
-            is_verified: false,
-            superchat_colors,
-        }),
-        is_member: false,
+        metadata: Some(badges.into_metadata(Some(amount), superchat_colors)),
+        is_member,
         is_first_time_viewer: false,
         in_stream_comment_count: None,
     })
@@ -298,6 +352,8 @@ fn parse_supersticker_message(renderer: &Value) -> Option<ChatMessage> {
 
     // YouTube API から SuperSticker の色情報をパース
     let superchat_colors = parse_supersticker_colors(renderer);
+    let badges = parse_author_badges(renderer);
+    let is_member = badges.is_member;
 
     Some(ChatMessage {
         id,
@@ -311,16 +367,8 @@ fn parse_supersticker_message(renderer: &Value) -> Option<ChatMessage> {
         channel_id,
         content: "[Sticker]".to_string(),
         runs: vec![],
-        metadata: Some(MessageMetadata {
-            amount: Some(amount),
-            badges: vec![],
-            badge_info: vec![],
-            color: None,
-            is_moderator: false,
-            is_verified: false,
-            superchat_colors,
-        }),
-        is_member: false,
+        metadata: Some(badges.into_metadata(Some(amount), superchat_colors)),
+        is_member,
         is_first_time_viewer: false,
         in_stream_comment_count: None,
     })
@@ -384,7 +432,7 @@ fn parse_membership_message(renderer: &Value) -> Option<ChatMessage> {
         channel_id,
         content,
         runs: vec![],
-        metadata: None,
+        metadata: Some(parse_author_badges(renderer).into_metadata(None, None)),
         is_member: true,
         is_first_time_viewer: false,
         in_stream_comment_count: None,
@@ -1141,5 +1189,137 @@ mod tests {
         let usec: i64 = msg.timestamp_usec.parse().expect("マイクロ秒文字列");
         assert!(before <= usec && usec <= after);
         assert_eq!(msg.timestamp, format_timestamp(&msg.timestamp_usec));
+    }
+
+    // ========================================================================
+    // バッジ (02_chat.md「バッジの種類」。形は実データの authorBadges)
+    // ========================================================================
+
+    fn member_badge() -> Value {
+        serde_json::json!({"liveChatAuthorBadgeRenderer": {
+            "customThumbnail": {"thumbnails": [
+                {"url": "https://example.com/member16.png"},
+                {"url": "https://example.com/member32.png"}
+            ]},
+            "tooltip": "Member (6 months)",
+            "accessibility": {"accessibilityData": {"label": "Member (6 months)"}}
+        }})
+    }
+
+    fn icon_badge(icon_type: &str, tooltip: &str) -> Value {
+        serde_json::json!({"liveChatAuthorBadgeRenderer": {
+            "icon": {"iconType": icon_type},
+            "tooltip": tooltip,
+            "accessibility": {"accessibilityData": {"label": tooltip}}
+        }})
+    }
+
+    fn renderer_with_badges(kind: &str, badges: Vec<Value>) -> ChatMessage {
+        let mut renderer = serde_json::json!({
+            "id": "badge_msg",
+            "timestampUsec": "1234567890000000",
+            "authorName": {"simpleText": "@viewer"},
+            "authorExternalChannelId": "UC_badge",
+            "message": {"runs": [{"text": "hi"}]},
+            "purchaseAmountText": {"simpleText": "¥500"},
+            "headerBackgroundColor": 4278239141_i64,
+            "authorBadges": badges
+        });
+        if kind == "liveChatMembershipItemRenderer" {
+            renderer["headerSubtext"] = serde_json::json!({"runs": [{"text": "Welcome!"}]});
+        }
+        parse_chat_action(&serde_json::json!({"addChatItemAction": {"item": {kind: renderer}}}))
+            .expect("パースできること")
+    }
+
+    fn text_with_badges(badges: Vec<Value>) -> ChatMessage {
+        renderer_with_badges("liveChatTextMessageRenderer", badges)
+    }
+
+    fn badge_types(msg: &ChatMessage) -> Vec<String> {
+        msg.metadata.as_ref().map(|m| m.badges.clone()).unwrap_or_default()
+    }
+
+    #[test]
+    fn moderator_badge_is_read_from_icon_type() {
+        let msg = text_with_badges(vec![icon_badge("MODERATOR", "Moderator")]);
+        let metadata = msg.metadata.as_ref().unwrap();
+        assert!(metadata.is_moderator);
+        assert!(!metadata.is_verified);
+        assert_eq!(metadata.badges, ["moderator"]);
+        assert_eq!(metadata.badge_info[0].label, "Moderator");
+        assert_eq!(metadata.badge_info[0].tooltip.as_deref(), Some("Moderator"));
+        assert_eq!(metadata.badge_info[0].icon_url, None);
+    }
+
+    #[test]
+    fn verified_badge_is_read_from_icon_type() {
+        let msg = text_with_badges(vec![icon_badge("VERIFIED", "Verified")]);
+        let metadata = msg.metadata.as_ref().unwrap();
+        assert!(metadata.is_verified);
+        assert!(!metadata.is_moderator);
+        assert_eq!(metadata.badges, ["verified"]);
+    }
+
+    #[test]
+    fn member_badge_is_listed_with_first_image() {
+        let msg = text_with_badges(vec![member_badge()]);
+        assert!(msg.is_member);
+        let metadata = msg.metadata.as_ref().unwrap();
+        assert_eq!(metadata.badges, ["member"]);
+        assert_eq!(metadata.badge_info[0].label, "Member (6 months)");
+        assert_eq!(
+            metadata.badge_info[0].icon_url.as_deref(),
+            Some("https://example.com/member16.png")
+        );
+    }
+
+    #[test]
+    fn owner_badge_is_listed_but_is_not_moderator() {
+        let msg = text_with_badges(vec![icon_badge("OWNER", "Owner")]);
+        let metadata = msg.metadata.as_ref().unwrap();
+        assert_eq!(metadata.badges, ["owner"]);
+        assert!(!metadata.is_moderator);
+    }
+
+    #[test]
+    fn several_badges_keep_their_order() {
+        let msg = text_with_badges(vec![icon_badge("MODERATOR", "Moderator"), member_badge()]);
+        assert_eq!(badge_types(&msg), ["moderator", "member"]);
+        assert!(msg.is_member);
+    }
+
+    #[test]
+    fn unknown_badge_is_skipped() {
+        let msg = text_with_badges(vec![icon_badge("SOMETHING_NEW", "New thing")]);
+        assert!(badge_types(&msg).is_empty());
+    }
+
+    #[test]
+    fn superchat_from_member_is_member() {
+        let msg = renderer_with_badges("liveChatPaidMessageRenderer", vec![member_badge()]);
+        assert!(msg.is_member);
+        let metadata = msg.metadata.as_ref().unwrap();
+        assert_eq!(metadata.badges, ["member"]);
+        // 色情報はそのまま残る
+        assert_eq!(
+            metadata.superchat_colors.as_ref().map(|c| c.header_background.as_str()),
+            Some("#00BFA5")
+        );
+    }
+
+    #[test]
+    fn supersticker_from_moderator_is_moderator() {
+        let msg = renderer_with_badges(
+            "liveChatPaidStickerRenderer",
+            vec![icon_badge("MODERATOR", "Moderator")],
+        );
+        assert!(msg.metadata.as_ref().unwrap().is_moderator);
+    }
+
+    #[test]
+    fn membership_message_lists_member_badge() {
+        let msg = renderer_with_badges("liveChatMembershipItemRenderer", vec![member_badge()]);
+        assert_eq!(badge_types(&msg), ["member"]);
     }
 }

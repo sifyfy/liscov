@@ -901,11 +901,19 @@ SuperChatの色情報がある場合はYouTube APIから取得した色を使用
 
 #### バッジの種類
 
-| バッジ | 判定条件 | 表示 |
-|-------|---------|------|
-| メンバー | tooltip含む "メンバー" or "Member" | `var(--member-subtle)` 背景 + `var(--member-accent)` テキスト |
-| モデレーター | tooltip含む "モデレーター" or "Moderator" | `var(--info-subtle)` 背景 + `var(--info)` テキスト |
-| 認証済み | tooltip含む "認証" or "Verified" | `var(--bg-surface-3)` 背景 + `var(--text-secondary)` テキスト |
+バッジは各メッセージの `authorBadges[].liveChatAuthorBadgeRenderer` から読む（テキスト・スーパーチャット・スーパーステッカー・メンバーシップ）。
+判定は tooltip の文言ではなく、言語に依らない `icon.iconType` と `customThumbnail` の有無で行う。
+
+| バッジ | 判定条件 | `badge_type` | 表示 |
+|-------|---------|------|------|
+| メンバー | `customThumbnail` がある（tooltip 例: `Member (6 months)`, `New member`） | `member` | `var(--member-subtle)` 背景 + `var(--member-accent)` テキスト |
+| モデレーター | `icon.iconType == "MODERATOR"` | `moderator` | `var(--info-subtle)` 背景 + `var(--info)` テキスト |
+| 認証済み | `icon.iconType == "VERIFIED"` | `verified` | `var(--bg-surface-3)` 背景 + `var(--text-secondary)` テキスト |
+| 配信者本人 | `icon.iconType == "OWNER"` | `owner` | 表示しない（`badges`・`badge_info` には入れる） |
+
+- `badges` は `badge_type` の並び、`badge_info` は各バッジの `label`（tooltip）・`tooltip`・`image_url`（`customThumbnail` の最初の URL）
+- `is_member`・`is_moderator`・`is_verified` は上の判定と一致させる（スーパーチャット・スーパーステッカーでもメンバーなら `is_member = true`）
+- 上のどれにも当たらないバッジは読み飛ばす
 
 #### バッジ表示優先順位
 

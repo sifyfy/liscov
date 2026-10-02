@@ -269,6 +269,42 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
     });
   });
 
+  test.describe('バッジ (02_chat.md「バッジの種類」)', () => {
+    test('モデレーターのコメントにモデレーターのバッジが表示される', async () => {
+      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await mainPage.locator('button:has-text("開始")').click();
+      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+
+      await addMockMessage({
+        message_type: 'text',
+        author: 'ModUser',
+        content: 'モデレーターのコメント',
+        channel_id: 'UC_moderator_1',
+        is_moderator: true,
+      });
+      await addMockMessage({
+        message_type: 'text',
+        author: 'PlainUser',
+        content: 'ふつうのコメント',
+        channel_id: 'UC_plain_1',
+      });
+
+      const modMessage = mainPage.locator('[data-message-id]').filter({
+        has: mainPage.locator('text=モデレーターのコメント'),
+      }).first();
+      await expect(modMessage.locator('[title="モデレーター"]')).toBeVisible({ timeout: 5000 });
+
+      const plainMessage = mainPage.locator('[data-message-id]').filter({
+        has: mainPage.locator('text=ふつうのコメント'),
+      }).first();
+      await expect(plainMessage).toBeVisible({ timeout: 5000 });
+      await expect(plainMessage.locator('[title="モデレーター"]')).toHaveCount(0);
+
+      await disconnectAndInitialize(mainPage);
+    });
+  });
+
   test.describe('Special Text Patterns', () => {
     test('should display stream title with hashtags correctly', async () => {
       // Set stream title with hashtags

@@ -495,6 +495,8 @@ export async function addMockMessage(message: {
   content: string;
   channel_id?: string;
   is_member?: boolean;
+  /** モデレーターのバッジを付ける */
+  is_moderator?: boolean;
   amount?: string;
   tier?: string;
   milestone_months?: number;

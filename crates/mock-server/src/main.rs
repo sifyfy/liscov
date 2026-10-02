@@ -771,6 +771,9 @@ struct AMR {
     tier: Option<String>,
     #[serde(default)]
     is_member: bool,
+    /// モデレーターのバッジ（実データと同じ icon.iconType = MODERATOR）を付ける
+    #[serde(default)]
+    is_moderator: bool,
     milestone_months: Option<u32>,
     gift_count: Option<u32>,
     /// ギフト（jewel）の画像 URL。実データと同じくスキーム無しを既定にする
@@ -1176,18 +1179,21 @@ fn gen_msg(s: &ServerState, r: &AMR) -> Value {
             .unwrap()
             .as_micros()
     );
-    // Member badge for member messages
-    let member_badge = if r.is_member {
-        json!([{"liveChatAuthorBadgeRenderer":{"customThumbnail":{"thumbnails":[{"url":"https://example.com/member_badge.png"}]},"tooltip":"Member"}}])
-    } else {
-        json!([])
-    };
+    // 発言者のバッジ（形は実データの authorBadges と同じ）
+    let mut badges = Vec::new();
+    if r.is_moderator {
+        badges.push(json!({"liveChatAuthorBadgeRenderer":{"icon":{"iconType":"MODERATOR"},"tooltip":"Moderator"}}));
+    }
+    if r.is_member {
+        badges.push(json!({"liveChatAuthorBadgeRenderer":{"customThumbnail":{"thumbnails":[{"url":"https://example.com/author_badges.png"}]},"tooltip":"Member"}}));
+    }
+    let author_badges = Value::Array(badges);
     match r.message_type.as_str() {
         "superchat" => {
-            json!({"addChatItemAction":{"item":{"liveChatPaidMessageRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":"https://example.com/av.png"}]},"authorExternalChannelId":&r.channel_id,"purchaseAmountText":{"simpleText":r.amount.as_deref().unwrap_or("¥500")},"message":{"runs":[{"text":&r.content}]},"headerBackgroundColor":tier_col(r.tier.as_deref()),"headerTextColor":0xFFFFFF,"bodyBackgroundColor":tier_col(r.tier.as_deref()),"bodyTextColor":0xFFFFFF,"authorBadges":member_badge}}}})
+            json!({"addChatItemAction":{"item":{"liveChatPaidMessageRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":"https://example.com/av.png"}]},"authorExternalChannelId":&r.channel_id,"purchaseAmountText":{"simpleText":r.amount.as_deref().unwrap_or("¥500")},"message":{"runs":[{"text":&r.content}]},"headerBackgroundColor":tier_col(r.tier.as_deref()),"headerTextColor":0xFFFFFF,"bodyBackgroundColor":tier_col(r.tier.as_deref()),"bodyTextColor":0xFFFFFF,"authorBadges":author_badges}}}})
         }
         "supersticker" => {
-            json!({"addChatItemAction":{"item":{"liveChatPaidStickerRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":"https://example.com/av.png"}]},"authorExternalChannelId":&r.channel_id,"purchaseAmountText":{"simpleText":r.amount.as_deref().unwrap_or("¥500")},"sticker":{"thumbnails":[{"url":"https://example.com/sticker.png"}]},"moneyChipBackgroundColor":tier_col(r.tier.as_deref()),"moneyChipTextColor":0xFFFFFF,"authorBadges":member_badge}}}})
+            json!({"addChatItemAction":{"item":{"liveChatPaidStickerRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":"https://example.com/av.png"}]},"authorExternalChannelId":&r.channel_id,"purchaseAmountText":{"simpleText":r.amount.as_deref().unwrap_or("¥500")},"sticker":{"thumbnails":[{"url":"https://example.com/sticker.png"}]},"moneyChipBackgroundColor":tier_col(r.tier.as_deref()),"moneyChipTextColor":0xFFFFFF,"authorBadges":author_badges}}}})
         }
         "membership" => {
             json!({"addChatItemAction":{"item":{"liveChatMembershipItemRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":"https://example.com/av.png"}]},"authorExternalChannelId":&r.channel_id,"headerSubtext":{"runs":[{"text":"Welcome to "},{"text":"Channel"},{"text":"!"}]},"authorBadges":[{"liveChatAuthorBadgeRenderer":{"tooltip":"New member","customThumbnail":{"thumbnails":[{"url":"https://example.com/badge.png"}]}}}]}}}})
@@ -1216,7 +1222,7 @@ fn gen_msg(s: &ServerState, r: &AMR) -> Value {
             json!({"addChatItemAction":{"item":{"liveChatTextMessageRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":"System"},"authorExternalChannelId":"system","message":{"runs":[{"text":&r.content}]}}}}})
         }
         _ => {
-            json!({"addChatItemAction":{"item":{"liveChatTextMessageRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":"https://example.com/av.png"}]},"authorExternalChannelId":&r.channel_id,"message":{"runs":[{"text":&r.content}]},"authorBadges":member_badge}}}})
+            json!({"addChatItemAction":{"item":{"liveChatTextMessageRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":"https://example.com/av.png"}]},"authorExternalChannelId":&r.channel_id,"message":{"runs":[{"text":&r.content}]},"authorBadges":author_badges}}}})
         }
     }
 }

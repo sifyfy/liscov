@@ -418,8 +418,9 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
       expect(result.rowScrollWidth).toBeLessThanOrEqual(result.rowClientWidth + 1);
 
       // 成功条件: 長い名前があってもメンバーバッジは表示され、押し出されない。
-      // バッジの右端がメッセージ枠内に収まっていることで「押し出されない」を実証する
-      const memberBadge = message.getByText('メンバー', { exact: true }).first();
+      // バッジの右端がメッセージ枠内に収まっていることで「押し出されない」を実証する。
+      // メンバーは画像バッジ（authorBadges の customThumbnail）で表示される（02_chat.md「バッジ表示優先順位」）
+      const memberBadge = message.locator('img[alt="Member"]').first();
       await expect(memberBadge).toBeVisible();
       const badgeBox = await memberBadge.boundingBox();
       const messageBox = await message.boundingBox();
