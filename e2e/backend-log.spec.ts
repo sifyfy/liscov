@@ -74,4 +74,13 @@ test.describe('バックエンドのログ (実 Tauri)', () => {
       })
       .toContain('チャット監視タスク開始');
   });
+
+  // 起動直後の DB 初期化（database/mod.rs の tracing::info!）もログに残る。
+  // beforeAll でテストデータを消しているので、マイグレーションも最初から適用される
+  test('起動時のデータベース初期化とマイグレーションのログが残る', async () => {
+    const logFile = path.join(getTestAppDataDir(), 'logs', 'liscov.log');
+    const log = fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8') : '';
+    expect(log).toContain('Applying migration: 001_initial');
+    expect(log).toContain('Database initialized');
+  });
 });

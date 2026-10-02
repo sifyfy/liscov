@@ -136,8 +136,6 @@ fn log_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .manage(AppState::new())
-        .manage(ConfigState::load_from_file())
         .plugin(log_plugin())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
@@ -147,13 +145,10 @@ pub fn run() {
                 .build(),
         )
         .setup(|app| {
-            // AppState はロガーより先に作られるので、DB 初期化の失敗はここで書き出す
-            if let Some(e) = &app.state::<AppState>().database_init_error {
-                log::error!(
-                    "データベースの初期化に失敗したため、保存せずに動作する: {}",
-                    e
-                );
-            }
+            // ロガーはプラグインの初期化で準備される。DB 初期化・設定読み込みのログを残すため、
+            // ステートはここ（プラグインの後）で作る
+            app.manage(AppState::new());
+            app.manage(ConfigState::load_from_file());
 
             // Show window after state restoration (window starts hidden)
             let window = app
