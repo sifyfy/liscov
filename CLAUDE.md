@@ -61,7 +61,7 @@
 | `commands/tts.rs` | `docs/specs/04_tts.md` |
 | `commands/raw_response.rs` | `docs/specs/05_raw_response.md` |
 | `commands/viewer.rs` | `docs/specs/06_viewer.md` |
-| `commands/analytics.rs` | `docs/specs/07_revenue.md` |
+| `commands/analytics.rs`, `core/analytics/` | `docs/specs/07_revenue.md` |
 | `commands/database.rs` | `docs/specs/08_database.md` |
 | `commands/config.rs` | `docs/specs/09_config.md` |
 | （コマンドなし: `tauri-plugin-window-state` が自動管理） | `docs/specs/10_window_state.md` |

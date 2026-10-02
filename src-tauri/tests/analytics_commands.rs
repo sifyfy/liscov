@@ -5,7 +5,7 @@
 
 mod common;
 
-use app_lib::commands::analytics::RevenueAnalytics;
+use app_lib::core::analytics::RevenueAnalytics;
 use app_lib::core::{ChatMessage, MessageType};
 use app_lib::database::{self, Database};
 use app_lib::state::AppState;
