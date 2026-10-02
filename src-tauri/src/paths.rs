@@ -52,11 +52,6 @@ pub fn database_path() -> Result<PathBuf, String> {
     Ok(data_dir()?.join("liscov.db"))
 }
 
-/// バックアップディレクトリのパスを返す（data_dir + "backups"）
-pub fn backup_dir() -> Result<PathBuf, String> {
-    Ok(data_dir()?.join("backups"))
-}
-
 /// ログディレクトリのパスを返す（data_dir + "logs"）
 pub fn log_dir() -> Result<PathBuf, String> {
     Ok(data_dir()?.join("logs"))
@@ -172,15 +167,6 @@ mod tests {
         unsafe { std::env::remove_var("LISCOV_APP_NAME") };
         let path = database_path().expect("database_path should succeed");
         assert!(path.ends_with("liscov.db"));
-    }
-
-    #[test]
-    #[serial(liscov_env)]
-    fn backup_dir_ends_with_backups() {
-        // SAFETY: テスト環境でのみ実行。#[serial] で直列化済み
-        unsafe { std::env::remove_var("LISCOV_APP_NAME") };
-        let path = backup_dir().expect("backup_dir should succeed");
-        assert!(path.ends_with("backups"));
     }
 
     #[test]

@@ -98,11 +98,6 @@ fn get_database_path() -> Result<PathBuf> {
     crate::paths::database_path().map_err(|e| anyhow::anyhow!(e))
 }
 
-/// バックアップディレクトリのパスを返す
-pub fn get_backup_dir() -> Result<PathBuf> {
-    crate::paths::backup_dir().map_err(|e| anyhow::anyhow!(e))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
