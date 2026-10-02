@@ -9,8 +9,6 @@ use std::time::Duration;
 use tokio::sync::{RwLock, watch};
 use tokio_util::sync::CancellationToken;
 
-use tauri::AppHandle;
-
 use crate::core::api::{InnerTubeClient, WebSocketServer};
 use crate::core::models::{ChatMessage, ChatMode, MessageType, ReactionUpdate};
 use crate::core::raw_response::{RawResponseSaver, SaveConfig};
@@ -33,8 +31,6 @@ const FAILURES_BEFORE_DISCONNECT: u32 = 15;
 pub enum MonitoringEnd {
     /// 切断された（CancellationToken）
     Cancelled,
-    /// InnerTube クライアントが無くなった
-    ClientMissing,
     /// 取得に続けて失敗した（02_chat.md「取得に失敗したとき」）
     FetchFailedRepeatedly,
 }
@@ -47,7 +43,7 @@ impl MonitoringEnd {
                 "チャットの取得に{}回続けて失敗したため切断しました",
                 FAILURES_BEFORE_DISCONNECT
             ),
-            Self::Cancelled | Self::ClientMissing => "監視タスクが予期せず終了しました".to_string(),
+            Self::Cancelled => "監視タスクが予期せず終了しました".to_string(),
         }
     }
 }
@@ -76,44 +72,54 @@ impl MonitoringDeps {
     }
 }
 
+/// 1 つの接続の監視に要るもの（接続ごとに作る）
+pub struct MonitoringTarget {
+    /// この接続に割り当てられた接続 ID
+    pub connection_id: u64,
+    /// 監視対象の YouTube 動画 ID
+    pub video_id: String,
+    /// データベースセッション ID（DB を使えないときは None）
+    pub session_id: Option<String>,
+    /// 配信者チャンネル ID
+    pub broadcaster_id: Option<String>,
+    /// この接続のキャンセレーショントークン
+    pub cancellation_token: CancellationToken,
+    /// チャットモード変更要求を受信する watch チャネル
+    pub chat_mode_rx: watch::Receiver<ChatMode>,
+}
+
+/// 監視ループの外とのやりとり（画面への通知と、その時点の保存設定）
+///
+/// core を Tauri に依存させないよう trait にする。本番の実装は commands::chat にある。
+pub trait MonitoringOutput: Send + Sync + 'static {
+    /// その時点の生レスポンス保存設定（接続中の設定変更を反映するため、ポーリングごとに呼ぶ）
+    fn save_config(&self) -> SaveConfig;
+    /// 新しいメッセージを画面に送る
+    fn message(&self, message: &ChatMessage);
+    /// ライブリアクションの更新を画面に送る
+    fn reaction(&self, update: &ReactionUpdate);
+}
+
 /// チャット監視のポーリングループ全体を実行する
 ///
 /// この関数は tokio::spawn で別タスクとして起動される。
 /// ループ終了後にセッションの終了処理（end_session / update_session_stats）を行う。
 ///
-/// # 引数
-/// - `deps` — 監視タスクが必要とする共有依存一式
-/// - `innertube_client` — InnerTube クライアント（Arc<RwLock> でラップ済み）
-/// - `app` — Tauri AppHandle（フロントエンドへの emit に使用）
-/// - `video_id` — 監視対象の YouTube 動画 ID
-/// - `connection_id` — この接続に割り当てられた接続 ID
-/// - `session_id` — データベースセッション ID
-/// - `broadcaster_id` — 配信者チャンネル ID
-/// - `cancellation_token` — この接続のキャンセレーショントークン
-/// - `current_save_config` — その時点のレスポンス保存設定を返す（接続中の設定変更を反映するため毎回呼ぶ）
-/// - `chat_mode_rx` — チャットモード変更要求を受信する watch チャネル
-/// - `emit_gui_message` — ChatMessage を GUI 用に変換して emit するコールバック
-/// - `emit_gui_reaction` — ReactionUpdate を GUI 用に変換して emit するコールバック
-#[allow(clippy::too_many_arguments)]
-pub async fn run_monitoring_loop<F, G, H>(
+/// クライアントはこのループだけが持つ（ポーリングのたびに取り出して戻す必要はない）。
+pub async fn run_monitoring_loop(
     deps: MonitoringDeps,
-    innertube_client: Arc<RwLock<Option<InnerTubeClient>>>,
-    app: AppHandle,
-    video_id: String,
-    connection_id: u64,
-    session_id: Option<String>,
-    broadcaster_id: Option<String>,
-    cancellation_token: CancellationToken,
-    current_save_config: G,
-    mut chat_mode_rx: watch::Receiver<ChatMode>,
-    emit_gui_message: F,
-    emit_gui_reaction: H,
-) -> MonitoringEnd
-where
-    F: Fn(&AppHandle, &ChatMessage) + Send + Sync + 'static,
-    G: Fn() -> SaveConfig + Send + Sync + 'static,
-    H: Fn(&AppHandle, &ReactionUpdate) + Send + Sync + 'static,
-{
+    mut client: InnerTubeClient,
+    target: MonitoringTarget,
+    output: impl MonitoringOutput,
+) -> MonitoringEnd {
+    let MonitoringTarget {
+        connection_id,
+        video_id,
+        session_id,
+        broadcaster_id,
+        cancellation_token,
+        mut chat_mode_rx,
+    } = target;
     tracing::info!("チャット監視タスク開始 connection_id: {}", connection_id);
     let mut poll_count = 0u64;
 
@@ -168,27 +174,7 @@ where
 
         poll_count += 1;
 
-        // ネットワーク呼び出し中にロックを手放すため、クライアントを一時的に取り出す
-        let client_opt = {
-            let mut client_guard = innertube_client.write().await;
-            client_guard.take()
-        };
-
-        let Some(mut client) = client_opt else {
-            tracing::warn!("InnerTube クライアントが存在しないため監視を停止");
-            break MonitoringEnd::ClientMissing;
-        };
-
-        // フェッチ前にもキャンセルを確認
-        if cancellation_token.is_cancelled() {
-            tracing::info!(
-                "フェッチ前にキャンセル検出 connection_id: {}",
-                connection_id
-            );
-            break MonitoringEnd::Cancelled;
-        }
-
-        // メッセージをフェッチ（ロックを保持しない）。応答を待つ間も切断を受け付ける
+        // メッセージをフェッチする。応答を待つ間も切断を受け付ける
         let fetched = tokio::select! {
             _ = cancellation_token.cancelled() => {
                 tracing::info!(
@@ -218,16 +204,16 @@ where
             }
         };
 
-        // キャンセルされていなければクライアントを戻す
+        // 応答を受けた直後に切断されていたら、保存も通知もせずに終わる
         if cancellation_token.is_cancelled() {
             tracing::info!(
-                "フェッチ後にキャンセル検出（クライアントを戻さず終了） connection_id: {}",
+                "フェッチ後にキャンセル検出 connection_id: {}",
                 connection_id
             );
             break MonitoringEnd::Cancelled;
         }
 
-        // 選ばれたモードと token のモードが違えば適用する（クライアントを戻す前に処理）
+        // 選ばれたモードと token のモードが違えば適用する
         // 書き換えに失敗しても、次のポーリングで新しい token に対してやり直す（02_chat.md）
         let desired_mode = *chat_mode_rx.borrow_and_update();
         if client.get_chat_mode() != desired_mode {
@@ -246,14 +232,9 @@ where
             }
         }
 
-        {
-            let mut client_guard = innertube_client.write().await;
-            *client_guard = Some(client);
-        }
-
         // 生レスポンスを保存（設定が有効な場合）
         if let Some(raw_json) = raw_response {
-            save_raw_response(&current_save_config(), &raw_json).await;
+            save_raw_response(&output.save_config(), &raw_json).await;
         }
 
         // 再送は保存・集計・GUI・WebSocket・TTS のどれにも流さない
@@ -294,8 +275,8 @@ where
         }
 
         for msg in &fresh {
-            // GUI メッセージをフロントエンドに emit（コールバック経由）
-            emit_gui_message(&app, msg);
+            // 画面に送る
+            output.message(msg);
 
             // WebSocket クライアントへブロードキャスト
             {
@@ -326,7 +307,7 @@ where
                 }
             }
 
-            emit_gui_reaction(&app, &update);
+            output.reaction(&update);
 
             let ws = deps.websocket_server.read().await;
             if let Some(server) = ws.as_ref() {

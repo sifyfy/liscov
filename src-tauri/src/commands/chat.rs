@@ -7,20 +7,55 @@ use crate::connection::{
     ConnectionInfo, DISCONNECT_TIMEOUT, MAX_CONNECTIONS, StreamConnection, disconnect_all,
 };
 use crate::core::api::InnerTubeClient;
-use crate::core::chat_runtime::{MonitoringDeps, run_monitoring_loop};
+use crate::core::chat_runtime::{
+    MonitoringDeps, MonitoringOutput, MonitoringTarget, run_monitoring_loop,
+};
 use crate::core::models::{
     ChatMessage, ChatMode, ConnectionStatus, Platform, ReactionSummary, ReactionUpdate,
     extract_video_id,
 };
+use crate::core::raw_response::SaveConfig;
 use crate::database;
 use crate::errors::CommandError;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Emitter, Manager, State};
-use tokio::sync::{RwLock, watch};
+use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use ts_rs::TS;
+
+/// 監視ループの通知を Tauri のイベントにする（02_chat.md「Tauriイベント」）
+struct TauriMonitoringOutput {
+    app: AppHandle,
+    connection_id: u64,
+    platform: String,
+    broadcaster_name: String,
+}
+
+impl MonitoringOutput for TauriMonitoringOutput {
+    fn save_config(&self) -> SaveConfig {
+        self.app.state::<ConfigState>().get().raw_response
+    }
+
+    fn message(&self, message: &ChatMessage) {
+        let gui_msg = GuiChatMessage::from_with_connection(
+            message.clone(),
+            self.connection_id,
+            &self.platform,
+            &self.broadcaster_name,
+        );
+        let _ = self.app.emit("chat:message", &gui_msg);
+    }
+
+    fn reaction(&self, update: &ReactionUpdate) {
+        let gui_update = GuiReactionUpdate {
+            connection_id: self.connection_id,
+            update: update.clone(),
+        };
+        let _ = self.app.emit("chat:reaction", &gui_update);
+    }
+}
 
 /// Result of connecting to a stream
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -355,10 +390,6 @@ pub async fn connect_to_stream(
 
         result.session_id = session_id.clone();
 
-        // クライアントを監視タスク用の Arc<RwLock> にラップ
-        let innertube_client: Arc<RwLock<Option<InnerTubeClient>>> =
-            Arc::new(RwLock::new(Some(client)));
-
         // キャンセレーショントークンを生成
         let cancellation_token = CancellationToken::new();
 
@@ -368,24 +399,21 @@ pub async fn connect_to_stream(
         // 監視タスクの共有依存を構築
         let deps = MonitoringDeps::from_state(&state);
 
-        // 生レスポンス保存設定はポーリングごとに ConfigState から読む（接続中の変更を反映する）
-        let app_for_save_config = app.clone();
-        let current_save_config = move || {
-            app_for_save_config
-                .state::<ConfigState>()
-                .get()
-                .raw_response
-        };
-
-        // emit コールバック用に接続情報をキャプチャ
         let conn_id = connection_id;
-        let platform_str = Platform::YouTube.as_str().to_string();
-        let broadcaster = result.broadcaster_name.clone().unwrap_or_default();
-
-        let app_handle = app.clone();
-        let innertube_for_task = Arc::clone(&innertube_client);
-        let token_for_task = cancellation_token.clone();
-        let broadcaster_id = result.broadcaster_channel_id.clone();
+        let output = TauriMonitoringOutput {
+            app: app.clone(),
+            connection_id,
+            platform: Platform::YouTube.as_str().to_string(),
+            broadcaster_name: result.broadcaster_name.clone().unwrap_or_default(),
+        };
+        let target = MonitoringTarget {
+            connection_id,
+            video_id,
+            session_id: session_id.clone(),
+            broadcaster_id: result.broadcaster_channel_id.clone(),
+            cancellation_token: cancellation_token.clone(),
+            chat_mode_rx,
+        };
 
         // StreamConnection を生成して connections マップに追加
         let stream_conn = StreamConnection {
@@ -414,36 +442,7 @@ pub async fn connect_to_stream(
 
         // 監視タスクをスポーン
         let handle = tokio::spawn(async move {
-            let end = run_monitoring_loop(
-                deps,
-                innertube_for_task,
-                app_handle,
-                video_id,
-                conn_id,
-                session_id,
-                broadcaster_id,
-                token_for_task,
-                current_save_config,
-                chat_mode_rx,
-                move |app, msg| {
-                    // ChatMessage を接続情報付き GUI メッセージに変換してフロントエンドへ emit
-                    let gui_msg = GuiChatMessage::from_with_connection(
-                        msg.clone(),
-                        conn_id,
-                        &platform_str,
-                        &broadcaster,
-                    );
-                    let _ = app.emit("chat:message", &gui_msg);
-                },
-                move |app, update| {
-                    let gui_update = GuiReactionUpdate {
-                        connection_id: conn_id,
-                        update: update.clone(),
-                    };
-                    let _ = app.emit("chat:reaction", &gui_update);
-                },
-            )
-            .await;
+            let end = run_monitoring_loop(deps, client, target, output).await;
 
             // 監視タスク終了後: connections マップに残っている場合はクリーンアップ
             // （disconnect_stream 経由で既に削除済みの場合はスキップ）
