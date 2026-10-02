@@ -250,6 +250,8 @@ struct StreamState {
     watch_delay_ms: u64,
     /// Simulate network delay for chat polling (ms)
     chat_delay_ms: u64,
+    /// チャット取得を 500 で失敗させる（02_chat.md「取得に失敗したとき」の検証用）
+    chat_fail: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -479,6 +481,12 @@ fn build_routes(
                 if delay > 0 {
                     tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
                 }
+                if sa.stream_state.lock().unwrap().chat_fail {
+                    return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                        warp::reply::json(&json!({"error": "Internal error"})),
+                        warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    ));
+                }
 
                 // Extract and parse continuation token to detect chat mode
                 // Default to TopChat (4), but preserve from incoming token if available
@@ -517,7 +525,10 @@ fn build_routes(
                 if let Some(entity) = sa.reaction_queue.lock().unwrap().pop_front() {
                     resp["frameworkUpdates"] = json!({"entityBatchUpdate":{"mutations":[{"entityKey":"mock_emoji_fountain","type":"ENTITY_MUTATION_TYPE_REPLACE","payload":{"emojiFountainDataEntity":entity}}]}});
                 }
-                Ok::<_, warp::Rejection>(warp::reply::json(&resp))
+                Ok(warp::reply::with_status(
+                    warp::reply::json(&resp),
+                    warp::http::StatusCode::OK,
+                ))
             }
         });
     let sac = Arc::clone(&state);
@@ -632,6 +643,9 @@ fn build_routes(
             }
             if let Some(d) = b.chat_delay_ms {
                 ss.chat_delay_ms = d;
+            }
+            if let Some(v) = b.chat_fail {
+                ss.chat_fail = v;
             }
             warp::reply::json(&json!({"status":"ok","stream":&*ss}))
         });
@@ -811,6 +825,7 @@ struct SSR {
     channel_name: Option<String>,
     watch_delay_ms: Option<u64>,
     chat_delay_ms: Option<u64>,
+    chat_fail: Option<bool>,
 }
 #[derive(Debug, Deserialize)]
 struct AutoMsgReq {

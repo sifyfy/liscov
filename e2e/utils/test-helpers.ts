@@ -647,7 +647,13 @@ export async function navigateToTab(page: Page, tabName: string): Promise<void> 
 /**
  * モックサーバーのストリーム状態を設定する
  */
-export async function setStreamState(state: { member_only?: boolean; require_auth?: boolean; title?: string }): Promise<void> {
+export async function setStreamState(state: {
+  member_only?: boolean;
+  require_auth?: boolean;
+  title?: string;
+  chat_delay_ms?: number;
+  chat_fail?: boolean;
+}): Promise<void> {
   await fetch(`${MOCK_SERVER_URL}/set_stream_state`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

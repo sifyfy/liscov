@@ -5,6 +5,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{RwLock, watch};
 use tokio_util::sync::CancellationToken;
 
@@ -19,6 +20,37 @@ use crate::tts::{TtsManager, TtsPriority, TtsQueueItem};
 
 /// 接続ごとに覚える受信済み message_id の件数（02_chat.md「設定値」）
 const RECENT_MESSAGE_IDS_CAPACITY: usize = 10_000;
+
+/// 取得に成功している間のポーリング間隔（02_chat.md「設定値」）
+const POLL_INTERVAL: Duration = Duration::from_millis(1500);
+/// この回数までの連続失敗は成功と同じ間隔で再試行する（02_chat.md「取得に失敗したとき」）
+const FAILURES_BEFORE_BACKOFF: u32 = 10;
+/// この回数続けて失敗したら切断する（02_chat.md「取得に失敗したとき」）
+const FAILURES_BEFORE_DISCONNECT: u32 = 15;
+
+/// 監視ループが終わった理由
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MonitoringEnd {
+    /// 切断された（CancellationToken）
+    Cancelled,
+    /// InnerTube クライアントが無くなった
+    ClientMissing,
+    /// 取得に続けて失敗した（02_chat.md「取得に失敗したとき」）
+    FetchFailedRepeatedly,
+}
+
+impl MonitoringEnd {
+    /// 切断されずに終わったときにユーザーへ出すエラー
+    pub fn error_message(self) -> String {
+        match self {
+            Self::FetchFailedRepeatedly => format!(
+                "チャットの取得に{}回続けて失敗したため切断しました",
+                FAILURES_BEFORE_DISCONNECT
+            ),
+            Self::Cancelled | Self::ClientMissing => "監視タスクが予期せず終了しました".to_string(),
+        }
+    }
+}
 
 /// 監視タスクが必要とする共有依存をまとめた構造体
 ///
@@ -79,13 +111,13 @@ pub async fn run_monitoring_loop<F, G, H>(
     mut chat_mode_rx: watch::Receiver<ChatMode>,
     emit_gui_message: F,
     emit_gui_reaction: H,
-) where
+) -> MonitoringEnd
+where
     F: Fn(&AppHandle, &ChatMessage) + Send + Sync + 'static,
     G: Fn() -> SaveConfig + Send + Sync + 'static,
     H: Fn(&AppHandle, &ReactionUpdate) + Send + Sync + 'static,
 {
     tracing::info!("チャット監視タスク開始 connection_id: {}", connection_id);
-    let poll_interval = std::time::Duration::from_millis(1500);
     let mut poll_count = 0u64;
 
     // セッション開始時点のコメント数をDBから復元してカウンターを初期化
@@ -124,7 +156,9 @@ pub async fn run_monitoring_loop<F, G, H>(
     // この接続で受け取った message_id（YouTube の再送を捨てるため）
     let mut recent_message_ids = RecentMessageIds::new(RECENT_MESSAGE_IDS_CAPACITY);
 
-    loop {
+    let mut fetch_failures = FetchFailures::default();
+
+    let end = loop {
         // CancellationToken でループ停止を確認
         if cancellation_token.is_cancelled() {
             tracing::info!(
@@ -132,7 +166,7 @@ pub async fn run_monitoring_loop<F, G, H>(
                 connection_id,
                 poll_count
             );
-            break;
+            break MonitoringEnd::Cancelled;
         }
 
         poll_count += 1;
@@ -145,7 +179,7 @@ pub async fn run_monitoring_loop<F, G, H>(
 
         let Some(mut client) = client_opt else {
             tracing::warn!("InnerTube クライアントが存在しないため監視を停止");
-            break;
+            break MonitoringEnd::ClientMissing;
         };
 
         // フェッチ前にもキャンセルを確認
@@ -154,11 +188,22 @@ pub async fn run_monitoring_loop<F, G, H>(
                 "フェッチ前にキャンセル検出 connection_id: {}",
                 connection_id
             );
-            break;
+            break MonitoringEnd::Cancelled;
         }
 
-        // メッセージをフェッチ（ロックを保持しない）
-        let (new_messages, new_reactions, raw_response) = match client.fetch_chat().await {
+        // メッセージをフェッチ（ロックを保持しない）。応答を待つ間も切断を受け付ける
+        let fetched = tokio::select! {
+            _ = cancellation_token.cancelled() => {
+                tracing::info!(
+                    "フェッチ中にキャンセル検出（応答を待たずに終了） connection_id: {}",
+                    connection_id
+                );
+                break MonitoringEnd::Cancelled;
+            }
+            fetched = client.fetch_chat() => fetched,
+        };
+        fetch_failures.record(fetched.is_ok());
+        let (new_messages, new_reactions, raw_response) = match fetched {
             Ok(fetch) => {
                 if !fetch.messages.is_empty() {
                     tracing::debug!("ポーリング {}: {} 件取得", poll_count, fetch.messages.len());
@@ -166,7 +211,12 @@ pub async fn run_monitoring_loop<F, G, H>(
                 (fetch.messages, fetch.reactions, Some(fetch.raw_json))
             }
             Err(e) => {
-                tracing::warn!("ポーリング {}: メッセージ取得失敗: {}", poll_count, e);
+                tracing::warn!(
+                    "ポーリング {}: メッセージ取得失敗（連続 {} 回）: {:#}",
+                    poll_count,
+                    fetch_failures.consecutive,
+                    e
+                );
                 (vec![], vec![], None)
             }
         };
@@ -174,10 +224,10 @@ pub async fn run_monitoring_loop<F, G, H>(
         // キャンセルされていなければクライアントを戻す
         if cancellation_token.is_cancelled() {
             tracing::info!(
-                "フェッチ中にキャンセル検出（クライアントを戻さず終了） connection_id: {}",
+                "フェッチ後にキャンセル検出（クライアントを戻さず終了） connection_id: {}",
                 connection_id
             );
-            break;
+            break MonitoringEnd::Cancelled;
         }
 
         // 選ばれたモードと token のモードが違えば適用する（クライアントを戻す前に処理）
@@ -283,24 +333,35 @@ pub async fn run_monitoring_loop<F, G, H>(
             }
         }
 
+        let Some(wait) = fetch_failures.next_wait() else {
+            tracing::warn!(
+                "取得に {} 回続けて失敗したため監視を停止 connection_id: {}",
+                fetch_failures.consecutive,
+                connection_id
+            );
+            break MonitoringEnd::FetchFailedRepeatedly;
+        };
+
         // スリープ中もキャンセルを検知できるように select! を使用
         tokio::select! {
             _ = cancellation_token.cancelled() => {
                 tracing::info!("sleep中にCancellationTokenキャンセル connection_id: {}", connection_id);
-                break;
+                break MonitoringEnd::Cancelled;
             }
-            _ = tokio::time::sleep(poll_interval) => {}
+            _ = tokio::time::sleep(wait) => {}
         }
-    }
+    };
 
     // セッション終了処理
     finish_session(&deps, connection_id, &session_id).await;
 
     tracing::info!(
-        "チャット監視タスク停止 connection_id: {} polls: {}",
+        "チャット監視タスク停止 connection_id: {} polls: {} reason: {:?}",
         connection_id,
-        poll_count
+        poll_count,
+        end
     );
+    end
 }
 
 /// 1 件のメッセージに対して、DB 保存・初回視聴者判定・in-stream カウント更新を行う
@@ -362,6 +423,30 @@ async fn process_message(
                     database::is_first_time_viewer(&conn, bid, &msg.channel_id, video_id)
                         .unwrap_or(false);
             }
+        }
+    }
+}
+
+/// 取得の連続失敗回数と、次の取得までの待ち（02_chat.md「取得に失敗したとき」）
+#[derive(Debug, Default)]
+struct FetchFailures {
+    consecutive: u32,
+}
+
+impl FetchFailures {
+    /// 1 回の取得の結果を数える。成功したら 0 に戻す
+    fn record(&mut self, succeeded: bool) {
+        self.consecutive = if succeeded { 0 } else { self.consecutive + 1 };
+    }
+
+    /// 次の取得までの待ち。`None` なら切断する
+    ///
+    /// 11 回目からは失敗のたびに倍にする（3・6・12・24 秒）。
+    fn next_wait(&self) -> Option<Duration> {
+        match self.consecutive {
+            n if n >= FAILURES_BEFORE_DISCONNECT => None,
+            n if n <= FAILURES_BEFORE_BACKOFF => Some(POLL_INTERVAL),
+            n => Some(POLL_INTERVAL * 2u32.pow(n - FAILURES_BEFORE_BACKOFF)),
         }
     }
 }
@@ -524,6 +609,48 @@ async fn finish_session(deps: &MonitoringDeps, connection_id: u64, session_id: &
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn failures_after(results: &[bool]) -> FetchFailures {
+        let mut failures = FetchFailures::default();
+        for &succeeded in results {
+            failures.record(succeeded);
+        }
+        failures
+    }
+
+    // 02_chat.md「取得に失敗したとき」の表: 連続失敗回数 → 次の取得までの待ち（None は切断）
+    #[test]
+    fn wait_after_consecutive_failures_follows_spec_table() {
+        let cases = [
+            (0, Some(1500)),
+            (1, Some(1500)),
+            (10, Some(1500)),
+            (11, Some(3000)),
+            (12, Some(6000)),
+            (13, Some(12000)),
+            (14, Some(24000)),
+            (15, None),
+        ];
+        for (count, expected) in cases {
+            let failures = failures_after(&vec![false; count]);
+            assert_eq!(
+                failures.next_wait(),
+                expected.map(std::time::Duration::from_millis),
+                "{count} 回連続で失敗"
+            );
+        }
+    }
+
+    // 02_chat.md: 失敗12回 → 成功 → 失敗 なら、次の待ちは 1.5秒
+    #[test]
+    fn success_resets_consecutive_failures() {
+        let mut results = vec![false; 12];
+        results.extend([true, false]);
+        assert_eq!(
+            failures_after(&results).next_wait(),
+            Some(std::time::Duration::from_millis(1500))
+        );
+    }
 
     fn reaction_at(time: i64) -> ReactionUpdate {
         let counts = std::collections::BTreeMap::from([("❤".to_string(), 1)]);

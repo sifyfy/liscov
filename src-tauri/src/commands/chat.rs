@@ -414,7 +414,7 @@ pub async fn connect_to_stream(
 
         // 監視タスクをスポーン
         let handle = tokio::spawn(async move {
-            run_monitoring_loop(
+            let end = run_monitoring_loop(
                 deps,
                 innertube_for_task,
                 app_handle,
@@ -464,7 +464,7 @@ pub async fn connect_to_stream(
                         broadcaster_channel_id: None,
                         broadcaster_name: None,
                         is_replay: false,
-                        error: Some("監視タスクが予期せず終了しました".to_string()),
+                        error: Some(end.error_message()),
                         session_id: None,
                         connection_id: conn_id,
                     },

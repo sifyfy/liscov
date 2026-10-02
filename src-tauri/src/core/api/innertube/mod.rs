@@ -13,6 +13,7 @@ mod reaction_parser;
 use crate::core::models::*;
 use anyhow::{Result, anyhow};
 use reqwest::Client;
+use std::time::Duration;
 
 pub use chat_parser::parse_chat_actions;
 pub use client::{get_innertube_api_url, get_youtube_base_url};
@@ -23,6 +24,19 @@ pub struct ChatFetch {
     pub reactions: Vec<ReactionUpdate>,
     /// 生のレスポンス JSON（05_raw_response.md の保存用）
     pub raw_json: String,
+}
+
+/// リクエスト全体のタイムアウト（02_chat.md「設定値」）。応答が返らない取得で監視ループが止まらないようにする
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+/// 接続確立のタイムアウト（02_chat.md「設定値」）
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+
+fn build_http_client() -> Client {
+    Client::builder()
+        .timeout(REQUEST_TIMEOUT)
+        .connect_timeout(CONNECT_TIMEOUT)
+        .build()
+        .expect("HTTP クライアントの初期化に失敗")
 }
 
 /// InnerTube API クライアント
@@ -43,7 +57,7 @@ pub struct InnerTubeClient {
 impl InnerTubeClient {
     pub fn new(video_id: impl Into<String>) -> Self {
         Self {
-            http_client: Client::new(),
+            http_client: build_http_client(),
             video_id: video_id.into(),
             api_key: client::DEFAULT_API_KEY.to_string(),
             client_version: "2.20240101.00.00".to_string(),
@@ -253,7 +267,12 @@ impl InnerTubeClient {
             }
         }
 
-        let response = request.json(&request_body).send().await?;
+        // 2xx 以外は失敗として数える（02_chat.md「取得に失敗したとき」）
+        let response = request
+            .json(&request_body)
+            .send()
+            .await?
+            .error_for_status()?;
         let raw_json = response.text().await?;
         let data: serde_json::Value = serde_json::from_str(&raw_json)?;
 
