@@ -25,7 +25,7 @@
           class="disconnect-btn"
           title="切断"
           onclick={() => handleDisconnect(conn.id)}
-          disabled={conn.connectionState === 'disconnecting'}
+          disabled={conn.connectionState !== 'connected'}
         >
           ×
         </button>

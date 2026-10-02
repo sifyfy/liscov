@@ -5,10 +5,11 @@
 
   // 新しい接続を追加（多接続対応：既存の接続はそのまま）
   async function handleConnect() {
-    if (!streamUrl.trim()) return;
-    await chatStore.connect(streamUrl, chatStore.chatMode);
-    // 接続成功後にURLをクリア（次の接続入力の準備）
-    if (!chatStore.error) {
+    const url = streamUrl;
+    if (!url.trim()) return;
+    await chatStore.connect(url, chatStore.chatMode);
+    // 接続成功後にURLをクリア（次の接続入力の準備）。待つ間に入力し直されていたら残す
+    if (!chatStore.error && streamUrl === url) {
       streamUrl = '';
     }
   }

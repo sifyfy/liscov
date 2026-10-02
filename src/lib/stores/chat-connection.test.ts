@@ -246,6 +246,30 @@ describe('chatStore 接続管理', () => {
 			expect(chatStore.isConnected).toBe(false);
 		});
 
+		// spec 02_chat.md 多接続: 接続中（connecting）のものは全切断で消さず、成立したら一覧に出る
+		it('接続中に全切断しても接続中のエントリは残り、成立したら接続済みになる', async () => {
+			const { connectToStream, disconnectAllStreams } = await import('$lib/tauri/chat');
+			let resolveConnect!: (result: ConnectionResult) => void;
+			vi.mocked(connectToStream).mockReturnValue(
+				new Promise((resolve) => {
+					resolveConnect = resolve;
+				})
+			);
+			vi.mocked(disconnectAllStreams).mockResolvedValue(undefined);
+
+			const connecting = chatStore.connect('https://example.com');
+			expect(chatStore.isConnecting).toBe(true);
+
+			await chatStore.disconnectAll();
+			expect(chatStore.isConnecting).toBe(true);
+			expect(chatStore.connections.size).toBe(1);
+
+			resolveConnect(makeSuccessResult({ connection_id: BigInt(2) }));
+			await connecting;
+			expect(chatStore.connections.get(2)?.connectionState).toBe('connected');
+			expect(chatStore.connections.size).toBe(1);
+		});
+
 		// spec: disconnectAllStreams が呼ばれる
 		it('disconnectAllStreams が呼ばれる', async () => {
 			const { disconnectAllStreams } = await import('$lib/tauri/chat');

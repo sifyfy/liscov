@@ -273,12 +273,14 @@ function createChatStore() {
     }
   }
 
-  // 全接続を切断
+  // 全接続を切断（接続中のものは残す。成立したら connect() が一覧に入れる）
   async function disconnectAll(): Promise<void> {
     try {
       await chatApi.disconnectAllStreams();
     } finally {
-      connections = new SvelteMap();
+      connections = new SvelteMap(
+        [...connections].filter(([, conn]) => conn.connectionState === 'connecting')
+      );
     }
   }
 
