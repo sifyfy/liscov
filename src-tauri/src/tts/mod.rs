@@ -46,7 +46,8 @@ pub struct TtsQueueItem {
 /// TTS Manager handles TTS operations
 pub struct TtsManager {
     config: Arc<RwLock<TtsConfig>>,
-    backend: Arc<RwLock<Option<Box<dyn TtsBackend>>>>,
+    /// 使うときは `current_backend` で Arc を取り出し、ロックを握ったまま読み上げない（04_tts.md）
+    backend: Arc<RwLock<Option<Arc<dyn TtsBackend>>>>,
     queue: Arc<Mutex<VecDeque<TtsQueueItem>>>,
     is_processing: Arc<RwLock<bool>>,
     shutdown_tx: Arc<Mutex<Option<mpsc::Sender<()>>>>,
@@ -64,7 +65,7 @@ impl TtsManager {
     pub fn with_backend(config: TtsConfig, backend: Option<Box<dyn TtsBackend>>) -> Self {
         Self {
             config: Arc::new(RwLock::new(config)),
-            backend: Arc::new(RwLock::new(backend)),
+            backend: Arc::new(RwLock::new(backend.map(Arc::from))),
             queue: Arc::new(Mutex::new(VecDeque::new())),
             is_processing: Arc::new(RwLock::new(false)),
             shutdown_tx: Arc::new(Mutex::new(None)),
@@ -79,9 +80,15 @@ impl TtsManager {
         }
 
         let backend =
-            backends::create_backend(&config.backend, &config.bouyomichan, &config.voicevox);
+            backends::create_backend(&config.backend, &config.bouyomichan, &config.voicevox)
+                .map(Arc::from);
         *self.config.write().await = config;
         *self.backend.write().await = backend;
+    }
+
+    /// 今のバックエンドを取り出す（ロックはすぐ放す）
+    async fn current_backend(&self) -> Option<Arc<dyn TtsBackend>> {
+        self.backend.read().await.clone()
     }
 
     /// Get current configuration
@@ -91,8 +98,7 @@ impl TtsManager {
 
     /// Test connection to current backend
     pub async fn test_connection(&self) -> Result<bool, TtsError> {
-        let backend = self.backend.read().await;
-        match backend.as_ref() {
+        match self.current_backend().await {
             Some(b) => b.test_connection().await,
             None => Ok(false),
         }
@@ -103,9 +109,11 @@ impl TtsManager {
         &self,
         backend_type: TtsBackendType,
     ) -> Result<bool, TtsError> {
-        let config = self.config.read().await;
-        let test_backend =
-            backends::create_backend(&backend_type, &config.bouyomichan, &config.voicevox);
+        // 接続テストの間は設定のロックを握らない（04_tts.md キュー処理）
+        let test_backend = {
+            let config = self.config.read().await;
+            backends::create_backend(&backend_type, &config.bouyomichan, &config.voicevox)
+        };
 
         match test_backend {
             Some(b) => b.test_connection().await,
@@ -166,8 +174,7 @@ impl TtsManager {
 
     /// Speak text directly (bypasses queue)
     pub async fn speak_direct(&self, text: &str) -> Result<(), TtsError> {
-        let backend = self.backend.read().await;
-        match backend.as_ref() {
+        match self.current_backend().await {
             Some(b) => b.speak(text).await,
             None => Err(TtsError::Connection("No backend configured".to_string())),
         }
@@ -233,9 +240,9 @@ impl TtsManager {
                                 }
                             };
 
-                            // Speak
-                            let b = backend.read().await;
-                            if let Some(ref backend) = *b {
+                            // Speak（ロックを握ったまま読み上げない。差し替えは次のメッセージから効く）
+                            let current = backend.read().await.clone();
+                            if let Some(backend) = current {
                                 if let Err(e) = backend.speak(&text).await {
                                     log::error!(
                                         "TTS speak error (message_id={:?}): {}",
@@ -1464,6 +1471,110 @@ mod tests {
         fn name(&self) -> &'static str {
             "Mock"
         }
+    }
+
+    /// speak が呼ばれたら `started` を知らせ、`release` されるまで返らない（読み上げ中の状態を作る）
+    struct BlockingTtsBackend {
+        started: Arc<tokio::sync::Notify>,
+        release: Arc<tokio::sync::Notify>,
+    }
+
+    #[async_trait::async_trait]
+    impl TtsBackend for BlockingTtsBackend {
+        async fn test_connection(&self) -> Result<bool, backends::TtsError> {
+            Ok(true)
+        }
+        async fn speak(&self, _text: &str) -> Result<(), backends::TtsError> {
+            self.started.notify_one();
+            self.release.notified().await;
+            Ok(())
+        }
+        fn name(&self) -> &'static str {
+            "Blocking"
+        }
+    }
+
+    const NOT_BLOCKED: std::time::Duration = std::time::Duration::from_secs(1);
+
+    // 04_tts.md キュー処理: 読み上げ中に設定を保存しても、読み上げの終わりを待たない
+    #[tokio::test]
+    async fn backend_can_be_replaced_while_speaking() {
+        let started = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let manager = TtsManager::with_backend(
+            TtsConfig {
+                enabled: true,
+                ..TtsConfig::default()
+            },
+            Some(Box::new(BlockingTtsBackend {
+                started: Arc::clone(&started),
+                release: Arc::clone(&release),
+            })),
+        );
+        manager.start_processing().await;
+        manager
+            .enqueue(TtsQueueItem {
+                text: "読み上げ中".to_string(),
+                priority: TtsPriority::Normal,
+                author_name: None,
+                amount: None,
+                in_stream_comment_count: None,
+                message_id: None,
+            })
+            .await;
+        tokio::time::timeout(NOT_BLOCKED, started.notified())
+            .await
+            .expect("読み上げが始まらない");
+
+        // update_config がバックエンドを差し替えるときに取る書き込みロック
+        let replaced = tokio::time::timeout(NOT_BLOCKED, manager.backend.write()).await;
+
+        release.notify_one();
+        manager.stop_processing().await;
+        assert!(
+            replaced.is_ok(),
+            "読み上げ中にバックエンドを差し替えられない"
+        );
+    }
+
+    // 04_tts.md キュー処理: 接続テスト中に設定を保存しても、接続テストの終わりを待たない
+    #[tokio::test]
+    async fn config_can_be_updated_while_testing_backend_connection() {
+        // 接続は受け付けるが応答しないサーバー（棒読みちゃんのタイムアウト 5 秒まで接続テストが続く）
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((socket, _)) = listener.accept().await {
+                held.push(socket);
+            }
+        });
+        let manager = Arc::new(TtsManager::with_backend(
+            TtsConfig {
+                bouyomichan: BouyomichanConfig {
+                    host: "127.0.0.1".to_string(),
+                    port,
+                    ..BouyomichanConfig::default()
+                },
+                ..TtsConfig::default()
+            },
+            None,
+        ));
+        let testing = {
+            let manager = Arc::clone(&manager);
+            tokio::spawn(async move {
+                manager
+                    .test_backend_connection(TtsBackendType::Bouyomichan)
+                    .await
+            })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        // update_config が設定を差し替えるときに取る書き込みロック
+        let updated = tokio::time::timeout(NOT_BLOCKED, manager.config.write()).await;
+
+        testing.abort();
+        assert!(updated.is_ok(), "接続テスト中に設定を更新できない");
     }
 
     // ========================================================================
