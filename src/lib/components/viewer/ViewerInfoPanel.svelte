@@ -25,51 +25,55 @@
   let saveMessage = $state('');
   let viewerProfileId = $state<number | null>(null);
 
-  // Load existing custom info when viewer changes
+  interface CustomInfo {
+    profileId: number;
+    reading: string;
+    notes: string;
+  }
+
+  // 視聴者が変わったら読み込み直す。読み込み中に別の視聴者を開いたら、前の結果は捨てる
+  // （古い応答が後から届いて、別の視聴者のフォームと保存先を上書きしないように）
   $effect(() => {
-    // Explicitly reference reactive dependencies for effect tracking
     const bc = broadcasterChannelId;
     const vc = viewer.channelId;
+    let stale = false;
 
-    // Reset state before loading (important when viewer changes)
     reading = '';
     notes = '';
     saveMessage = '';
     viewerProfileId = null;
 
-    // Load custom info for this viewer
-    loadCustomInfo(bc, vc);
+    loadCustomInfo(bc, vc)
+      .then((info) => {
+        if (stale || info === null) return;
+        viewerProfileId = info.profileId;
+        reading = info.reading;
+        notes = info.notes;
+      })
+      .catch((error) => console.error('Failed to load viewer info:', error));
+
+    return () => {
+      stale = true;
+    };
   });
 
-  async function loadCustomInfo(bc: string, vc: string) {
-    try {
-      const profile = await invoke<{
-        id: number;
-      } | null>('viewer_get_profile', {
-        broadcasterId: bc,
-        channelId: vc
-      });
-      if (profile) {
-        viewerProfileId = profile.id;
-        // Direct DB lookup by viewer_profile_id (O(1) instead of scanning 1000 viewers)
-        const customInfo = await invoke<{
-          reading: string | null;
-          notes: string | null;
-        } | null>('viewer_get_custom_info', {
-          viewerProfileId: profile.id
-        });
-        if (customInfo) {
-          if (customInfo.reading !== null) {
-            reading = customInfo.reading;
-          }
-          if (customInfo.notes !== null) {
-            notes = customInfo.notes;
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Failed to load viewer info:', error);
-    }
+  async function loadCustomInfo(bc: string, vc: string): Promise<CustomInfo | null> {
+    const profile = await invoke<{ id: number } | null>('viewer_get_profile', {
+      broadcasterId: bc,
+      channelId: vc
+    });
+    if (!profile) return null;
+    const customInfo = await invoke<{
+      reading: string | null;
+      notes: string | null;
+    } | null>('viewer_get_custom_info', {
+      viewerProfileId: profile.id
+    });
+    return {
+      profileId: profile.id,
+      reading: customInfo?.reading ?? '',
+      notes: customInfo?.notes ?? ''
+    };
   }
 
   async function handleSave() {
