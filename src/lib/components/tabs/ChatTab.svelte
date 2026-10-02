@@ -65,7 +65,7 @@
       {#if chatStore.connections.size > 1}
         <button
           class="text-xs px-2 py-0.5 rounded bg-[var(--bg-surface-2)] text-[var(--text-secondary)] border border-[var(--border-default)] hover:bg-[var(--bg-surface-3)] cursor-pointer"
-          onclick={() => chatStore.disconnectAll()}
+          onclick={() => chatStore.disconnectAll().catch((e) => console.warn('全切断に失敗:', e))}
         >全切断</button>
       {/if}
     </div>

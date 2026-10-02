@@ -1,8 +1,11 @@
 <script lang="ts">
   import { chatStore } from '$lib/stores/chat.svelte';
 
+  // 失敗しても一覧からは消える（バックエンド側で既に終わっていた接続など）。未処理の reject にしない
   function handleDisconnect(connectionId: number) {
-    chatStore.disconnect(connectionId);
+    chatStore
+      .disconnect(connectionId)
+      .catch((e) => console.warn(`切断に失敗 (connection ${connectionId}):`, e));
   }
 
 </script>
