@@ -24,6 +24,8 @@
   let isSaving = $state(false);
   let saveMessage = $state('');
   let viewerProfileId = $state<number | null>(null);
+  // 読み込みが終わるまでフォームを無効にする（読み込み結果が入力中の内容を上書きしないように）
+  let isLoaded = $state(false);
 
   interface CustomInfo {
     profileId: number;
@@ -42,6 +44,7 @@
     notes = '';
     saveMessage = '';
     viewerProfileId = null;
+    isLoaded = false;
 
     loadCustomInfo(bc, vc)
       .then((info) => {
@@ -50,7 +53,10 @@
         reading = info.reading;
         notes = info.notes;
       })
-      .catch((error) => console.error('Failed to load viewer info:', error));
+      .catch((error) => console.error('Failed to load viewer info:', error))
+      .finally(() => {
+        if (!stale) isLoaded = true;
+      });
 
     return () => {
       stale = true;
@@ -184,6 +190,7 @@
         type="text"
         placeholder="例: やまだ たろう"
         bind:value={reading}
+        disabled={!isLoaded}
         class="w-full px-3 py-2 rounded-lg text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/50"
         style="background: var(--bg-surface-3); border: 1px solid var(--border-default);"
       />
@@ -201,6 +208,7 @@
         id="viewer-notes"
         placeholder="この視聴者についてのメモ..."
         bind:value={notes}
+        disabled={!isLoaded}
         rows="3"
         class="w-full px-3 py-2 rounded-lg text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/50 resize-none"
         style="background: var(--bg-surface-3); border: 1px solid var(--border-default);"
@@ -211,7 +219,7 @@
     <div class="flex items-center gap-3 mb-5">
       <button
         onclick={handleSave}
-        disabled={isSaving}
+        disabled={!isLoaded || isSaving}
         class="flex-1 px-4 py-2 text-[var(--text-inverse)] rounded-lg transition-colors disabled:opacity-50"
         style="background: var(--accent);"
       >

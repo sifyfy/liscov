@@ -44,4 +44,33 @@ describe('ViewerInfoPanel', () => {
 			expect.objectContaining({ viewerProfileId: 2, reading: 'びー' })
 		);
 	});
+
+	it('読み込みが終わるまで読み仮名・メモ・保存は押せない', async () => {
+		let resolveProfile: (profile: { id: number }) => void = () => {};
+		vi.mocked(invoke).mockImplementation(async (command) => {
+			switch (command) {
+				case 'viewer_get_profile':
+					return new Promise((resolve) => (resolveProfile = resolve));
+				case 'viewer_get_custom_info':
+					return null;
+				default:
+					return null;
+			}
+		});
+
+		render(ViewerInfoPanel, {
+			broadcasterChannelId: 'UC_B0',
+			onClose: () => {},
+			viewer: viewer('UC_A', 'A'),
+		});
+		const readingInput = screen.getByLabelText(/読み仮名/) as HTMLInputElement;
+		const notesInput = screen.getByLabelText(/メモ/) as HTMLTextAreaElement;
+		const saveButton = screen.getByRole('button', { name: /保存/ }) as HTMLButtonElement;
+		expect([readingInput.disabled, notesInput.disabled, saveButton.disabled]).toEqual([true, true, true]);
+
+		resolveProfile({ id: 1 });
+		await waitFor(() => expect(readingInput.disabled).toBe(false));
+		expect(notesInput.disabled).toBe(false);
+		expect(saveButton.disabled).toBe(false);
+	});
 });
