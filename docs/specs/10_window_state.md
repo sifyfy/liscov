@@ -17,6 +17,19 @@
 | 保存サイズが最小サイズ（800x600）未満 | 最小サイズを適用 |
 | 保存サイズが画面より大きい | 画面サイズに自動調整 |
 
+### テスト用のアプリ名で起動したとき
+
+`LISCOV_APP_NAME` が本番の名前（`liscov-tauri`）以外のときは、ファイル名にアプリ名を入れて本番と別のファイルに保存・復元する。
+保存先のディレクトリは本番と同じ（`identifier` で決まり、`LISCOV_APP_NAME` では変わらない）ので、ファイル名で分ける。
+
+| `LISCOV_APP_NAME` | ファイル |
+|------|---------|
+| 未設定（本番） | `.window-state.json` |
+| `liscov-tauri` | `.window-state.json` |
+| `liscov-test` | `.window-state.liscov-test.json` |
+
+E2E がウィンドウのサイズ・位置を変えたり、ファイルを消したりしても、本番のウィンドウ状態は変わらない。
+
 ## 制約・不変条件（Boundaries）
 
 | 制約 | 理由 |
@@ -36,6 +49,7 @@
 | Linux | `~/.config/com.liscov-tauri.app/.window-state.json` |
 
 > **Note**: パスは `tauri.conf.json` の `identifier` に基づく。
+> テスト用のアプリ名で起動したときはファイル名が `.window-state.{アプリ名}.json` になる（「テスト用のアプリ名で起動したとき」）。
 
 ### ファイル形式
 
@@ -121,6 +135,8 @@ tauri::Builder::default()
     .plugin(
         tauri_plugin_window_state::Builder::default()
             .with_state_flags(StateFlags::SIZE | StateFlags::POSITION)
+            // 本番は .window-state.json、テスト用のアプリ名なら .window-state.{アプリ名}.json
+            .with_filename(paths::window_state_filename())
             .build()
     )
 ```
@@ -146,7 +162,9 @@ tauri::Builder::default()
 
 1. **サイズ保存・復元**: リサイズ → 終了 → 再起動 → サイズが復元される
 2. **位置保存・復元**: 移動 → 終了 → 再起動 → 位置が復元される
+3. **本番と分離**: 1・2 のあとも本番の `.window-state.json` が変わっていない
 
 ### テストデータ分離
 
-テスト実行時は `.window-state.json` を削除してクリーンな状態で開始。
+E2E は `LISCOV_APP_NAME=liscov-test` で起動するので、ウィンドウ状態は `.window-state.liscov-test.json` に保存される。
+テスト開始時はこのファイルだけを削除してクリーンな状態で始める。本番の `.window-state.json` には触れない。

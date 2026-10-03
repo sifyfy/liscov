@@ -56,6 +56,12 @@ export function getTestAppDataDir(): string {
   return path.join(getPlatformConfigDir(), TEST_APP_NAME);
 }
 
+/** E2E 用の WebView2 データフォルダ（本番は %LOCALAPPDATA%\com.liscov-tauri.app\EBWebView） */
+export function getTestWebViewDataDir(): string {
+  const localAppData = process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local');
+  return path.join(localAppData, TEST_APP_NAME, 'EBWebView');
+}
+
 export function getTestDatabasePath(): string {
   return path.join(getTestAppDataDir(), 'liscov.db');
 }
@@ -382,6 +388,10 @@ export async function startTauriAppWithEnv(extraEnv: NodeJS.ProcessEnv): Promise
   const env = getTestProcessEnv({
     ...extraEnv,
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=9222',
+    // WebView2 のデータ (Cookie・キャッシュ) は identifier で決まるフォルダにあり、LISCOV_APP_NAME では分かれない。
+    // 本番と同じフォルダだと、本番の liscov が起動中はブラウザプロセスを共有して上の引数が効かず CDP が開かない。
+    // テスト用のフォルダに分ける（環境変数がアプリの指定より優先される）
+    WEBVIEW2_USER_DATA_FOLDER: getTestWebViewDataDir(),
   });
 
   log.info(`Starting prebuilt Tauri app: ${PREBUILT_TAURI_APP_PATH}`);

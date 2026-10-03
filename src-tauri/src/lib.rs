@@ -143,6 +143,8 @@ pub fn run() {
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(StateFlags::SIZE | StateFlags::POSITION)
+                // 本番は .window-state.json、テスト用のアプリ名なら別のファイル（10_window_state.md）
+                .with_filename(paths::window_state_filename())
                 .build(),
         )
         .setup(|app| {

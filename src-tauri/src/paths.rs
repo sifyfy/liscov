@@ -9,9 +9,12 @@ use std::path::PathBuf;
 /// ユニットテストでは本番と別の名前にし、環境変数の設定漏れで本番データに触れないようにする
 /// （CLAUDE.md セキュリティ要件）。統合テスト・E2E は cfg(test) にならないので各自で環境変数を設定する。
 #[cfg(not(test))]
-const DEFAULT_NAME: &str = "liscov-tauri";
+const DEFAULT_NAME: &str = PRODUCTION_NAME;
 #[cfg(test)]
 const DEFAULT_NAME: &str = "liscov-test-unit";
+
+/// 本番のアプリ名
+const PRODUCTION_NAME: &str = "liscov-tauri";
 
 /// アプリ名を返す（環境変数 LISCOV_APP_NAME でオーバーライド可能）
 pub fn app_name() -> String {
@@ -50,6 +53,17 @@ pub fn config_path() -> Result<PathBuf, String> {
 /// データベースファイルのパスを返す（data_dir + "liscov.db"）
 pub fn database_path() -> Result<PathBuf, String> {
     Ok(data_dir()?.join("liscov.db"))
+}
+
+/// ウィンドウ状態のファイル名を返す（10_window_state.md「テスト用のアプリ名で起動したとき」）
+///
+/// 保存先のディレクトリは identifier で決まり、アプリ名では変わらない。
+/// 本番以外のアプリ名ではファイル名にアプリ名を入れ、E2E が本番のウィンドウ状態を上書き・削除しないようにする。
+pub fn window_state_filename() -> String {
+    match app_name().as_str() {
+        PRODUCTION_NAME => ".window-state.json".to_string(),
+        name => format!(".window-state.{name}.json"),
+    }
 }
 
 /// ログディレクトリのパスを返す（data_dir + "logs"）
@@ -110,6 +124,41 @@ mod tests {
         let result = keyring_service();
         unsafe { std::env::remove_var("LISCOV_KEYRING_SERVICE") };
         assert_eq!(result, "liscov-test");
+    }
+
+    // -----------------------------------------------------------------------
+    // window_state_filename（10_window_state.md「テスト用のアプリ名で起動したとき」）
+    // -----------------------------------------------------------------------
+
+    #[test]
+    #[serial(liscov_env)]
+    fn window_state_filename_for_production_is_plugin_default() {
+        // spec: LISCOV_APP_NAME = liscov-tauri → .window-state.json
+        // SAFETY: テスト環境でのみ実行。#[serial] で直列化済み
+        unsafe { std::env::set_var("LISCOV_APP_NAME", "liscov-tauri") };
+        let result = window_state_filename();
+        unsafe { std::env::remove_var("LISCOV_APP_NAME") };
+        assert_eq!(result, ".window-state.json");
+    }
+
+    #[test]
+    #[serial(liscov_env)]
+    fn window_state_filename_for_test_app_includes_app_name() {
+        // spec: LISCOV_APP_NAME = liscov-test → .window-state.liscov-test.json
+        // SAFETY: テスト環境でのみ実行。#[serial] で直列化済み
+        unsafe { std::env::set_var("LISCOV_APP_NAME", "liscov-test") };
+        let result = window_state_filename();
+        unsafe { std::env::remove_var("LISCOV_APP_NAME") };
+        assert_eq!(result, ".window-state.liscov-test.json");
+    }
+
+    #[test]
+    #[serial(liscov_env)]
+    fn window_state_filename_in_unit_tests_is_not_production() {
+        // 環境変数を設定し忘れたユニットテストが本番のウィンドウ状態に触れないこと
+        // SAFETY: テスト環境でのみ実行。#[serial] で直列化済み
+        unsafe { std::env::remove_var("LISCOV_APP_NAME") };
+        assert_ne!(window_state_filename(), ".window-state.json");
     }
 
     // -----------------------------------------------------------------------
