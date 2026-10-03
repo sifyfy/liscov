@@ -20,7 +20,7 @@ use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::time::Instant;
-use warp::Filter;
+use warp::{Filter, Reply};
 
 /// 本番では `__Secure-1PSID` だが、`__Secure-` プレフィックスはHTTPS必須のため
 /// HTTPモックでは代替名を使用してCookieパイプライン完全性を検証する。
@@ -384,7 +384,7 @@ fn build_routes(
             ("VISITOR_INFO1_LIVE", "mock_visitor_12345"),
         ];
 
-        let mut resp = warp::reply::Response::new(warp::hyper::Body::empty());
+        let mut resp = warp::reply().into_response();
         *resp.status_mut() = warp::http::StatusCode::SEE_OTHER;
         resp.headers_mut()
             .insert("Location", "/logged_in".parse().unwrap());
