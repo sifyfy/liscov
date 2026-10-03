@@ -6,22 +6,32 @@ use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use tokio::fs::metadata;
+use std::sync::{Mutex, PoisonError};
 use tracing::{info, warn};
+use ts_rs::TS;
+
+/// 生レスポンスファイルへの書き込み（ローテーションを含む）を直列化するロック
+///
+/// 保存は接続ごとの監視タスクから並行に呼ばれ、同じファイルに書き込む。
+/// 書き込みが混ざると NDJSON の行が壊れる（05_raw_response.md「1行1JSON」）ため、プロセス内で 1 つずつ書く。
+static WRITE_LOCK: Mutex<()> = Mutex::new(());
 
 /// 保存設定（config.toml の [raw_response]。無いキーはデフォルト値で補完する）
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 #[serde(default)]
+// フィールドのコメントは // にする（/// だと ts-rs が行末に空白を付けた TS を出す）
 pub struct SaveConfig {
-    /// レスポンス保存を有効にするか
+    // レスポンス保存を有効にするか
     pub enabled: bool,
-    /// 保存先ファイルパス
+    // 保存先ファイルパス
     pub file_path: String,
-    /// 最大ファイルサイズ(MB)
+    // 最大ファイルサイズ(MB)
+    #[ts(type = "number")]
     pub max_file_size_mb: u64,
-    /// ファイルローテーションを有効にするか
+    // ファイルローテーションを有効にするか
     pub enable_rotation: bool,
-    /// 最大保持ファイル数
+    // 最大保持ファイル数
     pub max_backup_files: u32,
 }
 
@@ -38,6 +48,15 @@ impl Default for SaveConfig {
 }
 
 impl SaveConfig {
+    /// 設定の更新時に検証する（05_raw_response.md 設定の変更）
+    pub fn validate(&self) -> Result<(), String> {
+        validate_file_path(&self.file_path)?;
+        if self.max_file_size_mb == 0 {
+            return Err("max_file_size_mb は 1 以上にしてください".to_string());
+        }
+        Ok(())
+    }
+
     /// 書き込み用に file_path を検証・解決した設定を返す（05_raw_response.md パス解決）
     pub fn resolved_for_write(&self, data_dir: &Path) -> Result<SaveConfig, String> {
         validate_file_path(&self.file_path)?;
@@ -48,6 +67,20 @@ impl SaveConfig {
             ..self.clone()
         })
     }
+}
+
+/// バックアップの命名規則 `{stem}_{YYYYMMDD}_{HHMMSS}.{ext}` に合うか（05_raw_response.md バックアップ削除）
+fn is_backup_name(filename: &str, stem: &str, ext: &str) -> bool {
+    let timestamp = filename
+        .strip_prefix(stem)
+        .and_then(|rest| rest.strip_prefix('_'))
+        .and_then(|rest| rest.strip_suffix(ext))
+        .and_then(|rest| rest.strip_suffix('.'));
+    let Some(timestamp) = timestamp else {
+        return false;
+    };
+    let is_digits = |s: &str, len: usize| s.len() == len && s.bytes().all(|b| b.is_ascii_digit());
+    matches!(timestamp.split_once('_'), Some((date, time)) if is_digits(date, 8) && is_digits(time, 6))
 }
 
 /// 保存先パスを解決する。相対パスは data_dir 基準、絶対パスはそのまま。
@@ -117,56 +150,68 @@ impl RawResponseSaver {
             self.config.file_path
         );
 
-        // ファイルサイズチェックとローテーション
-        if self.config.enable_rotation {
-            self.check_and_rotate_file().await?;
-        }
-
-        // タイムスタンプを追加してJSON行を作成
+        // タイムスタンプを追加してJSON行を作成（重い処理はロックの外で済ませる）
         let entry = serde_json::json!({
             "timestamp": Utc::now().timestamp(),
             "response": serde_json::from_str::<serde_json::Value>(response_json)
                 .unwrap_or_else(|_| serde_json::Value::String(response_json.to_string()))
         });
 
-        let json_line =
+        let mut json_line =
             serde_json::to_string(&entry).context("Failed to serialize response to JSON")?;
+        json_line.push('\n');
 
-        // ファイルに追記
-        self.append_to_file(&json_line).await?;
+        {
+            let _guard = WRITE_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+            // ローテーションに失敗しても、その回のレスポンスは今のファイルに書く（次の書き込みで再び試みる）
+            if self.config.enable_rotation {
+                if let Err(e) = self.check_and_rotate_file() {
+                    tracing::error!(
+                        "生レスポンスのローテーションに失敗（今のファイルに追記を続ける）: {:#}",
+                        e
+                    );
+                }
+            }
+            self.append_to_file(&json_line)?;
+        }
 
-        tracing::info!(
+        // ポーリングごとに呼ばれるので info にしない（リリースのログが埋まる）
+        tracing::debug!(
             "💾 Raw response saved successfully to: {}",
             self.config.file_path
         );
         Ok(())
     }
 
-    /// ファイルにJSONラインを追記
-    async fn append_to_file(&self, json_line: &str) -> Result<()> {
+    /// ファイルに 1 行（改行込み）を追記する。1 回の write_all で書き、行の途中で他の書き込みが挟まらないようにする
+    fn append_to_file(&self, line: &str) -> Result<()> {
+        if let Some(parent) = Path::new(&self.config.file_path).parent() {
+            std::fs::create_dir_all(parent).context("Failed to create raw response directory")?;
+        }
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
             .open(&self.config.file_path)
             .context("Failed to open raw response file")?;
 
-        writeln!(file, "{}", json_line)?;
+        file.write_all(line.as_bytes())?;
         file.flush()?;
 
         Ok(())
     }
 
     /// ファイルサイズをチェックしてローテーション
-    async fn check_and_rotate_file(&self) -> Result<()> {
+    fn check_and_rotate_file(&self) -> Result<()> {
         let file_path = Path::new(&self.config.file_path);
 
-        // ファイルが存在しない場合は何もしない
-        if !file_path.exists() {
+        // 0 はローテーションしない（毎回ローテーションして記録がバックアップ上限から押し出されるのを防ぐ）
+        // ファイルが存在しない場合も何もしない
+        if self.config.max_file_size_mb == 0 || !file_path.exists() {
             return Ok(());
         }
 
         // ファイルサイズをチェック
-        let meta = metadata(&self.config.file_path).await?;
+        let meta = std::fs::metadata(&self.config.file_path)?;
         let file_size_mb = meta.len() / 1024 / 1024;
 
         if file_size_mb >= self.config.max_file_size_mb {
@@ -174,7 +219,7 @@ impl RawResponseSaver {
                 "File size ({} MB) exceeded limit ({} MB), rotating file",
                 file_size_mb, self.config.max_file_size_mb
             );
-            self.rotate_file().await?;
+            self.rotate_file()?;
         }
 
         Ok(())
@@ -195,7 +240,7 @@ impl RawResponseSaver {
     }
 
     /// ファイルをローテーション
-    async fn rotate_file(&self) -> Result<()> {
+    fn rotate_file(&self) -> Result<()> {
         let file_path = Path::new(&self.config.file_path);
         let (file_stem, file_ext) = self.file_parts();
 
@@ -219,13 +264,13 @@ impl RawResponseSaver {
         );
 
         // 古いバックアップファイルを削除
-        self.cleanup_old_backups().await?;
+        self.cleanup_old_backups()?;
 
         Ok(())
     }
 
     /// 古いバックアップファイルを削除
-    async fn cleanup_old_backups(&self) -> Result<()> {
+    fn cleanup_old_backups(&self) -> Result<()> {
         let file_path = Path::new(&self.config.file_path);
         let dir = file_path.parent().unwrap_or_else(|| Path::new("."));
         let (file_stem, file_ext) = self.file_parts();
@@ -236,10 +281,7 @@ impl RawResponseSaver {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if let Some(filename) = path.file_name().and_then(|s| s.to_str()) {
-                    // パターンマッチング: {stem}_{timestamp}.{ext}
-                    if filename.starts_with(&format!("{}_", file_stem))
-                        && filename.ends_with(&format!(".{}", file_ext))
-                    {
+                    if is_backup_name(filename, file_stem, file_ext) {
                         if let Ok(meta) = entry.metadata() {
                             if let Ok(created) = meta.created() {
                                 backup_files.push((path, created));
@@ -399,6 +441,50 @@ mod tests {
             .unwrap();
 
         assert!(data_dir.join("raw_responses.ndjson").exists());
+    }
+
+    // 05_raw_response.md: 複数の接続が同時に保存しても、1行1JSONを保つ
+    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+    async fn concurrent_saves_keep_one_json_per_line() {
+        const TASKS: usize = 8;
+        const SAVES_PER_TASK: usize = 50;
+        let data_dir = temp_dir_for_test("concurrent_saves");
+        let config = SaveConfig {
+            enabled: true,
+            enable_rotation: false,
+            ..SaveConfig::default()
+        }
+        .resolved_for_write(&data_dir)
+        .unwrap();
+        // 1 回の書き込みで済まない程度に大きいレスポンス
+        let response = format!(
+            r#"{{"actions": [], "padding": "{}"}}"#,
+            "x".repeat(64 * 1024)
+        );
+
+        let handles: Vec<_> = (0..TASKS)
+            .map(|_| {
+                let saver = RawResponseSaver::new(config.clone());
+                let response = response.clone();
+                tokio::spawn(async move {
+                    for _ in 0..SAVES_PER_TASK {
+                        saver.save_response(&response).await.unwrap();
+                    }
+                })
+            })
+            .collect();
+        for handle in handles {
+            handle.await.unwrap();
+        }
+
+        let content = fs::read_to_string(data_dir.join("raw_responses.ndjson")).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        let broken = lines
+            .iter()
+            .filter(|line| serde_json::from_str::<serde_json::Value>(line).is_err())
+            .count();
+        assert_eq!(broken, 0, "JSON として読めない行がある");
+        assert_eq!(lines.len(), TASKS * SAVES_PER_TASK);
     }
 
     // ========================================================================
@@ -765,5 +851,121 @@ mod tests {
             "Expected at most 3 backups, got {}",
             backup_count
         );
+    }
+
+    // ========================================================================
+    // 書き込みの失敗に強くする (05_raw_response.md: 保存動作)
+    // ========================================================================
+
+    fn backup_names(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|name| name.starts_with("responses_") && name.ends_with(".ndjson"))
+            .collect();
+        names.sort();
+        names
+    }
+
+    fn write_large_file(path: &Path) {
+        let mut file = fs::File::create(path).unwrap();
+        let line = "x".repeat(1024);
+        for _ in 0..1100 {
+            writeln!(file, "{}", line).unwrap();
+        }
+    }
+
+    fn rotating_config(file_path: &Path, max_file_size_mb: u64) -> SaveConfig {
+        SaveConfig {
+            enabled: true,
+            file_path: file_path.to_string_lossy().to_string(),
+            max_file_size_mb,
+            enable_rotation: true,
+            max_backup_files: 1,
+        }
+    }
+
+    // spec: 保存先のフォルダが無い → フォルダを作ってから書く
+    #[tokio::test]
+    async fn save_creates_missing_parent_dir() {
+        let dir = temp_dir_for_test("missing_parent");
+        let file_path = dir.join("liscov").join("raw.ndjson");
+
+        let saver = RawResponseSaver::new(rotating_config(&file_path, 100));
+        saver.save_response(r#"{"actions": []}"#).await.unwrap();
+
+        let content = fs::read_to_string(&file_path).unwrap();
+        assert_eq!(content.lines().count(), 1);
+    }
+
+    // spec: ローテーションに失敗（他のアプリが削除不可で開いている）→ 今のファイルにそのまま追記する
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn rotation_failure_still_appends() {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_SHARE_READ: u32 = 0x1;
+        const FILE_SHARE_WRITE: u32 = 0x2;
+
+        let dir = temp_dir_for_test("rotation_failure");
+        let file_path = dir.join("responses.ndjson");
+        write_large_file(&file_path);
+        let lines_before = fs::read_to_string(&file_path).unwrap().lines().count();
+
+        // 読み書きは共有するが削除（リネーム）は許さない開き方
+        let _holder = OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .open(&file_path)
+            .unwrap();
+
+        let saver = RawResponseSaver::new(rotating_config(&file_path, 1));
+        saver.save_response(r#"{"kept": true}"#).await.unwrap();
+
+        let content = fs::read_to_string(&file_path).unwrap();
+        assert_eq!(content.lines().count(), lines_before + 1);
+        assert!(content.lines().last().unwrap().contains("\"kept\""));
+        assert!(backup_names(&dir).is_empty());
+    }
+
+    // spec: config.toml の max_file_size_mb が 0 → ローテーションせずに追記する
+    #[tokio::test]
+    async fn zero_max_file_size_does_not_rotate() {
+        let dir = temp_dir_for_test("zero_max_size");
+        let file_path = dir.join("responses.ndjson");
+
+        let saver = RawResponseSaver::new(rotating_config(&file_path, 0));
+        for i in 0..3 {
+            saver
+                .save_response(&format!(r#"{{"n": {}}}"#, i))
+                .await
+                .unwrap();
+        }
+
+        let content = fs::read_to_string(&file_path).unwrap();
+        assert_eq!(content.lines().count(), 3);
+        assert!(backup_names(&dir).is_empty());
+    }
+
+    // spec: 命名規則に合わない似た名前のファイル（例: raw_responses_manual.ndjson）は数えず、消さない
+    #[tokio::test]
+    async fn cleanup_keeps_files_not_matching_backup_naming() {
+        let dir = temp_dir_for_test("cleanup_naming");
+        let file_path = dir.join("responses.ndjson");
+        fs::write(dir.join("responses_manual.ndjson"), "keep").unwrap();
+        fs::write(dir.join("responses_20250101_1200.ndjson"), "keep").unwrap();
+        fs::write(dir.join("responses_20250101_000000.ndjson"), "old").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        write_large_file(&file_path);
+
+        // max_backup_files=1: 新しいバックアップ 1 件だけが残り、命名規則に合うもう 1 件が消える
+        let saver = RawResponseSaver::new(rotating_config(&file_path, 1));
+        saver.save_response(r#"{"test": true}"#).await.unwrap();
+
+        let names = backup_names(&dir);
+        assert!(names.contains(&"responses_manual.ndjson".to_string()));
+        assert!(names.contains(&"responses_20250101_1200.ndjson".to_string()));
+        assert!(!names.contains(&"responses_20250101_000000.ndjson".to_string()));
+        assert_eq!(names.len(), 3, "{:?}", names);
     }
 }

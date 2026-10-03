@@ -92,7 +92,7 @@ Given/When/Then 形式、または入出力の具体例で書く。
 Tauriコマンドの一覧
 
 ## データモデル
-Rust構造体、TypeScript型定義
+Rust構造体、TypeScript型定義（IPC で渡す型は ts-rs で `src/lib/types/generated/` に生成する。手で書いた TS の型を IPC に使わない）
 
 ## フロントエンド
 UIコンポーネントとユーザー操作

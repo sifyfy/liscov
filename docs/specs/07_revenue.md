@@ -6,19 +6,45 @@
 
 ## 振る舞い（What）
 
+### 集計の対象
+
+| コマンド | 対象 |
+|---------|------|
+| `get_revenue_analytics`・`export_current_messages`（「現在」） | この起動で接続したセッションすべて（接続中・切断済み・同じ配信への再接続を含む）。DB に保存したメッセージを数える（画面に出ている件数やメモリ上のバッファの上限に依らない） |
+| `get_session_analytics`・`export_session_data` | 指定した 1 セッション |
+
+| 状況（「現在」） | 結果 |
+|------|------|
+| 1 つの配信で 3000 件を受信し、うち SuperChat が 1500 件 | SuperChat総件数 1500。エクスポートも 3000 件（`max_records` を指定すればその件数まで） |
+| 配信 A に接続 → 切断 → 配信 B に接続 | A と B の合計 |
+| 接続が切れて同じ配信に再接続（別のセッションになる） | 切れる前と後の合計 |
+| アプリを再起動した直後 | 0 件（前回の起動のセッションは `get_session_analytics` で見る） |
+| DB を使えない | エラーを返す |
+
 ### Tier別集計
 
 SuperChatの色情報（`headerBackgroundColor`）に基づいてtierを判定し、tier別に件数を集計する。**金額の数値計算は行わない。**
 
-| Tier | 色 | USD相当額の目安 |
-|------|----|----------------|
-| Blue | 青 | $1-2 |
-| Cyan | 水色 | $2-5 |
-| Green | 緑 | $5-10 |
-| Yellow | 黄 | $10-20 |
-| Orange | オレンジ | $20-50 |
-| Magenta | マゼンタ | $50-100 |
-| Red | 赤 | $100-500 |
+判定はヘッダー背景色（`#RRGGBB`）が下の表と完全に一致するかで行う（大文字小文字は区別しない）。どれにも一致しない色と、色が分からないもの（色を保存する前の過去セッション）は **段階不明**（`tier_unknown`）に数える。金額から段階を推定しない。
+
+| Tier | 色 | ヘッダー背景色 | USD相当額の目安 | 実データの例 |
+|------|----|------|----------------|------|
+| Blue | 青 | `#1565C0` | $1-2 | ¥100 |
+| Cyan | 水色 | `#00B8D4` | $2-5 | ¥200, ¥320 |
+| Green | 緑 | `#00BFA5` | $5-10 | ¥500, ¥800, HK$25.00 |
+| Yellow | 黄 | `#FFB300` | $10-20 | ¥1,000, ¥1,600 |
+| Orange | オレンジ | `#E65100` | $20-50 | ¥2,222, ¥3,200 |
+| Magenta | マゼンタ | `#C2185B` | $50-100 | ¥5,000, ¥9,999 |
+| Red | 赤 | `#D00000` | $100-500 | （実データ未確認） |
+
+実データの例は、2026-09 の配信の生レスポンスで確かめたもの。赤だけは実データが無く、YouTube の配色から決めている。
+
+| 状況 | 結果 |
+|------|------|
+| ヘッダー背景色が `#00BFA5` の ¥500 | Green |
+| ヘッダー背景色が表に無い色 | 段階不明 |
+| 色を保存する前（マイグレーション 005 より前）の過去セッションのスーパーチャット | 段階不明 |
+| ダッシュボード | 段階不明が 1 件以上あれば「段階不明: N件」も出す |
 
 ### エクスポート
 
@@ -31,6 +57,7 @@ SuperChatの色情報（`headerBackgroundColor`）に基づいてtierを判定�
 ### 上位貢献者
 
 SuperChat件数でソートし、上位10人を表示。同一件数の場合は最高tierで比較。ギフトは含めない。
+件数は SuperChat と SuperSticker の合計。表示名はその視聴者の最初の SuperChat・SuperSticker のときの名前。
 
 ### ギフト集計
 
@@ -58,10 +85,10 @@ SuperChat件数でソートし、上位10人を表示。同一件数の場合は
 
 | コマンド | 入力 | 出力 | 説明 |
 |---------|------|------|------|
-| `get_revenue_analytics` | なし | `RevenueAnalytics` | 現在セッションの分析 |
+| `get_revenue_analytics` | なし | `RevenueAnalytics` | この起動で接続したセッションの分析（「集計の対象」） |
 | `get_session_analytics` | `session_id: String` | `RevenueAnalytics` | 過去セッションの分析 |
 | `export_session_data` | `session_id, file_path, config` | `()` | セッションデータエクスポート |
-| `export_current_messages` | `file_path, config` | `()` | 現在メッセージエクスポート（多接続時は全接続のメッセージを対象） |
+| `export_current_messages` | `file_path, config` | `()` | この起動で接続したセッションのメッセージをエクスポート（多接続時は全接続のメッセージを対象。「集計の対象」） |
 
 ## データモデル
 
@@ -86,7 +113,7 @@ pub struct RevenueAnalytics {
 | `super_sticker_count` | usize | SuperSticker総件数 |
 | `membership_gains` | usize | メンバーシップ獲得数 |
 | `hourly_stats` | Vec | 時間別統計データ（現在は常に空。将来実装予定） |
-| `top_contributors` | Vec | 上位貢献者（件数ベース、`get_revenue_analytics`のみで集計） |
+| `top_contributors` | Vec | 上位貢献者（件数ベース。`get_revenue_analytics`・`get_session_analytics` の両方で集計） |
 | `gifts` | GiftStats | ギフト集計（`get_revenue_analytics`・`get_session_analytics` の両方で集計） |
 
 ### GiftStats
@@ -121,6 +148,7 @@ pub struct SuperChatTierStats {
     pub tier_green: usize,    // USD $5-10相当
     pub tier_cyan: usize,     // USD $2-5相当
     pub tier_blue: usize,     // 最低tier（USD $1-2相当）
+    pub tier_unknown: usize,  // 段階不明（色が表に無い・分からない）
 }
 ```
 
@@ -184,14 +212,8 @@ pub struct LiveChatPaidMessageRenderer {
 
 ### Tier判定ロジック
 
-`header_background_color` の値からtierを判定：
-
-```rust
-fn determine_tier(header_background_color: u64) -> SuperChatTier {
-    // YouTubeの色コードからtierを判定
-    // 実装時に実際の色コードを確認して定義
-}
-```
+パーサがヘッダー背景色を `#RRGGBB` にし（`SuperChatColors.header_background`）、[Tier別集計](#tier別集計) の表と完全一致で判定する。一致しなければ段階不明。
+過去セッションは DB の `messages.superchat_color`（08_database.md）から同じ判定をする。
 
 ### 設計理由
 
@@ -261,13 +283,20 @@ pub struct ExportableData {
     pub content: String,
     pub message_type: String,
     pub amount_display: Option<String>,  // 表示用金額文字列（"¥500"等）
-    pub tier: Option<SuperChatTier>,     // SuperChatのtier
-    pub is_moderator: bool,
+    pub tier: Option<SuperChatTier>,     // SuperChatのtier（superchat 以外と段階不明は None）
+    pub is_moderator: Option<bool>,      // None = 不明
     pub is_member: bool,
-    pub is_verified: bool,
-    pub badges: Vec<String>,
+    pub is_verified: Option<bool>,       // None = 不明
+    pub badges: Option<Vec<String>>,     // None = 不明
 }
 ```
+
+`is_moderator`・`is_verified`・`badges` は、バッジを読めない種類（membership_gift・gift・system）と、バッジを保存する前（マイグレーション 005 より前）の過去セッションの行では不明（None）にする（08_database.md）。不明を false や空配列にしない。
+
+| 出力 | 不明のとき |
+|------|-----------|
+| CSV | 空欄 |
+| JSON | `null` |
 
 ### CSV形式
 

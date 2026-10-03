@@ -4,6 +4,7 @@
   import { ViewerManagement } from '$lib/components/viewer';
   import { ChatTab, AnalyticsTab, SettingsTab } from '$lib/components/tabs';
   import Icon from '$lib/components/ui/Icon.svelte';
+  import ErrorBoundary from '$lib/components/ui/ErrorBoundary.svelte';
 
   type Tab = 'chat' | 'viewers' | 'analytics' | 'settings';
   type SettingsSubTab = 'auth' | 'tts' | 'raw' | 'theme';
@@ -97,16 +98,24 @@
   <main class="flex-1 flex flex-col overflow-hidden">
     <!-- Chatタブ: VList の再マウントコストを避けるため display:none で維持 -->
     <div style:display={activeTab === 'chat' ? 'flex' : 'none'} class="flex-1 flex flex-col overflow-hidden">
-      <ChatTab />
+      <ErrorBoundary name="チャットタブ">
+        <ChatTab />
+      </ErrorBoundary>
     </div>
     {#if activeTab === 'viewers'}
       <div class="flex-1 p-4 bg-[var(--bg-base)] overflow-y-auto">
-        <ViewerManagement broadcasterId={broadcasterId || undefined} />
+        <ErrorBoundary name="視聴者タブ">
+          <ViewerManagement broadcasterId={broadcasterId || undefined} />
+        </ErrorBoundary>
       </div>
     {:else if activeTab === 'analytics'}
-      <AnalyticsTab />
+      <ErrorBoundary name="分析タブ">
+        <AnalyticsTab />
+      </ErrorBoundary>
     {:else if activeTab === 'settings'}
-      <SettingsTab initialTab={activeSettingsSubTab} />
+      <ErrorBoundary name="設定タブ">
+        <SettingsTab initialTab={activeSettingsSubTab} />
+      </ErrorBoundary>
     {/if}
   </main>
 </div>

@@ -10,6 +10,7 @@ import {
   startTauriApp,
   connectToApp,
   killTauriApp,
+  killProcessesStartedFrom,
   cleanupTestData,
   cleanupTestCredentials,
 } from './utils/test-helpers';
@@ -55,35 +56,10 @@ function isVoicevoxRunning(): boolean {
   }
 }
 
-// Kill all VOICEVOX processes
+// テストが起動した VOICEVOX を止める（beforeAll で、テスト前から動いている VOICEVOX があればスキップしている）
 function killVoicevox(): void {
-  try {
-    execSync('taskkill /F /IM VOICEVOX.exe 2>nul', { stdio: 'ignore' });
-  } catch {
-    // Process may not exist, which is fine
-  }
-}
-
-// Helper to gracefully close Tauri app (triggers ExitRequested event)
-async function closeTauriAppGracefully(): Promise<void> {
-  try {
-    if (process.platform === 'win32') {
-      // Send WM_CLOSE message instead of force kill
-      execSync('taskkill /IM liscov-tauri.exe 2>nul', { stdio: 'ignore' });
-      // Wait for graceful shutdown
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      // Force kill if still running
-      execSync('taskkill /F /IM liscov-tauri.exe 2>nul', { stdio: 'ignore' });
-    } else {
-      execSync('pkill -TERM -f liscov-tauri', { stdio: 'ignore' });
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      execSync('pkill -KILL -f liscov-tauri', { stdio: 'ignore' });
-    }
-  } catch {
-    // Process may not exist
-  }
-  // Wait for port to be released
-  await new Promise(resolve => setTimeout(resolve, 1000));
+  const voicevoxPath = getVoicevoxPath();
+  if (voicevoxPath) killProcessesStartedFrom(voicevoxPath);
 }
 
 // Navigate to TTS settings tab
@@ -152,6 +128,13 @@ test.describe('TTS VOICEVOX Auto-Launch', () => {
     }
 
     log.info(`VOICEVOX found at: ${voicevoxPath}`);
+
+    // ユーザーが使っている VOICEVOX（配信中など）を止めないよう、テスト前から動いていればスキップする
+    if (isVoicevoxRunning()) {
+      log.warn('VOICEVOX が起動中のためスキップする（ユーザーの VOICEVOX を止めない）');
+      test.skip();
+      return;
+    }
 
     // Step 1: Kill any existing processes
     log.info('Killing any existing Tauri app and VOICEVOX...');
@@ -266,7 +249,7 @@ test.describe('TTS VOICEVOX Auto-Launch', () => {
     await expect(mainPage.getByText('停止中')).toBeVisible();
 
     // Find and click the launch button
-    const launchButton = mainPage.getByRole('button', { name: '起動' });
+    const launchButton = mainPage.getByRole('button', { name: '起動', exact: true });
     await launchButton.click();
 
     // Wait for VOICEVOX process to start
@@ -277,7 +260,7 @@ test.describe('TTS VOICEVOX Auto-Launch', () => {
     await expect(mainPage.getByText('起動中')).toBeVisible({ timeout: 5000 });
 
     // Verify button text changed to "停止" (stop)
-    await expect(mainPage.getByRole('button', { name: '停止' })).toBeVisible();
+    await expect(mainPage.getByRole('button', { name: '停止', exact: true })).toBeVisible();
   });
 
   test('should stop VOICEVOX manually via button', async () => {
@@ -285,8 +268,8 @@ test.describe('TTS VOICEVOX Auto-Launch', () => {
     await selectVoicevoxBackend(mainPage);
 
     // First, ensure VOICEVOX is launched (via UI)
-    const launchButton = mainPage.getByRole('button', { name: '起動' });
-    const stopButton = mainPage.getByRole('button', { name: '停止' });
+    const launchButton = mainPage.getByRole('button', { name: '起動', exact: true });
+    const stopButton = mainPage.getByRole('button', { name: '停止', exact: true });
 
     // If "起動" button is visible, click it to launch
     if (await launchButton.isVisible({ timeout: 1000 }).catch(() => false)) {
@@ -322,7 +305,7 @@ test.describe('TTS VOICEVOX Auto-Launch', () => {
     await selectVoicevoxBackend(mainPage);
 
     // First, ensure VOICEVOX is stopped via UI if running
-    const stopButton = mainPage.getByRole('button', { name: '停止' });
+    const stopButton = mainPage.getByRole('button', { name: '停止', exact: true });
     if (await stopButton.isVisible({ timeout: 1000 }).catch(() => false)) {
       await stopButton.click();
       await waitForVoicevoxToStop();
@@ -393,8 +376,8 @@ test.describe('TTS VOICEVOX Auto-Launch', () => {
     }
 
     // Step 2: Launch VOICEVOX manually via UI
-    const launchButton = mainPage.getByRole('button', { name: '起動' });
-    const stopButton = mainPage.getByRole('button', { name: '停止' });
+    const launchButton = mainPage.getByRole('button', { name: '起動', exact: true });
+    const stopButton = mainPage.getByRole('button', { name: '停止', exact: true });
 
     // If already running, that's fine. If not, launch it.
     if (await launchButton.isVisible({ timeout: 1000 }).catch(() => false)) {
@@ -408,7 +391,7 @@ test.describe('TTS VOICEVOX Auto-Launch', () => {
 
     // Step 3: Exit the app gracefully (triggers ExitRequested event which triggers auto-close)
     await browser.close();
-    await closeTauriAppGracefully();
+    await killTauriApp(); // ウィンドウを閉じる終了を先に試す（ExitRequested で自動終了が走る）
 
     // Step 4: Verify VOICEVOX was auto-closed
     // Wait a bit for auto-close to take effect
@@ -429,8 +412,8 @@ test.describe('TTS VOICEVOX Auto-Launch', () => {
     await selectVoicevoxBackend(mainPage);
 
     // Launch VOICEVOX via UI
-    const launchButton = mainPage.getByRole('button', { name: '起動' });
-    const stopButton = mainPage.getByRole('button', { name: '停止' });
+    const launchButton = mainPage.getByRole('button', { name: '起動', exact: true });
+    const stopButton = mainPage.getByRole('button', { name: '停止', exact: true });
 
     // If not already running, launch it
     if (await launchButton.isVisible({ timeout: 1000 }).catch(() => false)) {
@@ -474,8 +457,8 @@ test.describe('TTS VOICEVOX Auto-Launch', () => {
     await selectVoicevoxBackend(mainPage);
 
     // Verify launch button is visible (VOICEVOX should be stopped)
-    const launchButton = mainPage.getByRole('button', { name: '起動' });
-    const stopButton = mainPage.getByRole('button', { name: '停止' });
+    const launchButton = mainPage.getByRole('button', { name: '起動', exact: true });
+    const stopButton = mainPage.getByRole('button', { name: '停止', exact: true });
 
     // If still showing "停止", stop the backend first
     if (await stopButton.isVisible({ timeout: 1000 }).catch(() => false)) {

@@ -10,9 +10,11 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::RwLock;
+use ts_rs::TS;
 
 /// WebSocket server status
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub struct WebSocketStatus {
     pub is_running: bool,
     pub actual_port: Option<u16>,

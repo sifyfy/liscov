@@ -80,10 +80,30 @@
 | 状況 | 結果 |
 |------|------|
 | メッセージ受信（キュー空き） | キューに追加、順次読み上げ |
-| メッセージ受信（キュー満杯） | 破棄（ログ出力） |
+| メッセージ受信（キュー満杯） | 新しいメッセージも含めて、最も優先度の低いもののうち最後に並んだ 1 件を捨てる（警告ログ出力） |
 | 1メッセージの読み上げ失敗 | エラーログ出力、次のメッセージへ進む（他に影響しない） |
 | 設定で enabled を true に変更 | キュー処理を自動開始 |
-| 設定で enabled を false に変更 | キュー処理を自動停止 |
+| 設定で enabled を false に変更 | キュー処理を自動停止。VOICEVOX で再生中の音声も止める |
+| enabled = true の設定を保存したが、キュー処理が動いていない（異常終了していた等） | キュー処理を開始する |
+| 停止の途中で開始した（enabled を false にしてすぐ true に戻す等） | 停止が終わってから開始する。読み上げが止まったままにならない |
+| 設定の保存が続けて届いた | 届いた順に適用する。最後に保存した enabled のとおりに動く・止まる |
+| キュー処理が異常終了した（panic 等） | 処理中でない扱いになる（`tts_get_status` の is_processing が false）。次の設定保存・`tts_start` で再び動く |
+| 読み上げ中（VOICEVOX の再生中を含む）に設定の保存・接続テスト・状態の取得をした | 読み上げの終わりを待たずに処理される。新しい設定は次のメッセージから使う |
+| 接続テスト中にメッセージが届いた・設定を保存した | 接続テストの終わりを待たずに処理される |
+| VOICEVOX の再生が音声の長さ + 5秒たっても終わらない（音声デバイスが応答しない等） | 再生を打ち切ってエラーログを出し、次のメッセージへ進む |
+
+#### キュー満杯時に捨てるもの
+
+先に並んだスーパーチャットを、後から来た通常コメントのために捨てないようにする。
+キューは優先度の高い順（同じ優先度では到着順）に並ぶので、捨てるのは常に末尾の 1 件になる。
+
+| 状況（上限2件の例） | 届いたもの | 結果のキュー |
+|------|-----------|-------------|
+| 通常 A・通常 B が並んでいる | 通常 C | 通常 A・通常 B（C を捨てる） |
+| スパチャ S・通常 A が並んでいる | 通常 B | スパチャ S・通常 A（B を捨てる） |
+| 通常 A・通常 B が並んでいる | スパチャ S | スパチャ S・通常 A（B を捨てる） |
+| メンバー M・通常 A が並んでいる | スパチャ S | スパチャ S・メンバー M（A を捨てる） |
+| スパチャ S1・スパチャ S2 が並んでいる | スパチャ S3 | スパチャ S1・スパチャ S2（S3 を捨てる） |
 
 ## 制約・不変条件（Boundaries）
 
@@ -100,7 +120,7 @@
 | コマンド | 入力 | 出力 | 説明 |
 |---------|------|------|------|
 | `tts_get_config` | なし | `TtsConfigDto` | 設定取得 |
-| `tts_update_config` | `config: TtsConfigDto` | `()` | 設定更新（enabled変更時は自動でstart/stop） |
+| `tts_update_config` | `config: TtsConfigDto` | `()` | 設定更新。保存後の enabled に合わせてキュー処理を開始・停止する（動いていなければ開始、false なら停止） |
 | `tts_speak` | `text, priority?, author_name?, amount?` | `()` | 読み上げキューに追加（チャットメッセージ読み上げの本番経路） |
 | `tts_speak_direct` | `text: String` | `()` | キューを介さず直接読み上げ（テスト用） |
 | `tts_test_connection` | `backend: Option<String>` | `bool` | 接続テスト |
@@ -330,8 +350,10 @@ pub enum TtsPriority {
 | 条件 | 動作 |
 |-----|------|
 | アプリ起動時 | `enabled=true`の場合、キュー処理を自動開始 |
-| 設定変更時（無効→有効） | キュー処理を開始 |
-| 設定変更時（有効→無効） | キュー処理を停止 |
+| 設定保存時（enabled = true） | キュー処理が動いていなければ開始 |
+| 設定保存時（enabled = false） | キュー処理が動いていれば停止 |
+
+設定の差し替えと開始・停止は 1 つずつ順に行う（保存が続けて届いても、停止と開始が入れ違わない）。
 
 手動で`tts_start`/`tts_stop`を呼び出す必要はない。
 
@@ -344,7 +366,7 @@ pub enum TtsPriority {
         ↓
 3. キューに追加
    ├─ キュー空き → 追加成功
-   └─ キュー満杯 → 破棄（ログ出力）
+   └─ キュー満杯 → 最も優先度の低いもののうち最後尾を破棄（ログ出力）
         ↓
 4. バックグラウンドタスクが順次処理
         ↓
@@ -358,8 +380,8 @@ pub enum TtsPriority {
 ### キューサイズ制限
 
 - デフォルト: 50メッセージ
-- 満杯時: 新規メッセージは破棄
-- 処理順: FIFO（先入れ先出し）
+- 満杯時: 新しいメッセージを優先度の位置に入れてから、上限を超えた末尾の 1 件を破棄（「キュー満杯時に捨てるもの」）
+- 処理順: 優先度の高い順。同じ優先度では FIFO（先入れ先出し）
 
 ## バックエンド自動起動
 
@@ -506,6 +528,10 @@ Content-Type: application/json
 
 生成されたWAVデータはアプリ内で再生（rodioライブラリ使用）。
 
+- 再生は音声の長さ + 5秒で打ち切る（長さが分からないときは60秒）。音声デバイスが応答しないときに読み上げ全体が止まり続けないため
+- キュー処理を止めたら（enabled を false にした等）、再生中の音声も止める
+- 再生の終わりを待つ間、バックエンドや設定のロックは握らない（設定の保存や接続テストを待たせない）
+
 #### 接続テスト
 
 ```
@@ -567,9 +593,10 @@ pub struct ViewerCustomInfo {
 |-------|------|
 | 接続失敗 | エラーログ出力、メッセージ破棄 |
 | タイムアウト | エラーログ出力、メッセージ破棄 |
-| キュー満杯 | 警告ログ出力、メッセージ破棄 |
+| キュー満杯 | 警告ログ出力、最も優先度の低いもののうち最後尾を破棄 |
 | 音声合成失敗（VOICEVOX） | エラーログ出力、メッセージ破棄 |
 | 音声再生失敗（VOICEVOX） | エラーログ出力、次のメッセージへ |
+| 音声再生が長さ + 5秒で終わらない（VOICEVOX） | 再生を打ち切り、エラーログ出力、次のメッセージへ |
 
 ### エラー時の継続性
 
@@ -587,6 +614,7 @@ pub struct ViewerCustomInfo {
 | 「接続テスト」クリック | `tts_test_connection`呼び出し、結果表示 |
 | テスト文入力 + 「読み上げ」クリック | `tts_speak_direct`呼び出し、ボタンにスピナー表示、読み上げ実行 |
 | 設定変更（ホスト、ポート等） | 300msデバウンス後に自動保存（保存ボタンなし） |
+| 自動保存の最中 | フォームはそのまま表示し続ける（入力中の欄のフォーカスと入力を失わない）。「読み込み中...」は設定を読み込むときだけ |
 
 ### 設定UI構成
 
@@ -617,6 +645,7 @@ TTS設定
 │       ├─ 実行ファイルパス表示 + 参照ボタン + 自動検出ボタン
 │       ├─ 終了時に自動停止トグル
 │       └─ 手動起動/停止ボタン + 起動状態表示
+│   （自動起動トグル〜起動状態表示は両バックエンドで同じ部品 TtsLaunchSettings.svelte）
 ├─ 接続テストボタン
 └─ テスト読み上げ（テキスト入力 + 読み上げボタン）
 ```
@@ -677,10 +706,16 @@ pub struct VoicevoxConfig {
 
 ### TtsConfigDto（TypeScript）
 
+Rust の型から ts-rs で `src/lib/types/generated/` に生成する（手で書かない。型を変えたら `cargo test --manifest-path src-tauri/Cargo.toml export_bindings` で生成し直してコミットする。`make typecheck` が古い生成物を検出する）。
+`TtsConfigDto` は TS では `TtsConfig`、`TtsBackendType` は `TtsBackend` という名前で出る。
+IPC では Rust の `TtsConfig` の入れ子（`bouyomichan` / `voicevox`）を平らにして、`bouyomichan_` / `voicevox_` を頭に付けたフィールドで渡す。
+
 ```typescript
-interface TtsConfigDto {
+type TtsBackend = "none" | "bouyomichan" | "voicevox";
+
+type TtsConfig = {
     enabled: boolean;
-    backend: 'none' | 'bouyomichan' | 'voicevox';
+    backend: TtsBackend;  // Rust 側は文字列で受け、ほかの値は "none" として扱う
     read_author_name: boolean;
     add_honorific: boolean;
     strip_at_prefix: boolean;
@@ -691,37 +726,35 @@ interface TtsConfigDto {
     first_comment_prefix_enabled: boolean;
     first_comment_prefix: string;
     first_comment_only: boolean;
-    bouyomichan: BouyomichanConfig;
-    voicevox: VoicevoxConfig;
-}
+    bouyomichan_host: string;
+    bouyomichan_port: number;
+    bouyomichan_voice: number;
+    bouyomichan_volume: number;
+    bouyomichan_speed: number;
+    bouyomichan_tone: number;
+    bouyomichan_auto_launch: boolean;
+    bouyomichan_exe_path: string | null;
+    bouyomichan_auto_close: boolean;
+    voicevox_host: string;
+    voicevox_port: number;
+    voicevox_speaker_id: number;
+    voicevox_volume_scale: number;
+    voicevox_speed_scale: number;
+    voicevox_pitch_scale: number;
+    voicevox_intonation_scale: number;
+    voicevox_auto_launch: boolean;
+    voicevox_exe_path: string | null;
+    voicevox_auto_close: boolean;
+};
 
-interface BouyomichanConfig {
-    host: string;
-    port: number;
-    voice: number;
-    volume: number;
-    speed: number;
-    tone: number;
-    auto_launch: boolean;
-    exe_path: string | null;
-    auto_close: boolean;
-}
+type TtsStatus = {
+    is_processing: boolean;
+    queue_size: number;
+    backend_name: string | null;
+};
 
-interface VoicevoxConfig {
-    host: string;
-    port: number;
-    speaker_id: number;
-    volume_scale: number;
-    speed_scale: number;
-    pitch_scale: number;
-    intonation_scale: number;
-    auto_launch: boolean;
-    exe_path: string | null;
-    auto_close: boolean;
-}
-
-interface TtsLaunchStatus {
+type TtsLaunchStatus = {
     bouyomichan_launched: boolean;
     voicevox_launched: boolean;
-}
+};
 ```

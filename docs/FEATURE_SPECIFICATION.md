@@ -22,8 +22,37 @@
 | config.toml | `%APPDATA%/liscov-tauri/config.toml` | TOML | アプリケーション設定 |
 | credentials.toml | `%APPDATA%/liscov-tauri/credentials.toml` | TOML | YouTube認証情報（fallbackモード時） |
 | tts_config.toml | `%APPDATA%/liscov-tauri/tts_config.toml` | TOML | TTS設定 |
-| liscov.db | `%APPDATA%/liscov-tauri/liscov.db` | SQLite | セッション・メッセージ・視聴者情報 |
+| liscov.db | `%APPDATA%/liscov-tauri/liscov.db` | SQLite | セッション・メッセージ・視聴者情報（WAL。実行中は `liscov.db-wal`・`liscov.db-shm` も並ぶ） |
 | raw_responses.ndjson | ユーザー指定パス（デフォルト: `raw_responses.ndjson`） | NDJSON | 生APIレスポンス（任意） |
+| liscov.log | `%APPDATA%/liscov-tauri/logs/liscov.log` | テキスト | バックエンドのログ |
+
+設定・認証の TOML（config.toml・credentials.toml・tts_config.toml）は、同じフォルダの一時ファイル（`<名前>.tmp`）に書いてディスクに書き出してから、元のファイルと置き換える。
+書き込みの途中でアプリや PC が止まっても、前の内容か新しい内容のどちらかが残り、空や途中までのファイルにならない。
+
+### バックエンドのログ
+
+配信中に起きた失敗（取得・保存・読み上げ）を後から調べられるように、リリースビルドでもログをファイルに残す。
+
+| 項目 | 値 |
+|------|-----|
+| 出力するレベル | リリースビルドは info 以上、debug ビルドは debug 以上 |
+| ファイルの切り替え | 10MB を超えたら切り替え、古いものは5世代まで残す |
+| 出力先の分離 | `LISCOV_APP_NAME` に従う（E2E のログが本番のログに混ざらない） |
+| debug ビルドの標準出力 | ファイルと同じ内容を標準出力にも出す（E2E がテスト失敗時に添付する。ADR-004） |
+| 起動時の初期化 | データベースの初期化・マイグレーション・設定の読み込みのログも残す（ログの準備を初期化より先に行う） |
+
+info 以上のログに、コメント本文・認証情報・ログイン中の URL（クエリに一時的な値を含みうる）を出さない。調査に要るときは debug で出す。
+
+### 画面の描画エラー
+
+描画中の例外 1 つで画面全体の更新が止まらないよう、領域ごとに区切る。
+
+| 状況 | 結果 |
+|------|------|
+| チャット一覧（ChatDisplay、視聴者情報パネルを含む）の描画中に例外 | その領域だけを「表示中にエラーが発生しました」と「再表示」ボタンに置き換える。URL 入力・接続一覧（切断）・ヘッダー・ほかのタブは動き続ける |
+| 視聴者・分析・設定タブの描画中に例外 | そのタブの中身だけを置き換える。タブの切り替えは使える |
+| 「再表示」クリック | その領域を作り直す（原因が残っていれば再び置き換わる） |
+| 例外の記録 | 開発者ツールのコンソールに、どの領域かと例外を出す |
 
 ## テスト要件
 

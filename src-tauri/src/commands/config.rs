@@ -10,9 +10,11 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::RwLock;
 use tauri::State;
+use ts_rs::TS;
 
 /// Storage mode for credentials
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 #[serde(rename_all = "lowercase")]
 pub enum StorageMode {
     #[default]
@@ -21,7 +23,8 @@ pub enum StorageMode {
 }
 
 /// Storage configuration section
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub struct StorageConfig {
     #[serde(default)]
     pub mode: StorageMode,
@@ -36,7 +39,8 @@ impl Default for StorageConfig {
 }
 
 /// UI theme
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 #[serde(rename_all = "lowercase")]
 pub enum Theme {
     #[default]
@@ -45,7 +49,8 @@ pub enum Theme {
 }
 
 /// UI configuration section
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub struct UiConfig {
     #[serde(default)]
     pub theme: Theme,
@@ -58,7 +63,8 @@ impl Default for UiConfig {
 }
 
 /// 最後に選んだチャットモード（02_chat.md チャットモード）。再起動・F5 後もこのモードで始める
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 #[serde(rename_all = "lowercase")]
 pub enum ChatModeSetting {
     #[default]
@@ -67,7 +73,8 @@ pub enum ChatModeSetting {
 }
 
 /// Chat display configuration section
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 #[serde(default)]
 pub struct ChatDisplayConfig {
     pub message_font_size: u32,
@@ -88,7 +95,8 @@ impl Default for ChatDisplayConfig {
 }
 
 /// Application configuration
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
 pub struct Config {
     #[serde(default)]
     pub storage: StorageConfig,
@@ -97,7 +105,9 @@ pub struct Config {
     #[serde(default)]
     pub ui: UiConfig,
     /// 生レスポンス保存設定（05_raw_response.md）。変更は raw_response_update_config だけが行う
+    // 画面の設定 (config_save) では扱わないので TS の型には出さない（config_for_save が引き継ぐ）
     #[serde(default)]
+    #[ts(skip)]
     pub raw_response: SaveConfig,
 }
 
@@ -131,10 +141,37 @@ impl ConfigState {
         self.config.read().unwrap().clone()
     }
 
-    /// Update the config
+    /// Update the config（ファイルから読み直したときに使う。変更は `update` で行う）
     pub fn set(&self, config: Config) {
         *self.config.write().unwrap() = config;
     }
+
+    /// 今の設定から次の設定を作って置き換え、config.toml に書き込む（09_config.md「設定の保存」）
+    ///
+    /// 読む・変える・置き換える・書き込むを 1 つのロックの下で行う。同時に来た更新が互いを消さず、
+    /// ファイルにも最後に適用した内容が残る。書き込みに失敗してもメモリ上の変更は残す。
+    pub fn update(
+        &self,
+        change: impl FnOnce(&Config) -> Result<Config, CommandError>,
+    ) -> Result<ConfigUpdate, CommandError> {
+        let mut config = self.config.write().unwrap();
+        let next = change(&config)?;
+        *config = next.clone();
+        let saved = save_config_to_file(&next);
+        Ok(ConfigUpdate {
+            config: next,
+            saved,
+        })
+    }
+}
+
+/// `ConfigState::update` の結果
+#[must_use]
+pub struct ConfigUpdate {
+    /// 適用した設定
+    pub config: Config,
+    /// config.toml への書き込みの結果
+    pub saved: Result<(), String>,
 }
 
 /// 設定ファイルのパスを返す
@@ -171,15 +208,11 @@ fn load_config_from_path(path: &std::path::Path) -> Config {
 
 /// 指定パスへ設定を書き込む純粋関数。親ディレクトリが存在しない場合は自動作成する。
 fn save_config_to_path(path: &std::path::Path, config: &Config) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create config directory: {}", e))?;
-    }
-
     let toml_string =
         toml::to_string_pretty(config).map_err(|e| format!("Failed to serialize config: {}", e))?;
 
-    fs::write(path, toml_string).map_err(|e| format!("Failed to write config file: {}", e))?;
+    crate::atomic_file::write(path, &toml_string)
+        .map_err(|e| format!("Failed to write config file: {}", e))?;
 
     log::info!("Config saved to {:?}", path);
     Ok(())
@@ -225,9 +258,10 @@ pub async fn config_save(
     config: Config,
     state: State<'_, ConfigState>,
 ) -> Result<(), CommandError> {
-    let config = config_for_save(&state.get(), config);
-    state.set(config.clone());
-    save_config_to_file(&config).map_err(CommandError::IoError)
+    state
+        .update(|current| Ok(config_for_save(current, config)))?
+        .saved
+        .map_err(CommandError::IoError)
 }
 
 /// Config構造体から section/key で値を取得する純粋関数
@@ -366,13 +400,10 @@ pub async fn config_set_value(
     value: Value,
     state: State<'_, ConfigState>,
 ) -> Result<(), CommandError> {
-    let config = state.get();
-    let new_config = config_apply_value(&config, &section, &key, value)?;
+    let updated = state.update(|current| config_apply_value(current, &section, &key, value))?;
 
-    state.set(new_config.clone());
-
-    // ファイル保存を試行。失敗してもメモリ上の変更は維持
-    if let Err(e) = save_config_to_file(&new_config) {
+    // 書き込みに失敗してもメモリ上の変更は維持
+    if let Err(e) = updated.saved {
         log::error!("Failed to save config: {}", e);
     }
 
@@ -382,6 +413,58 @@ pub async fn config_set_value(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // 09_config.md 設定の保存: 同時に届いた更新は 1 つずつ順に適用し、互いの変更を消さない
+    #[test]
+    #[serial_test::serial(liscov_env)]
+    fn concurrent_updates_keep_both_changes() {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+
+        // SAFETY: テスト環境でのみ実行。#[serial] で直列化済み
+        unsafe { std::env::set_var("LISCOV_APP_NAME", "liscov-test-config-update") };
+        let state = Arc::new(ConfigState::new());
+        let first_is_changing = Arc::new(Barrier::new(2));
+
+        let first = {
+            let state = Arc::clone(&state);
+            let first_is_changing = Arc::clone(&first_is_changing);
+            thread::spawn(move || {
+                state.update(|current| {
+                    first_is_changing.wait();
+                    thread::sleep(std::time::Duration::from_millis(100));
+                    let mut next = current.clone();
+                    next.chat_display.message_font_size = 20;
+                    Ok(next)
+                })
+            })
+        };
+        first_is_changing.wait();
+        let second = {
+            let state = Arc::clone(&state);
+            thread::spawn(move || {
+                state.update(|current| {
+                    let mut next = current.clone();
+                    next.chat_display.show_timestamps = !current.chat_display.show_timestamps;
+                    Ok(next)
+                })
+            })
+        };
+        first.join().unwrap().unwrap().saved.unwrap();
+        second.join().unwrap().unwrap().saved.unwrap();
+
+        let in_memory = state.get();
+        let in_file = load_config_from_path(&get_config_path().unwrap());
+        let _ = fs::remove_dir_all(get_config_path().unwrap().parent().unwrap());
+        unsafe { std::env::remove_var("LISCOV_APP_NAME") };
+        for config in [in_memory, in_file] {
+            assert_eq!(config.chat_display.message_font_size, 20);
+            assert_ne!(
+                config.chat_display.show_timestamps,
+                Config::default().chat_display.show_timestamps
+            );
+        }
+    }
 
     // ========================================================================
     // Config defaults (09_config.md: デフォルト値)

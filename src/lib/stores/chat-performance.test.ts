@@ -251,6 +251,52 @@ describe('chatStore パフォーマンス最適化', () => {
 		});
 	});
 
+	// spec: 02_chat.md 実装詳細 — フィルタが変わらない間は増えた分だけ判定する。結果は全件を判定したときと同じ
+	// spec: 02_chat.md「クリア」— クリアしたあとに届いたメッセージは一覧に出る
+	describe('バッチ待ちの間のクリア', () => {
+		it('メッセージが届いて一覧に足される前にクリアしても、そのあとのメッセージは一覧に出る', () => {
+			emitMessage(createMessage('c1'));
+			chatStore.clearMessages();
+			vi.advanceTimersByTime(50);
+
+			addAndFlush([createMessage('c2')]);
+			expect(chatStore.messages.map((m) => m.id)).toEqual(['c2']);
+		});
+	});
+
+	describe('フィルタの差分適用', () => {
+		const ids = () => chatStore.filteredMessages.map((m) => m.id);
+
+		it('フィルタ中に届いたメッセージも、合うものだけが後ろに加わる', () => {
+			chatStore.setFilter({ showText: false });
+			addAndFlush([createMessage('d1', { message_type: 'superchat' }), createMessage('d2')]);
+			expect(ids()).toEqual(['d1']);
+
+			addAndFlush([createMessage('d3'), createMessage('d4', { message_type: 'superchat' })]);
+			expect(ids()).toEqual(['d1', 'd4']);
+		});
+
+		it('フィルタを変えたら全件を判定し直す', () => {
+			chatStore.setFilter({ showText: false });
+			addAndFlush([createMessage('e1', { message_type: 'superchat' }), createMessage('e2', { content: 'りんご' })]);
+			expect(ids()).toEqual(['e1']);
+
+			chatStore.setFilter({ showText: true, searchQuery: 'りんご' });
+			expect(ids()).toEqual(['e2']);
+
+			addAndFlush([createMessage('e3', { content: 'りんごジュース' }), createMessage('e4')]);
+			expect(ids()).toEqual(['e2', 'e3']);
+		});
+
+		it('クリアしたあとは、新しく届いたものだけで判定する', () => {
+			chatStore.setFilter({ showText: false });
+			addAndFlush([createMessage('f1', { message_type: 'superchat' })]);
+			chatStore.clearMessages();
+			addAndFlush([createMessage('f2', { message_type: 'superchat' }), createMessage('f3')]);
+			expect(ids()).toEqual(['f2']);
+		});
+	});
+
 	describe('channelIdインデックス (Phase 2)', () => {
 		it('getMessagesForChannelで特定チャンネルのメッセージを取得できる', () => {
 			addAndFlush([
@@ -500,11 +546,6 @@ describe('chatStore パフォーマンス最適化', () => {
 
 	// spec: 多接続モードの初期状態確認
 	describe('多接続モード初期値', () => {
-		// isPaused は多接続では常に false（グローバルpauseなし）
-		it('isPaused の初期値は false', () => {
-			expect(chatStore.isPaused).toBe(false);
-		});
-
 		// connections は初期状態で空のMap
 		it('connections の初期値は空のMap', () => {
 			expect(chatStore.connections).toBeInstanceOf(Map);
@@ -514,11 +555,6 @@ describe('chatStore パフォーマンス最適化', () => {
 		// isConnected は connections.size === 0 なので false
 		it('isConnected の初期値は false', () => {
 			expect(chatStore.isConnected).toBe(false);
-		});
-
-		// isReplay は後方互換のため常に false
-		it('isReplay は常に false', () => {
-			expect(chatStore.isReplay).toBe(false);
 		});
 
 		// cleanup() を複数回呼んでも安全であること
@@ -536,11 +572,6 @@ describe('chatStore パフォーマンス最適化', () => {
 		// error は初期状態で null
 		it('error の初期値は null', () => {
 			expect(chatStore.error).toBeNull();
-		});
-
-		// connectionState は connections.size === 0 のとき 'idle'
-		it('connectionState の初期値は idle', () => {
-			expect(chatStore.connectionState).toBe('idle');
 		});
 	});
 

@@ -1,10 +1,65 @@
 //! VOICEVOX TTS backend
 
-use std::time::Duration;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use super::{TtsBackend, TtsError};
 use crate::tts::config::VoicevoxConfig;
 use async_trait::async_trait;
+
+/// 再生を打ち切るまでの、音声の長さに足す余裕（04_tts.md「音声再生」）
+const PLAYBACK_MARGIN: Duration = Duration::from_secs(5);
+/// 音声の長さが分からないときに再生を打ち切るまでの時間
+const PLAYBACK_LIMIT_UNKNOWN_LENGTH: Duration = Duration::from_secs(60);
+/// 再生の終わり・停止要求を確かめる間隔
+const PLAYBACK_POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+/// 再生の終わり方
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlaybackEnd {
+    Finished,
+    TimedOut,
+    Stopped,
+}
+
+/// 再生を打ち切るまでの時間
+fn playback_limit(length: Option<Duration>) -> Duration {
+    length.map_or(PLAYBACK_LIMIT_UNKNOWN_LENGTH, |length| {
+        length + PLAYBACK_MARGIN
+    })
+}
+
+/// 再生の終わりを待つ。`limit` を過ぎるか `stop` が立ったら待つのをやめる
+fn wait_for_playback(
+    is_finished: impl Fn() -> bool,
+    limit: Duration,
+    stop: &AtomicBool,
+    poll: Duration,
+) -> PlaybackEnd {
+    let started = Instant::now();
+    loop {
+        if is_finished() {
+            return PlaybackEnd::Finished;
+        }
+        if stop.load(Ordering::Relaxed) {
+            return PlaybackEnd::Stopped;
+        }
+        if started.elapsed() >= limit {
+            return PlaybackEnd::TimedOut;
+        }
+        std::thread::sleep(poll);
+    }
+}
+
+/// drop されたら停止要求を立てる。speak の future が捨てられた（キュー処理の停止）ときに再生も止めるため
+struct StopOnDrop(Arc<AtomicBool>);
+
+impl Drop for StopOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+}
 
 /// VOICEVOX backend
 pub struct VoicevoxBackend {
@@ -73,8 +128,10 @@ impl VoicevoxBackend {
     }
 
     /// Play WAV data (blocking)
-    fn play_wav_blocking(wav_bytes: Vec<u8>) -> Result<(), TtsError> {
-        use rodio::{Decoder, OutputStreamBuilder, Sink};
+    ///
+    /// 音声の長さ + 5秒で打ち切り、`stop` が立ったら止める（04_tts.md「音声再生」）。
+    fn play_wav_blocking(wav_bytes: Vec<u8>, stop: &AtomicBool) -> Result<(), TtsError> {
+        use rodio::{Decoder, OutputStreamBuilder, Sink, Source};
         use std::io::Cursor;
 
         let stream = OutputStreamBuilder::open_default_stream().map_err(|e| {
@@ -87,10 +144,18 @@ impl VoicevoxBackend {
         let source = Decoder::new(cursor)
             .map_err(|e| TtsError::AudioDecode(format!("Failed to decode WAV: {}", e)))?;
 
+        let limit = playback_limit(source.total_duration());
         sink.append(source);
-        sink.sleep_until_end();
+        let end = wait_for_playback(|| sink.empty(), limit, stop, PLAYBACK_POLL_INTERVAL);
+        sink.stop();
 
-        Ok(())
+        match end {
+            PlaybackEnd::Finished | PlaybackEnd::Stopped => Ok(()),
+            PlaybackEnd::TimedOut => Err(TtsError::AudioOutput(format!(
+                "再生が {:?} で終わらないため打ち切った",
+                limit
+            ))),
+        }
     }
 }
 
@@ -172,7 +237,10 @@ impl TtsBackend for VoicevoxBackend {
         let wav_bytes = self.synthesize(&audio_query).await?;
 
         // 4. Play (spawn_blocking for blocking task)
-        tokio::task::spawn_blocking(move || Self::play_wav_blocking(wav_bytes))
+        // この future が捨てられたら（キュー処理の停止）_stop_on_drop が再生を止める
+        let stop = Arc::new(AtomicBool::new(false));
+        let _stop_on_drop = StopOnDrop(Arc::clone(&stop));
+        tokio::task::spawn_blocking(move || Self::play_wav_blocking(wav_bytes, &stop))
             .await
             .map_err(|e| TtsError::AudioOutput(format!("Playback task error: {}", e)))??;
 
@@ -182,5 +250,52 @@ impl TtsBackend for VoicevoxBackend {
 
     fn name(&self) -> &'static str {
         "VOICEVOX"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicBool;
+
+    const POLL: Duration = Duration::from_millis(5);
+
+    // 04_tts.md 音声再生: 長さ + 5秒で打ち切る。長さが分からなければ 60 秒
+    #[test]
+    fn playback_limit_is_length_plus_five_seconds() {
+        assert_eq!(
+            playback_limit(Some(Duration::from_secs(3))),
+            Duration::from_secs(8)
+        );
+        assert_eq!(playback_limit(None), Duration::from_secs(60));
+    }
+
+    #[test]
+    fn playback_finishes_when_sink_becomes_empty() {
+        let stop = AtomicBool::new(false);
+        assert_eq!(
+            wait_for_playback(|| true, Duration::from_secs(1), &stop, POLL),
+            PlaybackEnd::Finished
+        );
+    }
+
+    // 04_tts.md: 長さ + 5秒たっても終わらない → 打ち切る
+    #[test]
+    fn playback_times_out_when_it_never_finishes() {
+        let stop = AtomicBool::new(false);
+        assert_eq!(
+            wait_for_playback(|| false, Duration::from_millis(30), &stop, POLL),
+            PlaybackEnd::TimedOut
+        );
+    }
+
+    // 04_tts.md: キュー処理を止めたら再生中の音声も止める
+    #[test]
+    fn playback_stops_when_requested() {
+        let stop = AtomicBool::new(true);
+        assert_eq!(
+            wait_for_playback(|| false, Duration::from_secs(10), &stop, POLL),
+            PlaybackEnd::Stopped
+        );
     }
 }

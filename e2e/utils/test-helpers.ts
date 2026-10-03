@@ -56,6 +56,12 @@ export function getTestAppDataDir(): string {
   return path.join(getPlatformConfigDir(), TEST_APP_NAME);
 }
 
+/** E2E 用の WebView2 データフォルダ（本番は %LOCALAPPDATA%\com.liscov-tauri.app\EBWebView） */
+export function getTestWebViewDataDir(): string {
+  const localAppData = process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local');
+  return path.join(localAppData, TEST_APP_NAME, 'EBWebView');
+}
+
 export function getTestDatabasePath(): string {
   return path.join(getTestAppDataDir(), 'liscov.db');
 }
@@ -244,6 +250,32 @@ async function waitForPortFree(port: number, timeout: number): Promise<void> {
 /**
  * Tauriアプリを終了する（graceful shutdown → 強制終了の順で試行）
  */
+/**
+ * 指定した実行ファイルから起動したプロセス（とその子プロセス）だけを強制終了する
+ *
+ * 名前で止めると、同じ名前の本番アプリ（liscov-tauri.exe）やユーザーのプロセスまで止めてしまう。
+ * 配信中に E2E を走らせても本番に触れないよう、実行ファイルのパスで絞る。
+ */
+export function killProcessesStartedFrom(exePath: string): void {
+  try {
+    if (process.platform === 'win32') {
+      const name = path.basename(exePath, '.exe').replace(/'/g, "''");
+      const target = exePath.replace(/'/g, "''");
+      const ids = execSync(
+        `powershell -NoProfile -NonInteractive -Command "Get-Process -Name '${name}' -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq '${target}' } | ForEach-Object { $_.Id }"`,
+        { encoding: 'utf8' }
+      )
+        .split(/\s+/)
+        .filter(Boolean);
+      for (const id of ids) {
+        execSync(`taskkill /F /T /PID ${id} 2>nul`, { stdio: 'ignore' });
+      }
+    } else {
+      execSync(`pkill -f '${exePath}'`, { stdio: 'ignore' });
+    }
+  } catch { /* プロセスが存在しない場合は無視 */ }
+}
+
 export async function killTauriApp(): Promise<void> {
   log.debug('Killing Tauri app...');
   if (tauriProcess) {
@@ -262,14 +294,8 @@ export async function killTauriApp(): Promise<void> {
     }
     tauriProcess = null;
   }
-  // 孤立プロセスのフォールバック: プロセスツリーごと強制終了
-  try {
-    if (process.platform === 'win32') {
-      execSync('taskkill /F /T /IM liscov-tauri.exe 2>nul', { stdio: 'ignore' });
-    } else {
-      execSync('pkill -f liscov-tauri', { stdio: 'ignore' });
-    }
-  } catch { /* プロセスが存在しない場合は無視 */ }
+  // 孤立プロセスのフォールバック: テスト用の実行ファイルから起動したものだけをプロセスツリーごと強制終了
+  killProcessesStartedFrom(PREBUILT_TAURI_APP_PATH);
   // CDP ポートが解放されるまで待機（Windowsではプロセスツリー終了が遅延するため長めに設定）
   await waitForPortFree(9222, 10000);
 }
@@ -362,6 +388,10 @@ export async function startTauriAppWithEnv(extraEnv: NodeJS.ProcessEnv): Promise
   const env = getTestProcessEnv({
     ...extraEnv,
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=9222',
+    // WebView2 のデータ (Cookie・キャッシュ) は identifier で決まるフォルダにあり、LISCOV_APP_NAME では分かれない。
+    // 本番と同じフォルダだと、本番の liscov が起動中はブラウザプロセスを共有して上の引数が効かず CDP が開かない。
+    // テスト用のフォルダに分ける（環境変数がアプリの指定より優先される）
+    WEBVIEW2_USER_DATA_FOLDER: getTestWebViewDataDir(),
   });
 
   log.info(`Starting prebuilt Tauri app: ${PREBUILT_TAURI_APP_PATH}`);
@@ -411,14 +441,8 @@ export async function killMockServer(): Promise<void> {
     }
     mockServerProcess = null;
   }
-  // 孤立プロセスのフォールバック
-  try {
-    if (process.platform === 'win32') {
-      execSync('taskkill /F /T /IM mock-server.exe 2>nul', { stdio: 'ignore' });
-    } else {
-      execSync('pkill -f mock-server', { stdio: 'ignore' });
-    }
-  } catch { /* プロセスが存在しない場合は無視 */ }
+  // 孤立プロセスのフォールバック（テスト用の実行ファイルから起動したものだけ）
+  killProcessesStartedFrom(PREBUILT_MOCK_SERVER_PATH);
   await waitForPortFree(3456, 3000);
 }
 
@@ -495,11 +519,15 @@ export async function addMockMessage(message: {
   content: string;
   channel_id?: string;
   is_member?: boolean;
+  /** モデレーターのバッジを付ける */
+  is_moderator?: boolean;
   amount?: string;
   tier?: string;
   milestone_months?: number;
   gift_count?: number;
   gift_image_url?: string;
+  /** 同じ id を再び積むと YouTube の再送を再現できる。省略時はモックが採番する */
+  id?: string;
 }): Promise<void> {
   await fetch(`${MOCK_SERVER_URL}/add_message`, {
     method: 'POST',
@@ -643,12 +671,37 @@ export async function navigateToTab(page: Page, tabName: string): Promise<void> 
 /**
  * モックサーバーのストリーム状態を設定する
  */
-export async function setStreamState(state: { member_only?: boolean; require_auth?: boolean; title?: string }): Promise<void> {
+export async function setStreamState(state: {
+  member_only?: boolean;
+  require_auth?: boolean;
+  title?: string;
+  chat_delay_ms?: number;
+  chat_fail?: boolean;
+}): Promise<void> {
   await fetch(`${MOCK_SERVER_URL}/set_stream_state`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(state),
   });
+}
+
+/**
+ * テスト用に起動したアプリだけを強制終了する（終了処理を走らせない。クラッシュ・強制終了の再現用）
+ *
+ * 自分が起動したプロセスの PID だけを止める。名前で止めると本番のアプリまで止めてしまう。
+ */
+export async function forceKillTauriApp(): Promise<void> {
+  if (tauriProcess?.pid) {
+    if (process.platform === 'win32') {
+      try {
+        execSync(`taskkill /F /T /PID ${tauriProcess.pid} 2>nul`, { stdio: 'ignore' });
+      } catch { /* 既に終了していた場合は無視 */ }
+    } else {
+      tauriProcess.kill('SIGKILL');
+    }
+    tauriProcess = null;
+  }
+  await waitForPortFree(9222, 10000);
 }
 
 /**

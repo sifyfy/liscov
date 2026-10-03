@@ -12,8 +12,12 @@ YouTube InnerTube APIの生レスポンスを保存し、デバッグ・分析�
 |------|------|
 | 保存が有効 + APIレスポンス受信 | NDJSON形式でファイルに追記（タイムスタンプ付き） |
 | 保存が無効 | 書き込みをスキップ |
+| 複数の接続が同時にレスポンスを受信 | 1件ずつ順に書く（ローテーションも含めて直列化）。行が混ざらない |
 | ファイルサイズが閾値（デフォルト100MB）に到達 | 自動ローテーション（タイムスタンプ付きリネーム + 新規ファイル作成） |
 | バックアップ数が上限（デフォルト5世代）超過 | 古いバックアップから自動削除 |
+| 保存先のフォルダが無い（例: `D:\logs\liscov\raw.ndjson` で `liscov` フォルダが無い） | フォルダを作ってから書く |
+| ローテーション（リネーム）に失敗（例: 他のアプリがファイルを削除不可で開いている） | エラーログを出し、今のファイルにそのまま追記する（その回のレスポンスを失わない）。次の書き込みで再びローテーションを試みる |
+| 同じフォルダに命名規則に合わない似た名前のファイルがある（例: `raw_responses_manual.ndjson`） | バックアップとして数えず、消さない |
 
 ### 設定の変更と永続化
 
@@ -25,6 +29,8 @@ YouTube InnerTube APIの生レスポンスを保存し、デバッグ・分析�
 | 接続中に設定を変更 | 次に受信するレスポンスから新しい設定で保存する（再接続は不要） |
 | パス検証に失敗する `file_path` で更新 | エラーを返し、設定を変更しない（メモリ・ファイルとも） |
 | `config.toml` から読んだ `file_path` がパス検証に失敗 | 書き込み時に警告ログを出し、書き込みをスキップする |
+| `max_file_size_mb` を 0 で更新 | エラーを返し、設定を変更しない（メモリ・ファイルとも） |
+| `config.toml` から読んだ `max_file_size_mb` が 0 | ローテーションせずに追記する（毎回ローテーションすると、数回の書き込みで記録がバックアップ上限から押し出されて消えるため） |
 
 ### パス解決
 
@@ -99,7 +105,7 @@ pub struct SaveConfig {
 |-----|-----|----------|------|
 | `enabled` | bool | `false` | 保存機能の有効/無効 |
 | `file_path` | string | `"raw_responses.ndjson"` | 保存先ファイルパス |
-| `max_file_size_mb` | u64 | `100` | ローテーション閾値（MB） |
+| `max_file_size_mb` | u64 | `100` | ローテーション閾値（MB）。1 以上 |
 | `enable_rotation` | bool | `true` | ファイルローテーション有効 |
 | `max_backup_files` | u32 | `5` | 保持するバックアップ世代数 |
 
@@ -172,7 +178,8 @@ NDJSON（Newline Delimited JSON）は、1行に1つのJSONオブジェクトを�
 
 ### ローテーション条件
 
-ファイルサイズが `max_file_size_mb` に達した時点で自動実行。
+ファイルサイズが `max_file_size_mb` MB（`max_file_size_mb × 1024 × 1024` バイト）以上になった時点で、次の書き込みの前に自動実行する。
+`max_file_size_mb` が 0 のときはローテーションしない。
 
 ### ローテーションフロー
 
@@ -183,6 +190,8 @@ NDJSON（Newline Delimited JSON）は、1行に1つのJSONオブジェクトを�
         ↓
 3. 現在のファイルをリネーム
    raw_responses.ndjson → raw_responses_20250114_143025.ndjson
+        ↓
+   （失敗 → エラーログ、今のファイルに追記を続ける）
         ↓
 4. 新しい空ファイルで書き込み継続
         ↓
@@ -201,6 +210,7 @@ NDJSON（Newline Delimited JSON）は、1行に1つのJSONオブジェクトを�
 
 ### バックアップ削除
 
+- 対象は保存先と同じフォルダにあり、[命名規則](#バックアップ命名規則)に合うファイルだけ（`{ファイル名}_` + 8桁の日付 + `_` + 6桁の時刻 + `.{拡張子}`）
 - ファイル作成日時でソート（新しい順）
 - `max_backup_files` を超えた古いファイルを削除
 - デフォルト: 5世代保持
@@ -229,7 +239,7 @@ NDJSON（Newline Delimited JSON）は、1行に1つのJSONオブジェクトを�
         ↓
 6. JSONシリアライズ
         ↓
-7. ファイルに追記（append mode）
+7. 保存先のフォルダが無ければ作り、ファイルに追記（append mode）
         ↓
 8. flush()で強制書き込み
 ```
@@ -316,8 +326,11 @@ pub struct ResponseEntry {
 
 ### SaveConfig（TypeScript）
 
+Rust の型から ts-rs で `src/lib/types/generated/` に生成する（手で書かない。型を変えたら `cargo test --manifest-path src-tauri/Cargo.toml export_bindings` で生成し直してコミットする。`make typecheck` が古い生成物を検出する）。
+`Config` の TS の型には `raw_response` を出さない（画面の設定保存 `config_save` では扱わず、`raw_response_update_config` だけが変える）。
+
 ```typescript
-interface SaveConfig {
+type SaveConfig = {
     enabled: boolean;
     file_path: string;
     max_file_size_mb: number;

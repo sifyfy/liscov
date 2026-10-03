@@ -1,14 +1,7 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { save } from '@tauri-apps/plugin-dialog';
-
-  interface SaveConfig {
-    enabled: boolean;
-    file_path: string;
-    max_file_size_mb: number;
-    enable_rotation: boolean;
-    max_backup_files: number;
-  }
+  import type { SaveConfig } from '$lib/types';
 
   let config = $state<SaveConfig>({
     enabled: false,

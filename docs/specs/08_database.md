@@ -14,6 +14,30 @@
 | メッセージ受信 | messagesテーブルにINSERT + viewer_profilesをUPSERT |
 | ライブリアクションの更新を受信 | reactionsテーブルに絵文字ごとに INSERT OR IGNORE（0件の更新は保存しない） |
 | 配信から切断 | sessionsテーブルのend_timeを更新、統計（total_messages, total_revenue）を最終集計 |
+| アプリを終了 | 接続中の全接続を切断と同じく閉じる（end_time と統計）。閉じ終わるのを最大5秒待つ |
+| 起動時に end_time が NULL のセッションがある（前回の強制終了・クラッシュ・閉じ終わる前の終了） | 前回のアプリは動いていないので閉じる。end_time は最後のメッセージを保存した時刻（`messages.created_at` の最大）、メッセージが無ければ start_time。ただし start_time より前にはしない（created_at は秒単位なので、接続直後に止まると開始より前に見える）。統計も集計する |
+
+起動時の回収は、同じデータディレクトリを同時に 1 つのアプリしか開かない前提で行う
+（2 つ目を起動すると、1 つ目の接続中のセッションも閉じたことになる。1 つ目が切断したときに end_time は付け直される）。
+
+| 起動時に残っていたセッション（例） | 閉じたあと |
+|------|------|
+| start 10:00、メッセージを 10:05・10:42 に保存 | end_time = 10:42、total_messages = 2 |
+| start 11:00、メッセージ無し | end_time = 11:00、total_messages = 0 |
+| start 13:00:00.5、メッセージを 13:00:00 に保存（同じ秒） | end_time = start_time（13:00:00.5）、total_messages = 1 |
+| end_time が既に入っている | 変えない |
+
+### 書き込み
+
+| 状況 | 結果 |
+|------|------|
+| DB を開く | `journal_mode = WAL`・`synchronous = NORMAL` にする。書き込みのたびに fsync しない（アプリが落ちても DB は壊れない。OS の電源断では最後の数回のコミットを失うことがある） |
+| 1 回のポーリングで複数のメッセージが届いた | まとめて 1 つのトランザクションで保存する（DB のロックもポーリングにつき 1 回）。初見判定は同じトランザクションの中で、保存したあとに行う |
+| そのうち 1 件の保存に失敗 | 警告ログを出してその 1 件を飛ばし、ほかのメッセージは保存する |
+| トランザクションを始められない | 警告ログを出し、1 件ずつ保存する |
+
+1 件ずつコミットしていたときは、100 件の保存に約 0.7 秒かかり（1 件ごとに fsync）、その間ほかの接続・コマンドが DB を待っていた
+（WAL で約 40 ミリ秒、1 トランザクションで約 16 ミリ秒。2026-10-03 の開発機での実測）。
 
 ### メッセージ重複排除
 
@@ -23,6 +47,10 @@
 | 異なるセッションで同じmessage_id | 別レコードとして保存（session_id + message_idの複合ユニーク） |
 
 ### マイグレーション
+
+各マイグレーションは 1 つのトランザクションで適用し、`schema_versions` への記録も同じトランザクションに含める。
+途中の文で失敗したら全体を戻す（ALTER TABLE ADD COLUMN は 2 回実行できないので、半端に適用されると次の起動で失敗し続ける）。
+既存データの埋め直しに SQL 以外の処理（URL の解析など）が要るマイグレーションは、SQL のあとに Rust の処理を同じトランザクションで実行する。
 
 | 変更種別 | 方法 |
 |---------|------|
@@ -44,6 +72,7 @@
 | ファイル | パス |
 |---------|------|
 | liscov.db | `%APPDATA%/liscov-tauri/liscov.db` |
+| liscov.db-wal・liscov.db-shm | 同じフォルダ。WAL の作業ファイル。アプリの実行中は最新の書き込みが `-wal` にあるので、DB を手でコピーするときはアプリを閉じてから（閉じると `liscov.db` に書き戻される） |
 
 > **Note**: ディレクトリ名 `liscov-tauri` は環境変数 `LISCOV_APP_NAME` で変更可能（E2Eテスト用）。詳細は[認証機能仕様のE2Eテストセクション](01_auth.md#e2eテスト)を参照。
 
@@ -86,8 +115,12 @@ CREATE TABLE sessions (
     total_messages INTEGER DEFAULT 0,
     total_revenue REAL DEFAULT 0.0,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    -- 006 で追加
+    video_id TEXT
 );
+
+CREATE INDEX IF NOT EXISTS idx_sessions_video_id ON sessions(video_id);
 
 CREATE TRIGGER update_sessions_timestamp
     AFTER UPDATE ON sessions
@@ -107,6 +140,20 @@ END;
 | `broadcaster_name` | TEXT | 配信者名 |
 | `total_messages` | INTEGER | 合計メッセージ数 |
 | `total_revenue` | REAL | 合計収益（SuperChat等） |
+| `video_id` | TEXT | 配信の video_id。`stream_url` から取り出したもの（取り出せない URL は NULL） |
+
+`video_id` は同じ配信のセッションを引くための列。`stream_url` の書き方（`watch?v=`・`/live/`・`youtu.be/`）によらず、
+同じ配信なら同じ値になる。取り出しは接続時の URL 解析（`extract_video_id`）と同じ関数を使う。
+
+| stream_url | video_id |
+|-----------|----------|
+| `https://www.youtube.com/watch?v=dQw4w9WgXcQ` | `dQw4w9WgXcQ` |
+| `https://www.youtube.com/live/dQw4w9WgXcQ` | `dQw4w9WgXcQ` |
+| `https://youtube.com/live/dQw4w9WgXcQ?feature=share` | `dQw4w9WgXcQ` |
+| `https://youtu.be/dQw4w9WgXcQ` | `dQw4w9WgXcQ` |
+| NULL | NULL |
+
+マイグレーション 006 は列を足したあと、既存のセッションの `stream_url` から同じ関数で埋める（SQL で URL を解析しない）。
 
 ### messages テーブル
 
@@ -126,6 +173,11 @@ CREATE TABLE messages (
     is_member INTEGER DEFAULT 0,
     metadata TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    -- 005 で追加
+    superchat_color TEXT,
+    is_moderator INTEGER,
+    is_verified INTEGER,
+    badges TEXT,
     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 );
 
@@ -150,6 +202,14 @@ CREATE UNIQUE INDEX idx_messages_unique ON messages(session_id, message_id);
 | `amount` | TEXT | SuperChat金額（通貨記号含む、例: "¥500"） |
 | `is_member` | INTEGER | メンバーシップ加入者フラグ（0/1） |
 | `metadata` | TEXT | JSON形式のメタデータ（現在は gift のみ。他の種別は NULL） |
+| `superchat_color` | TEXT | スーパーチャットのヘッダー背景色 `#RRGGBB`（段階の判定に使う。07_revenue.md）。superchat 以外は NULL |
+| `is_moderator` | INTEGER | モデレーターのバッジがあるか（0/1） |
+| `is_verified` | INTEGER | 認証済みのバッジがあるか（0/1） |
+| `badges` | TEXT | バッジの種類の JSON 配列（例: `["moderator","member"]`。02_chat.md「バッジの種類」） |
+
+`is_moderator`・`is_verified`・`badges` は、発言者のバッジを読める種類（text・superchat・supersticker・membership）だけに入れる。
+それ以外の種類（membership_gift・gift・system）と、005 より前に保存した行は NULL（不明）。
+NULL は「バッジが無い」ではなく「分からない」を表す。分析・エクスポートは NULL を false や空配列として扱わない。
 
 **ギフト（`message_type = 'gift'`）の保存形式:**
 
@@ -198,7 +258,7 @@ CREATE INDEX IF NOT EXISTS idx_reactions_session_time ON reactions(session_id, u
 SELECT r.emoji, SUM(r.count)
 FROM reactions r
 JOIN sessions s ON r.session_id = s.id
-WHERE s.stream_url LIKE '%watch?v={video_id}%'   -- 配信内コメント数カウンタの復元と同じ条件
+WHERE s.video_id = {video_id}   -- 配信内コメント数カウンタの復元と同じ条件
 GROUP BY r.emoji
 ```
 
@@ -376,6 +436,8 @@ CREATE INDEX idx_contributor_stats_session ON contributor_stats(session_id);
 
 ### メッセージ保存
 
+1 回のポーリングで届いた新しいメッセージについて、DB のロックを 1 回取り、1 つのトランザクションの中で 1 件ずつ次を行う（「書き込み」）。
+
 ```
 1. チャットメッセージ受信
         ↓
@@ -459,8 +521,12 @@ pub struct ViewerCustomInfo {
 
 ## TypeScript型定義
 
+`Session` は Rust の型から ts-rs で `src/lib/types/generated/` に生成する（手で書かない。型を変えたら `cargo test --manifest-path src-tauri/Cargo.toml export_bindings` で生成し直してコミットする。`make typecheck` が古い生成物を検出する）。
+`StoredMessage` と `ViewerProfile` は TS の型を持たない（画面には `GuiChatMessage` / `GuiViewerProfile` を渡す）。
+`ViewerCustomInfo` も TS の型は持たない（画面は `GuiViewerWithInfo` で読み、`viewer_upsert_custom_info` に値を渡す）。
+
 ```typescript
-interface Session {
+type Session = {
     id: string;
     start_time: string;
     end_time: string | null;
@@ -470,43 +536,9 @@ interface Session {
     broadcaster_name: string | null;
     total_messages: number;
     total_revenue: number;
-}
-
-interface StoredMessage {
-    id: number;
-    session_id: string;
-    message_id: string;
-    timestamp: string;
-    timestamp_usec: string;
-    author: string;
-    author_icon_url: string | null;
-    channel_id: string;
-    content: string;
-    message_type: string;
-    amount: string | null;
-    is_member: boolean;
-    metadata: string | null;
-}
-
-interface ViewerProfile {
-    id: number;
-    broadcaster_channel_id: string;
-    channel_id: string;
-    display_name: string;
-    first_seen: string;
-    last_seen: string;
-    message_count: number;
-    total_contribution: number;
-    membership_level: string | null;
-    tags: string[];
-}
-
-interface ViewerCustomInfo {
-    viewer_profile_id: number;
-    reading: string | null;
-    notes: string | null;
-    custom_data: string | null;
-}
+    created_at: string | null;
+    updated_at: string | null;
+};
 ```
 
 ## インデックス一覧
@@ -520,6 +552,7 @@ interface ViewerCustomInfo {
 | `idx_reactions_session_time` | reactions(session_id, update_time_usec) | セッション・時間帯別のリアクション集計 |
 | `idx_viewer_profiles_broadcaster` | viewer_profiles(broadcaster_channel_id) | 配信者別視聴者検索 |
 | `idx_viewer_profiles_message_count` | viewer_profiles(broadcaster_channel_id, message_count DESC) | アクティブ順ソート |
+| `idx_viewer_profiles_last_seen` | viewer_profiles(broadcaster_channel_id, last_seen DESC) | 視聴者一覧（最近アクティブな順。[06_viewer.md](06_viewer.md)） |
 | `idx_viewer_profiles_contribution` | viewer_profiles(broadcaster_channel_id, total_contribution DESC) | 貢献額順ソート |
 | `idx_hourly_stats_session` | hourly_stats(session_id) | セッション別統計検索 |
 | `idx_contributor_stats_session` | contributor_stats(session_id) | セッション別貢献者検索 |

@@ -2,16 +2,12 @@
   import { ttsStore } from '$lib/stores';
   import type { TtsBackend, TtsConfig } from '$lib/types';
   import { onMount } from 'svelte';
+  import TtsLaunchSettings from './TtsLaunchSettings.svelte';
 
   // Local state for editing
   let config = $state<TtsConfig | null>(null);
   let testText = $state('テスト読み上げです');
   let isSpeaking = $state(false);
-
-  let isLaunching = $state<{ bouyomichan: boolean; voicevox: boolean }>({
-    bouyomichan: false,
-    voicevox: false
-  });
 
   onMount(() => {
     loadConfig();
@@ -21,51 +17,6 @@
   async function loadConfig() {
     await ttsStore.loadConfig();
     config = { ...ttsStore.config };
-  }
-
-  async function discoverExe(backend: 'bouyomichan' | 'voicevox') {
-    const path = await ttsStore.discoverExe(backend);
-    if (path && config) {
-      if (backend === 'bouyomichan') {
-        config.bouyomichan_exe_path = path;
-      } else {
-        config.voicevox_exe_path = path;
-      }
-      await autoSave();
-    }
-  }
-
-  async function browseExe(backend: 'bouyomichan' | 'voicevox') {
-    const path = await ttsStore.selectExe();
-    if (path && config) {
-      if (backend === 'bouyomichan') {
-        config.bouyomichan_exe_path = path;
-      } else {
-        config.voicevox_exe_path = path;
-      }
-      await autoSave();
-    }
-  }
-
-  async function toggleLaunch(backend: 'bouyomichan' | 'voicevox') {
-    if (!config) return;
-    const isLaunched = backend === 'bouyomichan'
-      ? ttsStore.launchStatus.bouyomichan_launched
-      : ttsStore.launchStatus.voicevox_launched;
-    const exePath = backend === 'bouyomichan'
-      ? config.bouyomichan_exe_path ?? undefined
-      : config.voicevox_exe_path ?? undefined;
-
-    isLaunching[backend] = true;
-    try {
-      if (isLaunched) {
-        await ttsStore.killBackend(backend);
-      } else {
-        await ttsStore.launchBackend(backend, exePath);
-      }
-    } finally {
-      isLaunching[backend] = false;
-    }
   }
 
   // Auto-save when config changes (debounced)
@@ -275,81 +226,15 @@
           </div>
           <p class="text-xs text-[var(--text-muted)]">-1を指定すると棒読みちゃん側の設定が使用されます</p>
 
-          <!-- Auto-launch settings -->
-          <div class="pt-3 mt-3 border-t border-[var(--border-default)] space-y-3">
-            <h5 class="text-xs text-[var(--text-secondary)] font-medium">自動起動設定</h5>
-
-            <div class="flex items-center justify-between">
-              <span class="text-sm text-[var(--text-primary)]">アプリ起動時に自動起動</span>
-              <button
-                onclick={() => toggleConfig('bouyomichan_auto_launch')}
-                data-testid="bouyomichan-auto-launch-toggle"
-                aria-pressed={config.bouyomichan_auto_launch}
-                class="{config.bouyomichan_auto_launch ? 'bg-[var(--success)]' : 'bg-[var(--bg-surface-3)]'} relative inline-flex h-5 w-9 items-center rounded-full transition-colors"
-              >
-                <span class="{config.bouyomichan_auto_launch ? 'translate-x-5' : 'translate-x-1'} inline-block h-3 w-3 transform rounded-full bg-white transition-transform shadow"></span>
-              </button>
-            </div>
-
-            <div>
-              <label class="block text-xs text-[var(--text-muted)] mb-1">実行ファイルパス</label>
-              <div class="flex gap-2">
-                <input
-                  type="text"
-                  bind:value={config.bouyomichan_exe_path}
-                  oninput={handleConfigChange}
-                  placeholder="自動検出または参照で指定"
-                  class="flex-1 px-3 py-2 text-sm rounded-lg bg-[var(--bg-surface-3)] text-[var(--text-primary)] placeholder-[var(--text-muted)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-                />
-                <button
-                  onclick={() => discoverExe('bouyomichan')}
-                  class="px-3 py-2 text-xs bg-[var(--bg-surface-3)] text-[var(--text-secondary)] rounded-lg border border-[var(--border-default)] hover:bg-[var(--bg-base)] transition-colors"
-                  title="自動検出"
-                >
-                  検出
-                </button>
-                <button
-                  onclick={() => browseExe('bouyomichan')}
-                  class="px-3 py-2 text-xs bg-[var(--bg-surface-3)] text-[var(--text-secondary)] rounded-lg border border-[var(--border-default)] hover:bg-[var(--bg-base)] transition-colors"
-                  title="ファイル参照"
-                >
-                  参照
-                </button>
-              </div>
-            </div>
-
-            <div class="flex items-center justify-between">
-              <span class="text-sm text-[var(--text-primary)]">アプリ終了時に自動停止</span>
-              <button
-                onclick={() => toggleConfig('bouyomichan_auto_close')}
-                data-testid="bouyomichan-auto-close-toggle"
-                aria-pressed={config.bouyomichan_auto_close}
-                class="{config.bouyomichan_auto_close ? 'bg-[var(--success)]' : 'bg-[var(--bg-surface-3)]'} relative inline-flex h-5 w-9 items-center rounded-full transition-colors"
-              >
-                <span class="{config.bouyomichan_auto_close ? 'translate-x-5' : 'translate-x-1'} inline-block h-3 w-3 transform rounded-full bg-white transition-transform shadow"></span>
-              </button>
-            </div>
-
-            <div class="flex items-center gap-3">
-              <button
-                onclick={() => toggleLaunch('bouyomichan')}
-                disabled={isLaunching.bouyomichan}
-                data-testid="bouyomichan-launch-button"
-                class="px-3 py-2 text-sm rounded-lg border transition-colors disabled:opacity-50 {ttsStore.launchStatus.bouyomichan_launched ? 'bg-[var(--error-subtle)] text-[var(--error)] border-[var(--border-default)] hover:opacity-80' : 'bg-[var(--success-subtle)] text-[var(--success)] border-[var(--border-default)] hover:opacity-80'}"
-              >
-                {#if isLaunching.bouyomichan}
-                  処理中...
-                {:else if ttsStore.launchStatus.bouyomichan_launched}
-                  停止
-                {:else}
-                  起動
-                {/if}
-              </button>
-              <span class="text-xs {ttsStore.launchStatus.bouyomichan_launched ? 'text-[var(--success)]' : 'text-[var(--text-muted)]'}">
-                {ttsStore.launchStatus.bouyomichan_launched ? '起動中' : '停止中'}
-              </span>
-            </div>
-          </div>
+          <TtsLaunchSettings
+            backend="bouyomichan"
+            autoLaunch={config.bouyomichan_auto_launch}
+            autoClose={config.bouyomichan_auto_close}
+            bind:exePath={config.bouyomichan_exe_path}
+            onToggleAutoLaunch={() => toggleConfig('bouyomichan_auto_launch')}
+            onToggleAutoClose={() => toggleConfig('bouyomichan_auto_close')}
+            onExePathChange={handleConfigChange}
+          />
         </div>
       {/if}
 
@@ -444,81 +329,15 @@
             </div>
           </div>
 
-          <!-- Auto-launch settings -->
-          <div class="pt-3 mt-3 border-t border-[var(--border-default)] space-y-3">
-            <h5 class="text-xs text-[var(--text-secondary)] font-medium">自動起動設定</h5>
-
-            <div class="flex items-center justify-between">
-              <span class="text-sm text-[var(--text-primary)]">アプリ起動時に自動起動</span>
-              <button
-                onclick={() => toggleConfig('voicevox_auto_launch')}
-                data-testid="voicevox-auto-launch-toggle"
-                aria-pressed={config.voicevox_auto_launch}
-                class="{config.voicevox_auto_launch ? 'bg-[var(--success)]' : 'bg-[var(--bg-surface-3)]'} relative inline-flex h-5 w-9 items-center rounded-full transition-colors"
-              >
-                <span class="{config.voicevox_auto_launch ? 'translate-x-5' : 'translate-x-1'} inline-block h-3 w-3 transform rounded-full bg-white transition-transform shadow"></span>
-              </button>
-            </div>
-
-            <div>
-              <label class="block text-xs text-[var(--text-muted)] mb-1">実行ファイルパス</label>
-              <div class="flex gap-2">
-                <input
-                  type="text"
-                  bind:value={config.voicevox_exe_path}
-                  oninput={handleConfigChange}
-                  placeholder="自動検出または参照で指定"
-                  class="flex-1 px-3 py-2 text-sm rounded-lg bg-[var(--bg-surface-3)] text-[var(--text-primary)] placeholder-[var(--text-muted)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-                />
-                <button
-                  onclick={() => discoverExe('voicevox')}
-                  class="px-3 py-2 text-xs bg-[var(--bg-surface-3)] text-[var(--text-secondary)] rounded-lg border border-[var(--border-default)] hover:bg-[var(--bg-base)] transition-colors"
-                  title="自動検出"
-                >
-                  検出
-                </button>
-                <button
-                  onclick={() => browseExe('voicevox')}
-                  class="px-3 py-2 text-xs bg-[var(--bg-surface-3)] text-[var(--text-secondary)] rounded-lg border border-[var(--border-default)] hover:bg-[var(--bg-base)] transition-colors"
-                  title="ファイル参照"
-                >
-                  参照
-                </button>
-              </div>
-            </div>
-
-            <div class="flex items-center justify-between">
-              <span class="text-sm text-[var(--text-primary)]">アプリ終了時に自動停止</span>
-              <button
-                onclick={() => toggleConfig('voicevox_auto_close')}
-                data-testid="voicevox-auto-close-toggle"
-                aria-pressed={config.voicevox_auto_close}
-                class="{config.voicevox_auto_close ? 'bg-[var(--success)]' : 'bg-[var(--bg-surface-3)]'} relative inline-flex h-5 w-9 items-center rounded-full transition-colors"
-              >
-                <span class="{config.voicevox_auto_close ? 'translate-x-5' : 'translate-x-1'} inline-block h-3 w-3 transform rounded-full bg-white transition-transform shadow"></span>
-              </button>
-            </div>
-
-            <div class="flex items-center gap-3">
-              <button
-                onclick={() => toggleLaunch('voicevox')}
-                disabled={isLaunching.voicevox}
-                data-testid="voicevox-launch-button"
-                class="px-3 py-2 text-sm rounded-lg border transition-colors disabled:opacity-50 {ttsStore.launchStatus.voicevox_launched ? 'bg-[var(--error-subtle)] text-[var(--error)] border-[var(--border-default)] hover:opacity-80' : 'bg-[var(--success-subtle)] text-[var(--success)] border-[var(--border-default)] hover:opacity-80'}"
-              >
-                {#if isLaunching.voicevox}
-                  処理中...
-                {:else if ttsStore.launchStatus.voicevox_launched}
-                  停止
-                {:else}
-                  起動
-                {/if}
-              </button>
-              <span class="text-xs {ttsStore.launchStatus.voicevox_launched ? 'text-[var(--success)]' : 'text-[var(--text-muted)]'}">
-                {ttsStore.launchStatus.voicevox_launched ? '起動中' : '停止中'}
-              </span>
-            </div>
-          </div>
+          <TtsLaunchSettings
+            backend="voicevox"
+            autoLaunch={config.voicevox_auto_launch}
+            autoClose={config.voicevox_auto_close}
+            bind:exePath={config.voicevox_exe_path}
+            onToggleAutoLaunch={() => toggleConfig('voicevox_auto_launch')}
+            onToggleAutoClose={() => toggleConfig('voicevox_auto_close')}
+            onExePathChange={handleConfigChange}
+          />
         </div>
       {/if}
 

@@ -4,6 +4,7 @@
   import ChatMessageComponent from './ChatMessage.svelte';
   import { ViewerInfoPanel } from '$lib/components/viewer';
   import type { ChatMessage } from '$lib/types';
+  import { messageKey, type MessageKey } from '$lib/utils/message-key';
 
   let vlist = $state<VListHandle | undefined>();
 
@@ -22,7 +23,7 @@
   } | null>(null);
 
   // Highlighted message ID (for scroll-to feature)
-  let highlightedMessageId = $state<string | null>(null);
+  let highlightedMessageKey = $state<MessageKey | null>(null);
 
   // Props passed to ChatMessage (avoid per-component $derived)
   let fontSize = $derived(chatStore.messageFontSize);
@@ -83,11 +84,12 @@
     suppressAutoScroll = true;
 
     // Highlight the message
-    highlightedMessageId = message.id;
+    const key = messageKey(message);
+    highlightedMessageKey = key;
 
     // Find index in displayedMessages and scroll to it
     const msgs = chatStore.displayedMessages;
-    const targetIndex = msgs.findIndex((m) => m.id === message.id);
+    const targetIndex = msgs.findIndex((m) => messageKey(m) === key);
     if (targetIndex !== -1 && vlist) {
       vlist.scrollToIndex(targetIndex, { align: 'center' });
     }
@@ -99,7 +101,7 @@
 
     // Clear highlight after 3 seconds
     setTimeout(() => {
-      highlightedMessageId = null;
+      highlightedMessageKey = null;
     }, 3000);
   }
 </script>
@@ -120,7 +122,7 @@
     <VList
       bind:this={vlist}
       data={chatStore.displayedMessages}
-      getKey={(item) => item.id}
+      getKey={messageKey}
       style="flex: 1; overflow-y: auto; padding: 12px; font-size: {fontSize}px;"
     >
       {#snippet children(message)}
@@ -131,7 +133,7 @@
             {message}
             {fontSize}
             {showTimestamps}
-            highlighted={highlightedMessageId === message.id}
+            highlighted={highlightedMessageKey === messageKey(message)}
             showSourceIndicator={showSource}
             sourceColor={conn?.color}
             sourceName={conn?.broadcasterName}

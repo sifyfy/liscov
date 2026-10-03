@@ -1,54 +1,15 @@
 // TTS types
 
-export type TtsBackend = 'none' | 'bouyomichan' | 'voicevox';
+// Rust 型（commands/tts.rs・tts/config.rs）から ts-rs で生成した型を re-export する
+export type { TtsBackend } from './generated/TtsBackend';
+export type { TtsConfig } from './generated/TtsConfig';
+export type { TtsStatus } from './generated/TtsStatus';
+export type { TtsLaunchStatus } from './generated/TtsLaunchStatus';
+
+import type { TtsConfig } from './generated/TtsConfig';
+
+// 読み上げの優先度（tts_speak の priority。Rust 側は文字列で受けて parse_tts_priority で解釈する）
 export type TtsPriority = 'normal' | 'membership' | 'superchat';
-
-export interface TtsConfig {
-  enabled: boolean;
-  backend: TtsBackend;
-  read_author_name: boolean;
-  add_honorific: boolean;
-  strip_at_prefix: boolean;
-  strip_handle_suffix: boolean;
-  read_superchat_amount: boolean;
-  max_text_length: number;
-  queue_size_limit: number;
-  first_comment_prefix_enabled: boolean;
-  first_comment_prefix: string;
-  first_comment_only: boolean;
-  // Bouyomichan settings
-  bouyomichan_host: string;
-  bouyomichan_port: number;
-  bouyomichan_voice: number;
-  bouyomichan_volume: number;
-  bouyomichan_speed: number;
-  bouyomichan_tone: number;
-  bouyomichan_auto_launch: boolean;
-  bouyomichan_exe_path: string | null;
-  bouyomichan_auto_close: boolean;
-  // VOICEVOX settings
-  voicevox_host: string;
-  voicevox_port: number;
-  voicevox_speaker_id: number;
-  voicevox_volume_scale: number;
-  voicevox_speed_scale: number;
-  voicevox_pitch_scale: number;
-  voicevox_intonation_scale: number;
-  voicevox_auto_launch: boolean;
-  voicevox_exe_path: string | null;
-  voicevox_auto_close: boolean;
-}
-
-export interface TtsStatus {
-  is_processing: boolean;
-  queue_size: number;
-  backend_name: string | null;
-}
-
-export interface TtsLaunchStatus {
-  bouyomichan_launched: boolean;
-  voicevox_launched: boolean;
-}
 
 export const defaultTtsConfig: TtsConfig = {
   enabled: false,

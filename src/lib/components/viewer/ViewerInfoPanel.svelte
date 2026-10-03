@@ -3,6 +3,7 @@
   import type { ChatMessage } from '$lib/types';
   import { chatStore } from '$lib/stores';
   import { formatTimestamp } from '$lib/utils/format';
+  import { messageKey } from '$lib/utils/message-key';
 
   interface Props {
     viewer: {
@@ -23,52 +24,62 @@
   let isSaving = $state(false);
   let saveMessage = $state('');
   let viewerProfileId = $state<number | null>(null);
+  // 読み込みが終わるまでフォームを無効にする（読み込み結果が入力中の内容を上書きしないように）
+  let isLoaded = $state(false);
 
-  // Load existing custom info when viewer changes
+  interface CustomInfo {
+    profileId: number;
+    reading: string;
+    notes: string;
+  }
+
+  // 視聴者が変わったら読み込み直す。読み込み中に別の視聴者を開いたら、前の結果は捨てる
+  // （古い応答が後から届いて、別の視聴者のフォームと保存先を上書きしないように）
   $effect(() => {
-    // Explicitly reference reactive dependencies for effect tracking
     const bc = broadcasterChannelId;
     const vc = viewer.channelId;
+    let stale = false;
 
-    // Reset state before loading (important when viewer changes)
     reading = '';
     notes = '';
     saveMessage = '';
     viewerProfileId = null;
+    isLoaded = false;
 
-    // Load custom info for this viewer
-    loadCustomInfo(bc, vc);
+    loadCustomInfo(bc, vc)
+      .then((info) => {
+        if (stale || info === null) return;
+        viewerProfileId = info.profileId;
+        reading = info.reading;
+        notes = info.notes;
+      })
+      .catch((error) => console.error('Failed to load viewer info:', error))
+      .finally(() => {
+        if (!stale) isLoaded = true;
+      });
+
+    return () => {
+      stale = true;
+    };
   });
 
-  async function loadCustomInfo(bc: string, vc: string) {
-    try {
-      const profile = await invoke<{
-        id: number;
-      } | null>('viewer_get_profile', {
-        broadcasterId: bc,
-        channelId: vc
-      });
-      if (profile) {
-        viewerProfileId = profile.id;
-        // Direct DB lookup by viewer_profile_id (O(1) instead of scanning 1000 viewers)
-        const customInfo = await invoke<{
-          reading: string | null;
-          notes: string | null;
-        } | null>('viewer_get_custom_info', {
-          viewerProfileId: profile.id
-        });
-        if (customInfo) {
-          if (customInfo.reading !== null) {
-            reading = customInfo.reading;
-          }
-          if (customInfo.notes !== null) {
-            notes = customInfo.notes;
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Failed to load viewer info:', error);
-    }
+  async function loadCustomInfo(bc: string, vc: string): Promise<CustomInfo | null> {
+    const profile = await invoke<{ id: number } | null>('viewer_get_profile', {
+      broadcasterId: bc,
+      channelId: vc
+    });
+    if (!profile) return null;
+    const customInfo = await invoke<{
+      reading: string | null;
+      notes: string | null;
+    } | null>('viewer_get_custom_info', {
+      viewerProfileId: profile.id
+    });
+    return {
+      profileId: profile.id,
+      reading: customInfo?.reading ?? '',
+      notes: customInfo?.notes ?? ''
+    };
   }
 
   async function handleSave() {
@@ -179,6 +190,7 @@
         type="text"
         placeholder="例: やまだ たろう"
         bind:value={reading}
+        disabled={!isLoaded}
         class="w-full px-3 py-2 rounded-lg text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/50"
         style="background: var(--bg-surface-3); border: 1px solid var(--border-default);"
       />
@@ -196,6 +208,7 @@
         id="viewer-notes"
         placeholder="この視聴者についてのメモ..."
         bind:value={notes}
+        disabled={!isLoaded}
         rows="3"
         class="w-full px-3 py-2 rounded-lg text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/50 resize-none"
         style="background: var(--bg-surface-3); border: 1px solid var(--border-default);"
@@ -206,7 +219,7 @@
     <div class="flex items-center gap-3 mb-5">
       <button
         onclick={handleSave}
-        disabled={isSaving}
+        disabled={!isLoaded || isSaving}
         class="flex-1 px-4 py-2 text-[var(--text-inverse)] rounded-lg transition-colors disabled:opacity-50"
         style="background: var(--accent);"
       >
@@ -225,8 +238,8 @@
         投稿されたコメント ({viewerMessages.length}件)
       </h3>
       <div class="flex-1 overflow-y-auto space-y-2">
-        {#each [...viewerMessages].reverse() as message (message.id)}
-          {@const isClicked = message.id === viewer.message.id}
+        {#each [...viewerMessages].reverse() as message (messageKey(message))}
+          {@const isClicked = messageKey(message) === messageKey(viewer.message)}
           {@const badge = formatMessageType(message)}
           <button
             class="w-full text-left p-3 rounded-lg cursor-pointer transition-colors"

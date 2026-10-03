@@ -1,6 +1,7 @@
 <script lang="ts">
   import { ChatDisplay, ConnectionList, FilterPanel, InputSection, ReactionMeter } from '$lib/components/chat';
   import { chatStore } from '$lib/stores';
+  import ErrorBoundary from '$lib/components/ui/ErrorBoundary.svelte';
 
   // 接続リストパネルの高さ管理
   const MAX_HEIGHT_RATIO = 0.4; // ビューポートの40%まで
@@ -65,7 +66,7 @@
       {#if chatStore.connections.size > 1}
         <button
           class="text-xs px-2 py-0.5 rounded bg-[var(--bg-surface-2)] text-[var(--text-secondary)] border border-[var(--border-default)] hover:bg-[var(--bg-surface-3)] cursor-pointer"
-          onclick={() => chatStore.disconnectAll()}
+          onclick={() => chatStore.disconnectAll().catch((e) => console.warn('全切断に失敗:', e))}
         >全切断</button>
       {/if}
     </div>
@@ -96,6 +97,8 @@
   <FilterPanel />
   <ReactionMeter />
   <div class="flex-1 overflow-hidden">
-    <ChatDisplay />
+    <ErrorBoundary name="チャット一覧">
+      <ChatDisplay />
+    </ErrorBoundary>
   </div>
 </div>

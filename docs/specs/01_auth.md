@@ -388,10 +388,11 @@ E2Eテストは本番データと分離された専用の名前空間を使用�
 
 | 環境変数 | デフォルト値 | テスト時の値 | 影響範囲 |
 |---------|-------------|-------------|---------|
-| `LISCOV_APP_NAME` | `liscov` | `liscov-test` | 設定ファイルパス、DBパス |
+| `LISCOV_APP_NAME` | `liscov` | `liscov-test` | 設定ファイルパス、DBパス、ウィンドウ状態のファイル名（10_window_state.md） |
 | `LISCOV_KEYRING_SERVICE` | `liscov` | `liscov-test` | Windows資格情報マネージャーのサービス名 |
 | `LISCOV_AUTH_URL` | YouTube URL | mock server URL | 認証ウィンドウの初期URL |
 | `LISCOV_SESSION_CHECK_URL` | YouTube API | mock server URL | セッション検証エンドポイント |
+| `WEBVIEW2_USER_DATA_FOLDER` | なし（`%LOCALAPPDATA%/com.liscov-tauri.app/EBWebView`） | `%LOCALAPPDATA%/liscov-test/EBWebView` | WebView2 のデータ（Cookie・キャッシュ）。WebView2 自体が読む環境変数で、`identifier` で決まる本番のフォルダと分ける。同じフォルダだと本番の起動中にテスト用アプリが CDP を開けない |
 
 ### テストデータのパス
 
@@ -402,6 +403,8 @@ E2Eテストは本番データと分離された専用の名前空間を使用�
 | 設定ファイル | `%APPDATA%/liscov-test/config.toml` |
 | 認証情報（fallback） | `%APPDATA%/liscov-test/credentials.toml` |
 | データベース | `%APPDATA%/liscov-test/liscov.db` |
+| ウィンドウ状態 | `%APPDATA%/com.liscov-tauri.app/.window-state.liscov-test.json` |
+| WebView2 のデータ | `%LOCALAPPDATA%/liscov-test/EBWebView` |
 | 認証情報（secure） | Windows資格情報マネージャー（サービス名: `liscov-test`） |
 
 ### テストスイート

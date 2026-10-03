@@ -1,6 +1,7 @@
 //! Liscov - YouTube Live Chat Monitor
 //! Tauri backend implementation
 
+pub mod atomic_file;
 pub mod commands;
 pub mod connection;
 pub mod core;
@@ -91,26 +92,66 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! Welcome to Liscov.", name)
 }
 
+/// ログのプラグインを作る（FEATURE_SPECIFICATION.md「バックエンドのログ」）
+///
+/// `tracing::` のログも tracing の "log" feature で log に流れ、ここに集まる。
+fn log_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
+
+    let level = if cfg!(debug_assertions) {
+        log::LevelFilter::Debug
+    } else {
+        log::LevelFilter::Info
+    };
+    let mut targets = Vec::new();
+    match paths::log_dir() {
+        Ok(path) => targets.push(Target::new(TargetKind::Folder {
+            path,
+            file_name: Some("liscov".to_string()),
+        })),
+        // ログの置き場所が無くても起動はする（標準出力には出る）
+        Err(e) => eprintln!(
+            "ログディレクトリを特定できないため、ファイルに残さない: {}",
+            e
+        ),
+    }
+    if cfg!(debug_assertions) {
+        targets.push(Target::new(TargetKind::Stdout));
+    }
+
+    tauri_plugin_log::Builder::default()
+        .clear_targets()
+        .targets(targets)
+        .level(level)
+        // HTTP 層の debug ログは量が多く、調べたいログが埋もれる
+        .level_for("hyper", log::LevelFilter::Info)
+        .level_for("hyper_util", log::LevelFilter::Info)
+        .level_for("h2", log::LevelFilter::Info)
+        .level_for("reqwest", log::LevelFilter::Info)
+        .max_file_size(10 * 1024 * 1024)
+        .rotation_strategy(RotationStrategy::KeepSome(5))
+        .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
+        .build()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .manage(AppState::new())
-        .manage(ConfigState::load_from_file())
+        .plugin(log_plugin())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(StateFlags::SIZE | StateFlags::POSITION)
+                // 本番は .window-state.json、テスト用のアプリ名なら別のファイル（10_window_state.md）
+                .with_filename(paths::window_state_filename())
                 .build(),
         )
         .setup(|app| {
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Debug)
-                        .build(),
-                )?;
-            }
+            // ロガーはプラグインの初期化で準備される。DB 初期化・設定読み込みのログを残すため、
+            // ステートはここ（プラグインの後）で作る
+            app.manage(AppState::new());
+            app.manage(ConfigState::load_from_file());
 
             // Show window after state restoration (window starts hidden)
             let window = app
@@ -229,8 +270,15 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app_handle, event| {
             if let tauri::RunEvent::ExitRequested { .. } = event {
-                // Kill auto-launched TTS processes on exit
                 let state = app_handle.state::<AppState>();
+
+                // 接続中のセッションを切断と同じく閉じる（08_database.md セッションライフサイクル）
+                let connections = state.connections.clone();
+                tauri::async_runtime::block_on(async move {
+                    connection::disconnect_all(&connections, connection::DISCONNECT_TIMEOUT).await;
+                });
+
+                // Kill auto-launched TTS processes on exit
                 let tts_manager = state.tts_manager.clone();
                 let tts_process_manager = state.tts_process_manager.clone();
 

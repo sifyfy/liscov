@@ -337,11 +337,6 @@ fn parse_raw_cookies(raw: &str) -> YouTubeCookies {
 fn save_cookies_to_file(cookies: &YouTubeCookies) -> Result<(), String> {
     let path = get_credentials_path()?;
 
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create config directory: {}", e))?;
-    }
-
     let config = CredentialsConfig {
         youtube: cookies.into(),
     };
@@ -349,7 +344,7 @@ fn save_cookies_to_file(cookies: &YouTubeCookies) -> Result<(), String> {
     let toml_string = toml::to_string_pretty(&config)
         .map_err(|e| format!("Failed to serialize credentials: {}", e))?;
 
-    fs::write(&path, toml_string)
+    crate::atomic_file::write(&path, &toml_string)
         .map_err(|e| format!("Failed to write credentials file: {}", e))?;
 
     log::info!("Credentials saved to {:?}", path);
@@ -794,7 +789,7 @@ pub async fn auth_check_session_validity(
 pub async fn auth_use_fallback_storage(
     config_state: State<'_, ConfigState>,
 ) -> Result<bool, CommandError> {
-    let mut config = config_state.get();
+    let config = config_state.get();
 
     // セキュアストレージからの移行対象クレデンシャルを確認
     let credentials_to_migrate = if config.storage.mode == StorageMode::Secure {
@@ -803,13 +798,13 @@ pub async fn auth_use_fallback_storage(
         None
     };
 
-    // フォールバックモードに切り替え
-    config.storage.mode = StorageMode::Fallback;
-    config_state.set(config.clone());
-
-    // 設定ファイルを保存
-    use crate::commands::config::save_config_to_file;
-    if let Err(e) = save_config_to_file(&config) {
+    // フォールバックモードに切り替えて保存（他の項目は今の設定のまま。09_config.md）
+    let updated = config_state.update(|current| {
+        let mut next = current.clone();
+        next.storage.mode = StorageMode::Fallback;
+        Ok(next)
+    })?;
+    if let Err(e) = updated.saved {
         log::error!("Failed to save config: {}", e);
     }
 

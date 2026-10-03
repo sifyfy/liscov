@@ -5,20 +5,21 @@ import type {
   ChatMessage,
   ConnectionResult,
   ChatMode,
-  ChatFilter,
   FrontendConnectionState,
   GuiReactionUpdate
 } from '$lib/types';
-import { SvelteMap, SvelteSet } from 'svelte/reactivity';
+import { SvelteMap } from 'svelte/reactivity';
 import * as chatApi from '$lib/tauri/chat';
 import { getConnectionColor } from '$lib/utils/connection-colors';
 import { applyReactionUpdate, emptyReactionMeter, restoreReactionMeter } from '$lib/utils/reactions';
 import { configStore } from './config.svelte';
+import { createMessageList } from './chat-messages.svelte';
 
 // ファクトリ関数：テスト時に独立したストアインスタンスを生成できる
 function createChatStore() {
-  // リアクティブ状態
-  let messages = $state<ChatMessage[]>([]);
+  // チャット一覧のメッセージ（バッチ・重複チェック・索引・フィルタ）
+  const list = createMessageList();
+
   // 多接続状態マップ（キー: connection_id as number）
   // eslint-disable-next-line svelte/no-unnecessary-state-wrap -- 再代入パターン (connections = new SvelteMap(...)) でリアクティビティをトリガーするため$state必須
   let connections = $state<SvelteMap<number, FrontendConnectionState>>(new SvelteMap());
@@ -28,14 +29,6 @@ function createChatStore() {
   // 多接続ベースの派生状態
   let isConnected = $derived(connections.size > 0);
   let isConnecting = $derived([...connections.values()].some(c => c.connectionState === 'connecting'));
-  // 多接続ではglobalなpauseはない（常にfalse）
-  let isPaused = $derived(false);
-  let filter = $state<ChatFilter>({
-    showText: true,
-    showSuperchat: true,
-    showMembership: true,
-    searchQuery: ''
-  });
 
   // チャット表示設定
   const MIN_FONT_SIZE = 10;
@@ -44,96 +37,11 @@ function createChatStore() {
   let messageFontSize = $state(DEFAULT_FONT_SIZE);
   let showTimestamps = $state(true);
   let autoScroll = $state(true);
-  let displayLimit = $state<number | null>(null);
   let scrollToLatestTrigger = $state(0); // インクリメントでスクロールをトリガー
 
-  // O(1)検索のための重複チェック用セット（複合キー: connection_id:message_id）
-  let messageIds = new SvelteSet<string>();
-
-  // O(1)ビューワーメッセージ検索のためのチャンネルIDインデックス
-  let messagesByChannel = new SvelteMap<string, ChatMessage[]>();
-
-  // フィルターがデフォルト状態かどうか（全タイプ表示かつ検索クエリなし）
-  let isDefaultFilter = $derived(
-    filter.showText && filter.showSuperchat && filter.showMembership && !filter.searchQuery
-  );
-
-  // 派生状態：フィルタ済みメッセージ（カウント表示用）
-  let filteredMessages = $derived.by(() => {
-    if (isDefaultFilter) {
-      return messages; // O(1)：参照をそのまま返す
-    }
-    return messages.filter((msg) => {
-      // メッセージタイプでフィルタ
-      if (!filter.showText && msg.message_type === 'text') return false;
-      if (
-        !filter.showSuperchat &&
-        (msg.message_type === 'superchat' ||
-          msg.message_type === 'supersticker' ||
-          msg.message_type === 'gift')
-      )
-        return false;
-      if (
-        !filter.showMembership &&
-        (msg.message_type === 'membership' || msg.message_type === 'membership_gift')
-      )
-        return false;
-
-      // 検索クエリでフィルタ
-      if (filter.searchQuery) {
-        const query = filter.searchQuery.toLowerCase();
-        return (
-          msg.content.toLowerCase().includes(query) || msg.author.toLowerCase().includes(query)
-        );
-      }
-
-      return true;
-    });
-  });
-
-  // 派生状態：表示メッセージ（displayLimit適用済み、レンダリング用）
-  let displayedMessages = $derived.by(() => {
-    if (displayLimit !== null) {
-      return filteredMessages.slice(-displayLimit);
-    }
-    return filteredMessages;
-  });
-
-  // メッセージバッチング（高ボリームストリーム用）
-  let pendingMessages: ChatMessage[] = [];
-  let batchTimeout: ReturnType<typeof setTimeout> | null = null;
-  const BATCH_DELAY_MS = 50; // 50ms以内のメッセージをバッチ処理
-
-  function flushPendingMessages(): void {
-    if (pendingMessages.length === 0) return;
-
-    for (const msg of pendingMessages) {
-      // 複合キー（connection_id:message_id）で重複排除
-      const key = `${msg.connection_id}:${msg.id}`;
-      messageIds.add(key);
-      // チャンネルインデックスを更新
-      const arr = messagesByChannel.get(msg.channel_id);
-      if (arr) arr.push(msg);
-      else messagesByChannel.set(msg.channel_id, [msg]);
-    }
-    messages.push(...pendingMessages);
-    pendingMessages = [];
-    batchTimeout = null;
-  }
-
   function addMessage(message: ChatMessage): void {
-    // 複合キー（connection_id:message_id）でO(1)重複チェック
-    const key = `${message.connection_id}:${message.id}`;
-    if (messageIds.has(key) || pendingMessages.some((m) => `${m.connection_id}:${m.id}` === key)) {
-      return;
-    }
-
-    pendingMessages.push(message);
-    markJewelCountUnavailable(message);
-
-    // バッチフラッシュをスケジュール（未スケジュールの場合のみ）
-    if (!batchTimeout) {
-      batchTimeout = setTimeout(flushPendingMessages, BATCH_DELAY_MS);
+    if (list.add(message)) {
+      markJewelCountUnavailable(message);
     }
   }
 
@@ -273,33 +181,15 @@ function createChatStore() {
     }
   }
 
-  // 全接続を切断
+  // 全接続を切断（接続中のものは残す。成立したら connect() が一覧に入れる）
   async function disconnectAll(): Promise<void> {
     try {
       await chatApi.disconnectAllStreams();
     } finally {
-      connections = new SvelteMap();
+      connections = new SvelteMap(
+        [...connections].filter(([, conn]) => conn.connectionState === 'connecting')
+      );
     }
-  }
-
-  // pause は多接続では非推奨 → disconnectAllのエイリアス
-  async function pause(): Promise<void> {
-    await disconnectAll();
-  }
-
-  // resume は多接続では廃止（ユーザーがURLを再入力して接続）
-  // 後方互換のため空実装を残す
-  async function resume(): Promise<ConnectionResult> {
-    return {
-      success: false,
-      stream_title: null,
-      broadcaster_channel_id: null,
-      broadcaster_name: null,
-      is_replay: false,
-      error: 'resume() is not supported in multi-stream mode',
-      session_id: null,
-      connection_id: BigInt(0)
-    };
   }
 
   // 初期化（全てクリアしてidle状態に戻る）
@@ -310,10 +200,7 @@ function createChatStore() {
       // クリーンアップ中のエラーは無視
     } finally {
       connections = new SvelteMap();
-      messages = [];
-      messageIds.clear();
-      messagesByChannel.clear();
-      pendingMessages = [];
+      list.clear();
       error = null;
     }
   }
@@ -330,17 +217,6 @@ function createChatStore() {
         console.warn(`チャットモード変更失敗 (connection ${connId}):`, e);
       }
     }
-  }
-
-  function setFilter(newFilter: Partial<ChatFilter>): void {
-    filter = { ...filter, ...newFilter };
-  }
-
-  function clearMessages(): void {
-    messages = [];
-    messageIds.clear();
-    messagesByChannel.clear();
-    pendingMessages = [];
   }
 
   function setFontSize(size: number): void {
@@ -368,14 +244,6 @@ function createChatStore() {
 
   function scrollToLatest(): void {
     scrollToLatestTrigger++;
-  }
-
-  function setDisplayLimit(limit: number | null): void {
-    displayLimit = limit;
-  }
-
-  function getMessagesForChannel(channelId: string): ChatMessage[] {
-    return messagesByChannel.get(channelId) || [];
   }
 
   // イベントリスナーのクリーンアップ関数
@@ -483,14 +351,17 @@ function createChatStore() {
 
   return {
     // Getters (リアクティブ)
+    get viewerCount() {
+      return list.viewerCount;
+    },
     get messages() {
-      return messages;
+      return list.messages;
     },
     get filteredMessages() {
-      return filteredMessages;
+      return list.filteredMessages;
     },
     get displayedMessages() {
-      return displayedMessages;
+      return list.displayedMessages;
     },
     get connections() {
       return connections;
@@ -498,24 +369,10 @@ function createChatStore() {
     get isConnected() {
       return isConnected;
     },
-    // 後方互換のため残す（最初の接続のstreamTitle）
-    get streamTitle() {
-      if (connections.size === 0) return null;
-      return [...connections.values()][0].streamTitle || null;
-    },
-    // 後方互換のため残す（最初の接続のbroadcasterName）
-    get broadcasterName() {
-      if (connections.size === 0) return null;
-      return [...connections.values()][0].broadcasterName || null;
-    },
-    // 後方互換のため残す（最初の接続のbroadcasterChannelId）
+    // 最初の接続の配信者チャンネル ID（視聴者情報パネル・視聴者タブの既定の配信者）
     get broadcasterChannelId() {
       if (connections.size === 0) return null;
       return [...connections.values()][0].broadcasterChannelId || null;
-    },
-    // 後方互換のため残す（常にfalse）
-    get isReplay() {
-      return false;
     },
     get chatMode() {
       return chatMode;
@@ -527,7 +384,7 @@ function createChatStore() {
       return error;
     },
     get filter() {
-      return filter;
+      return list.filter;
     },
     get messageFontSize() {
       return messageFontSize;
@@ -535,22 +392,11 @@ function createChatStore() {
     get showTimestamps() {
       return showTimestamps;
     },
-    get isPaused() {
-      return isPaused;
-    },
-    // 後方互換のため残す（多接続では常に'idle'か'connected'相当）
-    get connectionState() {
-      if (connections.size === 0) return 'idle' as const;
-      const states = [...connections.values()].map(c => c.connectionState);
-      if (states.some(s => s === 'connecting')) return 'connecting' as const;
-      if (states.some(s => s === 'connected')) return 'connected' as const;
-      return 'idle' as const;
-    },
     get autoScroll() {
       return autoScroll;
     },
     get displayLimit() {
-      return displayLimit;
+      return list.displayLimit;
     },
     get scrollToLatestTrigger() {
       return scrollToLatestTrigger;
@@ -560,20 +406,18 @@ function createChatStore() {
     connect,
     disconnect,
     disconnectAll,
-    pause,
-    resume,
     initialize,
     setChatMode: setChatModeAction,
-    setFilter,
-    clearMessages,
+    setFilter: list.setFilter,
+    clearMessages: list.clear,
     setFontSize,
     increaseFontSize,
     decreaseFontSize,
     setShowTimestamps,
     setAutoScroll,
     scrollToLatest,
-    setDisplayLimit,
-    getMessagesForChannel,
+    setDisplayLimit: list.setDisplayLimit,
+    getMessagesForChannel: list.getMessagesForChannel,
     setupEventListeners,
     cleanup,
     initDisplaySettings,

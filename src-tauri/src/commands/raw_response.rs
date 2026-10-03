@@ -2,7 +2,7 @@
 //!
 //! 保存設定は ConfigState（config.toml の [raw_response]）が正本（05_raw_response.md）
 
-use crate::commands::config::{Config, ConfigState, save_config_to_file};
+use crate::commands::config::{Config, ConfigState};
 use crate::core::raw_response::{SaveConfig, resolve_save_path, validate_file_path};
 use crate::errors::CommandError;
 use serde::{Deserialize, Serialize};
@@ -47,7 +47,7 @@ pub(crate) fn config_apply_raw_response(
     config: &Config,
     save_config: SaveConfig,
 ) -> Result<Config, CommandError> {
-    validate_file_path(&save_config.file_path).map_err(CommandError::InvalidInput)?;
+    save_config.validate().map_err(CommandError::InvalidInput)?;
     Ok(Config {
         raw_response: save_config,
         ..config.clone()
@@ -66,15 +66,15 @@ pub fn raw_response_update_config(
     state: State<'_, ConfigState>,
     config: GuiSaveConfig,
 ) -> Result<(), CommandError> {
-    let new_config = config_apply_raw_response(&state.get(), SaveConfig::from(config))?;
-    state.set(new_config.clone());
+    let updated =
+        state.update(|current| config_apply_raw_response(current, SaveConfig::from(config)))?;
     tracing::info!(
         "💾 Save config updated: enabled={}",
-        new_config.raw_response.enabled
+        updated.config.raw_response.enabled
     );
 
-    // ファイル保存を試行。失敗してもメモリ上の変更は維持（09_config.md）
-    if let Err(e) = save_config_to_file(&new_config) {
+    // 書き込みに失敗してもメモリ上の変更は維持（09_config.md）
+    if let Err(e) = updated.saved {
         tracing::error!("Failed to save config: {}", e);
     }
     Ok(())
@@ -135,6 +135,17 @@ mod tests {
         let save_config = SaveConfig {
             enabled: true,
             file_path: "../secret.txt".to_string(),
+            ..SaveConfig::default()
+        };
+        let result = config_apply_raw_response(&Config::default(), save_config);
+        assert!(matches!(result, Err(CommandError::InvalidInput(_))));
+    }
+
+    // spec: 05_raw_response.md 設定の変更 - max_file_size_mb を 0 で更新するとエラー
+    #[test]
+    fn apply_raw_response_rejects_zero_max_file_size() {
+        let save_config = SaveConfig {
+            max_file_size_mb: 0,
             ..SaveConfig::default()
         };
         let result = config_apply_raw_response(&Config::default(), save_config);

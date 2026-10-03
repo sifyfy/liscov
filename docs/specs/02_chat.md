@@ -20,7 +20,11 @@
 | 状況 | 結果 |
 |------|------|
 | 新着メッセージ受信 | DBに保存、視聴者プロフィール更新、フロントエンドにTauriイベント発行 |
-| API応答エラー | warnログを出力し、次のポーリング（1.5秒後）で再試行 |
+| 同じ接続で既に受け取った message_id が再び届いた | 捨てる。DB保存・配信内コメント数・GUI・WebSocket・TTS のいずれにも流さない |
+| 別の接続で受け取った message_id が届いた | 新着として扱う（重複の判定は接続ごと） |
+| 同じ配信に再接続し、前の接続で受け取ったコメントが同じ id で届いた | 別の接続のメッセージとして並べる（同じコメントが2つ並ぶ）。一覧・視聴者パネルのキーや選択の判定も `connection_id:message_id` で行い、message_id だけでは扱わない |
+| 取得に失敗（タイムアウト・ネットワークエラー・HTTPエラー・JSONでない応答） | warnログを出力し、次のポーリングで再試行。続けて失敗したら待ちを延ばし、15回続いたら切断する（「取得に失敗したとき」） |
+| 取得の応答を待っている間に切断 | 応答を待たずに止まり、セッションを閉じる |
 | DB保存エラー | warnログを出力し、メッセージ処理は継続 |
 
 ### 初見さん判定
@@ -140,7 +144,10 @@
 | 操作 | 結果 |
 |------|------|
 | 2つ目以降のURLで「開始」クリック | 追加接続。全接続のメッセージをグローバルバッファに統合表示 |
-| 「全切断」クリック | 全接続を一括切断 |
+| 接続済みと接続中を合わせて32件あるときに「開始」 | 接続を拒否する（「同時接続数の上限（32）に達しています」）。同時に「開始」が続いても32件を超えない。切断・接続失敗で枠が空く |
+| 「全切断」クリック | 接続済みの全接続を一括切断。接続中（`connecting`）のものは残り、成立したら一覧に出る。切断の途中で成立した接続も止めずに残す（押した時点の接続だけを切る） |
+| 接続中（`connecting`）のエントリ | 切断ボタンは押せない。接続が成立するか失敗するまで待つ（接続処理には HTTP タイムアウトがあるので待ち続けない） |
+| 接続が成立した | URL 入力欄を空にする。ただし欄の内容がその接続の URL から変わっていたら残す |
 | F5リロード | バックエンド接続は維持。`get_connections`で状態を復元し、新着メッセージを正常受信 |
 
 ## 制約・不変条件（Boundaries）
@@ -149,6 +156,7 @@
 |------|------|
 | 最大同時接続数は32 | メモリとAPI負荷の上限。超過時は接続を拒否する |
 | メッセージ重複排除キーは `connection_id:message_id` の複合キー | connection_idなしだと異なる配信間でYouTubeのmessage_idが衝突する可能性がある |
+| バックエンドは接続ごとに受け取った message_id を覚え、再び届いたものを捨てる | YouTube は同じ接続に同じメッセージを再送することがある（実測: 同じ id・同じ timestampUsec が約60秒で4回）。フロントの重複排除だけでは、TTS・WebSocket・視聴者の集計に重複が流れる |
 | ポーリング間隔は1,500ms | YouTube APIのレート制限に準拠。短くするとAPIブロックのリスクがある |
 | 初見さん判定は `save_message`（`upsert_viewer_stream`含む）の**後**に実行する | 判定前にDBにデータが存在している必要がある |
 | システムメッセージ（`message_type == "system"`）は初見判定の対象外 | システムメッセージはユーザーの発言ではない |
@@ -453,27 +461,34 @@ Origin: https://www.youtube.com
 ```
 ┌─ ループ（1.5秒ごと）─────────────────────────┐
 │ 1. CancellationTokenでキャンセル確認          │
-│ 2. fetch_messages_with_raw()でAPI呼び出し     │
+│ 2. fetch_chat()でAPI呼び出し                  │
+│    ├─ 応答待ちの間も切断を受け付ける           │
+│    ├─ 成功 → 連続失敗回数を0に戻す            │
+│    ├─ 失敗 → 連続失敗回数を1増やす            │
 │    └─ 新しいcontinuation tokenを取得          │
 │ 3. chat_mode_rx でモード変更要求を確認         │
 │    └─ 変更あり → client.set_chat_mode(mode)  │
-│ 4. 各メッセージを処理:                         │
+│ 4. この接続で受け取り済みの id を捨てる        │
+│ 5. 残りを 1 トランザクションで処理（1件ずつ）: │
 │    ├─ ギフトなら handle から channel_id を特定  │
 │    ├─ 配信内コメント数カウンタ更新              │
 │    ├─ DBに保存（save_message）                │
 │    │   ├─ INSERT OR IGNORE (messages)         │
 │    │   ├─ upsert_viewer_profile               │
 │    │   └─ upsert_viewer_stream(video_id)      │
-│    ├─ is_first_time_viewer(video_id)で初見判定 │
-│    ├─ メモリバッファに追加                     │
-│    ├─ GuiChatMessageに初見・回数を付与         │
-│    └─ Tauriイベントを発行                     │
-│ 5. リアクション更新を処理:                     │
+│    └─ is_first_time_viewer(video_id)で初見判定 │
+│ 6. 各メッセージを送る:                         │
+│    ├─ GuiChatMessageに初見・回数を付与し、     │
+│    │   Tauriイベントを発行                    │
+│    ├─ WebSocket に配信                        │
+│    └─ TTS キューに追加                        │
+│ 7. リアクション更新を処理:                     │
 │    ├─ 前回以下の update_time_usec なら捨てる   │
 │    ├─ DBに保存（reactions）                   │
 │    ├─ Tauriイベント chat:reaction を発行       │
 │    └─ WebSocket に Reaction を配信            │
-│ 6. sleep(1500ms)                              │
+│ 8. 次の取得まで待つ（通常1500ms。失敗が続くと │
+│    延ばし、15回続いたら切断して抜ける）        │
 └───────────────────────────────────────────────┘
 ```
 
@@ -544,7 +559,7 @@ type InStreamCommentCounter = HashMap<String, u32>;
 | イベント | 動作 |
 |---------|------|
 | 新規接続 | 空のHashMapを作成 |
-| 再接続（同一video_id） | DBから該当セッションのメッセージを集計し、channel_idごとのカウントで初期化 |
+| 再接続（同一video_id） | DBから該当セッションのメッセージを集計し、channel_idごとのカウントで初期化。URL の書き方（`watch?v=`・`/live/`・`youtu.be/`）が前回と違っても同じ配信として数える |
 | メッセージ受信 | カウンタをインクリメントし、現在値を `in_stream_comment_count` に設定 |
 | 切断 | カウンタを破棄（DBにメッセージが保存されているため復元可能） |
 
@@ -554,7 +569,8 @@ type InStreamCommentCounter = HashMap<String, u32>;
 SELECT m.channel_id, COUNT(*) as count
 FROM messages m
 JOIN sessions s ON m.session_id = s.id
-WHERE s.stream_url LIKE '%{video_id}%'
+WHERE s.video_id = {video_id}
+  AND m.message_type != 'system'
   AND m.channel_id <> ''
 GROUP BY m.channel_id
 ```
@@ -567,12 +583,49 @@ GROUP BY m.channel_id
 | カウント更新 | O(1) - HashMap insert/update |
 | 初期化（再接続時） | O(N) - Nはユニーク視聴者数 |
 
+### 受信済み message_id の記憶
+
+接続ごとに、受け取った message_id を直近 10,000 件まで覚える。超えたら古いものから忘れる。
+YouTube の再送は数十秒〜数分のうちに届くので、直近だけ覚えれば足りる。件数に上限を設けて、長時間の配信でもメモリを一定に保つ（接続あたり約1MB）。
+
+| 状況（上限を3件とした例） | 結果 |
+|------|------|
+| A, B, A の順に届く | A, B を処理し、2回目の A を捨てる |
+| A, B, C, D, A の順に届く | A, B, C, D を処理する。D を覚えた時点で A を忘れているので、最後の A も処理する |
+| message_id が空のメッセージ | 重複の判定をせず、常に処理する（空の id 同士を同じものとみなさない） |
+| 切断 | 記憶を破棄する。再接続は新しい接続なので、YouTube が返す直近のコメントも新着として扱う |
+
+### 取得に失敗したとき
+
+YouTube 側の一時的な不調ならそのまま続け、復旧しそうにないときは自動で切断して知らせる。
+接続しているつもりで何も取れていない状態を放置しない。
+
+失敗として数えるもの: リクエストのタイムアウト（全体15秒・接続5秒）、ネットワークエラー、成功（2xx）以外の HTTP ステータス、JSON として読めない応答。
+応答が返ってきてメッセージが 0 件なのは失敗ではない。
+
+| 連続失敗回数 | 次の取得までの待ち |
+|------|------|
+| 0（成功） | 1.5秒 |
+| 1〜10 | 1.5秒（成功と同じ） |
+| 11 | 3秒 |
+| 12 | 6秒 |
+| 13 | 12秒 |
+| 14 | 24秒 |
+| 15 | 待たずに切断する |
+
+- 1 回でも成功したら連続失敗回数は 0 に戻る（例: 失敗12回 → 成功 → 失敗 なら、次の待ちは 1.5秒）
+- 成功している間の間隔は 1.5秒のまま（制約「ポーリング間隔は1,500ms」）。延ばすのは失敗が続いたときだけ
+- 15回目で切断するとき: セッションを閉じ、接続を一覧から消し、エラー「チャットの取得に15回続けて失敗したため切断しました」を表示する（「接続状態遷移」の監視タスク終了と同じ経路）
+- 1〜10回目の待ちを今までと同じにするのは、短い不調（数秒〜15秒）で取りこぼす時間を増やさないため
+
 ### 設定値
 
 | 項目 | 値 |
 |-----|-----|
 | ポーリング間隔 | 1,500ms |
-| メモリバッファ上限（Backend） | 1,000件 |
+| HTTP タイムアウト | 全体15秒、接続5秒 |
+| 自動切断するまでの連続失敗回数 | 15回（11回目から待ちを倍々に延ばす） |
+| 受信済み message_id の記憶件数（接続ごと） | 10,000件 |
 | デフォルトAPI Key | `AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8` |
 
 ## Tauriイベント
@@ -645,10 +698,7 @@ GROUP BY m.channel_id
 | `connections[id].reactions` | `{ totals: Record<string, number>; recent: ReactionUpdate[]; peakPerMinute: number }` | リアクションメーターの状態。`recent` は update_time_usec が60秒以内のものだけ残す。勢い（/分）は `recent` の total の合計（derived） |
 | `isConnected` | `boolean` | いずれかの接続がアクティブ（derived: connections.size > 0） |
 | `isConnecting` | `boolean` | 接続処理中の接続が存在（derived） |
-| `connectionState` | `string` | 後方互換（idle/connecting/connected） |
-| `streamTitle` | `string \| null` | 後方互換（最初の接続のタイトル）。ヘッダーでの表示は廃止（接続リストと重複するため） |
-| `broadcasterName` | `string \| null` | 後方互換（最初の接続の配信者名） |
-| `broadcasterChannelId` | `string \| null` | 後方互換（最初の接続のチャンネルID） |
+| `broadcasterChannelId` | `string \| null` | 最初の接続の配信者チャンネル ID（視聴者情報パネル・視聴者タブの既定の配信者） |
 | `chatMode` | `ChatMode` | TopChat / AllChat。起動時・F5 後は config.toml の `chat_display.chat_mode` で初期化し、選び直すたびに保存する |
 | `error` | `string \| null` | エラーメッセージ |
 
@@ -694,6 +744,29 @@ interface ChatFilter {
 | フォントサイズ変更 | ローカル設定を更新 |
 | F5リロード | バックエンドの接続状態を `get_connections` で取得し、フロントエンドに復元 |
 
+### 接続設定の統計（InputSection）
+
+URL 入力欄の右に、画面のメッセージ一覧の統計を出す。未接続のときはすべて 0（薄く表示）。
+
+| 表示 | 値 |
+|-----|-----|
+| 件 | 画面のメッセージ一覧の件数（「クリア」で 0） |
+| /分 | 直近 60 秒に投稿されたコメントの数（投稿時刻 `timestamp_usec` で数える）。コメントが止まれば下がっていく（5 秒ごとに数え直す） |
+| 人 | 画面のメッセージ一覧にいる視聴者の数（`channel_id` ごと。視聴者を特定できないギフトは数えない） |
+
+| 状況（/分、いま 12:00:00） | 結果 |
+|------|------|
+| 11:58:00・11:59:10・11:59:50 に投稿されたコメント | 2 |
+| 最後のコメントが 11:59:50 で、そのあと 60 秒コメントが無い | 12:01:00 までに 0 になる |
+| アーカイブ（投稿時刻が過去）のコメントだけ | 0 |
+
+| 状況（人） | 結果 |
+|------|------|
+| UCa が 3 件、UCb が 1 件、視聴者を特定できないギフトが 1 件 | 2 |
+
+件・人はストアが受信のたびに差分で数える（全件を数え直さない）。/分は一覧の末尾から辿り、投稿時刻が 90 秒より前のメッセージに当たったら止める
+（一覧は到着順。複数の接続で到着が前後しても数十秒に収まる前提）。
+
 ### フロントエンド状態の復元（F5リロード後）
 
 ページリロード時にバックエンドのアクティブ接続をフロントエンドに復元する。
@@ -712,6 +785,7 @@ interface ChatFilter {
   開始                                    切断
 (なし) → Connecting → Connected → Disconnecting → (削除)
                            │
+                           ├─ (取得に15回続けて失敗) → (削除 + エラー通知)
                            └─ (監視タスク異常終了) → (削除 + エラー通知)
 
 Connecting → (接続失敗) → (削除 + エラー通知)
@@ -721,7 +795,7 @@ Connecting → (接続失敗) → (削除 + エラー通知)
 
 | 状態 | 説明 | UI表示 |
 |-----|------|-------|
-| `connecting` | 接続処理中（API応答待ち） | 開始ボタン無効化、「接続中...」表示 |
+| `connecting` | 接続処理中（API応答待ち） | 開始ボタン無効化、「接続中...」表示。その接続の切断ボタンは無効 |
 | `connected` | 接続済み、メッセージ受信中 | 接続リストにエントリ表示 |
 | `disconnecting` | 切断処理中 | 切断アニメーション |
 
@@ -884,11 +958,19 @@ SuperChatの色情報がある場合はYouTube APIから取得した色を使用
 
 #### バッジの種類
 
-| バッジ | 判定条件 | 表示 |
-|-------|---------|------|
-| メンバー | tooltip含む "メンバー" or "Member" | `var(--member-subtle)` 背景 + `var(--member-accent)` テキスト |
-| モデレーター | tooltip含む "モデレーター" or "Moderator" | `var(--info-subtle)` 背景 + `var(--info)` テキスト |
-| 認証済み | tooltip含む "認証" or "Verified" | `var(--bg-surface-3)` 背景 + `var(--text-secondary)` テキスト |
+バッジは各メッセージの `authorBadges[].liveChatAuthorBadgeRenderer` から読む（テキスト・スーパーチャット・スーパーステッカー・メンバーシップ）。
+判定は tooltip の文言ではなく、言語に依らない `icon.iconType` と `customThumbnail` の有無で行う。
+
+| バッジ | 判定条件 | `badge_type` | 表示 |
+|-------|---------|------|------|
+| メンバー | `customThumbnail` がある（tooltip 例: `Member (6 months)`, `New member`） | `member` | `var(--member-subtle)` 背景 + `var(--member-accent)` テキスト |
+| モデレーター | `icon.iconType == "MODERATOR"` | `moderator` | `var(--info-subtle)` 背景 + `var(--info)` テキスト |
+| 認証済み | `icon.iconType == "VERIFIED"` | `verified` | `var(--bg-surface-3)` 背景 + `var(--text-secondary)` テキスト |
+| 配信者本人 | `icon.iconType == "OWNER"` | `owner` | 表示しない（`badges`・`badge_info` には入れる） |
+
+- `badges` は `badge_type` の並び、`badge_info` は各バッジの `label`（tooltip）・`tooltip`・`image_url`（`customThumbnail` の最初の URL）
+- `is_member`・`is_moderator`・`is_verified` は上の判定と一致させる（スーパーチャット・スーパーステッカーでもメンバーなら `is_member = true`）
+- 上のどれにも当たらないバッジは読み飛ばす
 
 #### バッジ表示優先順位
 
@@ -1110,6 +1192,8 @@ date.toLocaleTimeString('ja-JP', {         // ローカルタイムゾーンに�
 
 - `displayedMessages` = `filteredMessages.slice(-displayLimit)`（displayLimitがnullの場合はfilteredMessagesと同一）
 - `filteredMessages` はフィルタのみ適用（ステータスバーの件数表示に使用）
+- `messages` は追記と「クリア」だけで変わる（`$state.raw`。足すときは配列ごと差し替え、メッセージ自体は変えない）。
+  `filteredMessages` はフィルタが変わらない間、新しく届いた分だけを判定して前回の結果に足す（全件を判定し直すのはフィルタを変えたときと「クリア」のあと）
 - アーカイブ = `messages` 配列内に存在するが `displayedMessages` に含まれないメッセージ
 - ViewerInfoPanelの過去コメントは `messages` 配列（全件）を参照するため、アーカイブ済みメッセージも表示可能
 
@@ -1209,6 +1293,8 @@ DOMにはビューポート近辺のメッセージのみレンダリングさ�
 | 保存タイミング | 保存ボタン押下時 |
 | 表示位置 | メッセージの著者名の横に括弧書き |
 | 空文字の扱い | Noneとして保存（読み仮名なし） |
+| 開いてから読み込みが終わるまで | 読み仮名・メモの欄と保存ボタンは押せない（読み込み結果が入力中の内容を上書きしないように） |
+| 読み込み中に別の視聴者を開いた | 前の視聴者の読み込み結果は捨てる。フォームの内容と保存先は、いま開いている視聴者のもの（例: A を開いてすぐ B を開き、A の応答があとから届いても、読み仮名は B のまま。保存すると B に書く） |
 
 **保存フロー:**
 ```
@@ -1222,6 +1308,7 @@ DOMにはビューポート近辺のメッセージのみレンダリングさ�
 ### 過去コメント表示
 
 当該視聴者のコメントを新着順で表示。
+パネルを開いている間に届いたその視聴者のコメントも、そのまま一覧に加わる。
 
 #### データソース
 
@@ -1431,7 +1518,8 @@ CREATE TABLE sessions (
     started_at TEXT,
     ended_at TEXT,
     total_messages INTEGER,
-    total_revenue REAL
+    total_revenue REAL,
+    video_id TEXT  -- 同じ配信のセッションを引く（列の詳細は 08_database.md）
 );
 ```
 
@@ -1468,9 +1556,10 @@ CREATE TABLE messages (
 
 | エラー | 動作 |
 |-------|------|
-| API応答エラー | warnログ、次のポーリングで再試行 |
+| API応答エラー（2xx 以外・JSON でない） | warnログ、次のポーリングで再試行（「取得に失敗したとき」） |
 | DB保存エラー | warnログ、メッセージ処理は継続 |
-| ネットワークエラー | warnログ、次のポーリングで再試行 |
+| ネットワークエラー・タイムアウト | warnログ、次のポーリングで再試行（「取得に失敗したとき」） |
+| 15回続けて失敗 | 切断し、エラーを表示 |
 
 ### HTMLパース失敗時のデバッグ
 

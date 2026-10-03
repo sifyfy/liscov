@@ -1,7 +1,7 @@
 //! CRUD operations for the database
 
 use super::models::*;
-use crate::core::models::ChatMessage;
+use crate::core::models::{ChatMessage, extract_video_id};
 use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -28,11 +28,12 @@ pub fn create_session(
 
     let id = uuid::Uuid::new_v4().to_string();
     let start_time = chrono::Utc::now().to_rfc3339();
+    let video_id = stream_url.and_then(extract_video_id);
 
     conn.execute(
-        "INSERT INTO sessions (id, start_time, stream_url, stream_title, broadcaster_channel_id, broadcaster_name)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![id, start_time, stream_url, stream_title, broadcaster_channel_id, broadcaster_name],
+        "INSERT INTO sessions (id, start_time, stream_url, stream_title, broadcaster_channel_id, broadcaster_name, video_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![id, start_time, stream_url, stream_title, broadcaster_channel_id, broadcaster_name, video_id],
     )?;
 
     // Also save broadcaster profile if we have broadcaster info
@@ -59,6 +60,37 @@ pub fn end_session(conn: &Connection, session_id: &str) -> Result<()> {
         params![end_time, session_id],
     )?;
     Ok(())
+}
+
+/// 前回の終了で閉じられなかったセッションを閉じ、閉じた件数を返す（08_database.md セッションライフサイクル）
+///
+/// 起動時、接続がまだ無いうちに呼ぶ。end_time は最後のメッセージを保存した時刻、無ければ start_time。
+pub fn close_unfinished_sessions(conn: &Connection) -> Result<usize> {
+    let ids = conn
+        .prepare("SELECT id FROM sessions WHERE end_time IS NULL")?
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let tx = conn.unchecked_transaction()?;
+    for id in &ids {
+        // created_at は秒単位なので、開始と同じ秒なら開始より前に見える。開始より前にはしない
+        tx.execute(
+            "UPDATE sessions SET end_time = (
+                SELECT CASE
+                    WHEN last.saved_at IS NOT NULL
+                         AND julianday(last.saved_at) > julianday(sessions.start_time)
+                    THEN last.saved_at
+                    ELSE sessions.start_time
+                END
+                FROM (SELECT strftime('%Y-%m-%dT%H:%M:%S+00:00', MAX(created_at)) AS saved_at
+                      FROM messages WHERE session_id = ?1) AS last)
+             WHERE id = ?1",
+            params![id],
+        )?;
+        update_session_stats(&tx, id)?;
+    }
+    tx.commit()?;
+    Ok(ids.len())
 }
 
 /// Update session statistics
@@ -167,12 +199,17 @@ pub fn save_message(
         _ => None,
     };
 
+    // バッジを読めない種類は NULL（不明）。08_database.md messages テーブル
+    let badges = message.author_badge_metadata();
+    let badges_json = badges.and_then(|m| serde_json::to_string(&m.badges).ok());
+
     // Insert message (ignore duplicates)
     conn.execute(
         "INSERT OR IGNORE INTO messages
          (session_id, message_id, timestamp, timestamp_usec, author, author_icon_url,
-          channel_id, content, message_type, amount, is_member, metadata)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+          channel_id, content, message_type, amount, is_member, metadata,
+          superchat_color, is_moderator, is_verified, badges)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
         params![
             session_id,
             message.id,
@@ -186,6 +223,10 @@ pub fn save_message(
             amount,
             message.is_member,
             metadata,
+            message.superchat_header_color(),
+            badges.map(|m| m.is_moderator),
+            badges.map(|m| m.is_verified),
+            badges_json,
         ],
     )?;
 
@@ -297,28 +338,22 @@ pub fn upsert_viewer_stream(
     Ok(())
 }
 
-/// sessions.stream_url から同じ配信（video_id）のセッションを引く LIKE パターン
-pub(super) fn stream_url_pattern(video_id: &str) -> String {
-    format!("%watch?v={}%", video_id)
-}
-
 /// Get in-stream comment counts per channel_id for a given video_id
 pub fn get_in_stream_comment_counts(
     conn: &Connection,
     video_id: &str,
 ) -> Result<std::collections::HashMap<String, u32>> {
-    let like_pattern = stream_url_pattern(video_id);
     let mut stmt = conn.prepare(
         "SELECT m.channel_id, COUNT(*) as cnt
          FROM messages m
          JOIN sessions s ON m.session_id = s.id
-         WHERE s.stream_url LIKE ?1
+         WHERE s.video_id = ?1
            AND m.message_type != 'system'
            AND m.channel_id <> ''
          GROUP BY m.channel_id",
     )?;
     let counts = stmt
-        .query_map(params![like_pattern], |row| {
+        .query_map(params![video_id], |row| {
             let channel_id: String = row.get(0)?;
             let count: u32 = row.get(1)?;
             Ok((channel_id, count))
@@ -596,7 +631,7 @@ pub fn get_viewers_for_broadcaster(
          FROM viewer_profiles vp
          LEFT JOIN viewer_custom_info vci ON vp.id = vci.viewer_profile_id
          WHERE vp.broadcaster_channel_id = ?1
-           AND (vp.display_name LIKE ?2 OR vci.reading LIKE ?2 OR vci.notes LIKE ?2)
+           AND (vp.display_name LIKE ?2 ESCAPE '\\' OR vci.reading LIKE ?2 ESCAPE '\\' OR vci.notes LIKE ?2 ESCAPE '\\')
          ORDER BY vp.last_seen DESC
          LIMIT ?3 OFFSET ?4"
     } else {
@@ -613,7 +648,7 @@ pub fn get_viewers_for_broadcaster(
 
     let mut stmt = conn.prepare(query)?;
 
-    let search_pattern = search_query.map(|q| format!("%{}%", q));
+    let search_pattern = search_query.map(like_contains_pattern);
 
     let viewers = if let Some(pattern) = &search_pattern {
         stmt.query_map(
@@ -628,6 +663,22 @@ pub fn get_viewers_for_broadcaster(
     };
 
     viewers.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+/// LIKE の部分一致パターンを作る。`%`・`_`・`\` は文字そのものとして探す（06_viewer.md 検索方式）
+///
+/// SQL 側は `ESCAPE '\'` と組で使う。
+fn like_contains_pattern(query: &str) -> String {
+    let mut pattern = String::with_capacity(query.len() + 2);
+    pattern.push('%');
+    for c in query.chars() {
+        if matches!(c, '%' | '_' | '\\') {
+            pattern.push('\\');
+        }
+        pattern.push(c);
+    }
+    pattern.push('%');
+    pattern
 }
 
 fn row_to_viewer(row: &rusqlite::Row) -> rusqlite::Result<ViewerWithCustomInfo> {
@@ -1556,6 +1607,143 @@ mod tests {
         assert_eq!(counts.get("UC_b"), Some(&2u32));
     }
 
+    // 08_database.md セッションライフサイクル: 起動時に残っていたセッションを閉じる（表の例）
+    #[tokio::test]
+    async fn close_unfinished_sessions_follows_spec_examples() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let with_messages = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+        for id in ["m1", "m2"] {
+            save_message(
+                &conn,
+                &with_messages,
+                Some("UC_bc"),
+                &make_text_message(id, "A", "UC_a", "hi"),
+                None,
+            )
+            .unwrap();
+        }
+        let empty = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+        let same_second = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+        save_message(
+            &conn,
+            &same_second,
+            Some("UC_bc"),
+            &make_text_message("m3", "A", "UC_a", "hi"),
+            None,
+        )
+        .unwrap();
+        let closed = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+        conn.execute_batch(&format!(
+            "UPDATE sessions SET start_time = '2026-10-03T10:00:00+00:00' WHERE id = '{with_messages}';
+             UPDATE messages SET created_at = '2026-10-03 10:05:00' WHERE message_id = 'm1';
+             UPDATE messages SET created_at = '2026-10-03 10:42:00' WHERE message_id = 'm2';
+             UPDATE sessions SET start_time = '2026-10-03T11:00:00+00:00' WHERE id = '{empty}';
+             UPDATE sessions SET start_time = '2026-10-03T13:00:00.5+00:00' WHERE id = '{same_second}';
+             UPDATE messages SET created_at = '2026-10-03 13:00:00' WHERE message_id = 'm3';
+             UPDATE sessions SET end_time = '2026-10-03T12:30:00+00:00' WHERE id = '{closed}';"
+        ))
+        .unwrap();
+        let session = |id: &str| -> (Option<String>, i64) {
+            conn.query_row(
+                "SELECT end_time, total_messages FROM sessions WHERE id = ?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap()
+        };
+
+        assert_eq!(close_unfinished_sessions(&conn).unwrap(), 3);
+
+        assert_eq!(
+            session(&with_messages),
+            (Some("2026-10-03T10:42:00+00:00".to_string()), 2)
+        );
+        assert_eq!(
+            session(&empty),
+            (Some("2026-10-03T11:00:00+00:00".to_string()), 0)
+        );
+        assert_eq!(
+            session(&same_second),
+            (Some("2026-10-03T13:00:00.5+00:00".to_string()), 1)
+        );
+        assert_eq!(
+            session(&closed).0.as_deref(),
+            Some("2026-10-03T12:30:00+00:00")
+        );
+    }
+
+    // 02_chat.md 配信内コメント数: URL の書き方が前回と違っても同じ配信として数える
+    #[tokio::test]
+    async fn get_in_stream_comment_counts_matches_any_url_form_of_same_video() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let urls = [
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "https://www.youtube.com/live/dQw4w9WgXcQ",
+            "https://youtube.com/live/dQw4w9WgXcQ?feature=share",
+            "https://youtu.be/dQw4w9WgXcQ",
+        ];
+        for (i, url) in urls.iter().enumerate() {
+            let session_id =
+                create_session(&conn, Some(url), None, Some("UC_bc"), Some("BC")).unwrap();
+            let id = format!("m{i}");
+            save_message(
+                &conn,
+                &session_id,
+                Some("UC_bc"),
+                &make_text_message(&id, "A", "UC_a", "hi"),
+                None,
+            )
+            .unwrap();
+        }
+        let other = create_session(
+            &conn,
+            Some("https://www.youtube.com/live/otherVideo1"),
+            None,
+            Some("UC_bc"),
+            Some("BC"),
+        )
+        .unwrap();
+        save_message(
+            &conn,
+            &other,
+            Some("UC_bc"),
+            &make_text_message("x", "A", "UC_a", "hi"),
+            None,
+        )
+        .unwrap();
+
+        let counts = get_in_stream_comment_counts(&conn, "dQw4w9WgXcQ").unwrap();
+
+        assert_eq!(counts.get("UC_a"), Some(&4u32));
+    }
+
+    // 08_database.md sessions.video_id: stream_url から取り出した video_id を保存する。取り出せなければ NULL
+    #[tokio::test]
+    async fn create_session_stores_video_id_from_stream_url() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let live = create_session(
+            &conn,
+            Some("https://youtube.com/live/dQw4w9WgXcQ?feature=share"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let none = create_session(&conn, None, None, None, None).unwrap();
+        let video_id = |id: &str| -> Option<String> {
+            conn.query_row("SELECT video_id FROM sessions WHERE id = ?1", [id], |r| {
+                r.get(0)
+            })
+            .unwrap()
+        };
+
+        assert_eq!(video_id(&live).as_deref(), Some("dQw4w9WgXcQ"));
+        assert_eq!(video_id(&none), None);
+    }
+
     #[tokio::test]
     async fn get_in_stream_comment_counts_does_not_count_system_messages() {
         let db = setup_db();
@@ -1835,6 +2023,34 @@ mod tests {
         let viewers = get_viewers_for_broadcaster(&conn, "UC_bc", None, 100, 0).unwrap();
         assert!(!viewers.is_empty());
         assert_eq!(viewers[0].channel_id, "UC_v1");
+    }
+
+    fn search_names(conn: &Connection, query: &str) -> Vec<String> {
+        let mut names: Vec<String> =
+            get_viewers_for_broadcaster(conn, "UC_bc", Some(query), 100, 0)
+                .unwrap()
+                .into_iter()
+                .map(|v| v.display_name)
+                .collect();
+        names.sort();
+        names
+    }
+
+    // 06_viewer.md 検索方式: % _ \ は文字そのものとして探す（表の例）
+    #[tokio::test]
+    async fn search_treats_like_wildcards_as_literal_characters() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+        let names = ["a_b", "xa_bx", "axb", "50%off", "500", r"a\b", "ab"];
+        for (i, name) in names.iter().enumerate() {
+            let msg = make_text_message(&format!("m{i}"), name, &format!("UC_v{i}"), "hi");
+            save_message(&conn, &session_id, Some("UC_bc"), &msg, None).unwrap();
+        }
+
+        assert_eq!(search_names(&conn, "a_b"), ["a_b", "xa_bx"]);
+        assert_eq!(search_names(&conn, "50%"), ["50%off"]);
+        assert_eq!(search_names(&conn, r"\"), [r"a\b"]);
     }
 
     /// spec: get_distinct_broadcaster_channels は登録済み配信者のVecを返す

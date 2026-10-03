@@ -12,7 +12,7 @@ use app_lib::tts::{TtsBackend, TtsConfig, TtsManager, TtsProcessManager};
 use async_trait::async_trait;
 use common::{invoke_no_args, invoke_with_args};
 use serial_test::serial;
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets};
@@ -78,12 +78,13 @@ fn app_state_with_mock_backend() -> AppState {
 fn build_app_state(tts_manager: TtsManager) -> AppState {
     AppState {
         websocket_server: Arc::new(RwLock::new(None)),
-        messages: Arc::new(RwLock::new(VecDeque::new())),
         database: Arc::new(RwLock::new(None)),
         tts_manager: Arc::new(tts_manager),
         tts_process_manager: Arc::new(TtsProcessManager::new()),
         next_connection_id: Arc::new(AtomicU64::new(0)),
         connections: Arc::new(RwLock::new(HashMap::new())),
+        connection_slots: Default::default(),
+        started_at: chrono::Utc::now(),
     }
 }
 

@@ -64,7 +64,8 @@ keyring = { version = "3", features = ["windows-native"] }
 
 # Logging
 log = "0.4"
-tracing = "0.1"
+# "log": subscriber を置かず、tracing のイベントを log 経由で tauri-plugin-log に流す
+tracing = { version = "0.1", features = ["log"] }
 
 # Config
 toml = "0.8"

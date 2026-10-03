@@ -250,6 +250,8 @@ struct StreamState {
     watch_delay_ms: u64,
     /// Simulate network delay for chat polling (ms)
     chat_delay_ms: u64,
+    /// チャット取得を 500 で失敗させる（02_chat.md「取得に失敗したとき」の検証用）
+    chat_fail: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -479,6 +481,12 @@ fn build_routes(
                 if delay > 0 {
                     tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
                 }
+                if sa.stream_state.lock().unwrap().chat_fail {
+                    return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                        warp::reply::json(&json!({"error": "Internal error"})),
+                        warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    ));
+                }
 
                 // Extract and parse continuation token to detect chat mode
                 // Default to TopChat (4), but preserve from incoming token if available
@@ -517,7 +525,10 @@ fn build_routes(
                 if let Some(entity) = sa.reaction_queue.lock().unwrap().pop_front() {
                     resp["frameworkUpdates"] = json!({"entityBatchUpdate":{"mutations":[{"entityKey":"mock_emoji_fountain","type":"ENTITY_MUTATION_TYPE_REPLACE","payload":{"emojiFountainDataEntity":entity}}]}});
                 }
-                Ok::<_, warp::Rejection>(warp::reply::json(&resp))
+                Ok(warp::reply::with_status(
+                    warp::reply::json(&resp),
+                    warp::http::StatusCode::OK,
+                ))
             }
         });
     let sac = Arc::clone(&state);
@@ -632,6 +643,9 @@ fn build_routes(
             }
             if let Some(d) = b.chat_delay_ms {
                 ss.chat_delay_ms = d;
+            }
+            if let Some(v) = b.chat_fail {
+                ss.chat_fail = v;
             }
             warp::reply::json(&json!({"status":"ok","stream":&*ss}))
         });
@@ -771,10 +785,15 @@ struct AMR {
     tier: Option<String>,
     #[serde(default)]
     is_member: bool,
+    /// モデレーターのバッジ（実データと同じ icon.iconType = MODERATOR）を付ける
+    #[serde(default)]
+    is_moderator: bool,
     milestone_months: Option<u32>,
     gift_count: Option<u32>,
     /// ギフト（jewel）の画像 URL。実データと同じくスキーム無しを既定にする
     gift_image_url: Option<String>,
+    /// メッセージ ID。同じ ID を再び積むと YouTube の再送を再現できる。省略時は採番する
+    id: Option<String>,
 }
 /// /add_reaction の本文
 #[derive(Debug, Deserialize)]
@@ -806,6 +825,7 @@ struct SSR {
     channel_name: Option<String>,
     watch_delay_ms: Option<u64>,
     chat_delay_ms: Option<u64>,
+    chat_fail: Option<bool>,
 }
 #[derive(Debug, Deserialize)]
 struct AutoMsgReq {
@@ -1149,7 +1169,10 @@ fn gen_reaction_entity(update_time_usec: u64, r: &ARR) -> Value {
     let first = json!({"duration":{"seconds":"1"},"intensityScore":0.75,"reactionsData":reactions,"totalReactions":total});
     let empty = json!({"duration":{"seconds":"1"},"intensityScore":1,"totalReactions":0});
     let buckets: Vec<Value> = std::iter::once(first)
-        .chain(std::iter::repeat_n(empty, r.duration_seconds.saturating_sub(1) as usize))
+        .chain(std::iter::repeat_n(
+            empty,
+            r.duration_seconds.saturating_sub(1) as usize,
+        ))
         .collect();
     json!({"key":"mock_emoji_fountain","reactionBuckets":buckets,"updateTimeUsec":update_time_usec.to_string()})
 }
@@ -1161,10 +1184,12 @@ fn build_resp(acts: Vec<Value>, chattype: u8) -> Value {
 }
 
 fn gen_msg(s: &ServerState, r: &AMR) -> Value {
-    let id = format!(
-        "mock_msg_{}",
-        s.message_counter.fetch_add(1, Ordering::SeqCst)
-    );
+    let id = r.id.clone().unwrap_or_else(|| {
+        format!(
+            "mock_msg_{}",
+            s.message_counter.fetch_add(1, Ordering::SeqCst)
+        )
+    });
     let ts = format!(
         "{}",
         std::time::SystemTime::now()
@@ -1172,18 +1197,21 @@ fn gen_msg(s: &ServerState, r: &AMR) -> Value {
             .unwrap()
             .as_micros()
     );
-    // Member badge for member messages
-    let member_badge = if r.is_member {
-        json!([{"liveChatAuthorBadgeRenderer":{"customThumbnail":{"thumbnails":[{"url":"https://example.com/member_badge.png"}]},"tooltip":"Member"}}])
-    } else {
-        json!([])
-    };
+    // 発言者のバッジ（形は実データの authorBadges と同じ）
+    let mut badges = Vec::new();
+    if r.is_moderator {
+        badges.push(json!({"liveChatAuthorBadgeRenderer":{"icon":{"iconType":"MODERATOR"},"tooltip":"Moderator"}}));
+    }
+    if r.is_member {
+        badges.push(json!({"liveChatAuthorBadgeRenderer":{"customThumbnail":{"thumbnails":[{"url":"https://example.com/author_badges.png"}]},"tooltip":"Member"}}));
+    }
+    let author_badges = Value::Array(badges);
     match r.message_type.as_str() {
         "superchat" => {
-            json!({"addChatItemAction":{"item":{"liveChatPaidMessageRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":"https://example.com/av.png"}]},"authorExternalChannelId":&r.channel_id,"purchaseAmountText":{"simpleText":r.amount.as_deref().unwrap_or("¥500")},"message":{"runs":[{"text":&r.content}]},"headerBackgroundColor":tier_col(r.tier.as_deref()),"headerTextColor":0xFFFFFF,"bodyBackgroundColor":tier_col(r.tier.as_deref()),"bodyTextColor":0xFFFFFF,"authorBadges":member_badge}}}})
+            json!({"addChatItemAction":{"item":{"liveChatPaidMessageRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":"https://example.com/av.png"}]},"authorExternalChannelId":&r.channel_id,"purchaseAmountText":{"simpleText":r.amount.as_deref().unwrap_or("¥500")},"message":{"runs":[{"text":&r.content}]},"headerBackgroundColor":tier_col(r.tier.as_deref()),"headerTextColor":0xFFFFFF,"bodyBackgroundColor":tier_col(r.tier.as_deref()),"bodyTextColor":0xFFFFFF,"authorBadges":author_badges}}}})
         }
         "supersticker" => {
-            json!({"addChatItemAction":{"item":{"liveChatPaidStickerRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":"https://example.com/av.png"}]},"authorExternalChannelId":&r.channel_id,"purchaseAmountText":{"simpleText":r.amount.as_deref().unwrap_or("¥500")},"sticker":{"thumbnails":[{"url":"https://example.com/sticker.png"}]},"moneyChipBackgroundColor":tier_col(r.tier.as_deref()),"moneyChipTextColor":0xFFFFFF,"authorBadges":member_badge}}}})
+            json!({"addChatItemAction":{"item":{"liveChatPaidStickerRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":"https://example.com/av.png"}]},"authorExternalChannelId":&r.channel_id,"purchaseAmountText":{"simpleText":r.amount.as_deref().unwrap_or("¥500")},"sticker":{"thumbnails":[{"url":"https://example.com/sticker.png"}]},"moneyChipBackgroundColor":tier_col(r.tier.as_deref()),"moneyChipTextColor":0xFFFFFF,"authorBadges":author_badges}}}})
         }
         "membership" => {
             json!({"addChatItemAction":{"item":{"liveChatMembershipItemRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":"https://example.com/av.png"}]},"authorExternalChannelId":&r.channel_id,"headerSubtext":{"runs":[{"text":"Welcome to "},{"text":"Channel"},{"text":"!"}]},"authorBadges":[{"liveChatAuthorBadgeRenderer":{"tooltip":"New member","customThumbnail":{"thumbnails":[{"url":"https://example.com/badge.png"}]}}}]}}}})
@@ -1201,9 +1229,10 @@ fn gen_msg(s: &ServerState, r: &AMR) -> Value {
         "gift" => {
             // ジュエルで送るギフト: channelId・timestampUsec が無く、authorName は末尾に空白が付く（実データ準拠）
             // content は本文（例: "sent Press F for 10 Jewels"）
-            let image = r.gift_image_url.as_deref().unwrap_or(
-                "//www.gstatic.com/youtube/img/pdg/gift/assets/press_f.png=w480-h480",
-            );
+            let image = r
+                .gift_image_url
+                .as_deref()
+                .unwrap_or("//www.gstatic.com/youtube/img/pdg/gift/assets/press_f.png=w480-h480");
             let name = r.content.strip_prefix("sent ").unwrap_or(&r.content);
             let name = name.split(" for ").next().unwrap_or(name);
             json!({"addChatItemAction":{"item":{"giftMessageViewModel":{"id":id,"authorName":{"content":format!("{} ", r.author)},"authorAvatar":{"avatarViewModel":{"image":{"sources":[{"url":"https://example.com/av.png"}]}}},"text":{"content":&r.content},"giftImage":{"sources":[{"url":image,"width":480,"height":480}]},"giftImageA11yLabel":format!("{} sent a gift, {}", r.author, name)}}}})
@@ -1212,7 +1241,7 @@ fn gen_msg(s: &ServerState, r: &AMR) -> Value {
             json!({"addChatItemAction":{"item":{"liveChatTextMessageRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":"System"},"authorExternalChannelId":"system","message":{"runs":[{"text":&r.content}]}}}}})
         }
         _ => {
-            json!({"addChatItemAction":{"item":{"liveChatTextMessageRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":"https://example.com/av.png"}]},"authorExternalChannelId":&r.channel_id,"message":{"runs":[{"text":&r.content}]},"authorBadges":member_badge}}}})
+            json!({"addChatItemAction":{"item":{"liveChatTextMessageRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":"https://example.com/av.png"}]},"authorExternalChannelId":&r.channel_id,"message":{"runs":[{"text":&r.content}]},"authorBadges":author_badges}}}})
         }
     }
 }

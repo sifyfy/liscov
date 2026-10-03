@@ -11,7 +11,8 @@ use crate::core::models::GiftDetails;
 use regex::Regex;
 use std::collections::VecDeque;
 use std::sync::{Arc, LazyLock};
-use tokio::sync::{Mutex, RwLock, mpsc};
+use tokio::sync::{Mutex, RwLock};
+use tokio_util::sync::CancellationToken;
 
 pub use backends::{BouyomichanBackend, TtsBackend, TtsError, VoicevoxBackend};
 pub use config::{BouyomichanConfig, TtsBackendType, TtsConfig, VoicevoxConfig};
@@ -43,13 +44,51 @@ pub struct TtsQueueItem {
     pub message_id: Option<String>,
 }
 
+/// 設定の保存でキュー処理をどうするか
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProcessingAction {
+    Start,
+    Stop,
+}
+
+/// キュー処理が動いているかと保存後の enabled から、開始・停止を決める（04_tts.md「自動開始」）
+pub(crate) fn decide_processing_action(running: bool, enabled: bool) -> Option<ProcessingAction> {
+    match (running, enabled) {
+        (false, true) => Some(ProcessingAction::Start),
+        (true, false) => Some(ProcessingAction::Stop),
+        _ => None,
+    }
+}
+
+/// 動いているキュー処理タスク
+struct ProcessingTask {
+    cancel: CancellationToken,
+    handle: tokio::task::JoinHandle<()>,
+}
+
+impl ProcessingTask {
+    /// 終わっていなければ動いている。panic で終わったものは動いていない扱い（04_tts.md）
+    fn is_running(&self) -> bool {
+        !self.handle.is_finished()
+    }
+
+    /// 止めて、終わるまで待つ（読み上げ中の future も捨てる）
+    async fn stop(self) {
+        self.cancel.cancel();
+        if let Err(e) = self.handle.await {
+            log::error!("TTS queue processing ended abnormally: {}", e);
+        }
+    }
+}
+
 /// TTS Manager handles TTS operations
 pub struct TtsManager {
     config: Arc<RwLock<TtsConfig>>,
-    backend: Arc<RwLock<Option<Box<dyn TtsBackend>>>>,
+    /// 使うときは `current_backend` で Arc を取り出し、ロックを握ったまま読み上げない（04_tts.md）
+    backend: Arc<RwLock<Option<Arc<dyn TtsBackend>>>>,
     queue: Arc<Mutex<VecDeque<TtsQueueItem>>>,
-    is_processing: Arc<RwLock<bool>>,
-    shutdown_tx: Arc<Mutex<Option<mpsc::Sender<()>>>>,
+    /// キュー処理タスク。開始・停止・設定の差し替えはこのロックの下で 1 つずつ行う
+    processing: Mutex<Option<ProcessingTask>>,
 }
 
 impl TtsManager {
@@ -64,24 +103,41 @@ impl TtsManager {
     pub fn with_backend(config: TtsConfig, backend: Option<Box<dyn TtsBackend>>) -> Self {
         Self {
             config: Arc::new(RwLock::new(config)),
-            backend: Arc::new(RwLock::new(backend)),
+            backend: Arc::new(RwLock::new(backend.map(Arc::from))),
             queue: Arc::new(Mutex::new(VecDeque::new())),
-            is_processing: Arc::new(RwLock::new(false)),
-            shutdown_tx: Arc::new(Mutex::new(None)),
+            processing: Mutex::new(None),
         }
     }
 
-    /// Update configuration and save to file
+    /// 設定を保存して差し替え、保存後の enabled に合わせてキュー処理を開始・停止する
     pub async fn update_config(&self, config: TtsConfig) {
-        // Save to file
+        // 保存が続けて届いても、書き込み・差し替え・開始・停止が入れ違わないようにする（04_tts.md「自動開始」）
+        let mut task = self.processing.lock().await;
         if let Err(e) = config.save() {
             log::error!("Failed to save TTS config: {}", e);
         }
-
+        let enabled = config.enabled;
         let backend =
-            backends::create_backend(&config.backend, &config.bouyomichan, &config.voicevox);
+            backends::create_backend(&config.backend, &config.bouyomichan, &config.voicevox)
+                .map(Arc::from);
         *self.config.write().await = config;
         *self.backend.write().await = backend;
+
+        let running = task.as_ref().is_some_and(ProcessingTask::is_running);
+        match decide_processing_action(running, enabled) {
+            Some(ProcessingAction::Start) => *task = Some(self.spawn_processing()),
+            Some(ProcessingAction::Stop) => {
+                if let Some(running) = task.take() {
+                    running.stop().await;
+                }
+            }
+            None => {}
+        }
+    }
+
+    /// 今のバックエンドを取り出す（ロックはすぐ放す）
+    async fn current_backend(&self) -> Option<Arc<dyn TtsBackend>> {
+        self.backend.read().await.clone()
     }
 
     /// Get current configuration
@@ -91,8 +147,7 @@ impl TtsManager {
 
     /// Test connection to current backend
     pub async fn test_connection(&self) -> Result<bool, TtsError> {
-        let backend = self.backend.read().await;
-        match backend.as_ref() {
+        match self.current_backend().await {
             Some(b) => b.test_connection().await,
             None => Ok(false),
         }
@@ -103,30 +158,16 @@ impl TtsManager {
         &self,
         backend_type: TtsBackendType,
     ) -> Result<bool, TtsError> {
-        let config = self.config.read().await;
-        let test_backend =
-            backends::create_backend(&backend_type, &config.bouyomichan, &config.voicevox);
+        // 接続テストの間は設定のロックを握らない（04_tts.md キュー処理）
+        let test_backend = {
+            let config = self.config.read().await;
+            backends::create_backend(&backend_type, &config.bouyomichan, &config.voicevox)
+        };
 
         match test_backend {
             Some(b) => b.test_connection().await,
             None => Ok(false),
         }
-    }
-
-    /// Format text for TTS reading
-    pub async fn format_text(&self, item: &TtsQueueItem) -> String {
-        let config = self.config.read().await;
-        build_tts_text(
-            item.author_name.as_deref(),
-            item.amount.as_deref(),
-            &item.text,
-            config.read_author_name,
-            config.strip_at_prefix,
-            config.strip_handle_suffix,
-            config.add_honorific,
-            config.read_superchat_amount,
-            config.max_text_length,
-        )
     }
 
     /// Add item to queue
@@ -149,26 +190,24 @@ impl TtsManager {
 
         let mut queue = self.queue.lock().await;
 
-        // Check queue size limit
-        if queue.len() >= config.queue_size_limit {
-            log::warn!("TTS queue full, dropping oldest message");
-            queue.pop_front();
-        }
-
-        // Insert based on priority (higher priority items go to front)
+        // 優先度の位置に入れる（高い順、同じ優先度は到着順）
         let insert_pos = queue
             .iter()
             .position(|q| q.priority < item.priority)
             .unwrap_or(queue.len());
-
         queue.insert(insert_pos, item);
+
+        // 満杯なら末尾（最も優先度の低いもののうち最後尾）を捨てる。届いたもの自身のこともある
+        if queue.len() > config.queue_size_limit {
+            log::warn!("TTS queue full, dropping the last lowest-priority message");
+            queue.truncate(config.queue_size_limit);
+        }
         log::debug!("TTS queue size: {}", queue.len());
     }
 
     /// Speak text directly (bypasses queue)
     pub async fn speak_direct(&self, text: &str) -> Result<(), TtsError> {
-        let backend = self.backend.read().await;
-        match backend.as_ref() {
+        match self.current_backend().await {
             Some(b) => b.speak(text).await,
             None => Err(TtsError::Connection("No backend configured".to_string())),
         }
@@ -176,28 +215,28 @@ impl TtsManager {
 
     /// Start queue processing
     pub async fn start_processing(&self) {
-        let mut is_processing = self.is_processing.write().await;
-        if *is_processing {
+        let mut task = self.processing.lock().await;
+        if task.as_ref().is_some_and(ProcessingTask::is_running) {
             log::warn!("TTS processing already running");
             return;
         }
-        *is_processing = true;
-        drop(is_processing);
+        *task = Some(self.spawn_processing());
+    }
 
-        let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
-        *self.shutdown_tx.lock().await = Some(shutdown_tx);
-
+    /// キュー処理タスクを起動する（呼び出し側が `processing` のロックを持つ）
+    fn spawn_processing(&self) -> ProcessingTask {
+        let cancel = CancellationToken::new();
         let queue = Arc::clone(&self.queue);
         let backend = Arc::clone(&self.backend);
         let config = Arc::clone(&self.config);
-        let is_processing = Arc::clone(&self.is_processing);
+        let token = cancel.clone();
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             log::info!("TTS queue processing started");
 
             loop {
                 tokio::select! {
-                    _ = shutdown_rx.recv() => {
+                    _ = token.cancelled() => {
                         log::info!("TTS queue processing shutdown requested");
                         break;
                     }
@@ -209,34 +248,11 @@ impl TtsManager {
                         };
 
                         if let Some(item) = item {
-                            // Format text using shared helper
-                            let text = {
-                                let cfg = config.read().await;
-                                let base = build_tts_text(
-                                    item.author_name.as_deref(),
-                                    item.amount.as_deref(),
-                                    &item.text,
-                                    cfg.read_author_name,
-                                    cfg.strip_at_prefix,
-                                    cfg.strip_handle_suffix,
-                                    cfg.add_honorific,
-                                    cfg.read_superchat_amount,
-                                    cfg.max_text_length,
-                                );
-                                // 初回コメントプレフィックス
-                                match build_first_comment_prefix(
-                                    cfg.first_comment_prefix_enabled,
-                                    &cfg.first_comment_prefix,
-                                    item.in_stream_comment_count,
-                                ) {
-                                    Some(prefix) => format!("{}{}", prefix, base),
-                                    None => base,
-                                }
-                            };
+                            let text = speech_text(&*config.read().await, &item);
 
-                            // Speak
-                            let b = backend.read().await;
-                            if let Some(ref backend) = *b {
+                            // Speak（ロックを握ったまま読み上げない。差し替えは次のメッセージから効く）
+                            let current = backend.read().await.clone();
+                            if let Some(backend) = current {
                                 if let Err(e) = backend.speak(&text).await {
                                     log::error!(
                                         "TTS speak error (message_id={:?}): {}",
@@ -253,15 +269,15 @@ impl TtsManager {
                 }
             }
 
-            *is_processing.write().await = false;
             log::info!("TTS queue processing stopped");
         });
+        ProcessingTask { cancel, handle }
     }
 
-    /// Stop queue processing
+    /// Stop queue processing（止まるまで待つ）
     pub async fn stop_processing(&self) {
-        if let Some(tx) = self.shutdown_tx.lock().await.take() {
-            let _ = tx.send(()).await;
+        if let Some(task) = self.processing.lock().await.take() {
+            task.stop().await;
         }
     }
 
@@ -277,7 +293,11 @@ impl TtsManager {
 
     /// Check if processing is running
     pub async fn is_processing(&self) -> bool {
-        *self.is_processing.read().await
+        self.processing
+            .lock()
+            .await
+            .as_ref()
+            .is_some_and(ProcessingTask::is_running)
     }
 
     /// Get backend name
@@ -432,6 +452,31 @@ pub(crate) fn build_tts_text(
     parts.push(truncate_text(&sanitized, max_text_length));
 
     parts.join("、")
+}
+
+/// キューの 1 件を、読み上げる文に整える（04_tts.md「読み上げテキスト生成」「初回コメント読み上げ」）
+///
+/// 初回コメントならプレフィックスを先頭に付ける。キュー処理はこの関数だけで文を作る。
+pub(crate) fn speech_text(config: &TtsConfig, item: &TtsQueueItem) -> String {
+    let base = build_tts_text(
+        item.author_name.as_deref(),
+        item.amount.as_deref(),
+        &item.text,
+        config.read_author_name,
+        config.strip_at_prefix,
+        config.strip_handle_suffix,
+        config.add_honorific,
+        config.read_superchat_amount,
+        config.max_text_length,
+    );
+    match build_first_comment_prefix(
+        config.first_comment_prefix_enabled,
+        &config.first_comment_prefix,
+        item.in_stream_comment_count,
+    ) {
+        Some(prefix) => format!("{}{}", prefix, base),
+        None => base,
+    }
 }
 
 /// ギフトの読み上げ本文（04_tts.md「ギフトの読み上げ」）
@@ -1131,17 +1176,17 @@ mod tests {
     }
 
     // ========================================================================
-    // TtsManager::format_text（L114のmutantをkill）
+    // speech_text（キュー処理が読み上げる文）
     // ========================================================================
 
-    #[tokio::test]
-    async fn format_text_uses_config_to_build_text() {
-        // spec: add_honorific=true の設定で format_text は著者名に「さん」を付与する
-        let manager = TtsManager::new(TtsConfig {
+    #[test]
+    fn speech_text_uses_config_to_build_text() {
+        // spec: add_honorific=true の設定で著者名に「さん」を付与する
+        let config = TtsConfig {
             add_honorific: true,
             read_author_name: true,
             ..TtsConfig::default()
-        });
+        };
         let item = TtsQueueItem {
             text: "こんにちは".to_string(),
             priority: TtsPriority::Normal,
@@ -1150,84 +1195,103 @@ mod tests {
             in_stream_comment_count: None,
             message_id: None,
         };
-        let result = manager.format_text(&item).await;
-        // 空文字でもなく、元テキストそのままでもない（著者名が付加される）
-        assert!(!result.is_empty());
-        assert_ne!(result, "");
-        // add_honorific=true なので「田中さん」が含まれる
-        assert!(result.contains("田中さん"));
+        assert_eq!(speech_text(&config, &item), "田中さん、こんにちは");
+    }
+
+    #[test]
+    fn speech_text_prepends_first_comment_prefix() {
+        // spec: 初回コメントプレフィックス ON + 1 回目のコメント → 先頭に付く
+        let config = TtsConfig {
+            read_author_name: true,
+            add_honorific: true,
+            first_comment_prefix_enabled: true,
+            first_comment_prefix: String::new(),
+            ..TtsConfig::default()
+        };
+        let item = TtsQueueItem {
+            text: "こんにちは".to_string(),
+            priority: TtsPriority::Normal,
+            author_name: Some("田中".to_string()),
+            amount: None,
+            in_stream_comment_count: Some(1),
+            message_id: None,
+        };
+        assert_eq!(
+            speech_text(&config, &item),
+            "1回目のコメント。田中さん、こんにちは"
+        );
     }
 
     // ========================================================================
-    // enqueue がキュー満杯時に最古を破棄する（L149のmutantをkill）
+    // enqueue がキュー満杯時に最低優先度の最後尾を破棄する（04_tts.md「キュー満杯時に捨てるもの」）
     // ========================================================================
 
-    #[tokio::test]
-    async fn enqueue_drops_oldest_when_queue_full() {
-        // spec: queue_size_limit=2 で 3件enqueue すると最古が破棄されてサイズは2
-        let manager = TtsManager::new(TtsConfig {
-            enabled: true,
-            queue_size_limit: 2,
-            ..TtsConfig::default()
-        });
-        for i in 0..3 {
-            manager
-                .enqueue(TtsQueueItem {
-                    text: format!("メッセージ{}", i),
-                    priority: TtsPriority::Normal,
-                    author_name: None,
-                    amount: None,
-                    in_stream_comment_count: None,
-                    message_id: None,
-                })
-                .await;
+    fn queue_item(text: &str, priority: TtsPriority) -> TtsQueueItem {
+        TtsQueueItem {
+            text: text.to_string(),
+            priority,
+            author_name: None,
+            amount: None,
+            in_stream_comment_count: None,
+            message_id: None,
         }
-        assert_eq!(manager.queue_size().await, 2);
     }
 
-    #[tokio::test]
-    async fn enqueue_oldest_is_dropped_not_newest() {
-        // spec: 満杯時に破棄されるのは最古（先頭）のアイテム
+    /// 上限2件のキューに `queued` を順に入れ、`arrived` を入れたあとのキューの text を返す
+    async fn queue_after_full_enqueue(
+        queued: &[(&str, TtsPriority)],
+        arrived: (&str, TtsPriority),
+    ) -> Vec<String> {
         let manager = TtsManager::new(TtsConfig {
             enabled: true,
             queue_size_limit: 2,
             ..TtsConfig::default()
         });
-        manager
-            .enqueue(TtsQueueItem {
-                text: "最古".to_string(),
-                priority: TtsPriority::Normal,
-                author_name: None,
-                amount: None,
-                in_stream_comment_count: None,
-                message_id: None,
-            })
-            .await;
-        manager
-            .enqueue(TtsQueueItem {
-                text: "2番目".to_string(),
-                priority: TtsPriority::Normal,
-                author_name: None,
-                amount: None,
-                in_stream_comment_count: None,
-                message_id: None,
-            })
-            .await;
-        manager
-            .enqueue(TtsQueueItem {
-                text: "最新".to_string(),
-                priority: TtsPriority::Normal,
-                author_name: None,
-                amount: None,
-                in_stream_comment_count: None,
-                message_id: None,
-            })
-            .await;
-        // 最古「最古」が破棄され、「2番目」と「最新」が残る
+        for (text, priority) in queued.iter().copied().chain([arrived]) {
+            manager.enqueue(queue_item(text, priority)).await;
+        }
         let queue = manager.queue.lock().await;
-        assert_eq!(queue.len(), 2);
-        assert_eq!(queue[0].text, "2番目");
-        assert_eq!(queue[1].text, "最新");
+        queue.iter().map(|q| q.text.clone()).collect()
+    }
+
+    #[tokio::test]
+    async fn full_queue_drops_arriving_normal_after_normals() {
+        use TtsPriority::*;
+        let queue = queue_after_full_enqueue(&[("A", Normal), ("B", Normal)], ("C", Normal)).await;
+        assert_eq!(queue, ["A", "B"]);
+    }
+
+    #[tokio::test]
+    async fn full_queue_keeps_superchat_when_normal_arrives() {
+        use TtsPriority::*;
+        let queue =
+            queue_after_full_enqueue(&[("S", SuperChat), ("A", Normal)], ("B", Normal)).await;
+        assert_eq!(queue, ["S", "A"]);
+    }
+
+    #[tokio::test]
+    async fn full_queue_drops_last_normal_when_superchat_arrives() {
+        use TtsPriority::*;
+        let queue =
+            queue_after_full_enqueue(&[("A", Normal), ("B", Normal)], ("S", SuperChat)).await;
+        assert_eq!(queue, ["S", "A"]);
+    }
+
+    #[tokio::test]
+    async fn full_queue_drops_lowest_priority_when_superchat_arrives() {
+        use TtsPriority::*;
+        let queue =
+            queue_after_full_enqueue(&[("M", Membership), ("A", Normal)], ("S", SuperChat)).await;
+        assert_eq!(queue, ["S", "M"]);
+    }
+
+    #[tokio::test]
+    async fn full_queue_drops_arriving_superchat_after_superchats() {
+        use TtsPriority::*;
+        let queue =
+            queue_after_full_enqueue(&[("S1", SuperChat), ("S2", SuperChat)], ("S3", SuperChat))
+                .await;
+        assert_eq!(queue, ["S1", "S2"]);
     }
 
     // ========================================================================
@@ -1465,6 +1529,247 @@ mod tests {
         fn name(&self) -> &'static str {
             "Mock"
         }
+    }
+
+    /// speak が呼ばれたら `started` を知らせ、`release` されるまで返らない（読み上げ中の状態を作る）
+    struct BlockingTtsBackend {
+        started: Arc<tokio::sync::Notify>,
+        release: Arc<tokio::sync::Notify>,
+    }
+
+    #[async_trait::async_trait]
+    impl TtsBackend for BlockingTtsBackend {
+        async fn test_connection(&self) -> Result<bool, backends::TtsError> {
+            Ok(true)
+        }
+        async fn speak(&self, _text: &str) -> Result<(), backends::TtsError> {
+            self.started.notify_one();
+            self.release.notified().await;
+            Ok(())
+        }
+        fn name(&self) -> &'static str {
+            "Blocking"
+        }
+    }
+
+    const NOT_BLOCKED: std::time::Duration = std::time::Duration::from_secs(1);
+
+    struct PanickingTtsBackend;
+
+    #[async_trait::async_trait]
+    impl TtsBackend for PanickingTtsBackend {
+        async fn test_connection(&self) -> Result<bool, backends::TtsError> {
+            Ok(true)
+        }
+        async fn speak(&self, _text: &str) -> Result<(), backends::TtsError> {
+            panic!("読み上げ中の panic（テスト）");
+        }
+        fn name(&self) -> &'static str {
+            "Panicking"
+        }
+    }
+
+    fn normal_item(text: &str) -> TtsQueueItem {
+        TtsQueueItem {
+            text: text.to_string(),
+            priority: TtsPriority::Normal,
+            author_name: None,
+            amount: None,
+            in_stream_comment_count: None,
+            message_id: None,
+        }
+    }
+
+    async fn eventually(mut condition: impl AsyncFnMut() -> bool) -> bool {
+        for _ in 0..100 {
+            if condition().await {
+                return true;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        false
+    }
+
+    // 04_tts.md 自動開始: 動いているか × 保存後の enabled
+    #[test]
+    fn decide_processing_action_follows_running_state_and_enabled() {
+        assert_eq!(
+            decide_processing_action(false, true),
+            Some(ProcessingAction::Start)
+        );
+        assert_eq!(
+            decide_processing_action(true, false),
+            Some(ProcessingAction::Stop)
+        );
+        assert_eq!(decide_processing_action(true, true), None);
+        assert_eq!(decide_processing_action(false, false), None);
+    }
+
+    // 04_tts.md キュー処理: 停止の途中で開始しても、停止が終わってから開始し、読み上げが止まったままにならない
+    #[tokio::test]
+    async fn starting_right_after_stopping_keeps_reading() {
+        let mock = MockTtsBackend::connected();
+        let speak_calls = Arc::clone(&mock.speak_calls);
+        let manager = TtsManager::with_backend(
+            TtsConfig {
+                enabled: true,
+                ..TtsConfig::default()
+            },
+            Some(Box::new(mock)),
+        );
+        manager.start_processing().await;
+        manager.stop_processing().await;
+        manager.start_processing().await;
+
+        manager.enqueue(normal_item("再開後")).await;
+
+        assert!(eventually(async || speak_calls.lock().await.len() == 1).await);
+        manager.stop_processing().await;
+    }
+
+    // 04_tts.md キュー処理: 異常終了したら処理中でない扱いになり、再び開始できる
+    #[tokio::test]
+    async fn processing_can_be_restarted_after_panic() {
+        let manager = TtsManager::with_backend(
+            TtsConfig {
+                enabled: true,
+                ..TtsConfig::default()
+            },
+            Some(Box::new(PanickingTtsBackend)),
+        );
+        manager.start_processing().await;
+        manager.enqueue(normal_item("panic させる")).await;
+
+        assert!(
+            eventually(async || !manager.is_processing().await).await,
+            "異常終了しても処理中のまま"
+        );
+        manager.start_processing().await;
+        assert!(manager.is_processing().await);
+        manager.stop_processing().await;
+    }
+
+    // 04_tts.md 自動開始: enabled = true の設定を保存したとき、動いていなければ開始する
+    #[tokio::test]
+    #[serial(liscov_env)]
+    async fn saving_enabled_config_starts_processing_when_not_running() {
+        let manager = TtsManager::with_backend(
+            TtsConfig {
+                enabled: true,
+                ..TtsConfig::default()
+            },
+            None,
+        );
+        assert!(!manager.is_processing().await);
+
+        manager
+            .update_config(TtsConfig {
+                enabled: true,
+                ..TtsConfig::default()
+            })
+            .await;
+
+        assert!(manager.is_processing().await);
+        manager.stop_processing().await;
+    }
+
+    // 04_tts.md 自動開始: enabled = false の設定を保存したとき、動いていれば停止する
+    #[tokio::test]
+    #[serial(liscov_env)]
+    async fn saving_disabled_config_stops_processing() {
+        let manager = TtsManager::with_backend(
+            TtsConfig {
+                enabled: true,
+                ..TtsConfig::default()
+            },
+            None,
+        );
+        manager.start_processing().await;
+
+        manager.update_config(TtsConfig::default()).await;
+
+        assert!(!manager.is_processing().await);
+    }
+
+    // 04_tts.md キュー処理: 読み上げ中に設定を保存しても、読み上げの終わりを待たない
+    #[tokio::test]
+    async fn backend_can_be_replaced_while_speaking() {
+        let started = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let manager = TtsManager::with_backend(
+            TtsConfig {
+                enabled: true,
+                ..TtsConfig::default()
+            },
+            Some(Box::new(BlockingTtsBackend {
+                started: Arc::clone(&started),
+                release: Arc::clone(&release),
+            })),
+        );
+        manager.start_processing().await;
+        manager
+            .enqueue(TtsQueueItem {
+                text: "読み上げ中".to_string(),
+                priority: TtsPriority::Normal,
+                author_name: None,
+                amount: None,
+                in_stream_comment_count: None,
+                message_id: None,
+            })
+            .await;
+        tokio::time::timeout(NOT_BLOCKED, started.notified())
+            .await
+            .expect("読み上げが始まらない");
+
+        // update_config がバックエンドを差し替えるときに取る書き込みロック
+        let replaced = tokio::time::timeout(NOT_BLOCKED, manager.backend.write()).await;
+
+        release.notify_one();
+        manager.stop_processing().await;
+        assert!(
+            replaced.is_ok(),
+            "読み上げ中にバックエンドを差し替えられない"
+        );
+    }
+
+    // 04_tts.md キュー処理: 接続テスト中に設定を保存しても、接続テストの終わりを待たない
+    #[tokio::test]
+    async fn config_can_be_updated_while_testing_backend_connection() {
+        // 接続は受け付けるが応答しないサーバー（棒読みちゃんのタイムアウト 5 秒まで接続テストが続く）
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((socket, _)) = listener.accept().await {
+                held.push(socket);
+            }
+        });
+        let manager = Arc::new(TtsManager::with_backend(
+            TtsConfig {
+                bouyomichan: BouyomichanConfig {
+                    host: "127.0.0.1".to_string(),
+                    port,
+                    ..BouyomichanConfig::default()
+                },
+                ..TtsConfig::default()
+            },
+            None,
+        ));
+        let testing = {
+            let manager = Arc::clone(&manager);
+            tokio::spawn(async move {
+                manager
+                    .test_backend_connection(TtsBackendType::Bouyomichan)
+                    .await
+            })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        // update_config が設定を差し替えるときに取る書き込みロック
+        let updated = tokio::time::timeout(NOT_BLOCKED, manager.config.write()).await;
+
+        testing.abort();
+        assert!(updated.is_ok(), "接続テスト中に設定を更新できない");
     }
 
     // ========================================================================

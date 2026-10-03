@@ -1,6 +1,5 @@
 //! ライブリアクションの保存と集計（08_database.md「reactions テーブル」）
 
-use super::crud::stream_url_pattern;
 use crate::core::models::{ReactionSummary, ReactionUpdate};
 use anyhow::Result;
 use rusqlite::{Connection, params};
@@ -34,17 +33,15 @@ pub fn get_reaction_summary(
     video_id: &str,
     since_usec: i64,
 ) -> Result<ReactionSummary> {
-    let pattern = stream_url_pattern(video_id);
-
     let mut stmt = conn.prepare(
         "SELECT r.emoji, SUM(r.count)
          FROM reactions r
          JOIN sessions s ON r.session_id = s.id
-         WHERE s.stream_url LIKE ?1
+         WHERE s.video_id = ?1
          GROUP BY r.emoji",
     )?;
     let totals = stmt
-        .query_map(params![pattern], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .query_map(params![video_id], |row| Ok((row.get(0)?, row.get(1)?)))?
         .collect::<Result<_, _>>()?;
 
     // 同じ時刻の更新が別セッション（同じ配信への同時接続）にあっても混ぜないよう、セッションごとにまとめる
@@ -52,11 +49,11 @@ pub fn get_reaction_summary(
         "SELECT r.session_id, r.update_time_usec, r.duration_seconds, r.emoji, r.count
          FROM reactions r
          JOIN sessions s ON r.session_id = s.id
-         WHERE s.stream_url LIKE ?1 AND r.update_time_usec >= ?2
+         WHERE s.video_id = ?1 AND r.update_time_usec >= ?2
          ORDER BY r.update_time_usec, r.session_id",
     )?;
     let rows = stmt
-        .query_map(params![pattern, since_usec], |row| {
+        .query_map(params![video_id, since_usec], |row| {
             Ok((
                 (
                     row.get::<_, String>(0)?,
@@ -184,6 +181,29 @@ mod tests {
             BTreeMap::from([("❤".to_string(), 5), ("🎉".to_string(), 4)])
         );
         assert!(summary.recent.is_empty());
+    }
+
+    // 02_chat.md: /live/ の URL で接続したセッションも同じ配信として累計する
+    #[tokio::test]
+    async fn totals_include_sessions_connected_by_live_url() {
+        let db = Database::new_in_memory().unwrap();
+        let conn = db.connection().await;
+        let watch = session(&conn, "vid1");
+        let live = create_session(
+            &conn,
+            Some("https://youtube.com/live/vid1?feature=share"),
+            None,
+            Some("UC_bc"),
+            Some("BC"),
+        )
+        .unwrap();
+        save_reaction_update(&conn, &watch, &update(100, 1, &[("❤", 3)])).unwrap();
+        save_reaction_update(&conn, &live, &update(200, 1, &[("❤", 2)])).unwrap();
+
+        let summary = get_reaction_summary(&conn, "vid1", 0).unwrap();
+
+        assert_eq!(summary.totals, BTreeMap::from([("❤".to_string(), 5)]));
+        assert_eq!(summary.recent.len(), 2);
     }
 
     // 02_chat.md: recent は指定時刻以降の更新を、更新ごとにまとめて古い順に返す

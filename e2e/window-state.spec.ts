@@ -21,6 +21,7 @@ import {
  * Tests verify:
  * - Window size is saved and restored after app restart
  * - Window position is saved and restored after app restart
+ * - The production window state file is not touched (テストデータ分離)
  *
  * Run tests:
  *    pnpm exec playwright test --config e2e/playwright.config.ts window-state.spec.ts
@@ -29,9 +30,20 @@ import {
 // Window state file uses the app identifier from tauri.conf.json
 const WINDOW_STATE_APP_ID = 'com.liscov-tauri.app';
 
-// Get window state file path (uses app identifier, not LISCOV_APP_NAME)
+// ウィンドウ状態のディレクトリは identifier で決まり、LISCOV_APP_NAME では変わらない。
+// テスト用のアプリ名ではファイル名で本番と分ける（10_window_state.md「テスト用のアプリ名で起動したとき」）
 function getWindowStateFilePath(): string {
-  return path.join(getPlatformConfigDir(), WINDOW_STATE_APP_ID, '.window-state.json');
+  return path.join(getPlatformConfigDir(), WINDOW_STATE_APP_ID, `.window-state.${TEST_APP_NAME}.json`);
+}
+
+// 本番のウィンドウ状態ファイル。読むだけで、書き換え・削除はしない
+const PRODUCTION_WINDOW_STATE_FILE = path.join(getPlatformConfigDir(), WINDOW_STATE_APP_ID, '.window-state.json');
+
+// 本番のウィンドウ状態ファイルの中身（無ければ null）
+function readProductionWindowStateRaw(): string | null {
+  return fs.existsSync(PRODUCTION_WINDOW_STATE_FILE)
+    ? fs.readFileSync(PRODUCTION_WINDOW_STATE_FILE, 'utf-8')
+    : null;
 }
 
 // Clean up test data directories (extended to include window state file)
@@ -122,7 +134,11 @@ test.describe('Window State Persistence', () => {
   // アプリ2回起動が必要なテストがあるためタイムアウトを延長
   test.setTimeout(180000);
 
+  // テスト開始前の本番のウィンドウ状態（最後に変わっていないことを確かめる）
+  let productionWindowStateBefore: string | null = null;
+
   test.beforeAll(async () => {
+    productionWindowStateBefore = readProductionWindowStateRaw();
     // Clean up before tests
     await killTauriApp();
     await cleanupTestDataWithWindowState();
@@ -248,5 +264,10 @@ test.describe('Window State Persistence', () => {
     expect(Math.abs(restoredBounds.y - savedState!.y!)).toBeLessThan(50);
 
     await browser2.close();
+  });
+
+  // spec: 10_window_state.md「テストデータ分離」— 本番の .window-state.json には触れない
+  test('サイズ・位置を変えて再起動しても本番のウィンドウ状態は変わらない', async () => {
+    expect(readProductionWindowStateRaw()).toBe(productionWindowStateBefore);
   });
 });

@@ -3,22 +3,59 @@
 use crate::AppState;
 use crate::commands::auth;
 use crate::commands::config::ConfigState;
-use crate::connection::{ConnectionInfo, MAX_CONNECTIONS, StreamConnection};
+use crate::connection::{
+    ConnectionInfo, DISCONNECT_TIMEOUT, MAX_CONNECTIONS, StreamConnection, disconnect_all,
+};
 use crate::core::api::InnerTubeClient;
-use crate::core::chat_runtime::{MonitoringDeps, run_monitoring_loop};
+use crate::core::chat_runtime::{
+    MonitoringDeps, MonitoringOutput, MonitoringTarget, run_monitoring_loop,
+};
 use crate::core::models::{
     ChatMessage, ChatMode, ConnectionStatus, Platform, ReactionSummary, ReactionUpdate,
     extract_video_id,
 };
+use crate::core::raw_response::SaveConfig;
 use crate::database;
 use crate::errors::CommandError;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Emitter, Manager, State};
-use tokio::sync::{RwLock, watch};
+use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use ts_rs::TS;
+
+/// 監視ループの通知を Tauri のイベントにする（02_chat.md「Tauriイベント」）
+struct TauriMonitoringOutput {
+    app: AppHandle,
+    connection_id: u64,
+    platform: String,
+    broadcaster_name: String,
+}
+
+impl MonitoringOutput for TauriMonitoringOutput {
+    fn save_config(&self) -> SaveConfig {
+        self.app.state::<ConfigState>().get().raw_response
+    }
+
+    fn message(&self, message: &ChatMessage) {
+        let gui_msg = GuiChatMessage::from_with_connection(
+            message.clone(),
+            self.connection_id,
+            &self.platform,
+            &self.broadcaster_name,
+        );
+        let _ = self.app.emit("chat:message", &gui_msg);
+    }
+
+    fn reaction(&self, update: &ReactionUpdate) {
+        let gui_update = GuiReactionUpdate {
+            connection_id: self.connection_id,
+            update: update.clone(),
+        };
+        let _ = self.app.emit("chat:reaction", &gui_update);
+    }
+}
 
 /// Result of connecting to a stream
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -264,16 +301,13 @@ pub async fn connect_to_stream(
     url: String,
     chat_mode: Option<String>,
 ) -> Result<ConnectionResult, CommandError> {
-    // 同時接続数の上限チェック
-    {
-        let connections = state.connections.read().await;
-        if connections.len() >= MAX_CONNECTIONS {
-            return Err(CommandError::InvalidInput(format!(
-                "同時接続数の上限（{}）に達しています",
-                MAX_CONNECTIONS
-            )));
-        }
-    }
+    // 同時接続の枠を取る（接続中も数える。接続に失敗したら drop で空く。02_chat.md「多接続」）
+    let slot = state.connection_slots.try_reserve().ok_or_else(|| {
+        CommandError::InvalidInput(format!(
+            "同時接続数の上限（{}）に達しています",
+            MAX_CONNECTIONS
+        ))
+    })?;
 
     // 新しい接続IDを採番
     let connection_id = state.next_connection_id.fetch_add(1, Ordering::SeqCst) + 1;
@@ -356,10 +390,6 @@ pub async fn connect_to_stream(
 
         result.session_id = session_id.clone();
 
-        // クライアントを監視タスク用の Arc<RwLock> にラップ
-        let innertube_client: Arc<RwLock<Option<InnerTubeClient>>> =
-            Arc::new(RwLock::new(Some(client)));
-
         // キャンセレーショントークンを生成
         let cancellation_token = CancellationToken::new();
 
@@ -369,24 +399,21 @@ pub async fn connect_to_stream(
         // 監視タスクの共有依存を構築
         let deps = MonitoringDeps::from_state(&state);
 
-        // 生レスポンス保存設定はポーリングごとに ConfigState から読む（接続中の変更を反映する）
-        let app_for_save_config = app.clone();
-        let current_save_config = move || {
-            app_for_save_config
-                .state::<ConfigState>()
-                .get()
-                .raw_response
-        };
-
-        // emit コールバック用に接続情報をキャプチャ
         let conn_id = connection_id;
-        let platform_str = Platform::YouTube.as_str().to_string();
-        let broadcaster = result.broadcaster_name.clone().unwrap_or_default();
-
-        let app_handle = app.clone();
-        let innertube_for_task = Arc::clone(&innertube_client);
-        let token_for_task = cancellation_token.clone();
-        let broadcaster_id = result.broadcaster_channel_id.clone();
+        let output = TauriMonitoringOutput {
+            app: app.clone(),
+            connection_id,
+            platform: Platform::YouTube.as_str().to_string(),
+            broadcaster_name: result.broadcaster_name.clone().unwrap_or_default(),
+        };
+        let target = MonitoringTarget {
+            connection_id,
+            video_id,
+            session_id: session_id.clone(),
+            broadcaster_id: result.broadcaster_channel_id.clone(),
+            cancellation_token: cancellation_token.clone(),
+            chat_mode_rx,
+        };
 
         // StreamConnection を生成して connections マップに追加
         let stream_conn = StreamConnection {
@@ -401,6 +428,7 @@ pub async fn connect_to_stream(
             cancellation_token: cancellation_token.clone(),
             task_handle: None, // spawn後に設定
             chat_mode_tx,
+            slot,
         };
 
         {
@@ -414,36 +442,7 @@ pub async fn connect_to_stream(
 
         // 監視タスクをスポーン
         let handle = tokio::spawn(async move {
-            run_monitoring_loop(
-                deps,
-                innertube_for_task,
-                app_handle,
-                video_id,
-                conn_id,
-                session_id,
-                broadcaster_id,
-                token_for_task,
-                current_save_config,
-                chat_mode_rx,
-                move |app, msg| {
-                    // ChatMessage を接続情報付き GUI メッセージに変換してフロントエンドへ emit
-                    let gui_msg = GuiChatMessage::from_with_connection(
-                        msg.clone(),
-                        conn_id,
-                        &platform_str,
-                        &broadcaster,
-                    );
-                    let _ = app.emit("chat:message", &gui_msg);
-                },
-                move |app, update| {
-                    let gui_update = GuiReactionUpdate {
-                        connection_id: conn_id,
-                        update: update.clone(),
-                    };
-                    let _ = app.emit("chat:reaction", &gui_update);
-                },
-            )
-            .await;
+            let end = run_monitoring_loop(deps, client, target, output).await;
 
             // 監視タスク終了後: connections マップに残っている場合はクリーンアップ
             // （disconnect_stream 経由で既に削除済みの場合はスキップ）
@@ -464,7 +463,7 @@ pub async fn connect_to_stream(
                         broadcaster_channel_id: None,
                         broadcaster_name: None,
                         is_replay: false,
-                        error: Some("監視タスクが予期せず終了しました".to_string()),
+                        error: Some(end.error_message()),
                         session_id: None,
                         connection_id: conn_id,
                     },
@@ -531,8 +530,7 @@ pub async fn disconnect_stream(
 
     // JoinHandle を待機（タイムアウト付き）
     if let Some(handle) = task_handle {
-        let timeout = std::time::Duration::from_secs(5);
-        match tokio::time::timeout(timeout, handle).await {
+        match tokio::time::timeout(DISCONNECT_TIMEOUT, handle).await {
             Ok(Ok(())) => tracing::debug!("disconnect_stream: task {} completed", connection_id),
             Ok(Err(e)) => {
                 tracing::warn!("disconnect_stream: task {} panicked: {}", connection_id, e)
@@ -554,43 +552,7 @@ pub async fn disconnect_stream(
 #[tauri::command]
 pub async fn disconnect_all_streams(state: State<'_, AppState>) -> Result<(), CommandError> {
     tracing::info!("disconnect_all_streams called");
-
-    // State は Clone でないため Arc を直接操作する
-    let connections_arc = Arc::clone(&state.connections);
-
-    // 全接続のトークンとハンドルを収集してキャンセル
-    let handles: Vec<(u64, tokio::task::JoinHandle<()>)> = {
-        let mut connections = connections_arc.write().await;
-        let mut handles = Vec::new();
-        for (id, conn) in connections.iter_mut() {
-            conn.cancellation_token.cancel();
-            if let Some(handle) = conn.task_handle.take() {
-                handles.push((*id, handle));
-            }
-        }
-        handles
-    };
-
-    // 全タスクを並列待機（直列だと N × timeout になるため）
-    let timeout = std::time::Duration::from_secs(5);
-    let futures: Vec<_> = handles
-        .into_iter()
-        .map(|(id, handle)| async move {
-            match tokio::time::timeout(timeout, handle).await {
-                Ok(Ok(())) => tracing::debug!("disconnect_all: task {} completed", id),
-                Ok(Err(e)) => tracing::warn!("disconnect_all: task {} panicked: {}", id, e),
-                Err(_) => tracing::warn!("disconnect_all: task {} timed out", id),
-            }
-        })
-        .collect();
-    futures_util::future::join_all(futures).await;
-
-    // connections マップをクリア
-    {
-        let mut connections = connections_arc.write().await;
-        connections.clear();
-    }
-
+    disconnect_all(&state.connections, DISCONNECT_TIMEOUT).await;
     Ok(())
 }
 

@@ -1,14 +1,16 @@
 <script lang="ts">
   import { chatStore } from '$lib/stores';
+  import { countRecentMessages } from '$lib/utils/chat-stats';
 
   let streamUrl = $state('');
 
   // 新しい接続を追加（多接続対応：既存の接続はそのまま）
   async function handleConnect() {
-    if (!streamUrl.trim()) return;
-    await chatStore.connect(streamUrl, chatStore.chatMode);
-    // 接続成功後にURLをクリア（次の接続入力の準備）
-    if (!chatStore.error) {
+    const url = streamUrl;
+    if (!url.trim()) return;
+    await chatStore.connect(url, chatStore.chatMode);
+    // 接続成功後にURLをクリア（次の接続入力の準備）。待つ間に入力し直されていたら残す
+    if (!chatStore.error && streamUrl === url) {
       streamUrl = '';
     }
   }
@@ -18,23 +20,17 @@
     await chatStore.setChatMode(newMode);
   }
 
-  // 統計情報
+  // 統計情報（02_chat.md「接続設定の統計」）。件・人はストアが差分で数える
   let messageCount = $derived(chatStore.messages.length);
-  let uniqueViewers = $derived(new Set(chatStore.messages.map(m => m.channel_id)).size);
-  let messagesPerMinute = $derived.by(() => {
-    if (chatStore.messages.length < 2) return 0;
-    const now = Date.now();
-    const oneMinuteAgo = now - 60000;
-    const recentMessages = chatStore.messages.filter(m => {
-      try {
-        const timestamp = parseInt(m.timestamp_usec) / 1000;
-        return timestamp > oneMinuteAgo;
-      } catch {
-        return false;
-      }
-    });
-    return recentMessages.length;
+  let uniqueViewers = $derived(chatStore.viewerCount);
+  // コメントが止まっても /分 が下がっていくよう、いまの時刻を 5 秒ごとに進める
+  const STATS_TICK_MS = 5000;
+  let nowMs = $state(Date.now());
+  $effect(() => {
+    const timer = setInterval(() => (nowMs = Date.now()), STATS_TICK_MS);
+    return () => clearInterval(timer);
   });
+  let messagesPerMinute = $derived(countRecentMessages(chatStore.messages, nowMs));
 </script>
 
 <!-- 接続設定セクション -->
