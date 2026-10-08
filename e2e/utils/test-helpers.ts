@@ -677,6 +677,8 @@ export async function setStreamState(state: {
   title?: string;
   chat_delay_ms?: number;
   chat_fail?: boolean;
+  /** 次に接続する配信の配信者チャンネル ID（空文字で既定に戻す）。接続ごとに配信者を分けるときに使う */
+  channel_id?: string;
 }): Promise<void> {
   await fetch(`${MOCK_SERVER_URL}/set_stream_state`, {
     method: 'POST',

@@ -337,6 +337,53 @@ describe('chatStore 接続管理', () => {
 	});
 
 	// =====================================================================
+	// broadcasterChannelIdOf（視聴者情報パネルの配信者）
+	// spec: 02_chat.md「視聴者情報パネル」の「どの配信者のもとで開くか」
+	// =====================================================================
+	describe('broadcasterChannelIdOf', () => {
+		function messageFrom(connectionId: number): ChatMessage {
+			return { id: 'm1', channel_id: 'UCxxx', connection_id: BigInt(connectionId) } as ChatMessage;
+		}
+
+		// 接続1（配信者A: UCaaa）と接続2（配信者B: UCbbb）に同時に接続する
+		async function connectAandB(): Promise<void> {
+			const { connectToStream } = await import('$lib/tauri/chat');
+			vi.mocked(connectToStream)
+				.mockResolvedValueOnce(makeSuccessResult({ connection_id: BigInt(1), broadcaster_channel_id: 'UCaaa' }))
+				.mockResolvedValueOnce(makeSuccessResult({ connection_id: BigInt(2), broadcaster_channel_id: 'UCbbb' }));
+			await chatStore.connect('https://example.com/a');
+			await chatStore.connect('https://example.com/b');
+		}
+
+		it('接続2 に届いたコメントは、最初の接続ではなく接続2 の配信者 B', async () => {
+			await connectAandB();
+			expect(chatStore.broadcasterChannelIdOf(messageFrom(2))).toBe('UCbbb');
+		});
+
+		it('接続1 に届いたコメントは配信者 A', async () => {
+			await connectAandB();
+			expect(chatStore.broadcasterChannelIdOf(messageFrom(1))).toBe('UCaaa');
+		});
+
+		it('コメントの接続が切断済みなら null（接続1 が残っていても A にしない）', async () => {
+			const { disconnectStream } = await import('$lib/tauri/chat');
+			vi.mocked(disconnectStream).mockResolvedValue(undefined);
+			await connectAandB();
+			await chatStore.disconnect(2);
+			expect(chatStore.broadcasterChannelIdOf(messageFrom(2))).toBeNull();
+		});
+
+		it('コメントの接続の配信者 channel_id が分からなければ null', async () => {
+			const { connectToStream } = await import('$lib/tauri/chat');
+			vi.mocked(connectToStream).mockResolvedValue(
+				makeSuccessResult({ connection_id: BigInt(1), broadcaster_channel_id: null })
+			);
+			await chatStore.connect('https://example.com');
+			expect(chatStore.broadcasterChannelIdOf(messageFrom(1))).toBeNull();
+		});
+	});
+
+	// =====================================================================
 	// chat:connection イベント
 	// =====================================================================
 	describe('chat:connection イベント', () => {
