@@ -1,0 +1,146 @@
+{
+  "src/lib/components/analytics/ExportPanel.svelte": {
+    "better-tailwindcss/no-restricted-classes": {
+      "count": 45
+    }
+  },
+  "src/lib/components/analytics/RevenueDashboard.svelte": {
+    "better-tailwindcss/no-restricted-classes": {
+      "count": 105
+    }
+  },
+  "src/lib/components/auth/AuthIndicator.svelte": {
+    "better-tailwindcss/no-restricted-classes": {
+      "count": 4
+    }
+  },
+  "src/lib/components/auth/StorageErrorDialog.svelte": {
+    "better-tailwindcss/no-restricted-classes": {
+      "count": 25
+    }
+  },
+  "src/lib/components/chat/ChatDisplay.svelte": {
+    "better-tailwindcss/no-restricted-classes": {
+      "count": 2
+    }
+  },
+  "src/lib/components/chat/ChatMessage.svelte": {
+    "better-tailwindcss/no-restricted-classes": {
+      "count": 53
+    },
+    "no-restricted-syntax": {
+      "count": 9
+    }
+  },
+  "src/lib/components/chat/ConnectionList.svelte": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
+  "src/lib/components/chat/FilterPanel.svelte": {
+    "better-tailwindcss/no-restricted-classes": {
+      "count": 102
+    }
+  },
+  "src/lib/components/chat/InputSection.svelte": {
+    "better-tailwindcss/no-restricted-classes": {
+      "count": 53
+    }
+  },
+  "src/lib/components/layout/AppShell.svelte": {
+    "better-tailwindcss/no-restricted-classes": {
+      "count": 20
+    }
+  },
+  "src/lib/components/settings/AuthSettings.svelte": {
+    "better-tailwindcss/no-restricted-classes": {
+      "count": 51
+    }
+  },
+  "src/lib/components/settings/RawResponseSettings.svelte": {
+    "better-tailwindcss/no-restricted-classes": {
+      "count": 69
+    }
+  },
+  "src/lib/components/settings/ThemeSettings.svelte": {
+    "better-tailwindcss/no-restricted-classes": {
+      "count": 27
+    },
+    "no-restricted-syntax": {
+      "count": 14
+    }
+  },
+  "src/lib/components/settings/TtsLaunchSettings.svelte": {
+    "better-tailwindcss/no-restricted-classes": {
+      "count": 42
+    }
+  },
+  "src/lib/components/settings/TtsSettings.svelte": {
+    "better-tailwindcss/no-restricted-classes": {
+      "count": 222
+    }
+  },
+  "src/lib/components/tabs/AnalyticsTab.svelte": {
+    "better-tailwindcss/no-restricted-classes": {
+      "count": 1
+    }
+  },
+  "src/lib/components/tabs/ChatTab.svelte": {
+    "better-tailwindcss/no-restricted-classes": {
+      "count": 15
+    }
+  },
+  "src/lib/components/tabs/SettingsTab.svelte": {
+    "better-tailwindcss/no-restricted-classes": {
+      "count": 8
+    }
+  },
+  "src/lib/components/ui/ErrorBoundary.svelte": {
+    "better-tailwindcss/no-restricted-classes": {
+      "count": 7
+    }
+  },
+  "src/lib/components/viewer/BroadcasterSelector.svelte": {
+    "better-tailwindcss/no-restricted-classes": {
+      "count": 7
+    }
+  },
+  "src/lib/components/viewer/DeleteConfirmDialog.svelte": {
+    "better-tailwindcss/no-restricted-classes": {
+      "count": 21
+    }
+  },
+  "src/lib/components/viewer/ViewerEditModal.svelte": {
+    "better-tailwindcss/no-restricted-classes": {
+      "count": 63
+    }
+  },
+  "src/lib/components/viewer/ViewerInfoPanel.svelte": {
+    "better-tailwindcss/no-restricted-classes": {
+      "count": 41
+    },
+    "no-restricted-syntax": {
+      "count": 3
+    }
+  },
+  "src/lib/components/viewer/ViewerList.svelte": {
+    "better-tailwindcss/no-restricted-classes": {
+      "count": 63
+    }
+  },
+  "src/lib/components/viewer/ViewerManagement.svelte": {
+    "better-tailwindcss/no-restricted-classes": {
+      "count": 17
+    }
+  },
+  "src/lib/utils/connection-colors.ts": {
+    "no-restricted-syntax": {
+      "count": 8
+    }
+  },
+  "src/routes/+layout.svelte": {
+    "better-tailwindcss/no-restricted-classes": {
+      "count": 1
+    }
+  }
+}

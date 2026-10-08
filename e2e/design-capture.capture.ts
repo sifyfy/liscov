@@ -141,4 +141,19 @@ test.describe('Design capture', () => {
       await captureAll(name);
     }
   });
+
+  // 他の画面を撮り終えてから移動する (見本ページはナビゲーションから開けない)
+  test('デザイントークンの見本', async () => {
+    test.setTimeout(120000);
+    await page.evaluate(() => location.assign('/design-tokens'));
+    await expect(page.getByText('デザイントークンの見本')).toBeVisible({ timeout: 15000 });
+    await page.addStyleTag({ content: '*, *::before, *::after { transition: none !important; }' });
+    await page.setViewportSize({ width: 1024, height: HEIGHT });
+    for (const theme of THEMES) {
+      await page.evaluate((t) => document.documentElement.setAttribute('data-theme', t), theme);
+      await page.waitForTimeout(300);
+      await page.screenshot({ path: path.join(OUT_DIR, `design-tokens-${theme}.png`), fullPage: true, animations: 'disabled' });
+      await checkContrast(`design-tokens-${theme}`);
+    }
+  });
 });

@@ -8,6 +8,140 @@
 @import '@fontsource/plus-jakarta-sans/600.css';
 @import '@fontsource/plus-jakarta-sans/700.css';
 @import '@fontsource-variable/jetbrains-mono';
+@import '@fontsource/biz-udpgothic/400.css';
+@import '@fontsource/biz-udpgothic/700.css';
+
+/*
+ * === デザイントークン (docs/design/tokens.md) ===
+ * 画面のコードは --sys-* と、下の @theme で Tailwind に登録した名前だけを使う。
+ * 値の理由は tokens.md に書く。コントラストは src/lib/design/tokens.test.ts で検査する。
+ * この節より下の旧い変数 (--bg-* など) は、M5 で画面を作り直し終えたら消す。
+ */
+
+/* 値の層: 画面のコードからは使わない */
+:root {
+	/* ハイライト (優先順位 2〜4) のすみれ色。見本ページで 3 案から選んだ (2026-10-08) */
+	--ref-violet-dark: #b9a5ff;
+	--ref-violet-light: #5f43cc;
+}
+
+/* 意味の層: ダーク (既定) */
+:root {
+	--sys-surface: #131315;
+	--sys-surface-low: #18181b;
+	--sys-surface-mid: #1d1d21;
+	--sys-surface-high: #25252a;
+	--sys-surface-highest: #2e2e34;
+
+	--sys-fg-1: #ededf0;
+	--sys-fg-2: #b8b8bf;
+	--sys-fg-3: #8e8e96;
+
+	--sys-outline: #3b3b42;
+	--sys-outline-variant: #2a2a30;
+
+	--sys-accent: #8ab4f8;
+	--sys-success: #6dd58c;
+	--sys-warning: #f2c55c;
+	--sys-error: #f28b82;
+
+	/* 優先順位 1 のメンバーシップ・ギフト・マイルストーン (YouTube のメンバーの緑の系統)。白い文字を載せる */
+	--sys-member: #0b8043;
+	--sys-on-member: #ffffff;
+
+	--sys-highlight: var(--ref-violet-dark);
+
+	--sys-elevation-1: 0 2px 8px rgba(0, 0, 0, 0.4);
+	--sys-elevation-2: 0 8px 24px rgba(0, 0, 0, 0.5);
+
+	--sys-font-ui: 'BIZ UDPGothic', system-ui, sans-serif;
+	--sys-font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
+}
+
+/* 意味の層: ライト */
+[data-theme='light'] {
+	--sys-surface: #fbfbfc;
+	--sys-surface-low: #f4f4f6;
+	--sys-surface-mid: #eeeef1;
+	--sys-surface-high: #e6e6ea;
+	--sys-surface-highest: #dedee3;
+
+	--sys-fg-1: #1b1b1f;
+	--sys-fg-2: #4a4a52;
+	--sys-fg-3: #66666e;
+
+	--sys-outline: #c4c4cc;
+	--sys-outline-variant: #dcdce2;
+
+	--sys-accent: #1757c0;
+	--sys-success: #186a31;
+	--sys-warning: #7a4f00;
+	--sys-error: #b3261e;
+
+	--sys-highlight: var(--ref-violet-light);
+
+	--sys-elevation-1: 0 2px 8px rgba(0, 0, 0, 0.12);
+	--sys-elevation-2: 0 8px 24px rgba(0, 0, 0, 0.16);
+}
+
+/* Tailwind に登録する名前 (テーマで変わる値は inline で意味の層を参照する) */
+@theme inline {
+	--color-surface: var(--sys-surface);
+	--color-surface-low: var(--sys-surface-low);
+	--color-surface-mid: var(--sys-surface-mid);
+	--color-surface-high: var(--sys-surface-high);
+	--color-surface-highest: var(--sys-surface-highest);
+	--color-fg-1: var(--sys-fg-1);
+	--color-fg-2: var(--sys-fg-2);
+	--color-fg-3: var(--sys-fg-3);
+	--color-outline: var(--sys-outline);
+	--color-outline-variant: var(--sys-outline-variant);
+	--color-accent: var(--sys-accent);
+	--color-success: var(--sys-success);
+	--color-warning: var(--sys-warning);
+	--color-error: var(--sys-error);
+	--color-member: var(--sys-member);
+	--color-on-member: var(--sys-on-member);
+	--color-highlight: var(--sys-highlight);
+	--shadow-elevation-1: var(--sys-elevation-1);
+	--shadow-elevation-2: var(--sys-elevation-2);
+	--font-ui: var(--sys-font-ui);
+	--font-code: var(--sys-font-mono);
+}
+
+/* Tailwind に登録する名前 (テーマで変わらない値) */
+@theme {
+	/* 文字の段階 (アプリの UI) */
+	--text-caption: 12px;
+	--text-caption--line-height: 16px;
+	--text-label: 13px;
+	--text-label--line-height: 18px;
+	--text-label--font-weight: 700;
+	--text-body: 14px;
+	--text-body--line-height: 20px;
+	--text-title: 16px;
+	--text-title--line-height: 24px;
+	--text-title--font-weight: 700;
+	--text-display: 20px;
+	--text-display--line-height: 28px;
+	--text-display--font-weight: 700;
+
+	/* 文字の段階 (コメント): 利用者が設定する大きさ (message_font_size) を 1em とする */
+	--text-chat-body: 1em;
+	--text-chat-body--line-height: 1.45;
+	--text-chat-meta: 0.85em;
+	--text-chat-meta--line-height: 1.45;
+	--text-chat-amount: 1.15em;
+	--text-chat-amount--line-height: 1.3;
+	--text-chat-amount--font-weight: 700;
+
+	/* 角丸 */
+	--radius-control: 4px;
+	--radius-popup: 8px;
+
+	/* 動き */
+	--ease-standard: cubic-bezier(0.2, 0, 0, 1);
+}
 
 /* === Dark Theme (Default) === */
 :root {
