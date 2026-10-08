@@ -15,13 +15,28 @@
 | `@田中-abc` | true | true | true | `田中さん` |
 | `@田中-abc` | false | true | true | `@田中さん` |
 | `田中みな子` | - | - | true | `田中みな子さん` |
-| `UCxxx`（読み仮名:たなか） | - | - | true | `たなかさん` |
+| `@田中-abc`（読み仮名:たなか） | true | true | true | `たなかさん` |
+| `@田中-abc`（読み仮名:たなか） | false | false | true | `たなかさん` |
+| `@田中-abc`（読み仮名:たなか） | - | - | false | `たなか` |
 
 **投稿者名の処理順序:**
-1. 視聴者カスタム読み仮名があれば使用（以降の処理をスキップ）
+1. 視聴者カスタム読み仮名があれば、投稿者名の代わりに使う（2・3 は行わない。4 は設定どおり行う）
 2. `strip_at_prefix=true` → 先頭の `@` を除去
 3. `strip_handle_suffix=true` → 末尾の `-xxx` を除去（最後のハイフン以降）
 4. `add_honorific=true` → 「さん」を付与
+
+読み仮名は名前の部分だけを置き換える。「さん」を付けるかは読み仮名の有無にかかわらず `add_honorific` で決まる（読み仮名に「さん」まで書くと「さんさん」になる）。
+
+**どの読み仮名を使うか:** メッセージが届いた接続の配信者のもとで、その視聴者に登録した読み仮名を使う（読み仮名は配信者ごと。06_viewer.md「配信者スコープ」）。
+
+| 状況 | 読み上げる名前 |
+|------|--------------|
+| 配信者A（UCaaa）の接続に視聴者X（UCxxx）のコメント。A のもとで X の読み仮名は `たなか` | `たなかさん` |
+| 配信者A・B を同時に接続。配信者B（UCbbb）の接続に X のコメント。A のもとでは `たなか`、B のもとでは `タナカ` | `タナカさん` |
+| 配信者B の接続に X のコメント。A のもとでだけ `たなか` を登録している | 投稿者名を処理したもの |
+| 読み仮名を保存した直後に、その視聴者のコメントが届いた | 保存した読み仮名（アプリの再起動や再接続は要らない） |
+| 読み仮名を空にして保存した | 投稿者名を処理したもの |
+| 視聴者を特定できないギフト（channel_id が無い） | 投稿者名を処理したもの |
 
 ### スーパーチャット/メンバーシップの読み上げ例
 
@@ -279,15 +294,17 @@ auto_close = true
 
 ```
 1. 視聴者カスタム読み仮名をチェック
-   ├─ あり → カスタム読み仮名を使用
+   ├─ あり → カスタム読み仮名を名前にする（2・3 を飛ばして 4 へ）
    └─ なし → 投稿者名を処理
         ↓
 2. strip_at_prefix=true → 先頭の @ を除去
         ↓
 3. strip_handle_suffix=true → 末尾の -xxx を除去
         ↓
-4. add_honorific=true → 「さん」を付与
+4. add_honorific=true → 「さん」を付与（読み仮名のときも同じ）
 ```
+
+1〜4 は `tts::process_author_name` が行う。読み仮名はキューの要素（`TtsQueueItem.author_reading`）で受け取る。
 
 ### 投稿者名の例
 
@@ -296,7 +313,8 @@ auto_close = true
 | `@田中-abc` | true | true | true | `田中さん` |
 | `@田中-abc` | false | true | true | `@田中さん` |
 | `田中みな子` | - | - | true | `田中みな子さん` |
-| `UCxxx（読み仮名:たなか）` | - | - | true | `たなかさん` |
+| `@田中-abc（読み仮名:たなか）` | true | true | true | `たなかさん` |
+| `@田中-abc（読み仮名:たなか）` | - | - | false | `たなか` |
 
 ### スーパーチャット/メンバーシップの読み上げ
 
@@ -554,36 +572,32 @@ GET http://{host}:{port}/version
 
 ### 概要
 
-視聴者ごとにカスタム読み仮名を設定可能。設定されている場合、投稿者名の代わりにカスタム読み仮名を使用。
+視聴者ごとにカスタム読み仮名を設定可能。設定されている場合、投稿者名の代わりにカスタム読み仮名を使用（「さん」の付与は設定どおり。「読み上げテキスト生成」）。
 
 ### データモデル
 
-詳細は[視聴者管理機能](06_viewer.md)を参照。
-
-```rust
-pub struct ViewerCustomInfo {
-    pub broadcaster_channel_id: String,
-    pub viewer_channel_id: String,
-    pub reading: Option<String>,  // カスタム読み仮名
-    // ...
-}
-```
+詳細は[視聴者管理機能](06_viewer.md)を参照。読み仮名は `viewer_custom_info.reading` にあり、`viewer_profile_id` で `viewer_profiles`（`broadcaster_channel_id` と `channel_id` の組で一意）に 1:1 で付く。
 
 ### 適用フロー
 
 ```
-1. メッセージ受信
+1. メッセージ受信（接続ごとの監視ループ。core/chat_runtime.rs）
         ↓
-2. viewer_channel_idでViewerCustomInfoを検索
-   ├─ reading あり → カスタム読み仮名を使用
-   └─ reading なし → 投稿者名を処理
+2. メッセージを DB に保存（08_database.md「書き込み」）
+        ↓
+3. この接続の broadcaster_channel_id と、メッセージの channel_id で読み仮名を検索
+   （database::get_viewer_reading。viewer_profiles と viewer_custom_info を結合）
+   ├─ reading あり → TtsQueueItem.author_reading に入れる
+   └─ reading なし・視聴者を特定できない・配信者が分からない・DB を使えない → None
+        ↓
+4. TTS キューに追加 → 「投稿者名の処理フロー」
 ```
 
-### キャッシング
+### 取得のしかた（キャッシュしない）
 
-- 配信者ごとにViewerCustomInfoをメモリにキャッシュ
-- 起動時にDBから全件ロード
-- UI編集時にリアルタイム同期
+- ポーリング 1 回分のメッセージを保存したあと、同じ DB 接続で 1 件ずつ引く
+- メモリにはキャッシュしない。読み仮名を変える経路（チャット画面の視聴者パネル、視聴者一覧の編集、`viewer_update_info`、視聴者・配信者の削除）がいくつもあり、キャッシュを同期し損ねると古い読み仮名を読み続けるため。`(broadcaster_channel_id, channel_id)` のユニークインデックスと `viewer_profile_id` の主キーで引くので、1 件あたりの負荷は小さい
+- 検索に失敗したら警告ログを出し、投稿者名で読み上げる（読み上げ自体は止めない）
 
 ## エラーハンドリング
 

@@ -22,7 +22,7 @@
     settings: { icon: 'settings', label: 'Settings', shortLabel: 'Settings' }
   };
 
-  // 最初の接続のbroadcasterChannelIdを使用（ViewerInfoPanel用）
+  // 最初の接続のbroadcasterChannelIdを使用（視聴者タブの既定の配信者）
   let broadcasterId = $derived(chatStore.broadcasterChannelId ?? '');
 
   // ストレージエラーが発生した場合にダイアログを表示

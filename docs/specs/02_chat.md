@@ -149,6 +149,7 @@
 | 接続中（`connecting`）のエントリ | 切断ボタンは押せない。接続が成立するか失敗するまで待つ（接続処理には HTTP タイムアウトがあるので待ち続けない） |
 | 接続が成立した | URL 入力欄を空にする。ただし欄の内容がその接続の URL から変わっていたら残す |
 | F5リロード | バックエンド接続は維持。`get_connections`で状態を復元し、新着メッセージを正常受信 |
+| コメントをクリックして視聴者パネルを開く | そのコメントが届いた接続の配信者のもとで視聴者を引き、読み仮名・メモもその配信者のもとに保存する（TTS が読み仮名を引く配信者と同じ）。最初の接続の配信者ではない（「視聴者情報パネル」の「どの配信者のもとで開くか」） |
 
 ## 制約・不変条件（Boundaries）
 
@@ -698,7 +699,8 @@ YouTube 側の一時的な不調ならそのまま続け、復旧しそうにな
 | `connections[id].reactions` | `{ totals: Record<string, number>; recent: ReactionUpdate[]; peakPerMinute: number }` | リアクションメーターの状態。`recent` は update_time_usec が60秒以内のものだけ残す。勢い（/分）は `recent` の total の合計（derived） |
 | `isConnected` | `boolean` | いずれかの接続がアクティブ（derived: connections.size > 0） |
 | `isConnecting` | `boolean` | 接続処理中の接続が存在（derived） |
-| `broadcasterChannelId` | `string \| null` | 最初の接続の配信者チャンネル ID（視聴者情報パネル・視聴者タブの既定の配信者） |
+| `broadcasterChannelId` | `string \| null` | 最初の接続の配信者チャンネル ID（視聴者タブの既定の配信者。視聴者情報パネルには使わない） |
+| `broadcasterChannelIdOf(message)` | `string \| null` | そのメッセージが届いた接続の配信者チャンネル ID。接続が一覧に無い（切断済み）か配信者が分からなければ `null`（視聴者情報パネルの配信者） |
 | `chatMode` | `ChatMode` | TopChat / AllChat。起動時・F5 後は config.toml の `chat_display.chat_mode` で初期化し、選び直すたびに保存する |
 | `error` | `string \| null` | エラーメッセージ |
 
@@ -716,7 +718,7 @@ YouTube 側の一時的な不調ならそのまま続け、復旧しそうにな
 
 | 状態 | 型 | 説明 |
 |-----|-----|------|
-| `selectedViewer` | `{ channelId, displayName, iconUrl?, message } \| null` | 選択中の視聴者（パネル表示は `selectedViewer !== null` で制御） |
+| `selectedViewer` | `{ channelId, displayName, iconUrl?, message, broadcasterChannelId } \| null` | 選択中の視聴者（パネル表示は `selectedViewer !== null` で制御）。`broadcasterChannelId` は一覧でコメントをクリックしたときに `broadcasterChannelIdOf(message)` で決め、パネル内のコメントを押しても変えない |
 
 ※ 視聴者カスタム情報はAPI経由でオンデマンド取得（キャッシュなし）。
 
@@ -1227,6 +1229,22 @@ DOMにはビューポート近辺のメッセージのみレンダリングさ�
 
 配信者が視聴者を識別・管理するためのスライドインパネル。
 
+### どの配信者のもとで開くか
+
+視聴者のプロフィールと読み仮名・メモは配信者ごとにある（06_viewer.md「配信者スコープ」）。パネルは、一覧でクリックしたコメントが届いた接続の配信者のもとで視聴者を引き、保存もそこに書く。TTS もメッセージが届いた接続の配信者のもとで読み仮名を引くので、パネルで保存した読み仮名はその接続のコメントの読み上げに使われる。
+
+例: 接続1（配信者A: UCaaa）と接続2（配信者B: UCbbb）に同時に接続している。
+
+| 状況 | 結果 |
+|------|------|
+| 接続2 に届いた視聴者X（UCxxx）のコメントをクリック | B のもとで X を引く。保存すると B のもとの X に書く（接続2 に X のコメントが届いたら、TTS はこの読み仮名で読む） |
+| 接続1 に届いた X のコメントをクリック | A のもとで X を引く |
+| パネルを開いたまま、一覧で別の接続に届いたコメントをクリック | クリックしたコメントの接続の配信者で引き直す |
+| パネルの「投稿されたコメント」で、別の接続に届いた X のコメントを押す | 一覧のそのコメントへスクロールするだけ。配信者は開いたときのまま |
+| パネルを開いたあとでその接続を切断した | 開いたときの配信者のまま。保存もそこに書く |
+| クリックしたコメントの接続が切断済み（接続一覧に無い） | パネルを開かない（どの配信者のもとか分からない） |
+| クリックしたコメントの接続の配信者 channel_id が分からない | パネルを開かない |
+
 ### レイアウト
 
 ```
@@ -1466,6 +1484,8 @@ CREATE INDEX idx_viewer_custom_info_lookup
 
 ```
 メッセージクリック
+  ↓
+broadcaster_id = chatStore.broadcasterChannelIdOf(message)（null ならパネルを開かない）
   ↓
 viewer_get_profile(broadcaster_id, channel_id)
   ↓

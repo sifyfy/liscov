@@ -15,11 +15,13 @@
   let suppressAutoScroll = $state(false);
 
   // Selected viewer for ViewerInfoPanel
+  // broadcasterChannelId は一覧でクリックしたコメントの接続の配信者。パネル内のコメントを押しても変えない（02_chat.md「どの配信者のもとで開くか」）
   let selectedViewer = $state<{
     channelId: string;
     displayName: string;
     iconUrl?: string;
     message: ChatMessage;
+    broadcasterChannelId: string;
   } | null>(null);
 
   // Highlighted message ID (for scroll-to feature)
@@ -58,11 +60,15 @@
   function handleMessageClick(message: ChatMessage) {
     // 視聴者を特定できないギフト（channel_id が空）は視聴者情報パネルを開かない
     if (!message.channel_id) return;
+    // どの配信者のもとの視聴者か分からない（接続が切断済み・配信者不明）ときも開かない
+    const broadcasterChannelId = chatStore.broadcasterChannelIdOf(message);
+    if (!broadcasterChannelId) return;
     selectedViewer = {
       channelId: message.channel_id,
       displayName: message.author,
       iconUrl: message.author_icon_url || undefined,
-      message: message
+      message: message,
+      broadcasterChannelId
     };
   }
 
@@ -145,10 +151,10 @@
   {/if}
 
   <!-- Viewer Info Panel -->
-  {#if selectedViewer && chatStore.broadcasterChannelId}
+  {#if selectedViewer}
     <ViewerInfoPanel
       viewer={selectedViewer}
-      broadcasterChannelId={chatStore.broadcasterChannelId}
+      broadcasterChannelId={selectedViewer.broadcasterChannelId}
       onClose={closeViewerPanel}
       onMessageClick={handleViewerMessageClick}
     />

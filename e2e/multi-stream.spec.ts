@@ -8,6 +8,7 @@ import {
   resetMockServer,
   addMockMessage,
   disconnectAndInitialize,
+  setStreamState,
 } from './utils/test-helpers';
 
 /**
@@ -162,6 +163,58 @@ test.describe('Multi-Stream Connection', () => {
       expect(hasIndicator).toBe(true);
 
       log.debug('配信元インジケーターの表示が確認された');
+    });
+  });
+
+  // spec: 02_chat.md「視聴者情報パネル」の「どの配信者のもとで開くか」
+  test.describe('視聴者パネルの配信者', () => {
+    test('2つ目の接続に届いたコメントの視聴者は、その接続の配信者のもとで読み仮名を保存できる', async () => {
+      // モックのメッセージキューは全接続で共通で、積んだあと最初にポーリング（1,500ms 周期）した接続に届く。
+      // 2 接続のポーリングの時刻が近いと接続2 にはほとんど届かないので、接続1 がポーリングした直後
+      // （同期用のメッセージが見えた時点）から周期の半分ほどずらして接続2 をつなぐ
+      const runId = Date.now();
+      await setStreamState({ channel_id: 'UC_panel_broadcaster_a' });
+      await connectStream(mainPage, 'test_video_123', 'Mock Live');
+      const syncContent = `PanelSync_${runId}`;
+      await addMockMessage({ message_type: 'text', author: 'PanelSync', content: syncContent, channel_id: 'UC_panel_sync' });
+      await expect(mainPage.locator(`text=${syncContent}`)).toBeVisible({ timeout: 8000 });
+      await mainPage.waitForTimeout(700);
+      // 接続1（配信者A）と接続2（配信者B）で配信者を分ける。モックの /watch は接続時に上書きを読む
+      await setStreamState({ channel_id: 'UC_panel_broadcaster_b' });
+      await connectStream(mainPage, 'test_video_456', 'Mock Live 2');
+
+      // 接続2（配信者名 MockBroadcaster2）に届くまで、視聴者を変えて積み直す。
+      // 前のメッセージが見えた直後に積むと毎回同じ接続に拾われるので、積む時刻を 130ms ずつずらして周期を掃く
+      let target: { content: string; channelId: string } | null = null;
+      for (let i = 0; i < 12 && target === null; i++) {
+        await mainPage.waitForTimeout(i * 130);
+        const content = `PanelBroadcaster_${runId}_${i}`;
+        const channelId = `UC_panel_viewer_${runId}_${i}`;
+        await addMockMessage({ message_type: 'text', author: `PanelViewer${i}`, content, channel_id: channelId });
+        const messageEl = mainPage.locator('[data-message-id]').filter({ hasText: content }).first();
+        await expect(messageEl).toBeVisible({ timeout: 8000 });
+        const source = await messageEl.locator('.source-label').textContent();
+        log.debug(`${content} は ${source} の接続に届いた`);
+        if (source?.trim() === 'MockBroadcaster2') target = { content, channelId };
+      }
+      expect(target, '12 件とも接続1 に届いた').not.toBeNull();
+      const { content, channelId } = target!;
+
+      // 接続2 の配信者 B のもとにはこの視聴者のプロフィールがある。最初の接続の配信者 A のもとには無い
+      await mainPage.locator('[data-message-id]').filter({ hasText: content }).first().click();
+      await expect(mainPage.getByText(channelId).first()).toBeVisible({ timeout: 5000 });
+      const readingInput = mainPage.locator('#viewer-reading');
+      await expect(readingInput).toBeEnabled({ timeout: 5000 });
+      await readingInput.fill('びーのしちょうしゃ');
+      await mainPage.locator('button:has-text("保存")').click();
+      await expect(mainPage.getByText('保存しました')).toBeVisible({ timeout: 5000 });
+
+      // 開き直すと、B のもとに保存した読み仮名が読み込まれる
+      await mainPage.locator('button:has-text("✕")').click();
+      await mainPage.locator('[data-message-id]').filter({ hasText: content }).first().click();
+      await expect(mainPage.locator('#viewer-reading')).toHaveValue('びーのしちょうしゃ', { timeout: 5000 });
+      // パネルは接続一覧の上に重なるので、次のテストの切断の前に閉じる
+      await mainPage.locator('button:has-text("✕")').click();
     });
   });
 

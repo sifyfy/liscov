@@ -35,6 +35,9 @@ pub struct TtsQueueItem {
     pub text: String,
     pub priority: TtsPriority,
     pub author_name: Option<String>,
+    /// 視聴者カスタム読み仮名。あれば投稿者名の代わりに読む（04_tts.md「投稿者名の処理順序」）。
+    /// メッセージが届いた接続の配信者のもとで登録されたもの
+    pub author_reading: Option<String>,
     pub amount: Option<String>,
     /// 配信内コメント回数（初回コメント判定に使用）
     pub in_stream_comment_count: Option<u32>,
@@ -361,27 +364,34 @@ pub(crate) fn build_first_comment_prefix(
     }
 }
 
-/// Process author name: strip @prefix, strip -xxx handle suffix, add honorific
+/// Process author name: use viewer reading or strip @prefix / -xxx handle suffix, then add honorific
 ///
-/// Spec (04_tts.md):
-/// - strip_at_prefix=true → 先頭の @ を除去
-/// - strip_handle_suffix=true → 末尾の -xxx サフィックスを除去
-/// - add_honorific=true → 「さん」を付与
+/// Spec (04_tts.md「投稿者名の処理順序」):
+/// 1. 視聴者カスタム読み仮名があれば名前の代わりに使う（2・3 は行わない）
+/// 2. strip_at_prefix=true → 先頭の @ を除去
+/// 3. strip_handle_suffix=true → 末尾の -xxx サフィックスを除去
+/// 4. add_honorific=true → 「さん」を付与（読み仮名のときも）
 pub(crate) fn process_author_name(
     name: &str,
+    reading: Option<&str>,
     strip_at: bool,
     strip_handle: bool,
     honorific: bool,
 ) -> String {
-    let s = if strip_at {
-        name.strip_prefix('@').unwrap_or(name)
-    } else {
-        name
-    };
-    let s = if strip_handle {
-        s.rfind('-').map_or(s, |pos| &s[..pos])
-    } else {
-        s
+    let s = match reading {
+        Some(reading) => reading,
+        None => {
+            let s = if strip_at {
+                name.strip_prefix('@').unwrap_or(name)
+            } else {
+                name
+            };
+            if strip_handle {
+                s.rfind('-').map_or(s, |pos| &s[..pos])
+            } else {
+                s
+            }
+        }
     };
     if honorific {
         format!("{}さん", s)
@@ -420,6 +430,7 @@ pub(crate) fn truncate_text(text: &str, max_length: usize) -> String {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_tts_text(
     author_name: Option<&str>,
+    author_reading: Option<&str>,
     amount: Option<&str>,
     message: &str,
     read_author_name: bool,
@@ -435,6 +446,7 @@ pub(crate) fn build_tts_text(
         if let Some(author) = author_name {
             parts.push(process_author_name(
                 author,
+                author_reading,
                 strip_at_prefix,
                 strip_handle_suffix,
                 add_honorific,
@@ -460,6 +472,7 @@ pub(crate) fn build_tts_text(
 pub(crate) fn speech_text(config: &TtsConfig, item: &TtsQueueItem) -> String {
     let base = build_tts_text(
         item.author_name.as_deref(),
+        item.author_reading.as_deref(),
         item.amount.as_deref(),
         &item.text,
         config.read_author_name,
@@ -507,6 +520,7 @@ mod tests {
         build_tts_text(
             Some("@山田太郎-xyz"),
             None,
+            None,
             &gift_message(&gift, read_superchat_amount),
             true,
             true,
@@ -551,7 +565,7 @@ mod tests {
     fn spec_example_all_options_on() {
         // spec: @田中-abc, strip_at=true, strip_handle=true, honorific=true → 田中さん
         assert_eq!(
-            process_author_name("@田中-abc", true, true, true),
+            process_author_name("@田中-abc", None, true, true, true),
             "田中さん"
         );
     }
@@ -561,7 +575,7 @@ mod tests {
         // spec: @田中-abc, strip_at=false, strip_handle=true, honorific=true → @田中さん
         // Note: @は残るが、@田中-abc から -abc は除去される → @田中さん
         assert_eq!(
-            process_author_name("@田中-abc", false, true, true),
+            process_author_name("@田中-abc", None, false, true, true),
             "@田中さん"
         );
     }
@@ -570,8 +584,37 @@ mod tests {
     fn spec_example_no_suffix() {
         // spec: 田中みな子 → 田中みな子さん (ハイフンなし → strip_handle_suffixは何もしない)
         assert_eq!(
-            process_author_name("田中みな子", true, true, true),
+            process_author_name("田中みな子", None, true, true, true),
             "田中みな子さん"
+        );
+    }
+
+    // ---- 視聴者カスタム読み仮名（04_tts.md「読み上げテキスト生成」の表） ----
+
+    #[test]
+    fn spec_example_reading_replaces_name_and_gets_honorific() {
+        // spec: @田中-abc（読み仮名:たなか）, true, true, true → たなかさん
+        assert_eq!(
+            process_author_name("@田中-abc", Some("たなか"), true, true, true),
+            "たなかさん"
+        );
+    }
+
+    #[test]
+    fn spec_example_reading_ignores_strip_options() {
+        // spec: @田中-abc（読み仮名:たなか）, false, false, true → たなかさん
+        assert_eq!(
+            process_author_name("@田中-abc", Some("たなか"), false, false, true),
+            "たなかさん"
+        );
+    }
+
+    #[test]
+    fn spec_example_reading_without_honorific() {
+        // spec: @田中-abc（読み仮名:たなか）, -, -, false → たなか
+        assert_eq!(
+            process_author_name("@田中-abc", Some("たなか"), true, true, false),
+            "たなか"
         );
     }
 
@@ -579,14 +622,17 @@ mod tests {
 
     #[test]
     fn author_name_strip_at_only() {
-        assert_eq!(process_author_name("@田中", true, false, false), "田中");
+        assert_eq!(
+            process_author_name("@田中", None, true, false, false),
+            "田中"
+        );
     }
 
     #[test]
     fn author_name_strip_handle_removes_last_hyphen_suffix() {
         // strip_handle_suffix removes trailing -xxx suffix
         assert_eq!(
-            process_author_name("名前-handle", false, true, false),
+            process_author_name("名前-handle", None, false, true, false),
             "名前"
         );
     }
@@ -595,20 +641,23 @@ mod tests {
     fn author_name_strip_handle_no_hyphen() {
         // No hyphen → nothing to strip
         assert_eq!(
-            process_author_name("田中太郎", false, true, false),
+            process_author_name("田中太郎", None, false, true, false),
             "田中太郎"
         );
     }
 
     #[test]
     fn author_name_honorific_false() {
-        assert_eq!(process_author_name("田中-abc", true, true, false), "田中");
+        assert_eq!(
+            process_author_name("田中-abc", None, true, true, false),
+            "田中"
+        );
     }
 
     #[test]
     fn author_name_all_options_off() {
         assert_eq!(
-            process_author_name("@田中-abc", false, false, false),
+            process_author_name("@田中-abc", None, false, false, false),
             "@田中-abc"
         );
     }
@@ -617,7 +666,7 @@ mod tests {
     fn author_name_multiple_hyphens() {
         // rfind('-') removes only the last -suffix
         assert_eq!(
-            process_author_name("田中-太郎-xyz", false, true, false),
+            process_author_name("田中-太郎-xyz", None, false, true, false),
             "田中-太郎"
         );
     }
@@ -625,20 +674,20 @@ mod tests {
     #[test]
     fn author_name_empty_string_with_honorific() {
         // エッジケース: 空文字に「さん」付与
-        assert_eq!(process_author_name("", true, true, true), "さん");
+        assert_eq!(process_author_name("", None, true, true, true), "さん");
     }
 
     #[test]
     fn author_name_only_at_sign() {
         // エッジケース: "@"のみ → strip_at後は空文字
-        assert_eq!(process_author_name("@", true, true, true), "さん");
+        assert_eq!(process_author_name("@", None, true, true, true), "さん");
     }
 
     #[test]
     fn author_name_at_with_handle_suffix() {
         // エッジケース: "@user-handle" → @除去 → ハンドル除去 → "user" + さん
         assert_eq!(
-            process_author_name("@user-handle", true, true, true),
+            process_author_name("@user-handle", None, true, true, true),
             "userさん"
         );
     }
@@ -744,6 +793,7 @@ mod tests {
         // spec: "田中さん、¥500の、こんにちは"
         let result = build_tts_text(
             Some("田中"),
+            None,
             Some("¥500"),
             "こんにちは",
             true, // read_author_name
@@ -758,7 +808,18 @@ mod tests {
 
     #[test]
     fn build_text_no_author() {
-        let result = build_tts_text(None, None, "こんにちは", true, true, true, true, true, 200);
+        let result = build_tts_text(
+            None,
+            None,
+            None,
+            "こんにちは",
+            true,
+            true,
+            true,
+            true,
+            true,
+            200,
+        );
         assert_eq!(result, "こんにちは");
     }
 
@@ -766,6 +827,7 @@ mod tests {
     fn build_text_author_name_disabled() {
         let result = build_tts_text(
             Some("田中"),
+            None,
             None,
             "こんにちは",
             false, // read_author_name disabled
@@ -782,6 +844,7 @@ mod tests {
     fn build_text_amount_disabled() {
         let result = build_tts_text(
             Some("田中"),
+            None,
             Some("¥500"),
             "テスト",
             true,
@@ -798,6 +861,7 @@ mod tests {
     fn build_text_with_at_prefix_author() {
         let result = build_tts_text(
             Some("@user123"),
+            None,
             None,
             "hello",
             true,
@@ -819,6 +883,7 @@ mod tests {
         // before enqueueing, so here we test with pre-formatted amount
         let result = build_tts_text(
             Some("@山田太郎-xyz"),
+            None,
             Some("¥500"),
             "こんにちは！",
             true,
@@ -837,6 +902,7 @@ mod tests {
         let result = build_tts_text(
             None,
             None,
+            None,
             "見て https://example.com ね",
             true,
             true,
@@ -852,7 +918,9 @@ mod tests {
     fn build_text_sanitize_then_truncate() {
         // spec: サニタイズ後のテキストに対してmax_text_lengthが適用される
         let long_msg = format!("https://example.com/long {}", "あ".repeat(201));
-        let result = build_tts_text(None, None, &long_msg, true, true, true, true, true, 200);
+        let result = build_tts_text(
+            None, None, None, &long_msg, true, true, true, true, true, 200,
+        );
         let expected = format!("{}、以下省略", "あ".repeat(200));
         assert_eq!(result, expected);
     }
@@ -862,6 +930,7 @@ mod tests {
         // Verifies that -suffix is stripped in build_tts_text pipeline
         let result = build_tts_text(
             Some("@田中-abc"),
+            None,
             None,
             "テスト",
             true,
@@ -1036,6 +1105,7 @@ mod tests {
         let prefix = build_first_comment_prefix(true, "", Some(1));
         let tts_text = build_tts_text(
             Some("@山田太郎-xyz"),
+            None,
             Some("¥500"),
             "こんにちは",
             true,
@@ -1073,6 +1143,7 @@ mod tests {
             text: "テスト".to_string(),
             priority: TtsPriority::Normal,
             author_name: Some("テスター".to_string()),
+            author_reading: None,
             amount: None,
             in_stream_comment_count: Some(2),
             message_id: None,
@@ -1089,6 +1160,7 @@ mod tests {
             text: "テスト".to_string(),
             priority: TtsPriority::Normal,
             author_name: Some("テスター".to_string()),
+            author_reading: None,
             amount: None,
             in_stream_comment_count: Some(1),
             message_id: None,
@@ -1105,6 +1177,7 @@ mod tests {
             text: "テスト".to_string(),
             priority: TtsPriority::Normal,
             author_name: Some("テスター".to_string()),
+            author_reading: None,
             amount: None,
             in_stream_comment_count: Some(5),
             message_id: None,
@@ -1125,6 +1198,7 @@ mod tests {
                 text: "テスト".to_string(),
                 priority: TtsPriority::Normal,
                 author_name: None,
+                author_reading: None,
                 amount: None,
                 in_stream_comment_count: None,
                 message_id: None,
@@ -1191,11 +1265,32 @@ mod tests {
             text: "こんにちは".to_string(),
             priority: TtsPriority::Normal,
             author_name: Some("田中".to_string()),
+            author_reading: None,
             amount: None,
             in_stream_comment_count: None,
             message_id: None,
         };
         assert_eq!(speech_text(&config, &item), "田中さん、こんにちは");
+    }
+
+    #[test]
+    fn speech_text_reads_viewer_reading_instead_of_author_name() {
+        // spec: 配信者A の接続に視聴者X のコメント。X の読み仮名は「たなか」→ たなかさん
+        let config = TtsConfig {
+            add_honorific: true,
+            read_author_name: true,
+            ..TtsConfig::default()
+        };
+        let item = TtsQueueItem {
+            text: "こんにちは".to_string(),
+            priority: TtsPriority::Normal,
+            author_name: Some("@田中-abc".to_string()),
+            author_reading: Some("たなか".to_string()),
+            amount: None,
+            in_stream_comment_count: None,
+            message_id: None,
+        };
+        assert_eq!(speech_text(&config, &item), "たなかさん、こんにちは");
     }
 
     #[test]
@@ -1212,6 +1307,7 @@ mod tests {
             text: "こんにちは".to_string(),
             priority: TtsPriority::Normal,
             author_name: Some("田中".to_string()),
+            author_reading: None,
             amount: None,
             in_stream_comment_count: Some(1),
             message_id: None,
@@ -1231,6 +1327,7 @@ mod tests {
             text: text.to_string(),
             priority,
             author_name: None,
+            author_reading: None,
             amount: None,
             in_stream_comment_count: None,
             message_id: None,
@@ -1310,6 +1407,7 @@ mod tests {
                 text: "ノーマル".to_string(),
                 priority: TtsPriority::Normal,
                 author_name: None,
+                author_reading: None,
                 amount: None,
                 in_stream_comment_count: None,
                 message_id: None,
@@ -1320,6 +1418,7 @@ mod tests {
                 text: "スーパーチャット".to_string(),
                 priority: TtsPriority::SuperChat,
                 author_name: None,
+                author_reading: None,
                 amount: None,
                 in_stream_comment_count: None,
                 message_id: None,
@@ -1342,6 +1441,7 @@ mod tests {
                 text: "a".to_string(),
                 priority: TtsPriority::Normal,
                 author_name: None,
+                author_reading: None,
                 amount: None,
                 in_stream_comment_count: None,
                 message_id: None,
@@ -1352,6 +1452,7 @@ mod tests {
                 text: "b".to_string(),
                 priority: TtsPriority::Normal,
                 author_name: None,
+                author_reading: None,
                 amount: None,
                 in_stream_comment_count: None,
                 message_id: None,
@@ -1374,6 +1475,7 @@ mod tests {
                 text: "ノーマル".to_string(),
                 priority: TtsPriority::Normal,
                 author_name: None,
+                author_reading: None,
                 amount: None,
                 in_stream_comment_count: None,
                 message_id: None,
@@ -1384,6 +1486,7 @@ mod tests {
                 text: "メンバーシップ".to_string(),
                 priority: TtsPriority::Membership,
                 author_name: None,
+                author_reading: None,
                 amount: None,
                 in_stream_comment_count: None,
                 message_id: None,
@@ -1394,6 +1497,7 @@ mod tests {
                 text: "スーパーチャット".to_string(),
                 priority: TtsPriority::SuperChat,
                 author_name: None,
+                author_reading: None,
                 amount: None,
                 in_stream_comment_count: None,
                 message_id: None,
@@ -1468,6 +1572,7 @@ mod tests {
                     text: format!("アイテム{}", i),
                     priority: TtsPriority::Normal,
                     author_name: None,
+                    author_reading: None,
                     amount: None,
                     in_stream_comment_count: None,
                     message_id: None,
@@ -1574,6 +1679,7 @@ mod tests {
             text: text.to_string(),
             priority: TtsPriority::Normal,
             author_name: None,
+            author_reading: None,
             amount: None,
             in_stream_comment_count: None,
             message_id: None,
@@ -1712,6 +1818,7 @@ mod tests {
                 text: "読み上げ中".to_string(),
                 priority: TtsPriority::Normal,
                 author_name: None,
+                author_reading: None,
                 amount: None,
                 in_stream_comment_count: None,
                 message_id: None,
@@ -1934,6 +2041,7 @@ mod tests {
             text: text.to_string(),
             priority,
             author_name: Some("田中".to_string()),
+            author_reading: None,
             amount: None,
             in_stream_comment_count,
             message_id: Some(format!("msg-{text}")),

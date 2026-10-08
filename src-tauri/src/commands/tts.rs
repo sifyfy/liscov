@@ -170,6 +170,7 @@ pub async fn tts_speak(
         text,
         priority,
         author_name,
+        author_reading: None,
         amount,
         in_stream_comment_count: None,
         message_id: None,
