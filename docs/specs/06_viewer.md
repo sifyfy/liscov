@@ -15,6 +15,8 @@
 | 配信者A (UCaaa) | 視聴者X (UCxxx) | 150 | "たなか" |
 | 配信者B (UCbbb) | 視聴者X (UCxxx) | 10 | "タナカ" |
 
+複数の配信に同時に接続しているとき、チャット画面の視聴者パネルはクリックしたコメントが届いた接続の配信者のもとで視聴者を引き、保存する。上の例で配信者Bの接続に届いた X のコメントを開くと「タナカ」が出て、保存すると B のもとに書く（02_chat.md「視聴者情報パネル」の「どの配信者のもとで開くか」）。
+
 ### カスタム情報の管理
 
 | 操作 | 結果 |
@@ -245,6 +247,7 @@ pub struct BroadcasterChannel {
 - `viewer_profiles` は `(broadcaster_channel_id, channel_id)` の複合キーで一意性を保証
 - `viewer_custom_info` は `viewer_profile_id` で `viewer_profiles` と1:1対応
 - 配信者削除時は関連する全ての `viewer_profiles` が削除され、CASCADE削除で `viewer_custom_info` も削除される
+- チャット画面の視聴者パネルの配信者は `chatStore.broadcasterChannelIdOf(message)`（メッセージの `connection_id` から接続一覧の `broadcasterChannelId` を引く）で決める。`chatStore.broadcasterChannelId`（最初の接続）は使わない
 
 ## カスタム情報フィールド
 
