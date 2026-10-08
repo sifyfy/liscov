@@ -12,6 +12,8 @@ import { defineConfig } from '@playwright/test';
  */
 export default defineConfig({
   testDir: '.',
+  // utils/*.test.ts は E2E 基盤の vitest の単体テスト。Playwright の既定の testMatch は *.test.ts も拾うので、spec だけに絞る
+  testMatch: '**/*.spec.ts',
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: 1,
