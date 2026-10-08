@@ -26,9 +26,11 @@
 		"test:e2e:chat": "playwright test --config e2e/playwright.config.ts e2e/chat-basic.spec.ts e2e/chat-message-types.spec.ts e2e/chat-styling.spec.ts e2e/chat-viewer-panel.spec.ts",
 		"test:e2e:auth": "playwright test --config e2e/playwright.config.ts e2e/auth-flow.spec.ts",
 		"test:e2e:ws": "playwright test --config e2e/playwright.config.ts e2e/websocket.spec.ts",
+		"design:capture": "playwright test --config e2e/playwright.capture.config.ts",
 		"test:e2e:ci": "playwright test --config e2e/playwright.config.ts --grep-invert @external"
 	},
 	"devDependencies": {
+		"@axe-core/playwright": "^4.13.0",
 		"@eslint/js": "^10.0.1",
 		"@playwright/test": "^1.60.0",
 		"@stryker-mutator/core": "^9.6.1",

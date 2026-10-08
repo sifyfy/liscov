@@ -54,6 +54,23 @@ pnpm exec playwright test --config e2e/playwright.config.ts
 2. **認証状態表示**: ログイン後の状態が正しく表示されることを確認
 3. **ログアウト**: ログアウト後の状態が正しく表示されることを確認
 
+## デザインの撮影
+
+テストではなく、デザインの診断・批評に使うスクリーンショットを撮る。主要な画面を、データの状態
+(未接続・空・通常・長い名前・スパチャ連続・大量・視聴者情報) × テーマ (ダーク/ライト) × 幅 (360/640/1024px) で撮る。
+
+```bash
+pnpm design:capture
+```
+
+- 起動・接続は通常の E2E と同じ (テスト用のアプリ名 `liscov-test`・モックサーバー)。prebuilt の成果物を使うので、
+  frontend を変えたら先に `pnpm test:e2e:build`
+- 出力は `.tmp/design-capture/latest/` (git に入れない)。フォルダ名は `LISCOV_DESIGN_CAPTURE_LABEL` で変えられる
+- 各状態・テーマで、axe によるコントラストの検査 (WCAG 2 AA) も行い、`<名前>-<テーマ>.axe.json` に残す。
+  `incomplete` (背景がグラデーションなどで判定できなかったもの) は合格ではない
+- 撮影の本体は `design-capture.capture.ts`、流すデータは `utils/design-capture-data.ts` (名前・本文はすべて架空)。
+  ファイル名が `*.spec.ts` ではないので、通常の E2E では動かない。設定は `playwright.capture.config.ts`
+
 ## 環境変数
 
 | 変数名 | 説明 |
