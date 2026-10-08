@@ -374,6 +374,11 @@ function createChatStore() {
       if (connections.size === 0) return null;
       return [...connections.values()][0].broadcasterChannelId || null;
     },
+    // そのメッセージが届いた接続の配信者チャンネル ID（視聴者情報パネル用。TTS が読み仮名を引く配信者と同じ）
+    // 接続が一覧に無い（切断済み）か配信者が分からなければ null
+    broadcasterChannelIdOf(message: ChatMessage): string | null {
+      return connections.get(Number(message.connection_id))?.broadcasterChannelId || null;
+    },
     get chatMode() {
       return chatMode;
     },
