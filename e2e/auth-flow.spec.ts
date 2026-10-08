@@ -2,7 +2,7 @@ import { test, expect } from './utils/fixtures';
 import type { BrowserContext, Page, Browser } from '@playwright/test';
 import { log } from './utils/logger';
 import {
-  MOCK_SERVER_URL,
+  mockServerUrl,
   setupTestEnvironment,
   teardownTestEnvironment,
   killTauriApp,
@@ -42,7 +42,7 @@ test.describe('Authentication Feature (01_auth.md)', () => {
     mainPage = connection.page;
 
     // Set auth state to unauthenticated so app starts in logged out state
-    await fetch(`${MOCK_SERVER_URL}/set_auth_state`, {
+    await fetch(`${mockServerUrl()}/set_auth_state`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_valid: false }),
@@ -184,10 +184,10 @@ test.describe('Authentication Feature (01_auth.md)', () => {
       // by confirming the mock server receives a fresh login page visit
 
       // Reset mock server state to track new login page visits
-      await fetch(`${MOCK_SERVER_URL}/reset`, { method: 'POST' });
+      await fetch(`${mockServerUrl()}/reset`, { method: 'POST' });
 
       // Verify login_page_visits is 0 after reset
-      const initialStatus = await fetch(`${MOCK_SERVER_URL}/status`);
+      const initialStatus = await fetch(`${mockServerUrl()}/status`);
       const initialData = (await initialStatus.json()) as { login_page_visits: number };
       expect(initialData.login_page_visits).toBe(0);
 
@@ -209,7 +209,7 @@ test.describe('Authentication Feature (01_auth.md)', () => {
       // existing SAPISID without visiting the login page at all.
       // login_page_visits > 0 proves the auth window visited the login page,
       // which means cookies were properly cleared.
-      const statusResponse = await fetch(`${MOCK_SERVER_URL}/status`);
+      const statusResponse = await fetch(`${mockServerUrl()}/status`);
       const status = (await statusResponse.json()) as { login_page_visits: number };
       log.debug('Mock server status after re-login', status);
 

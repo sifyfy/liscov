@@ -2,7 +2,7 @@ import { test, expect } from './utils/fixtures';
 import type { Page, Browser } from '@playwright/test';
 import { log } from './utils/logger';
 import {
-  MOCK_SERVER_URL,
+  mockServerUrl,
   setupTestEnvironment,
   teardownTestEnvironment,
   resetMockServer,
@@ -44,7 +44,7 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
     test('should display member names in member-accent color and non-member names in accent color', async () => {
       // Connect to stream
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
@@ -138,7 +138,7 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
     test('should toggle timestamp display', async () => {
       // Connect to stream and add message
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
@@ -210,7 +210,7 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
     test('should display member message with green styling', async () => {
       // Connect to stream
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
@@ -244,7 +244,7 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
     test('should display author icon', async () => {
       // Connect to stream
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
@@ -278,7 +278,7 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
 
       // Connect to stream with long title
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
 
       // Find the title element (look for <div> containing part of the long title)
@@ -328,7 +328,7 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
     test('should display a moderately long author name wider than the former 200px cap without truncation', async () => {
       // Connect to stream
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
@@ -368,7 +368,7 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
     test('should ellipsize an over-long author name while keeping the member badge visible and the row from overflowing', async () => {
       // Connect to stream
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 

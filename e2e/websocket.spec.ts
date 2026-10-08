@@ -3,7 +3,7 @@ import type { BrowserContext, Page, Browser } from '@playwright/test';
 import { WebSocket } from 'ws';
 import { log } from './utils/logger';
 import {
-  MOCK_SERVER_URL,
+  mockServerUrl,
   setupTestEnvironment,
   teardownTestEnvironment,
   resetMockServer,
@@ -287,7 +287,7 @@ test.describe('WebSocket API (03_websocket.md)', () => {
     // spec: 03_websocket.md「Reaction」— ライブリアクションの更新を差分で配信する
     test('should receive live reactions as Reaction through WebSocket API', async () => {
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_reaction_ws`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_reaction_ws`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
@@ -320,7 +320,7 @@ test.describe('WebSocket API (03_websocket.md)', () => {
 
     test('should receive text message through WebSocket API', async () => {
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
@@ -370,7 +370,7 @@ test.describe('WebSocket API (03_websocket.md)', () => {
 
     test('should receive SuperChat message with correct format', async () => {
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
@@ -418,7 +418,7 @@ test.describe('WebSocket API (03_websocket.md)', () => {
 
     test('should receive membership message with milestone_months', async () => {
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
@@ -455,7 +455,7 @@ test.describe('WebSocket API (03_websocket.md)', () => {
 
     test('should receive membership gift message with gift_count', async () => {
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
@@ -493,7 +493,7 @@ test.describe('WebSocket API (03_websocket.md)', () => {
   test.describe('Message Format Verification (03_websocket.md spec)', () => {
     test('should have correct ChatMessage structure', async () => {
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
@@ -575,7 +575,7 @@ test.describe('WebSocket API (03_websocket.md)', () => {
       await resetMockServer();
 
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 

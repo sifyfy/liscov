@@ -4,7 +4,8 @@ import { defineConfig } from '@playwright/test';
  * Playwright config for E2E testing the actual Tauri application.
  *
  * This config connects to a running Tauri app via CDP (Chrome DevTools Protocol).
- * WebView2 must be started with --remote-debugging-port enabled.
+ * The CDP port is chosen by WebView2 (--remote-debugging-port=0) and read from DevToolsActivePort,
+ * so that E2E runs in multiple worktrees do not interfere (docs/decisions/005_e2e_worktree_isolation.md).
  *
  * Usage: `pnpm test:e2e` (builds, then runs). The mock server, the static frontend
  * server and the Tauri app are started by setupTestEnvironment() in utils/test-helpers.ts.
@@ -28,13 +29,8 @@ export default defineConfig({
   },
   projects: [
     {
+      // CDP の接続先は起動ごとに変わるので、utils/test-helpers.ts の connectToApp() が接続する (ADR-005)
       name: 'tauri-webview',
-      use: {
-        // Connect to WebView2 via CDP
-        connectOptions: {
-          wsEndpoint: 'ws://127.0.0.1:9222',
-        },
-      },
     },
   ],
 });

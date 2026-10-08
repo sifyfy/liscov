@@ -27,6 +27,7 @@
 | 未設定（本番） | `.window-state.json` |
 | `liscov-tauri` | `.window-state.json` |
 | `liscov-test` | `.window-state.liscov-test.json` |
+| `liscov-test-1a2b3c4d`（E2E。ワークツリーごとの名前） | `.window-state.liscov-test-1a2b3c4d.json` |
 
 E2E がウィンドウのサイズ・位置を変えたり、ファイルを消したりしても、本番のウィンドウ状態は変わらない。
 
@@ -166,5 +167,5 @@ tauri::Builder::default()
 
 ### テストデータ分離
 
-E2E は `LISCOV_APP_NAME=liscov-test` で起動するので、ウィンドウ状態は `.window-state.liscov-test.json` に保存される。
+E2E は `LISCOV_APP_NAME=liscov-test-<ワークツリー ID>` で起動するので（ADR-005）、ウィンドウ状態は `.window-state.liscov-test-<ワークツリー ID>.json` に保存される。
 テスト開始時はこのファイルだけを削除してクリーンな状態で始める。本番の `.window-state.json` には触れない。

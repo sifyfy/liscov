@@ -144,6 +144,7 @@ fn validate_continuation_token(token: &str) -> TokenValidation {
 #[command(name = "mock_server")]
 #[command(about = "HTTP mock server for YouTube InnerTube API")]
 struct Args {
+    /// 0 なら OS が空きポートを選ぶ (E2E はこれを使い、実際のポートを標準出力から読む)
     #[arg(short, long, default_value = "3456")]
     port: u16,
     #[arg(short, long)]
@@ -349,8 +350,13 @@ async fn main() {
     });
     let routes = build_routes(state);
     let addr: SocketAddr = ([127, 0, 0, 1], args.port).into();
-    println!("Mock server on http://{}", addr);
-    warp::serve(routes).run(addr).await;
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .unwrap_or_else(|e| panic!("failed to bind {addr}: {e}"));
+    // --port 0 なら OS が選んだポートになる。E2E はこの行から実際の URL を読む (e2e/README.md「並列実行と分離」)
+    let bound = listener.local_addr().expect("bound address");
+    println!("Mock server on http://{bound}");
+    warp::serve(routes).incoming(listener).run().await;
 }
 
 fn build_routes(

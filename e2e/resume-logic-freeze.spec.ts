@@ -2,7 +2,7 @@ import { test, expect } from './utils/fixtures';
 import type { BrowserContext, Page, Browser } from '@playwright/test';
 import { log } from './utils/logger';
 import {
-  MOCK_SERVER_URL,
+  mockServerUrl,
   TEST_APP_NAME,
   TEST_KEYRING_SERVICE,
   cleanupTestData,
@@ -39,9 +39,9 @@ async function startTauriAppForMockServer(): Promise<void> {
   await startTauriAppWithEnv({
     LISCOV_APP_NAME: TEST_APP_NAME,
     LISCOV_KEYRING_SERVICE: TEST_KEYRING_SERVICE,
-    LISCOV_AUTH_URL: `${MOCK_SERVER_URL}/?auto_login=true`,
-    LISCOV_SESSION_CHECK_URL: `${MOCK_SERVER_URL}/youtubei/v1/account/account_menu`,
-    LISCOV_YOUTUBE_BASE_URL: MOCK_SERVER_URL,
+    LISCOV_AUTH_URL: `${mockServerUrl()}/?auto_login=true`,
+    LISCOV_SESSION_CHECK_URL: `${mockServerUrl()}/youtubei/v1/account/account_menu`,
+    LISCOV_YOUTUBE_BASE_URL: mockServerUrl(),
   });
 }
 
@@ -251,11 +251,11 @@ test.describe('Mock Server - Application Logic Freeze Detection', () => {
   });
 
   test('should detect application logic freeze after disconnect/reconnect with mock server', async () => {
-    const streamUrl = `${MOCK_SERVER_URL}/watch?v=test_logic_freeze`;
+    const streamUrl = `${mockServerUrl()}/watch?v=test_logic_freeze`;
 
     // 自動メッセージを有効化（実YouTube相当の流量）
     log.info('Enabling auto-messages (20 per poll to match real YouTube)...');
-    await fetch(`${MOCK_SERVER_URL}/set_auto_message`, {
+    await fetch(`${mockServerUrl()}/set_auto_message`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled: true, messages_per_poll: 20 }),
@@ -302,7 +302,7 @@ test.describe('Mock Server - Application Logic Freeze Detection', () => {
 
     if (!afterReconnect.works) {
       await mainPage.screenshot({ path: 'logic-freeze-mock-server.png' });
-      await fetch(`${MOCK_SERVER_URL}/set_auto_message`, {
+      await fetch(`${mockServerUrl()}/set_auto_message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: false }),
@@ -313,7 +313,7 @@ test.describe('Mock Server - Application Logic Freeze Detection', () => {
     log.info('Test passed: Application logic works after reconnect');
 
     // クリーンアップ
-    await fetch(`${MOCK_SERVER_URL}/set_auto_message`, {
+    await fetch(`${mockServerUrl()}/set_auto_message`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled: false }),
@@ -322,17 +322,17 @@ test.describe('Mock Server - Application Logic Freeze Detection', () => {
   });
 
   test('should detect application logic freeze with network delay simulation', async () => {
-    const streamUrl = `${MOCK_SERVER_URL}/watch?v=test_delay`;
+    const streamUrl = `${mockServerUrl()}/watch?v=test_delay`;
 
     // ネットワーク遅延シミュレーション
     log.info('Configuring network delay simulation...');
-    await fetch(`${MOCK_SERVER_URL}/set_stream_state`, {
+    await fetch(`${mockServerUrl()}/set_stream_state`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ watch_delay_ms: 500, chat_delay_ms: 200 }),
     });
 
-    await fetch(`${MOCK_SERVER_URL}/set_auto_message`, {
+    await fetch(`${mockServerUrl()}/set_auto_message`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled: true, messages_per_poll: 10 }),
@@ -373,12 +373,12 @@ test.describe('Mock Server - Application Logic Freeze Detection', () => {
     log.info(`After reconnect with delay: ${afterReconnect.details}`);
 
     // 遅延設定をリセット
-    await fetch(`${MOCK_SERVER_URL}/set_stream_state`, {
+    await fetch(`${mockServerUrl()}/set_stream_state`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ watch_delay_ms: 0, chat_delay_ms: 0 }),
     });
-    await fetch(`${MOCK_SERVER_URL}/set_auto_message`, {
+    await fetch(`${mockServerUrl()}/set_auto_message`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled: false }),
@@ -394,7 +394,7 @@ test.describe('Mock Server - Application Logic Freeze Detection', () => {
   });
 
   test('should detect logic freeze with multiple disconnect/reconnect cycles', async () => {
-    const streamUrl = `${MOCK_SERVER_URL}/watch?v=test_multi_cycle`;
+    const streamUrl = `${mockServerUrl()}/watch?v=test_multi_cycle`;
 
     // 接続
     await connectToStream(mainPage, streamUrl);

@@ -2,7 +2,7 @@ import { test, expect } from './utils/fixtures';
 import type { BrowserContext, Page, Browser } from '@playwright/test';
 import { log } from './utils/logger';
 import {
-  MOCK_SERVER_URL,
+  mockServerUrl,
   setupTestEnvironment,
   teardownTestEnvironment,
   resetMockServer,
@@ -46,7 +46,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
     test('should display SuperChat with amount', async () => {
       // Connect to stream
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
@@ -73,7 +73,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
     test('should display membership message', async () => {
       // Connect to stream
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
@@ -101,7 +101,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
 
       // Connect to stream
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
@@ -157,7 +157,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
 
       // Connect to stream
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
@@ -195,7 +195,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
     test('should display SuperSticker with amount', async () => {
       // Connect to stream
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
@@ -221,7 +221,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
 
       // Connect to stream
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
@@ -247,7 +247,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
 
       // Connect to stream
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
@@ -272,7 +272,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
   test.describe('バッジ (02_chat.md「バッジの種類」)', () => {
     test('モデレーターのコメントにモデレーターのバッジが表示される', async () => {
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
@@ -313,7 +313,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
 
       // Connect to stream
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=hashtag_title_test`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=hashtag_title_test`);
       await mainPage.locator('button:has-text("開始")').click();
 
       // Wait for connection
@@ -347,7 +347,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
 
       // Connect to stream
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=special_title_test`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=special_title_test`);
       await mainPage.locator('button:has-text("開始")').click();
 
       // Wait for connection
@@ -377,7 +377,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
     test('should display messages with hashtags correctly', async () => {
       // Connect to stream
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
@@ -400,7 +400,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
     test('should display messages with various special characters', async () => {
       // Connect to stream
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
@@ -422,7 +422,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
     test('should display messages with URLs', async () => {
       // Connect to stream
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
@@ -443,7 +443,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
     test('should display long messages without breaking layout', async () => {
       // Connect to stream
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
@@ -474,7 +474,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
     test('初見さんの最初のメッセージに🎉初見さんバッジと#1が表示される', async () => {
       // Connect to stream
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_first_time`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_first_time`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
@@ -501,7 +501,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
     test('初見さんの2回目のメッセージにはmutedな初見さんと#2が表示される', async () => {
       // Connect to stream
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_repeat`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_repeat`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
@@ -542,7 +542,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
     test('異なるユーザーはそれぞれ初見バッジが表示される', async () => {
       // Connect to stream
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_multi_first`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_multi_first`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
@@ -588,7 +588,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
   test.describe('ギフト（ジュエル）', () => {
     async function connect(videoId: string) {
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=${videoId}`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=${videoId}`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
     }

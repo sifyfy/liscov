@@ -2,7 +2,7 @@ import { test, expect } from './utils/fixtures';
 import type { BrowserContext, Page, Browser } from '@playwright/test';
 import { log } from './utils/logger';
 import {
-  MOCK_SERVER_URL,
+  mockServerUrl,
   setupTestEnvironment,
   teardownTestEnvironment,
   resetMockServer,
@@ -37,7 +37,7 @@ async function connectToMockStream(page: Page): Promise<void> {
   await waitForAppReady(page);
   const urlInput = page.locator('input[placeholder*="youtube.com"]');
   await expect(urlInput).toBeVisible({ timeout: 10000 });
-  await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+  await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
   await page.locator('button:has-text("開始")').click();
   await expect(page.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 }

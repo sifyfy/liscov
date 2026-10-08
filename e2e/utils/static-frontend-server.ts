@@ -2,21 +2,24 @@
  * E2E 用の静的フロントエンドサーバー
  *
  * debug ビルドの exe はフロントを埋め込まず devUrl (http://localhost:5173) を読む。
- * そこへこのワークツリーの build/ を配信するのがこのサーバーの役割。
+ * このサーバーは空きポートでこのワークツリーの build/ を配信し、WebView2 の --host-resolver-rules で
+ * devUrl の接続先をここへ付け替える (e2e/README.md「並列実行と分離」、ADR-005)。
  */
 
+import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as http from 'http';
+import type { AddressInfo } from 'net';
 import * as path from 'path';
 
 /**
- * localhost の両方のループバックで listen する。
- * WebView2 (Chromium) は localhost を ::1 から試すので、127.0.0.1 だけだと
- * ::1 で待つ pnpm dev の Vite (host 未指定時は ::1 に bind する) に黙って読み込まれる。
+ * 起動ごとの ID を返すパス。ページからこれを fetch して、付け替えが効いて自分のサーバーから読み込まれたかを確かめる
  */
-const LOOPBACK_HOSTS = ['127.0.0.1', '::1'] as const satisfies readonly string[];
+export const FRONTEND_SERVER_ID_PATH = '/__liscov_e2e_server_id';
 
 export interface StaticFrontendServer {
+  readonly port: number;
+  readonly serverId: string;
   readonly close: () => Promise<void>;
 }
 
@@ -72,32 +75,17 @@ function closeServer(server: http.Server): Promise<void> {
   });
 }
 
-function listenOn(server: http.Server, port: number, host: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    server.once('error', (error: NodeJS.ErrnoException) => {
-      if (error.code !== 'EADDRINUSE') {
-        reject(error);
-        return;
-      }
-      // 再利用はしない: 先客が別ワークツリーや pnpm dev だと、このワークツリーの build/ ではないフロントを検証してしまう
-      reject(
-        new Error(
-          `E2E のフロントエンド配信用のポート ${host}:${port} が使用中です。` +
-            '`pnpm dev` / `pnpm tauri dev` の Vite や、別のワークツリーの E2E が動いていないか確認し、止めてから再実行してください。' +
-            `使用中のプロセスは \`Get-NetTCPConnection -LocalPort ${port} -State Listen\` の OwningProcess で確認できます。`,
-          { cause: error }
-        )
-      );
-    });
-    server.listen(port, host, () => resolve());
-  });
-}
-
 /**
- * rootDir を 127.0.0.1 と ::1 の両方の port で配信する。どちらかが使用中なら両方とも閉じて失敗する
+ * rootDir を 127.0.0.1 の空きポートで配信する。ポートは OS が選ぶので、別のワークツリーの E2E や pnpm dev とぶつからない
  */
-export async function startStaticFrontendServer(rootDir: string, port: number): Promise<StaticFrontendServer> {
-  const handler: http.RequestListener = (req, res) => {
+export async function startStaticFrontendServer(rootDir: string): Promise<StaticFrontendServer> {
+  const serverId = randomUUID();
+  const server = http.createServer((req, res) => {
+    if (new URL(req.url ?? '/', 'http://127.0.0.1').pathname === FRONTEND_SERVER_ID_PATH) {
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(serverId);
+      return;
+    }
     const filePath = resolveStaticFrontendFile(rootDir, req.url);
     try {
       const content = fs.readFileSync(filePath);
@@ -107,19 +95,13 @@ export async function startStaticFrontendServer(rootDir: string, port: number): 
       res.writeHead(404);
       res.end('Not found');
     }
-  };
+  });
 
-  const servers = LOOPBACK_HOSTS.map(() => http.createServer(handler));
-  const close = async () => {
-    await Promise.all(servers.filter((server) => server.listening).map(closeServer));
-  };
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => resolve());
+  });
+  const { port } = server.address() as AddressInfo;
 
-  const results = await Promise.allSettled(servers.map((server, i) => listenOn(server, port, LOOPBACK_HOSTS[i])));
-  const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
-  if (failure) {
-    await close();
-    throw failure.reason;
-  }
-
-  return { close };
+  return { port, serverId, close: () => closeServer(server) };
 }

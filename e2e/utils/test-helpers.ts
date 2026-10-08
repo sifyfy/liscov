@@ -8,22 +8,46 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { log } from './logger';
-import { startStaticFrontendServer, type StaticFrontendServer } from './static-frontend-server';
+import {
+  acquireWorktreeLock,
+  describeFrontendServerMismatch,
+  parseDevToolsActivePort,
+  parseMockServerUrl,
+  releaseWorktreeLock,
+  webView2BrowserArguments,
+  worktreeTestName,
+  type DevToolsEndpoint,
+  type FrontendServerIdFetch,
+} from './e2e-isolation';
+import { FRONTEND_SERVER_ID_PATH, startStaticFrontendServer, type StaticFrontendServer } from './static-frontend-server';
 
-export const CDP_URL = 'http://127.0.0.1:9222';
-export const MOCK_SERVER_URL = 'http://127.0.0.1:3456';
 export const PROJECT_DIR = process.cwd().replace(/[\\/]e2e$/, '');
 
-// テスト分離: 認証情報・データに専用名前空間を使用
-export const TEST_APP_NAME = 'liscov-test';
-export const TEST_KEYRING_SERVICE = 'liscov-test';
+// テスト分離: 認証情報・データに専用名前空間を使用する。ワークツリーごとに分け、並列に走らせても干渉しない（ADR-005）
+export const TEST_APP_NAME = worktreeTestName(PROJECT_DIR);
+export const TEST_KEYRING_SERVICE = TEST_APP_NAME;
 
-// モックサーバープロセス参照
+// 同じワークツリーの E2E の二重実行を検知するロック（e2e/README.md「同じワークツリーでの二重実行」）
+const WORKTREE_LOCK_PATH = path.join(PROJECT_DIR, '.tmp', 'e2e.lock');
+
+// モックサーバープロセス参照と、標準出力から読んだ実際の URL（ポートは起動ごとに OS が選ぶ）
 let mockServerProcess: ChildProcess | null = null;
+let mockServerBaseUrl: string | null = null;
 
-// Tauriアプリプロセス参照
+// Tauriアプリプロセス参照と、DevToolsActivePort から読んだ CDP のエンドポイント
 let tauriProcess: ChildProcess | null = null;
+let cdpEndpoint: DevToolsEndpoint | null = null;
 let staticFrontendServer: StaticFrontendServer | null = null;
+
+/**
+ * モックサーバーの URL（例: http://127.0.0.1:51234）。ポートは起動ごとに変わるので、起動後に呼ぶ
+ */
+export function mockServerUrl(): string {
+  if (mockServerBaseUrl === null) {
+    throw new Error('モックサーバーがまだ起動していません。startMockServer() / setupTestEnvironment() の後に呼んでください。');
+  }
+  return mockServerBaseUrl;
+}
 
 // プリビルドバイナリのパス（Windowsのみ対応）
 // 注: workspace 化により cargo build の出力先は <root>/target/ (旧: src-tauri/target/)
@@ -31,8 +55,19 @@ const PREBUILT_TAURI_APP_PATH = path.join(PROJECT_DIR, 'target', 'debug', 'lisco
 const PREBUILT_MOCK_SERVER_PATH = path.join(PROJECT_DIR, 'target', 'debug', 'mock-server.exe');
 const PREBUILT_FRONTEND_INDEX_PATH = path.join(PROJECT_DIR, 'build', 'index.html');
 const PREBUILT_FRONTEND_DIR = path.join(PROJECT_DIR, 'build');
-// src-tauri/tauri.conf.json の devUrl (http://localhost:5173) と一致させる
-const PREBUILT_FRONTEND_PORT = 5173;
+// debug ビルドの exe が読む URL (http://localhost:5173)。WebView2 の接続先をここから静的サーバーへ付け替える
+const DEV_URL: string = JSON.parse(fs.readFileSync(path.join(PROJECT_DIR, 'src-tauri', 'tauri.conf.json'), 'utf8')).build.devUrl;
+
+/**
+ * このワークツリーの E2E のロックを取る。共有の名前空間に触る操作（アプリ・モックの停止と起動、テストデータ・資格情報の削除）の
+ * 先頭で呼ぶ。setupTestEnvironment() を通らない spec もあるので、個々の関数の中で呼ぶ。
+ * 停止もロックの後にするのは、exe のパスで止める killProcessesStartedFrom() が同じワークツリーの別の実行のアプリまで止めるため
+ */
+function ensureWorktreeLock(): void {
+  acquireWorktreeLock(WORKTREE_LOCK_PATH, process.pid);
+}
+// ワーカーのプロセスが終わるときに解放する（落ちて残ったロックは、次の実行が PID の生死で判定する）
+process.once('exit', () => releaseWorktreeLock(WORKTREE_LOCK_PATH, process.pid));
 
 /**
  * テスト用プロセス環境変数を生成する
@@ -88,6 +123,7 @@ export function getTestDataDirs(): string[] {
  * テストデータディレクトリを削除する
  */
 export async function cleanupTestData(): Promise<void> {
+  ensureWorktreeLock();
   const dirs = getTestDataDirs();
   for (const dir of dirs) {
     if (fs.existsSync(dir)) {
@@ -101,6 +137,7 @@ export async function cleanupTestData(): Promise<void> {
  * テスト用キーリング認証情報を削除する（Windows資格情報マネージャー）
  */
 export async function cleanupTestCredentials(): Promise<void> {
+  ensureWorktreeLock();
   if (process.platform === 'win32') {
     try {
       execSync(`cmdkey /delete:youtube_credentials.${TEST_KEYRING_SERVICE} 2>nul`, { stdio: 'ignore' });
@@ -112,13 +149,19 @@ export async function cleanupTestCredentials(): Promise<void> {
 }
 
 /**
- * このワークツリーの build/ を devUrl のポートで配信する（同じプロセス内で起動済みなら何もしない）
- * ポートが使用中なら再利用せず失敗する（static-frontend-server.ts を参照）
+ * このワークツリーの build/ を空きポートで配信する（同じプロセス内で起動済みならそれを返す）
  */
-async function ensureStaticFrontendServer(): Promise<void> {
-  if (staticFrontendServer) return;
-  staticFrontendServer = await startStaticFrontendServer(PREBUILT_FRONTEND_DIR, PREBUILT_FRONTEND_PORT);
-  log.debug(`Static frontend server started on port ${PREBUILT_FRONTEND_PORT}`);
+async function ensureStaticFrontendServer(): Promise<StaticFrontendServer> {
+  if (!staticFrontendServer) {
+    staticFrontendServer = await startStaticFrontendServer(PREBUILT_FRONTEND_DIR);
+    log.debug(`Static frontend server started on port ${staticFrontendServer.port}`);
+  }
+  return staticFrontendServer;
+}
+
+/** WebView2 が CDP の実際のポートを書くファイル（WEBVIEW2_USER_DATA_FOLDER の下の EBWebView にできる） */
+function getDevToolsActivePortPath(): string {
+  return path.join(getTestWebViewDataDir(), 'EBWebView', 'DevToolsActivePort');
 }
 
 /**
@@ -211,13 +254,15 @@ export function killProcessesStartedFrom(exePath: string): void {
 }
 
 export async function killTauriApp(): Promise<void> {
+  ensureWorktreeLock();
   log.debug('Killing Tauri app...');
+  const cdpPort = cdpEndpoint?.port;
   if (tauriProcess) {
     if (process.platform === 'win32' && tauriProcess.pid) {
       // まず graceful shutdown を試行
       try {
         execSync(`taskkill /PID ${tauriProcess.pid} 2>nul`, { stdio: 'ignore' });
-        await waitForPortFree(9222, 3000);
+        if (cdpPort) await waitForPortFree(cdpPort, 3000);
       } catch { /* 既に終了していた場合は無視 */ }
       // プロセスツリーごと強制終了（フォールバック）
       try {
@@ -231,45 +276,65 @@ export async function killTauriApp(): Promise<void> {
   // 孤立プロセスのフォールバック: テスト用の実行ファイルから起動したものだけをプロセスツリーごと強制終了
   killProcessesStartedFrom(PREBUILT_TAURI_APP_PATH);
   // CDP ポートが解放されるまで待機（Windowsではプロセスツリー終了が遅延するため長めに設定）
-  await waitForPortFree(9222, 10000);
+  if (cdpPort) await waitForPortFree(cdpPort, 10000);
+  cdpEndpoint = null;
 }
 
 /**
- * CDPが利用可能になるまで待機する
+ * WebView2 が DevToolsActivePort を書くのを待ち、CDP のエンドポイントを返す
+ *
+ * 起動前に消したファイルを、自分のデータフォルダから読むので、別のワークツリーのアプリに繋がることはない
  */
-export async function waitForCDP(timeout = 120000): Promise<void> {
-  return waitForCDPWithProcess(timeout);
-}
-
-async function waitForCDPWithProcess(timeout = 120000, process?: ChildProcess, tailLines: string[] = []): Promise<void> {
+async function waitForDevToolsEndpoint(timeout: number, process: ChildProcess, tailLines: string[]): Promise<DevToolsEndpoint> {
   const start = Date.now();
-  log.debug('Waiting for CDP to be available...');
-  let lastError = '';
+  const portFile = getDevToolsActivePortPath();
+  log.debug(`Waiting for ${portFile}...`);
   while (Date.now() - start < timeout) {
-    const exitInfo = process ? describeExitedProcess('Tauri app', process, tailLines) : null;
+    const exitInfo = describeExitedProcess('Tauri app', process, tailLines);
     if (exitInfo) {
       throw new Error(`CDP not available because ${exitInfo}`);
     }
 
-    try {
-      const response = await fetch(`${CDP_URL}/json/version`);
-      if (response.ok) {
-        log.debug(`CDP available after ${Date.now() - start}ms`);
-        return;
-      }
-    } catch (e) {
-      lastError = e instanceof Error ? e.message : String(e);
+    const endpoint = fs.existsSync(portFile) ? parseDevToolsActivePort(fs.readFileSync(portFile, 'utf8')) : null;
+    if (endpoint) {
+      log.debug(`CDP available on port ${endpoint.port} after ${Date.now() - start}ms`);
+      return endpoint;
     }
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
-  throw new Error(`CDP not available after ${timeout}ms. Last error: ${lastError}`);
+  throw new Error(
+    `CDP not available after ${timeout}ms: ${portFile} が書かれませんでした。` +
+      '同じ WebView2 のデータフォルダを使うアプリが既に動いていないか確認してください (e2e/README.md のトラブルシューティング)。'
+  );
+}
+
+/**
+ * ページが devUrl へ遷移するのを待ち、E2E の静的サーバーから読み込まれたかを確かめる（違えば例外で止める）
+ */
+async function verifyFrontendServer(page: Page, expectedId: string): Promise<void> {
+  const deadline = Date.now() + 30000;
+  while (page.url() === 'about:blank' && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  const idUrl = new URL(FRONTEND_SERVER_ID_PATH, DEV_URL).href;
+  const result: FrontendServerIdFetch = await page
+    .evaluate(async (url) => (await fetch(url, { cache: 'no-store' })).text(), idUrl)
+    .then(
+      (body): FrontendServerIdFetch => ({ kind: 'fetched', body }),
+      (error: unknown): FrontendServerIdFetch => ({ kind: 'failed', error: error instanceof Error ? error.message : String(error) })
+    );
+  const mismatch = describeFrontendServerMismatch(result, expectedId);
+  if (mismatch) throw new Error(`${mismatch} (ページの URL: ${page.url()})`);
 }
 
 /**
  * CDPでTauriアプリに接続する
  */
 export async function connectToApp(): Promise<{ browser: Browser; context: BrowserContext; page: Page }> {
-  const browser = await chromium.connectOverCDP(CDP_URL);
+  if (!cdpEndpoint || !staticFrontendServer) {
+    throw new Error('Tauri アプリがまだ起動していません。startTauriApp() / startTauriAppWithEnv() の後に呼んでください。');
+  }
+  const browser = await chromium.connectOverCDP(cdpEndpoint.browserWsUrl);
   const contexts = browser.contexts();
 
   if (contexts.length === 0) {
@@ -283,20 +348,25 @@ export async function connectToApp(): Promise<{ browser: Browser; context: Brows
     throw new Error('No pages found in context');
   }
 
+  await verifyFrontendServer(pages[0], staticFrontendServer.serverId);
   log.info('Connected to Tauri app');
   return { browser, context, page: pages[0] };
 }
 
 /**
  * テスト分離用の環境変数でTauriアプリを起動する
+ *
+ * モックサーバーが起動していなければ起動する。モックを使わない spec でも、アプリの YouTube 宛ての通信
+ * (起動時のセッション確認など) は本物の YouTube や別のワークツリーのモックではなく、このモックに向ける
  */
 export async function startTauriApp(): Promise<void> {
+  if (mockServerBaseUrl === null) await startMockServer();
   await startTauriAppWithEnv({
     LISCOV_APP_NAME: TEST_APP_NAME,
     LISCOV_KEYRING_SERVICE: TEST_KEYRING_SERVICE,
-    LISCOV_AUTH_URL: `${MOCK_SERVER_URL}/?auto_login=true`,
-    LISCOV_SESSION_CHECK_URL: `${MOCK_SERVER_URL}/youtubei/v1/account/account_menu`,
-    LISCOV_YOUTUBE_BASE_URL: MOCK_SERVER_URL,
+    LISCOV_AUTH_URL: `${mockServerUrl()}/?auto_login=true`,
+    LISCOV_SESSION_CHECK_URL: `${mockServerUrl()}/youtubei/v1/account/account_menu`,
+    LISCOV_YOUTUBE_BASE_URL: mockServerUrl(),
   });
 }
 
@@ -304,6 +374,7 @@ export async function startTauriApp(): Promise<void> {
  * 指定した環境変数でTauriアプリを起動する（プリビルドバイナリ必須）
  */
 export async function startTauriAppWithEnv(extraEnv: NodeJS.ProcessEnv): Promise<void> {
+  ensureWorktreeLock();
   if (!fs.existsSync(PREBUILT_TAURI_APP_PATH)) {
     throw new Error(
       `プリビルドバイナリが見つかりません: ${PREBUILT_TAURI_APP_PATH}\n` +
@@ -317,14 +388,17 @@ export async function startTauriAppWithEnv(extraEnv: NodeJS.ProcessEnv): Promise
     );
   }
 
-  await ensureStaticFrontendServer();
+  const frontend = await ensureStaticFrontendServer();
+  // 前回の実行のポートを読まないよう、WebView2 が書き直すファイルを先に消す
+  fs.rmSync(getDevToolsActivePortPath(), { force: true });
 
   const env = getTestProcessEnv({
     ...extraEnv,
-    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=9222',
+    // CDP は空きポートで開き、devUrl の接続先はこのワークツリーの静的サーバーへ付け替える（ADR-005）
+    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: webView2BrowserArguments(DEV_URL, frontend.port),
     // WebView2 のデータ (Cookie・キャッシュ) は identifier で決まるフォルダにあり、LISCOV_APP_NAME では分かれない。
-    // 本番と同じフォルダだと、本番の liscov が起動中はブラウザプロセスを共有して上の引数が効かず CDP が開かない。
-    // テスト用のフォルダに分ける（環境変数がアプリの指定より優先される）
+    // 同じフォルダを使うアプリ (本番の liscov や別のワークツリーの E2E) が起動中だとブラウザプロセスを共有し、
+    // 上の引数が効かず CDP が開かない。ワークツリーごとのフォルダに分ける（環境変数がアプリの指定より優先される）
     WEBVIEW2_USER_DATA_FOLDER: getTestWebViewDataDir(),
   });
 
@@ -351,20 +425,22 @@ export async function startTauriAppWithEnv(extraEnv: NodeJS.ProcessEnv): Promise
     }
   });
 
-  await waitForCDPWithProcess(120000, tauriProcess, tauriTail.lines);
+  cdpEndpoint = await waitForDevToolsEndpoint(120000, tauriProcess, tauriTail.lines);
 }
 
 /**
  * モックサーバープロセスを終了する（graceful shutdown → 強制終了の順で試行）
  */
 export async function killMockServer(): Promise<void> {
+  ensureWorktreeLock();
+  const port = mockServerBaseUrl ? Number(new URL(mockServerBaseUrl).port) : null;
   if (mockServerProcess) {
     log.debug('Stopping mock server...');
     if (process.platform === 'win32' && mockServerProcess.pid) {
       // まず graceful shutdown を試行
       try {
         execSync(`taskkill /PID ${mockServerProcess.pid} 2>nul`, { stdio: 'ignore' });
-        await waitForPortFree(3456, 3000);
+        if (port) await waitForPortFree(port, 3000);
       } catch { /* 既に終了していた場合は無視 */ }
       // プロセスツリーごと強制終了（フォールバック）
       try {
@@ -377,13 +453,17 @@ export async function killMockServer(): Promise<void> {
   }
   // 孤立プロセスのフォールバック（テスト用の実行ファイルから起動したものだけ）
   killProcessesStartedFrom(PREBUILT_MOCK_SERVER_PATH);
-  await waitForPortFree(3456, 3000);
+  if (port) await waitForPortFree(port, 3000);
+  mockServerBaseUrl = null;
 }
 
 /**
  * モックサーバーを起動する（プリビルドバイナリ必須）
+ *
+ * ポートは OS に選ばせ (--port 0)、実際の URL は自分が起動したプロセスの標準出力から読む（ADR-005）
  */
 export async function startMockServer(): Promise<void> {
+  ensureWorktreeLock();
   log.info('Starting mock server...');
   await killMockServer();
 
@@ -395,15 +475,22 @@ export async function startMockServer(): Promise<void> {
   }
 
   const mockTail = buildProcessTailRecorder();
+  let stdout = '';
+  let url: string | null = null;
 
-  mockServerProcess = spawn(PREBUILT_MOCK_SERVER_PATH, [], {
+  mockServerProcess = spawn(PREBUILT_MOCK_SERVER_PATH, ['--port', '0'], {
     cwd: PROJECT_DIR,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
   const mockLog = log.child('mock_server');
   mockServerProcess.stdout?.on('data', (data) => {
-    const msg = data.toString().trim();
+    const text = data.toString();
+    if (url === null) {
+      stdout += text;
+      url = parseMockServerUrl(stdout);
+    }
+    const msg = text.trim();
     mockTail.push(msg);
     if (msg) mockLog.debug(msg);
   });
@@ -422,18 +509,21 @@ export async function startMockServer(): Promise<void> {
     const exitInfo = describeExitedProcess('mock_server', mockServerProcess, mockTail.lines);
     if (exitInfo) throw new Error(`モックサーバーが起動できませんでした: ${exitInfo}`);
 
-    try {
-      const response = await fetch(`${MOCK_SERVER_URL}/status`);
-      if (response.ok) {
-        log.debug(`Mock server ready after ${Date.now() - start}ms`);
-        return;
+    if (url !== null) {
+      try {
+        const response = await fetch(`${url}/status`);
+        if (response.ok) {
+          mockServerBaseUrl = url;
+          log.debug(`Mock server ready on ${url} after ${Date.now() - start}ms`);
+          return;
+        }
+      } catch {
+        // まだ起動していない
       }
-    } catch {
-      // まだ起動していない
     }
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
-  throw new Error(`Mock server not ready after ${timeout}ms`);
+  throw new Error(`Mock server not ready after ${timeout}ms (URL: ${url ?? '標準出力にまだ出ていない'})`);
 }
 
 /**
@@ -441,7 +531,7 @@ export async function startMockServer(): Promise<void> {
  */
 export async function resetMockServer(): Promise<void> {
   log.debug('Resetting mock server state...');
-  await fetch(`${MOCK_SERVER_URL}/reset`, { method: 'POST' });
+  await fetch(`${mockServerUrl()}/reset`, { method: 'POST' });
 }
 
 /**
@@ -463,7 +553,7 @@ export async function addMockMessage(message: {
   /** 同じ id を再び積むと YouTube の再送を再現できる。省略時はモックが採番する */
   id?: string;
 }): Promise<void> {
-  await fetch(`${MOCK_SERVER_URL}/add_message`, {
+  await fetch(`${mockServerUrl()}/add_message`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(message),
@@ -475,7 +565,7 @@ export async function addMockMessage(message: {
  * durationSeconds が 2 以上なら、残りは 0 件のバケットになる
  */
 export async function addMockReaction(counts: Record<string, number>, durationSeconds = 1): Promise<void> {
-  await fetch(`${MOCK_SERVER_URL}/add_reaction`, {
+  await fetch(`${mockServerUrl()}/add_reaction`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ counts, duration_seconds: durationSeconds }),
@@ -589,7 +679,7 @@ export async function disconnectAndInitialize(page: Page): Promise<void> {
  */
 export async function connectToMockStream(page: Page, videoId = 'test_video_123', expectedTitle = 'Mock Live'): Promise<void> {
   const urlInput = page.locator('input[placeholder*="youtube.com"]');
-  await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=${videoId}`);
+  await urlInput.fill(`${mockServerUrl()}/watch?v=${videoId}`);
   await page.locator('button:has-text("開始")').click();
   // 接続リストにエントリが追加されるのを待つ
   await expect(page.getByText(expectedTitle).first()).toBeVisible({ timeout: 10000 });
@@ -615,7 +705,7 @@ export async function setStreamState(state: {
   /** 次に接続する配信の配信者チャンネル ID（空文字で既定に戻す）。接続ごとに配信者を分けるときに使う */
   channel_id?: string;
 }): Promise<void> {
-  await fetch(`${MOCK_SERVER_URL}/set_stream_state`, {
+  await fetch(`${mockServerUrl()}/set_stream_state`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(state),
@@ -628,6 +718,8 @@ export async function setStreamState(state: {
  * 自分が起動したプロセスの PID だけを止める。名前で止めると本番のアプリまで止めてしまう。
  */
 export async function forceKillTauriApp(): Promise<void> {
+  ensureWorktreeLock();
+  const cdpPort = cdpEndpoint?.port;
   if (tauriProcess?.pid) {
     if (process.platform === 'win32') {
       try {
@@ -638,7 +730,8 @@ export async function forceKillTauriApp(): Promise<void> {
     }
     tauriProcess = null;
   }
-  await waitForPortFree(9222, 10000);
+  if (cdpPort) await waitForPortFree(cdpPort, 10000);
+  cdpEndpoint = null;
 }
 
 /**

@@ -1,7 +1,7 @@
 import { test, expect } from './utils/fixtures';
 import type { Page, Browser } from '@playwright/test';
 import {
-  MOCK_SERVER_URL,
+  mockServerUrl,
   setupTestEnvironment,
   teardownTestEnvironment,
   resetMockServer,
@@ -41,12 +41,12 @@ test.describe('接続中の操作 (02_chat.md)', () => {
   const urlInput = () => mainPage.locator('input[placeholder*="youtube.com"]');
 
   async function startConnecting(videoId: string) {
-    await fetch(`${MOCK_SERVER_URL}/set_stream_state`, {
+    await fetch(`${mockServerUrl()}/set_stream_state`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ watch_delay_ms: 3000 }),
     });
-    await urlInput().fill(`${MOCK_SERVER_URL}/watch?v=${videoId}`);
+    await urlInput().fill(`${mockServerUrl()}/watch?v=${videoId}`);
     await mainPage.locator('button:has-text("開始")').click();
     await expect(mainPage.locator('button:has-text("接続中...")')).toBeVisible();
   }
