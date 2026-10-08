@@ -5,10 +5,10 @@
    * 全トークンを並べ、撮影 (pnpm design:capture) してシフィさんが値を判断するための画面。
    * アプリのナビゲーションからは開けない。/design-tokens に直接移動して開く。
    * ここでは --sys-* と Tailwind に登録した名前だけを使う (生の色値・任意値を使わない)。
-   * コメントの見本の font-size: 13px は、利用者の設定 (message_font_size) の既定の代わり。
+   * コメントの行は本物の ChatMessage を固定の架空データ (design-proto/data.ts の ROW_SAMPLES) で並べる。fontSize 13 は利用者の設定の既定の代わり。
    */
-
-  type Row = Readonly<{ name: string; body: string; meta: string }>;
+  import ChatMessage from '$lib/components/chat/ChatMessage.svelte';
+  import { ROW_SAMPLES, originOf } from '../design-proto/data';
 
   const SAMPLE = '初見です！よろしくお願いします 0123456789 ¥10,000 さっきの謎解き、本棚の順番は左から赤・青・緑';
 
@@ -21,14 +21,6 @@
     { cls: 'text-title', label: 'title 16/24 700' },
     { cls: 'text-display', label: 'display 20/28 700' },
   ] as const;
-
-  // 優先順位 2〜5 の行の見本 (名前・本文は架空)
-  const rows = {
-    first: { name: 'みかん箱', body: '初見です！よろしくお願いします', meta: '#1' },
-    newRepeat: { name: 'Kaito_92', body: 'さっきのところ右の道だったかも', meta: '#3' },
-    returning: { name: '夜ふかし研究会', body: 'こんばんは！', meta: '#1' },
-    normal: { name: 'しおこんぶ', body: 'このボス強すぎない？', meta: '#12' },
-  } as const satisfies Record<string, Row>;
 </script>
 
 <main class="min-h-screen bg-surface p-6 font-ui text-fg-1">
@@ -57,25 +49,6 @@
           <span class={t.cls}>コメント 1,234 件・同接 567</span>
         </div>
       {/each}
-    </div>
-  </section>
-
-  <!-- コメントの段階 (既定の 13px) -->
-  <section class="mt-8">
-    <h2 class="text-label text-fg-2">文字の段階 (コメント、基準 13px)</h2>
-    <div class="mt-3 bg-surface-low" style="font-size: 13px">
-      {#each Object.values(rows) as r (r.name)}
-        <div class="border-b border-outline-variant px-3 py-1 text-chat-body">
-          <span class="font-bold">{r.name}</span>
-          <span class="ml-2">{r.body}</span>
-          <span class="ml-2 text-chat-meta text-fg-3 tabular-nums">{r.meta} 21:34</span>
-        </div>
-      {/each}
-      <div class="px-3 py-1 text-chat-body">
-        <span class="text-chat-amount tabular-nums">¥10,000</span>
-        <span class="ml-2 font-bold">ねむいペンギン</span>
-        <span class="ml-2">次の配信も楽しみにしてます</span>
-      </div>
     </div>
   </section>
 
@@ -123,29 +96,13 @@
     </div>
   </section>
 
-  <!-- ハイライト -->
+  <!-- コメントの行 (本物のコンポーネント。見た目の回帰テスト e2e/chat-row-visual.spec.ts が撮る) -->
   <section class="mt-8">
-    <h2 class="text-label text-fg-2">ハイライト (優先順位 2〜4)</h2>
-    <div class="mt-3 max-w-md bg-surface-low" style="font-size: 13px">
-      <div class="bg-highlight/20 px-3 py-1 text-chat-body">
-        <span class="rounded-control bg-highlight px-1 text-chat-meta font-bold text-surface">初見</span>
-        <span class="ml-1 font-bold">{rows.first.name}</span>
-        <span class="ml-2">{rows.first.body}</span>
-      </div>
-      <div class="px-3 py-1 text-chat-body">
-        <span class="rounded-control border border-highlight px-1 text-chat-meta text-highlight">初見</span>
-        <span class="ml-1 font-bold">{rows.newRepeat.name}</span>
-        <span class="ml-2">{rows.newRepeat.body}</span>
-      </div>
-      <div class="px-3 py-1 text-chat-body">
-        <span class="text-chat-meta text-highlight">●</span>
-        <span class="ml-1 font-bold">{rows.returning.name}</span>
-        <span class="ml-2">{rows.returning.body}</span>
-      </div>
-      <div class="px-3 py-1 text-chat-body">
-        <span class="font-bold">{rows.normal.name}</span>
-        <span class="ml-2">{rows.normal.body}</span>
-      </div>
+    <h2 class="text-label text-fg-2">コメントの行 (優先順位 1〜5・種類・相手の配信)</h2>
+    <div data-testid="row-samples" class="mt-3 max-w-lg bg-surface-low py-1">
+      {#each ROW_SAMPLES as message (message.id)}
+        <ChatMessage {message} fontSize={13} showTimestamps origin={originOf(message)} />
+      {/each}
     </div>
   </section>
 </main>

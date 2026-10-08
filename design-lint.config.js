@@ -12,7 +12,11 @@
  */
 
 /** トークンに移し終えたファイル (リポジトリの直下からのパス) */
-export const DESIGN_MIGRATED = ['src/routes/design-tokens/+page.svelte', 'src/routes/design-proto/**'];
+export const DESIGN_MIGRATED = [
+	'src/routes/design-tokens/+page.svelte',
+	'src/routes/design-proto/**',
+	'src/lib/components/chat/ChatMessage.svelte',
+];
 
 const DOC = 'docs/design/tokens.md';
 

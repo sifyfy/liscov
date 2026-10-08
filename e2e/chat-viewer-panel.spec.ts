@@ -66,7 +66,11 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
       await expect(mainPage.locator('h2:has-text("視聴者情報")')).toBeVisible({ timeout: 5000 });
 
       // Should show the user name
-      await expect(mainPage.locator('p:has-text("ClickableUser")')).toBeVisible();
+      // (一覧の行にも同じ名前があるので、パネルの中に範囲を絞る)
+      const viewerPanel = mainPage.locator('.fixed.right-0').filter({
+        has: mainPage.locator('h2:has-text("視聴者情報")'),
+      });
+      await expect(viewerPanel.locator('p:has-text("ClickableUser")')).toBeVisible();
 
       // Close panel
       const closeButton = mainPage.locator('button:has-text("✕")');
@@ -129,13 +133,12 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
         has: mainPage.locator('text=ScrollMsg1')
       }).first();
 
-      // Wait for the highlight style to be applied (style attribute containing the highlight border)
-      // The highlight is applied via inline style: 'border: 2px solid var(--accent)'
+      // 仕様: 選択中の行は根に class outline-accent (outline 2px) が付く
       try {
-        await expect(highlightedMessage).toHaveAttribute('style', /border:\s*2px solid var\(--accent\)/, { timeout: 5000 });
+        await expect(highlightedMessage).toHaveClass(/outline-accent/, { timeout: 5000 });
       } catch {
         // If the highlight didn't appear, log debug info and skip the assertion
-        const styleAttr = await highlightedMessage.getAttribute('style');
+        const styleAttr = await highlightedMessage.getAttribute('class');
         const msgId = await highlightedMessage.getAttribute('data-message-id');
         log.debug(`Highlight timeout - style: "${styleAttr}", msgId: ${msgId}`);
 
@@ -491,10 +494,19 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
       await expect(readingInputAgain).toHaveValue('りーでぃんぐてすと', { timeout: 10000 });
 
       // Reading should also be displayed in the header
-      await expect(mainPage.getByText('(りーでぃんぐてすと)')).toBeVisible();
+      // (一覧の行の名前の横にも同じ表示が出るので、パネルの中に範囲を絞る)
+      const readingPanel = mainPage.locator('.fixed.right-0').filter({
+        has: mainPage.locator('h2:has-text("視聴者情報")'),
+      });
+      await expect(readingPanel.getByText('(りーでぃんぐてすと)')).toBeVisible();
 
       // Close panel
       await mainPage.locator('button:has-text("✕")').click();
+      await expect(mainPage.locator('h2:has-text("視聴者情報")')).not.toBeVisible({ timeout: 3000 });
+
+      // 仕様「1 行の形」: 読み仮名が登録されている視聴者は、一覧の行の名前の横にも出る
+      const readingRow = mainPage.locator('[data-message-id]').filter({ hasText: 'Test message for reading' }).first();
+      await expect(readingRow.getByText('(りーでぃんぐてすと)')).toBeVisible({ timeout: 5000 });
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
@@ -541,8 +553,14 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
 
       // The message should be highlighted
       const firstMsgElement = mainPage.locator('[data-message-id]').filter({ hasText: 'FIRST_TARGET_MSG' }).first();
-      const borderStyle = await firstMsgElement.evaluate((el) => window.getComputedStyle(el).border);
-      expect(borderStyle).toContain('solid');
+      // 選択の強調: class outline-accent と、実際に描画される outline 2px の実線
+      await expect(firstMsgElement).toHaveClass(/outline-accent/);
+      const outline = await firstMsgElement.evaluate((el) => {
+        const st = window.getComputedStyle(el);
+        return { style: st.outlineStyle, width: st.outlineWidth };
+      });
+      expect(outline.style).toBe('solid');
+      expect(outline.width).toBe('2px');
 
       // Close panel
       await mainPage.locator('button:has-text("✕")').click();
@@ -685,10 +703,10 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
 
       // The first message should now be visible (already confirmed above)
 
-      // Verify the message is highlighted (check for highlight color in any format)
-      const style = await firstMsgElement.getAttribute('style');
-      // The highlight is applied via var(--accent) CSS variable
-      expect(style).toMatch(/border:\s*2px solid var\(--accent\)/); // Highlight border color
+      // 選択の強調: 行の根に class outline-accent (outline 2px)
+      await expect(firstMsgElement).toHaveClass(/outline-accent/);
+      const outlineWidth = await firstMsgElement.evaluate((el) => window.getComputedStyle(el).outlineWidth);
+      expect(outlineWidth).toBe('2px');
 
       // Close panel
       await mainPage.locator('button:has-text("✕")').click();

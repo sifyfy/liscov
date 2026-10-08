@@ -72,6 +72,13 @@ pnpm design:capture
 - 撮影の本体は `design-capture.capture.ts`、流すデータは `utils/design-capture-data.ts` (名前・本文はすべて架空)。
   ファイル名が `*.spec.ts` ではないので、通常の E2E では動かない。設定は `playwright.capture.config.ts`
 
+### 見た目の回帰テスト
+
+撮影と違い、通常の E2E として動く。`chat-row-visual.spec.ts` が `/design-tokens` の「コメントの行」
+(本物の `ChatMessage` を固定の架空データ `src/routes/design-proto/data.ts` の `ROW_SAMPLES` で並べたもの) を
+幅 540 のダーク/ライトで撮り、`chat-row-visual.spec.ts-snapshots/` の基準と比べる。
+見た目を意図して変えたら、撮影で確かめてから `--update-snapshots` で基準を更新する。
+
 ## 環境変数
 
 Tauri アプリに渡す環境変数。`setupTestEnvironment()` が設定するので、手で設定する必要は無い。

@@ -42,6 +42,7 @@ function createMessage(id: string, overrides: Partial<ChatMessage> = {}): ChatMe
 		connection_id: BigInt(1),
 		platform: 'youtube',
 		broadcaster_name: 'TestBroadcaster',
+		author_reading: null,
 		...overrides,
 	};
 }

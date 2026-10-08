@@ -56,7 +56,7 @@ function contrast(a: string, b: string): number {
 }
 
 const SURFACES = ['surface', 'surface-low', 'surface-mid', 'surface-high', 'surface-highest'] as const;
-const FOREGROUNDS = ['fg-1', 'fg-2', 'accent', 'success', 'warning', 'error', 'highlight'] as const;
+const FOREGROUNDS = ['fg-1', 'fg-2', 'accent', 'success', 'warning', 'error', 'highlight', 'member-text'] as const;
 const REQUIRED = [...SURFACES, ...FOREGROUNDS, 'fg-3', 'outline', 'outline-variant'] as const;
 
 describe.each(['dark', 'light'] as const)('デザイントークン (%s)', (theme) => {

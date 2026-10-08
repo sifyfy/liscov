@@ -1,0 +1,3 @@
+# ts-rs の生成物は行末に空白を出す。生成物は手で直さない (make の生成物チェックが ts-rs の出力との一致を求める) ので、
+# pre-commit の空白検査 (git diff --cached --check) から外す
+src/lib/types/generated/** -whitespace

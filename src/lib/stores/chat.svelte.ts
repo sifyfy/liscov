@@ -9,6 +9,7 @@ import type {
   GuiReactionUpdate
 } from '$lib/types';
 import { SvelteMap } from 'svelte/reactivity';
+import type { MessageOrigin } from '$lib/design/priority';
 import * as chatApi from '$lib/tauri/chat';
 import { getConnectionColor } from '$lib/utils/connection-colors';
 import { applyReactionUpdate, emptyReactionMeter, restoreReactionMeter } from '$lib/utils/reactions';
@@ -25,6 +26,14 @@ function createChatStore() {
   let connections = $state<SvelteMap<number, FrontendConnectionState>>(new SvelteMap());
   let chatMode = $state<ChatMode>('top');
   let error = $state<string | null>(null);
+
+  // パネルで保存した読み仮名（キーは `配信者 channel_id:視聴者 channel_id`）。
+  // 届いた後に登録し直したものを、画面にある行にもすぐ出すため（02_chat.md「配信中の画面」1 行の形）
+  const readingOverrides = new SvelteMap<string, string>();
+  const readingKey = (broadcasterChannelId: string, channelId: string) => `${broadcasterChannelId}:${channelId}`;
+
+  // 主の配信の接続（最初の接続。Map は接続した順。最初を切断すれば次に古いものが繰り上がる）
+  let primaryConnection = $derived(connections.values().next().value);
 
   // 多接続ベースの派生状態
   let isConnected = $derived(connections.size > 0);
@@ -369,10 +378,21 @@ function createChatStore() {
     get isConnected() {
       return isConnected;
     },
-    // 最初の接続の配信者チャンネル ID（視聴者情報パネル・視聴者タブの既定の配信者）
+    // 主の配信（最初の接続）の配信者チャンネル ID（視聴者情報パネル・視聴者タブの既定の配信者）
     get broadcasterChannelId() {
-      if (connections.size === 0) return null;
-      return [...connections.values()][0].broadcasterChannelId || null;
+      return primaryConnection?.broadcasterChannelId || null;
+    },
+    // そのメッセージが主の配信のものか相手の配信のものか（02_chat.md「主の配信と相手の配信」）
+    originOf(message: ChatMessage): MessageOrigin {
+      return primaryConnection === undefined || Number(message.connection_id) === primaryConnection.id ? 'primary' : 'partner';
+    },
+    // パネルで保存した読み仮名。保存していなければ undefined（届いたときの author_reading を使う）
+    readingOf(message: ChatMessage): string | undefined {
+      const broadcasterChannelId = connections.get(Number(message.connection_id))?.broadcasterChannelId;
+      return broadcasterChannelId ? readingOverrides.get(readingKey(broadcasterChannelId, message.channel_id)) : undefined;
+    },
+    setViewerReading(broadcasterChannelId: string, channelId: string, reading: string) {
+      readingOverrides.set(readingKey(broadcasterChannelId, channelId), reading);
     },
     // そのメッセージが届いた接続の配信者チャンネル ID（視聴者情報パネル用。TTS が読み仮名を引く配信者と同じ）
     // 接続が一覧に無い（切断済み）か配信者が分からなければ null

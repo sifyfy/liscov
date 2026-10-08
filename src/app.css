@@ -48,6 +48,8 @@
 	/* 優先順位 1 のメンバーシップ・ギフト・マイルストーン (YouTube のメンバーの緑の系統)。白い文字を載せる */
 	--sys-member: #0b8043;
 	--sys-on-member: #ffffff;
+	/* メンバーのふだんのコメントの名前の色 (YouTube と同じく名前を緑にする。シフィさん、2026-10-09)。すべての面の上で 4.5:1 以上 */
+	--sys-member-text: #4cc26a;
 
 	--sys-highlight: var(--ref-violet-dark);
 
@@ -78,6 +80,8 @@
 	--sys-warning: #7a4f00;
 	--sys-error: #b3261e;
 
+	--sys-member-text: #13703a;
+
 	--sys-highlight: var(--ref-violet-light);
 
 	--sys-elevation-1: 0 2px 8px rgba(0, 0, 0, 0.12);
@@ -102,6 +106,7 @@
 	--color-error: var(--sys-error);
 	--color-member: var(--sys-member);
 	--color-on-member: var(--sys-on-member);
+	--color-member-text: var(--sys-member-text);
 	--color-highlight: var(--sys-highlight);
 	--shadow-elevation-1: var(--sys-elevation-1);
 	--shadow-elevation-2: var(--sys-elevation-2);
@@ -134,6 +139,12 @@
 	--text-chat-amount: 1.15em;
 	--text-chat-amount--line-height: 1.3;
 	--text-chat-amount--font-weight: 700;
+
+	/* コメントの文字に合わせて大きさが変わるもの (em。size-chat-icon などで使う) */
+	--spacing-chat-icon: 1.5em; /* 投稿者のアイコン */
+	--spacing-chat-gift: 1.75em; /* ギフトの画像 */
+	--spacing-chat-emoji: 1.3em; /* カスタム絵文字の高さ */
+	--spacing-chat-badge: 1em; /* YouTube のバッジの画像 */
 
 	/* 角丸 */
 	--radius-control: 4px;

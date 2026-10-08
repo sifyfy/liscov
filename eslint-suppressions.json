@@ -24,14 +24,6 @@
       "count": 2
     }
   },
-  "src/lib/components/chat/ChatMessage.svelte": {
-    "better-tailwindcss/no-restricted-classes": {
-      "count": 53
-    },
-    "no-restricted-syntax": {
-      "count": 9
-    }
-  },
   "src/lib/components/chat/ConnectionList.svelte": {
     "no-restricted-syntax": {
       "count": 1

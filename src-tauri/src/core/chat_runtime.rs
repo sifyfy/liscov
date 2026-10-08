@@ -95,7 +95,8 @@ pub trait MonitoringOutput: Send + Sync + 'static {
     /// その時点の生レスポンス保存設定（接続中の設定変更を反映するため、ポーリングごとに呼ぶ）
     fn save_config(&self) -> SaveConfig;
     /// 新しいメッセージを画面に送る
-    fn message(&self, message: &ChatMessage);
+    /// author_reading は viewer_reading で引いた、この接続の配信者のもとでの投稿者の読み仮名
+    fn message(&self, message: &ChatMessage, author_reading: Option<&str>);
     /// ライブリアクションの更新を画面に送る
     fn reaction(&self, update: &ReactionUpdate);
 }
@@ -283,8 +284,8 @@ pub async fn run_monitoring_loop(
         };
 
         for (msg, reading) in fresh.iter().zip(readings) {
-            // 画面に送る
-            output.message(msg);
+            // 画面に送る (読み仮名は読み上げと同じ値を名前の横に出す)
+            output.message(msg, reading.as_deref());
 
             // WebSocket クライアントへブロードキャスト
             {

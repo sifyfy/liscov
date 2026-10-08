@@ -37,6 +37,7 @@ function message(channelId: string, overrides: Partial<ChatMessage> = {}): ChatM
 		connection_id: BigInt(1),
 		platform: 'youtube',
 		broadcaster_name: 'B',
+		author_reading: null,
 		...overrides,
 	};
 }

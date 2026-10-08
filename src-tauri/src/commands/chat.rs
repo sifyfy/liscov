@@ -38,12 +38,13 @@ impl MonitoringOutput for TauriMonitoringOutput {
         self.app.state::<ConfigState>().get().raw_response
     }
 
-    fn message(&self, message: &ChatMessage) {
+    fn message(&self, message: &ChatMessage, author_reading: Option<&str>) {
         let gui_msg = GuiChatMessage::from_with_connection(
             message.clone(),
             self.connection_id,
             &self.platform,
             &self.broadcaster_name,
+            author_reading.map(str::to_string),
         );
         let _ = self.app.emit("chat:message", &gui_msg);
     }
@@ -167,6 +168,8 @@ pub struct GuiChatMessage {
     pub platform: String,
     /// 配信者名
     pub broadcaster_name: String,
+    /// この接続の配信者のもとで登録した、投稿者の読み仮名（02_chat.md「配信中の画面」。読み上げと同じ値）
+    pub author_reading: Option<String>,
 }
 
 impl From<ChatMessage> for GuiChatMessage {
@@ -268,23 +271,27 @@ impl From<ChatMessage> for GuiChatMessage {
             connection_id: 0,
             platform: "youtube".to_string(),
             broadcaster_name: String::new(),
+            author_reading: None,
         }
     }
 }
 
 impl GuiChatMessage {
-    /// 接続情報付きで ChatMessage から GuiChatMessage を生成する
+    /// 接続情報と投稿者の読み仮名付きで ChatMessage から GuiChatMessage を生成する
     pub fn from_with_connection(
         msg: ChatMessage,
         connection_id: u64,
         platform: &str,
         broadcaster_name: &str,
+        author_reading: Option<String>,
     ) -> Self {
-        let mut gui = Self::from(msg);
-        gui.connection_id = connection_id;
-        gui.platform = platform.to_string();
-        gui.broadcaster_name = broadcaster_name.to_string();
-        gui
+        Self {
+            connection_id,
+            platform: platform.to_string(),
+            broadcaster_name: broadcaster_name.to_string(),
+            author_reading,
+            ..Self::from(msg)
+        }
     }
 }
 
@@ -666,5 +673,27 @@ mod tests {
         };
         let gui = GuiChatMessage::from(msg);
         assert_eq!(gui.metadata.and_then(|m| m.gift_count), Some(5));
+    }
+
+    // 02_chat.md「配信中の画面」1 行の形: 読み仮名が登録されている視聴者は、名前の横に小さく出す
+    #[test]
+    fn gui_message_carries_reading_of_the_viewer() {
+        let gui = GuiChatMessage::from_with_connection(
+            text_message(),
+            1,
+            "youtube",
+            "配信者A",
+            Some("たなか".to_string()),
+        );
+        assert_eq!(gui.author_reading.as_deref(), Some("たなか"));
+        assert_eq!(gui.connection_id, 1);
+        assert_eq!(gui.broadcaster_name, "配信者A");
+    }
+
+    #[test]
+    fn gui_message_without_reading() {
+        let gui =
+            GuiChatMessage::from_with_connection(text_message(), 1, "youtube", "配信者A", None);
+        assert_eq!(gui.author_reading, None);
     }
 }

@@ -97,6 +97,8 @@
         notes: notes || null,
         customData: null
       });
+      // 画面にある同じ視聴者の行にも、すぐ読み仮名を出す（02_chat.md「配信中の画面」1 行の形）
+      chatStore.setViewerReading(broadcasterChannelId, viewer.channelId, reading);
       saveMessage = '保存しました';
       setTimeout(() => saveMessage = '', 3000);
     } catch (error) {

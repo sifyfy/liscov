@@ -384,6 +384,88 @@ describe('chatStore 接続管理', () => {
 	});
 
 	// =====================================================================
+	// originOf（主の配信と相手の配信）
+	// spec: 02_chat.md「配信中の画面」の「主の配信と相手の配信」
+	// =====================================================================
+	describe('originOf', () => {
+		function messageFrom(connectionId: number): ChatMessage {
+			return { id: 'm1', channel_id: 'UCxxx', connection_id: BigInt(connectionId) } as ChatMessage;
+		}
+
+		async function connect(...ids: number[]): Promise<void> {
+			const { connectToStream } = await import('$lib/tauri/chat');
+			for (const id of ids) {
+				vi.mocked(connectToStream).mockResolvedValueOnce(
+					makeSuccessResult({ connection_id: BigInt(id), broadcaster_channel_id: `UC${id}` })
+				);
+				await chatStore.connect(`https://example.com/${id}`);
+			}
+		}
+
+		it('接続が 1 つなら主の配信', async () => {
+			await connect(1);
+			expect(chatStore.originOf(messageFrom(1))).toBe('primary');
+		});
+
+		it('接続が 2 つなら、最初の接続が主の配信で、それ以外は相手の配信', async () => {
+			await connect(1, 2);
+			expect(chatStore.originOf(messageFrom(1))).toBe('primary');
+			expect(chatStore.originOf(messageFrom(2))).toBe('partner');
+		});
+
+		it('主の配信を切断して他が残ったら、残ったうちいちばん先に接続したものが主の配信', async () => {
+			const { disconnectStream } = await import('$lib/tauri/chat');
+			vi.mocked(disconnectStream).mockResolvedValue(undefined);
+			await connect(1, 2, 3);
+			await chatStore.disconnect(1);
+			expect(chatStore.originOf(messageFrom(2))).toBe('primary');
+			expect(chatStore.originOf(messageFrom(3))).toBe('partner');
+		});
+	});
+
+	// =====================================================================
+	// readingOf / setViewerReading（パネルで保存した読み仮名を行に出す）
+	// spec: 02_chat.md「配信中の画面」の「1 行の形」（読み仮名）
+	// =====================================================================
+	describe('readingOf', () => {
+		function messageFrom(connectionId: number, channelId = 'UCxxx'): ChatMessage {
+			return { id: 'm1', channel_id: channelId, connection_id: BigInt(connectionId) } as ChatMessage;
+		}
+
+		async function connectAandB(): Promise<void> {
+			const { connectToStream } = await import('$lib/tauri/chat');
+			vi.mocked(connectToStream)
+				.mockResolvedValueOnce(makeSuccessResult({ connection_id: BigInt(1), broadcaster_channel_id: 'UCaaa' }))
+				.mockResolvedValueOnce(makeSuccessResult({ connection_id: BigInt(2), broadcaster_channel_id: 'UCbbb' }));
+			await chatStore.connect('https://example.com/a');
+			await chatStore.connect('https://example.com/b');
+		}
+
+		it('パネルで保存していなければ undefined（届いたときの読み仮名を使う）', async () => {
+			await connectAandB();
+			expect(chatStore.readingOf(messageFrom(1))).toBeUndefined();
+		});
+
+		it('配信者 B のもとで保存した読み仮名は、B の接続に届いた同じ視聴者のコメントに出る', async () => {
+			await connectAandB();
+			chatStore.setViewerReading('UCbbb', 'UCxxx', 'タナカ');
+			expect(chatStore.readingOf(messageFrom(2))).toBe('タナカ');
+		});
+
+		it('配信者 B のもとで保存した読み仮名は、A の接続のコメントには使わない（配信者ごと）', async () => {
+			await connectAandB();
+			chatStore.setViewerReading('UCbbb', 'UCxxx', 'タナカ');
+			expect(chatStore.readingOf(messageFrom(1))).toBeUndefined();
+		});
+
+		it('空にして保存したら空文字（読み仮名を出さない）', async () => {
+			await connectAandB();
+			chatStore.setViewerReading('UCaaa', 'UCxxx', '');
+			expect(chatStore.readingOf(messageFrom(1))).toBe('');
+		});
+	});
+
+	// =====================================================================
 	// chat:connection イベント
 	// =====================================================================
 	describe('chat:connection イベント', () => {
@@ -1414,6 +1496,7 @@ describe('chatStore ジュエル数を取れない接続の注記', () => {
 			connection_id: BigInt(connectionId),
 			platform: 'youtube',
 			broadcaster_name: 'Alice',
+			author_reading: null,
 		};
 	}
 

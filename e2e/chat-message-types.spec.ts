@@ -60,11 +60,12 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
       });
 
       // Verify SuperChat is displayed with amount
-      await expect(mainPage.locator('text=SuperChatter')).toBeVisible({ timeout: 5000 });
-      await expect(mainPage.locator('text=Thanks for the stream!')).toBeVisible();
-      await expect(mainPage.locator('text=¥1,000')).toBeVisible();
-      // Check for Super Chat label (Japanese: スーパーチャット)
-      await expect(mainPage.locator('text=スーパーチャット')).toBeVisible();
+      // 仕様: 主の配信のスパチャは優先順位 1 の面。見出しに名前と金額、本文は面の中
+      const card = mainPage.locator('[data-message-id][data-priority="1"]').filter({ hasText: 'SuperChatter' });
+      await expect(card).toBeVisible({ timeout: 5000 });
+      await expect(card).toContainText('SuperChatter');
+      await expect(card).toContainText('¥1,000');
+      await expect(card.getByTestId('paid-body')).toHaveText('Thanks for the stream!');
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
@@ -97,7 +98,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
       // This test verifies that SuperChat messages use the color scheme from YouTube API
       // Per 02_chat.md spec:
       // - superchat_colors contains: header_background, header_text, body_background, body_text
-      // - These should be applied via inline styles for border-left-color and background gradient
+      // - 面の背景 = body_background、見出しの背景 = header_background (インライン style)
 
       // Connect to stream
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
@@ -114,39 +115,25 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
         tier: 'blue',
       });
 
-      // Find the SuperChat message element
-      const superchatMessage = mainPage.locator('[data-message-id]').filter({
-        has: mainPage.locator('text=BlueTierDonator')
-      }).first();
-
+      // 仕様: 面の背景は body_background、見出しの背景は header_background (どちらもインライン style)
+      const superchatMessage = mainPage.locator('[data-message-id][data-priority="1"]').filter({
+        hasText: 'BlueTierDonator',
+      });
       await expect(superchatMessage).toBeVisible({ timeout: 5000 });
 
-      // Get the inline style attribute - should contain YouTube's blue tier color
-      // Blue tier: 0x1565C0 = #1565C0 = rgb(21, 101, 192)
-      const styleAttr = await superchatMessage.getAttribute('style');
+      // Blue tier の header_background は 0x1565C0 = rgb(21, 101, 192)
+      // インライン style は要素の style 属性として読める (ブラウザが rgb に正規化することもある)
+      const headerStyle =
+        (await superchatMessage.locator('div[style*="background"]').filter({ hasText: 'BlueTierDonator' }).last().getAttribute('style')) ?? '';
+      log.debug(`SuperChat header style: "${headerStyle}"`);
+      expect(headerStyle.toLowerCase()).toMatch(/1565c0|rgb\(21,\s*101,\s*192\)/);
 
-      // The spec requires:
-      // border-left-color: {header_background}
-      // background: linear-gradient(135deg, {body_background}22 0%, {header_background}22 100%)
-      //
-      // If superchat_colors is properly parsed from YouTube API, it should contain:
-      // - The tier color (blue = #1565C0) in border-left-color
-      // - A gradient background using the tier color
-
-      log.debug(`SuperChat style attribute: "${styleAttr}"`);
-
-      // CRITICAL ASSERTION: Style must contain the YouTube-specified blue tier color
-      // Either as hex (#1565c0) or rgb (rgb(21, 101, 192))
-      // If this fails, it means superchat_colors is not being parsed from the API
-      expect(styleAttr).toBeTruthy();
-      const hasYouTubeColor = styleAttr?.includes('1565c0') ||
-                              styleAttr?.includes('1565C0') ||
-                              styleAttr?.match(/rgb\(21,\s*101,\s*192\)/);
-
-      expect(hasYouTubeColor).toBeTruthy();
-
-      // Additionally, should have a gradient background
-      expect(styleAttr).toContain('linear-gradient');
+      // 面 (カード) の背景は body_background。モックは header と body に同じティアの色を送るので同じ色になる。
+      // 本文 (paid-body) の文字色は body_text (青のティアは白。モックも YouTube と同じく、明るいティアでは黒を送る)
+      const cardStyle = (await superchatMessage.locator('div[style*="background"]').first().getAttribute('style')) ?? '';
+      expect(cardStyle.toLowerCase()).toMatch(/1565c0|rgb\(21,\s*101,\s*192\)/);
+      const bodyColor = await superchatMessage.getByTestId('paid-body').evaluate((el) => getComputedStyle(el).color);
+      expect(bodyColor).toBe('rgb(255, 255, 255)');
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
@@ -170,21 +157,16 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
         tier: 'red',
       });
 
-      // Find the red tier SuperChat
-      const redSuperchat = mainPage.locator('[data-message-id]').filter({
-        has: mainPage.locator('text=RedTierDonator')
-      }).first();
-
+      // 仕様: 見出しの背景に header_background (red は 0xD00000 = rgb(208, 0, 0))
+      const redSuperchat = mainPage.locator('[data-message-id][data-priority="1"]').filter({
+        hasText: 'RedTierDonator',
+      });
       await expect(redSuperchat).toBeVisible({ timeout: 5000 });
 
-      const redStyle = await redSuperchat.getAttribute('style');
-      log.debug(`Red tier SuperChat style: "${redStyle}"`);
-
-      // Red tier should have red color (0xD00000 = #D00000 = rgb(208, 0, 0))
-      expect(redStyle).toBeTruthy();
-      const hasRedColor = redStyle?.toLowerCase().includes('d00000') ||
-                          redStyle?.match(/rgb\(208,\s*0,\s*0\)/);
-      expect(hasRedColor).toBeTruthy();
+      const redStyle =
+        (await redSuperchat.locator('div[style*="background"]').filter({ hasText: 'RedTierDonator' }).last().getAttribute('style')) ?? '';
+      log.debug(`Red tier SuperChat header style: "${redStyle}"`);
+      expect(redStyle.toLowerCase()).toMatch(/d00000|rgb\(208,\s*0,\s*0\)/);
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
@@ -208,9 +190,10 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
       });
 
       // Verify SuperSticker is displayed
-      await expect(mainPage.locator('text=StickerUser')).toBeVisible({ timeout: 5000 });
-      await expect(mainPage.locator('text=¥1,500')).toBeVisible();
-      await expect(mainPage.locator('text=スーパーステッカー')).toBeVisible();
+      // 仕様: 主の配信のスーパーステッカーも優先順位 1 の面。見出しに名前と金額
+      const sticker = mainPage.locator('[data-message-id][data-priority="1"]').filter({ hasText: 'StickerUser' });
+      await expect(sticker).toBeVisible({ timeout: 5000 });
+      await expect(sticker).toContainText('¥1,500');
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
@@ -471,7 +454,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
   });
 
   test.describe('初見さんバッジと配信内コメント回数', () => {
-    test('初見さんの最初のメッセージに🎉初見さんバッジと#1が表示される', async () => {
+    test('新規さんの初回コメントは優先順位 2 (塗りの印「初見」) で #1 が表示される', async () => {
       // Connect to stream
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_first_time`);
@@ -487,18 +470,19 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
         is_member: false,
       });
 
-      // Find the message element and verify 🎉初見さん badge and #1 are present
+      // 仕様: 新規さんの初回 (is_first_time_viewer かつ #1) は優先順位 2、塗りの印「初見」
       const messageEl = mainPage.locator('[data-message-id]').filter({
         has: mainPage.locator('text=はじめてのコメントです'),
       }).first();
-      await expect(messageEl.getByText('🎉初見さん')).toBeVisible({ timeout: 5000 });
+      await expect(messageEl).toHaveAttribute('data-priority', '2', { timeout: 5000 });
+      await expect(messageEl.getByText('初見', { exact: true })).toBeVisible();
       await expect(messageEl.getByText('#1')).toBeVisible();
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
     });
 
-    test('初見さんの2回目のメッセージにはmutedな初見さんと#2が表示される', async () => {
+    test('新規さんの2回目は優先順位 3 (枠の印「初見」) で #2 が表示される', async () => {
       // Connect to stream
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_repeat`);
@@ -527,19 +511,19 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
 
       await expect(mainPage.locator('text=2回目のコメント')).toBeVisible({ timeout: 5000 });
 
-      // 2回目: 🎉初見さん(目立つ)は無いが、初見さん(muted)と#2が表示される
+      // 仕様: 新規さんの 2 回目以降は優先順位 3 (枠だけの印、背景なし)。#2 が続く
       const secondMessageEl = mainPage.locator('[data-message-id]').filter({
         has: mainPage.locator('text=2回目のコメント'),
       }).first();
-      await expect(secondMessageEl.getByText('🎉初見さん')).not.toBeVisible();
-      await expect(secondMessageEl.getByText('初見さん')).toBeVisible();
+      await expect(secondMessageEl).toHaveAttribute('data-priority', '3');
+      await expect(secondMessageEl.getByText('初見', { exact: true })).toBeVisible();
       await expect(secondMessageEl.getByText('#2')).toBeVisible();
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
     });
 
-    test('異なるユーザーはそれぞれ初見バッジが表示される', async () => {
+    test('異なるユーザーはそれぞれ優先順位 2 の「初見」と #1 が表示される', async () => {
       // Connect to stream
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_multi_first`);
@@ -564,19 +548,21 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
         is_member: false,
       });
 
-      // 両方に🎉初見さんと#1が表示されることを確認
+      // 両方に優先順位 2 の印「初見」と #1 が表示される
       const messageA = mainPage.locator('[data-message-id]').filter({
         has: mainPage.locator('text=UserAlphaのコメント'),
       }).first();
       await expect(messageA).toBeVisible({ timeout: 5000 });
-      await expect(messageA.getByText('🎉初見さん')).toBeVisible();
+      await expect(messageA).toHaveAttribute('data-priority', '2');
+      await expect(messageA.getByText('初見', { exact: true })).toBeVisible();
       await expect(messageA.getByText('#1')).toBeVisible();
 
       const messageB = mainPage.locator('[data-message-id]').filter({
         has: mainPage.locator('text=UserBetaのコメント'),
       }).first();
       await expect(messageB).toBeVisible();
-      await expect(messageB.getByText('🎉初見さん')).toBeVisible();
+      await expect(messageB).toHaveAttribute('data-priority', '2');
+      await expect(messageB.getByText('初見', { exact: true })).toBeVisible();
       await expect(messageB.getByText('#1')).toBeVisible();
 
       // Disconnect
@@ -664,7 +650,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
       const row = giftRow('@gift-stranger', 'Hiding');
       await expect(row).toBeVisible({ timeout: 5000 });
       await expect(row.getByText(/^#\d+$/)).toHaveCount(0);
-      await expect(row.getByText('初見さん')).toHaveCount(0);
+      await expect(row.getByText('初見')).toHaveCount(0);
 
       await row.click();
       await expect(mainPage.locator('h2:has-text("視聴者情報")')).toHaveCount(0);

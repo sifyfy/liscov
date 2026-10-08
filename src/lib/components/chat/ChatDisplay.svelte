@@ -129,23 +129,18 @@
       bind:this={vlist}
       data={chatStore.displayedMessages}
       getKey={messageKey}
-      style="flex: 1; overflow-y: auto; padding: 12px; font-size: {fontSize}px;"
+      style="flex: 1; overflow-y: auto;"
     >
       {#snippet children(message)}
-        {@const showSource = chatStore.connections.size >= 2}
-        {@const conn = chatStore.connections.get(Number(message.connection_id))}
-        <div class="mb-1">
-          <ChatMessageComponent
-            {message}
-            {fontSize}
-            {showTimestamps}
-            highlighted={highlightedMessageKey === messageKey(message)}
-            showSourceIndicator={showSource}
-            sourceColor={conn?.color}
-            sourceName={conn?.broadcasterName}
-            onClick={() => handleMessageClick(message)}
-          />
-        </div>
+        <ChatMessageComponent
+          {message}
+          {fontSize}
+          {showTimestamps}
+          origin={chatStore.originOf(message)}
+          reading={chatStore.readingOf(message)}
+          highlighted={highlightedMessageKey === messageKey(message)}
+          onClick={() => handleMessageClick(message)}
+        />
       {/snippet}
     </VList>
   {/if}

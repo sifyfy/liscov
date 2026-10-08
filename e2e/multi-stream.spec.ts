@@ -138,29 +138,39 @@ test.describe('Multi-Stream Connection', () => {
       await connectStream(mainPage, 'test_video_123', 'Mock Live');
       await connectStream(mainPage, 'test_video_456', 'Mock Live 2');
 
-      // 接続が2件の場合、メッセージに配信元インジケーターが表示される
-      const msg1Content = `IndicatorTest_${Date.now()}`;
-      await addMockMessage({
-        message_type: 'text',
-        author: 'IndicatorUser',
-        content: msg1Content,
-        channel_id: 'UC_indicator_user',
-      });
+      // 仕様「1 行の形」: 相手の配信 (2 つ目以降の接続) のコメントには名前の前に配信者名の札が付き、
+      // 主の配信 (最初の接続) の行には付かない。
+      // モックのキューは全接続共通で、積んだあと最初にポーリングした接続に届く。どちらの接続に届くかは
+      // 決まらないので、積む時刻を 130ms ずつずらして周期を掃き、両方の行が見えるまで積む
+      const runId = Date.now();
+      let sawPartner = false;
+      let sawPrimary = false;
+      for (let i = 0; i < 16 && !(sawPartner && sawPrimary); i++) {
+        await mainPage.waitForTimeout(i * 130);
+        const content = `IndicatorTest_${runId}_${i}`;
+        await addMockMessage({
+          message_type: 'text',
+          author: 'IndicatorUser',
+          content,
+          channel_id: 'UC_indicator_user',
+        });
+        const messageEl = mainPage.locator('[data-message-id]').filter({ hasText: content }).first();
+        await expect(messageEl).toBeVisible({ timeout: 8000 });
 
-      await expect(mainPage.locator(`text=${msg1Content}`)).toBeVisible({ timeout: 8000 });
-
-      // 配信元インジケーター（色ライン or ラベル）が表示される
-      // 2接続時は .source-indicator が表示される
-      const messageEl = mainPage.locator('[data-message-id]').filter({
-        has: mainPage.locator(`text=${msg1Content}`),
-      }).first();
-      await expect(messageEl).toBeVisible();
-
-      // .source-indicator の存在を確認
-      const hasIndicator = await messageEl.locator('.source-indicator').count() > 0;
-      log.debug(`Source indicator found: ${hasIndicator}`);
-      // インジケーターが表示されることを確認（2接続時は必須）
-      expect(hasIndicator).toBe(true);
+        const origin = await messageEl.getAttribute('data-origin');
+        const label = messageEl.locator('[data-testid="source-label"]');
+        log.debug(`${content} の data-origin: ${origin}`);
+        if (origin === 'partner') {
+          await expect(label).toHaveText('MockBroadcaster2');
+          sawPartner = true;
+        } else {
+          expect(origin).toBe('primary');
+          await expect(label).toHaveCount(0);
+          sawPrimary = true;
+        }
+      }
+      expect(sawPartner, '2 つ目の接続の行 (配信者名の札つき) が見えた').toBe(true);
+      expect(sawPrimary, '最初の接続の行 (札なし) が見えた').toBe(true);
 
       log.debug('配信元インジケーターの表示が確認された');
     });
@@ -193,8 +203,9 @@ test.describe('Multi-Stream Connection', () => {
         await addMockMessage({ message_type: 'text', author: `PanelViewer${i}`, content, channel_id: channelId });
         const messageEl = mainPage.locator('[data-message-id]').filter({ hasText: content }).first();
         await expect(messageEl).toBeVisible({ timeout: 8000 });
-        const source = await messageEl.locator('.source-label').textContent();
-        log.debug(`${content} は ${source} の接続に届いた`);
+        // 札があるのは相手の配信 (2 つ目の接続) の行だけ。主の配信の行には無い
+        const source = await messageEl.locator('[data-testid="source-label"]').textContent({ timeout: 500 }).catch(() => null);
+        log.debug(`${content} は ${source ?? '主の配信'} の接続に届いた`);
         if (source?.trim() === 'MockBroadcaster2') target = { content, channelId };
       }
       expect(target, '12 件とも接続1 に届いた').not.toBeNull();

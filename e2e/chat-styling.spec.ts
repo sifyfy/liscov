@@ -41,7 +41,7 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
   });
 
   test.describe('Author Name Color Coding', () => {
-    test('should display member names in member-accent color and non-member names in accent color', async () => {
+    test('should display member names in member-text color and non-member names in fg-1 color', async () => {
       // Connect to stream
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
@@ -66,16 +66,28 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
       // Wait for first message
       await expect(mainPage.getByText(nonMemberName).first()).toBeVisible({ timeout: 5000 });
 
-      // Check non-member color - should use var(--accent) CSS variable
-      // Dark theme: #6fb8d9 = rgb(111, 184, 217)
+      // 仕様 (tokens.md): 通常の名前は fg-1。ダークテーマ (E2E の既定) は #ededf0 = rgb(237, 237, 240)
       const nonMemberMessage = mainPage.locator('[data-message-id]').filter({
         has: mainPage.locator(`text=${nonMemberContent}`)
       }).first();
-      const nonMemberAuthor = nonMemberMessage.locator('span').filter({ hasText: nonMemberName }).first();
+      const nonMemberAuthor = nonMemberMessage.getByTestId('author-name');
       const nonMemberColor = await nonMemberAuthor.evaluate(el => getComputedStyle(el).color);
-      expect(nonMemberColor).toMatch(/rgb\(111,\s*184,\s*217\)/);
+      expect(nonMemberColor).toMatch(/rgb\(237,\s*237,\s*240\)/);
 
-      // Add member message
+      // メンバーのコメントを 2 回送る。仕様: 新規さんの初回の行 (優先順位 2) は薄い背景の上で緑が
+      // 読みにくいので名前は通常の色。2 回目以降 (優先順位 3) でメンバーの緑になる
+      await addMockMessage({
+        message_type: 'text',
+        author: memberName,
+        content: 'Member first comment',
+        channel_id: 'UC_green_viewer',
+        is_member: true,
+      });
+      const memberFirst = mainPage.locator('[data-message-id]').filter({ hasText: 'Member first comment' }).first();
+      await expect(memberFirst).toHaveAttribute('data-priority', '2', { timeout: 5000 });
+      const firstColor = await memberFirst.getByTestId('author-name').evaluate(el => getComputedStyle(el).color);
+      expect(firstColor).toMatch(/rgb\(237,\s*237,\s*240\)/);
+
       await addMockMessage({
         message_type: 'text',
         author: memberName,
@@ -84,18 +96,17 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
         is_member: true,
       });
 
-      // Wait for second message with longer timeout
-      await expect(mainPage.getByText(memberName).first()).toBeVisible({ timeout: 5000 });
+      await expect(mainPage.getByText(memberContent).first()).toBeVisible({ timeout: 5000 });
 
-      // Check member color - should use var(--member-accent) CSS variable
-      // Dark theme: #6ec98a = rgb(110, 201, 138)
+      // 仕様: メンバーの名前は member-text。ダークテーマは #4cc26a = rgb(76, 194, 106)
       const memberMessage = mainPage.locator('[data-message-id]').filter({
         has: mainPage.locator(`text=${memberContent}`)
       }).first();
-      const memberAuthor = memberMessage.locator('span').filter({ hasText: memberName }).first();
+      const memberAuthor = memberMessage.getByTestId('author-name');
+      await expect(memberAuthor).toHaveClass(/text-member-text/);
       const memberColor = await memberAuthor.evaluate(el => getComputedStyle(el).color);
 
-      expect(memberColor).toMatch(/rgb\(110,\s*201,\s*138\)/);
+      expect(memberColor).toMatch(/rgb\(76,\s*194,\s*106\)/);
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
@@ -207,35 +218,49 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
   });
 
   test.describe('Message Display Styling', () => {
-    test('should display member message with green styling', async () => {
+    test('should display member name in member-text color without a green background or border', async () => {
       // Connect to stream
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
-      // Add member message
-      await addMockMessage({
-        message_type: 'text',
-        author: 'GreenBgMember',
-        content: 'Member with green background',
-        is_member: true,
-      });
+      // メンバーの 2 回目のコメントを見る (初回は優先順位 2 で名前が通常の色になるため。仕様「1 行の形」)
+      for (const content of ['Member first', 'Member with green background']) {
+        await addMockMessage({
+          message_type: 'text',
+          author: 'GreenBgMember',
+          content,
+          channel_id: 'UC_green_bg_member',
+          is_member: true,
+        });
+      }
 
-      // Find the message element
       const memberMessage = mainPage.locator('[data-message-id]').filter({
-        has: mainPage.locator('text=GreenBgMember')
+        hasText: 'Member with green background',
       }).first();
 
       await expect(memberMessage).toBeVisible({ timeout: 5000 });
 
-      // Check for green styling - could be on border, background, or author name
-      // Option 1: Check author name color (green for members)
-      const authorSpan = memberMessage.locator('span').filter({ hasText: 'GreenBgMember' }).first();
+      // 仕様「1 行の形」: メンバーは名前を緑の文字にする。背景・枠は付けない
+      // ダークテーマの member-text #4cc26a = rgb(76, 194, 106)
+      const authorSpan = memberMessage.getByTestId('author-name');
+      await expect(authorSpan).toHaveClass(/text-member-text/);
       const authorColor = await authorSpan.evaluate(el => getComputedStyle(el).color);
+      expect(authorColor).toMatch(/rgb\(76,\s*194,\s*106\)/);
 
-      // Should use var(--member-accent): dark theme #6ec98a = rgb(110, 201, 138)
-      expect(authorColor).toMatch(/rgb\(110,\s*201,\s*138\)/);
+      // 行の根にも、行の本体にも背景色と枠が付かない (透明・枠なし)
+      const decoration = await memberMessage.evaluate((root) => {
+        const body = root.firstElementChild as HTMLElement;
+        return [root, body].map((el) => {
+          const st = getComputedStyle(el);
+          return { background: st.backgroundColor, borderWidth: st.borderTopWidth, borderStyle: st.borderTopStyle };
+        });
+      });
+      for (const d of decoration) {
+        expect(d.background).toBe('rgba(0, 0, 0, 0)');
+        expect(d.borderStyle === 'none' || d.borderWidth === '0px').toBe(true);
+      }
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
@@ -324,7 +349,7 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
     });
 
     // 著者名の表示幅（02_chat.md:584）
-    // 固定200px上限を撤廃し「利用可能幅まで表示、行が収まらない場合のみ末尾省略」する挙動を検証する。
+    // 仕様「1 行の形」: 長い名前は折り返して全文を出し、省略 (…) しない。
     test('should display a moderately long author name wider than the former 200px cap without truncation', async () => {
       // Connect to stream
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
@@ -351,21 +376,23 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
       }).first();
       await expect(message).toBeVisible({ timeout: 5000 });
 
-      const authorSpan = message.locator('span').filter({ hasText: widthMarker }).first();
+      // 名前は inline の span なので、幅は描画矩形で測る (clientWidth は inline だと 0)
+      const authorSpan = message.getByTestId('author-name');
+      await expect(authorSpan).toHaveText(moderateName);
       const metrics = await authorSpan.evaluate((el) => ({
-        clientWidth: el.clientWidth,
-        scrollWidth: el.scrollWidth,
+        width: el.getBoundingClientRect().width,
+        textOverflow: getComputedStyle(el).textOverflow,
       }));
 
-      // 固定上限が撤廃され、名前が200pxを超えて表示されている
-      expect(metrics.clientWidth).toBeGreaterThan(200);
-      // 利用可能幅に収まっているため省略されず全体表示（クリップなし、1pxの丸め誤差を許容）
-      expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth + 1);
+      // 固定の 200px 上限が無く、名前が 200px を超えて表示されている
+      expect(metrics.width).toBeGreaterThan(200);
+      // 省略 (…) の指定が無い
+      expect(metrics.textOverflow).not.toBe('ellipsis');
 
       await disconnectAndInitialize(mainPage);
     });
 
-    test('should ellipsize an over-long author name while keeping the member badge visible and the row from overflowing', async () => {
+    test('should wrap an over-long author name in full while keeping the member badge visible and the row from overflowing', async () => {
       // Connect to stream
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
@@ -391,34 +418,32 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
       }).first();
       await expect(message).toBeVisible({ timeout: 5000 });
 
-      const authorSpan = message.locator('span').filter({ hasText: 'OVFMARK_' }).first();
+      // 仕様: 省略せず折り返して全文を出す。行は横にはみ出さない
+      const authorSpan = message.getByTestId('author-name');
+      await expect(authorSpan).toHaveText(overLongName);
       const result = await authorSpan.evaluate((el) => {
         const style = window.getComputedStyle(el);
-        // 著者名 span の親 = メタデータ flex 行
-        const row = el.parentElement as HTMLElement;
+        const root = el.closest('[data-message-id]') as HTMLElement;
         return {
           textOverflow: style.textOverflow,
-          overflow: style.overflow,
-          whiteSpace: style.whiteSpace,
-          spanClientWidth: el.clientWidth,
-          spanScrollWidth: el.scrollWidth,
-          rowClientWidth: row.clientWidth,
-          rowScrollWidth: row.scrollWidth,
+          lineCount: el.getClientRects().length,
+          rootClientWidth: root.clientWidth,
+          rootScrollWidth: root.scrollWidth,
+          spanRight: el.getBoundingClientRect().right,
+          rootRight: root.getBoundingClientRect().right,
         };
       });
 
-      // 省略スタイルが適用されている（truncate = overflow-hidden / ellipsis / nowrap）
-      expect(result.textOverflow).toBe('ellipsis');
-      expect(result.overflow).toBe('hidden');
-      expect(result.whiteSpace).toBe('nowrap');
-      // 実際にクリップが発生している（収まらないので末尾省略）
-      expect(result.spanScrollWidth).toBeGreaterThan(result.spanClientWidth);
-      // 保存則: 名前が縮小を吸収し、メタデータ行は横方向に溢れない。
-      // バッジが同居するため、名前が譲らなければ行が溢れる ⇒ この検証は非自明
-      expect(result.rowScrollWidth).toBeLessThanOrEqual(result.rowClientWidth + 1);
+      // 省略の指定が無い
+      expect(result.textOverflow).not.toBe('ellipsis');
+      // 実際に複数行へ折り返している (1 行に押し込んで切っていない)
+      expect(result.lineCount).toBeGreaterThan(1);
+      // 行は横方向に溢れず、名前の右端も行の中に収まる
+      expect(result.rootScrollWidth).toBeLessThanOrEqual(result.rootClientWidth + 1);
+      expect(result.spanRight).toBeLessThanOrEqual(result.rootRight + 1);
 
-      // 成功条件: 長い名前があってもメンバーバッジは表示され、押し出されない。
-      // バッジの右端がメッセージ枠内に収まっていることで「押し出されない」を実証する。
+      // 成功条件: 長い名前があってもメンバーバッジは表示され、行からはみ出さない。
+      // バッジの右端がメッセージ枠内に収まっていることで実証する。
       // メンバーは画像バッジ（authorBadges の customThumbnail）で表示される（02_chat.md「バッジ表示優先順位」）
       const memberBadge = message.locator('img[alt="Member"]').first();
       await expect(memberBadge).toBeVisible();

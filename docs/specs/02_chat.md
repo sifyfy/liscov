@@ -210,6 +210,10 @@
 | 長い本文・長い名前 | 折り返して全文を出す。流れ・流れたもの・お礼の一覧のどこでも、省略 (`…`) しない (省略された文字を読むには操作が要る) |
 | 相手の配信のコメント | 名前の前に配信者名の札 (色ではなく文字で見分ける。540px 幅でも読める)。強さは変えない |
 | 読み仮名が登録されている視聴者 | 名前の横に小さく出す |
+| メンバーのコメント | 名前を緑の文字にし、メンバーバッジの画像を名前の横に出す (YouTube と同じ。背景・枠は付けない)。バッジの画像が無ければ「メンバー」の文字の札。新規さんの初回の行では名前は通常の色 (薄い背景の上で緑が読みにくいため) |
+| モデレーター・認証済み | 名前の横に小さい印 (🔧・✓) |
+| 時刻 | 表示の設定で消せる (今と同じ) |
+| 文字の大きさ | 表示の設定 (10〜24px) を流れ・欄・一覧のコメントの文字に使う (今と同じ) |
 
 **流れたもの (流れて画面の外に出た優先順位 1・2):**
 
@@ -319,6 +323,7 @@ pub struct GuiChatMessage {
     pub connection_id: u64,                   // この接続のID（多接続識別用）
     pub platform: String,                     // 配信プラットフォーム（"youtube"等）
     pub broadcaster_name: String,             // 配信者名
+    pub author_reading: Option<String>,       // 届いたときの読み仮名（視聴者情報に登録済みなら。読み上げと同じ値）
 }
 ```
 
@@ -928,268 +933,80 @@ Connecting → (接続失敗) → (削除 + エラー通知)
 | メッセージ統合 | 全接続のメッセージをグローバルバッファに統合 |
 | 重複排除 | 複合キー `connection_id:message_id` で O(1) チェック |
 | 配信元識別 | `broadcaster_channel_id` のハッシュ値から色を決定 |
-| メッセージ表示 | 色付き左ラインと配信者名ラベルで配信元を区別（ラベルはコンテナ幅で省略） |
+| メッセージ表示 | 主の配信 (最初の接続) 以外のコメントに配信者名の札を付ける。強さ (優先順位) は変えない。札は省略しない (「メッセージ表示仕様」) |
 
 ## メッセージ表示仕様
 
-> 作り直し中 (2026-10): 振る舞いは「配信中の画面」が正。この節は段階 5.2a〜5.2c の実装と一緒に書き換える。
+振る舞いは「配信中の画面」(1 行の形・優先順位と強調)。ここは実装の詳細。
+コンポーネントは `ChatMessage.svelte`、見た目の値は [docs/design/tokens.md](../design/tokens.md) のトークンだけを使う (`design-lint.config.js` の `DESIGN_MIGRATED`)。
+試作は `src/routes/design-proto/Row.svelte`。
 
-配信者が視聴者対応を判断するために必要な情報を、視覚的優先度を考慮して表示する。
-
-### メッセージレイアウト
-
-各メッセージは2行構成で表示する。
-
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│ [時刻] [アイコン] [著者名] [読み仮名] [バッジ群] [初見] [コメント数] │ ← 第1行：メタデータ行
-│         [メッセージ本文（テキスト＋絵文字）]                          │ ← 第2行：本文行
-└──────────────────────────────────────────────────────────────────────┘
-```
-
-#### 第1行：メタデータ行の構成要素
-
-| 要素 | サイズ | 色 | 備考 |
-|------|--------|-----|------|
-| タイムスタンプ | 10px固定 | `var(--text-muted)` | HH:MM:SS形式（ローカルタイムゾーン）、表示/非表示切り替え可 |
-| アイコン | 20×20px | - | 円形、object-fit: cover |
-| 著者名 | フォント設定値 | メンバー: `var(--member-accent)`、非メンバー: `var(--accent)` | font-weight: 600。利用可能な横幅まで表示し、メタデータ行（バッジ・タイムスタンプ含む）が1行に収まらない場合のみ末尾を省略（`…`）する。固定の最大幅は設けない |
-| 読み仮名 | 11px固定 | `var(--text-muted)` | 登録時のみ表示 |
-| バッジ画像 | 16×16px | - | 複数表示可 |
-| 初見バッジ | フォント設定値 | 下記参照 | `is_first_time_viewer`がtrueの場合のみ表示。配信内コメント回数に応じて表示が変化 |
-| 配信内コメント回数 | フォント設定値 | 下記参照 | 初見バッジとは独立して表示。`#1` のみ目立つ色 |
-
-#### 第2行：本文行
-
-- 左インデント: 8px（アイコン分）
-- フォントサイズ: ユーザー設定値（10〜24px）
-- 行間: 1.4
-
-### メッセージタイプ別表示スタイル
-
-#### 通常チャット（text）
+### 行の根
 
 | 項目 | 値 |
-|-----|-----|
-| 背景 | `var(--bg-surface-2)` |
-| 左枠線 | 4px solid `var(--accent)` |
-
-**メンバーの場合:**
-
-| 項目 | 値 |
-|-----|-----|
-| 背景 | `var(--member-subtle)` |
-| 左枠線 | 4px solid `var(--member-accent)` |
-
-#### スーパーチャット（superchat）
-
-**ヘッダー行:**
-```
-[💰] Super Chat [金額バッジ]
-```
-
-| 項目 | 値 |
-|-----|-----|
-| 背景 | グラデーション（YouTube API提供色） |
-| 左枠線 | 4px solid（ヘッダー背景色） |
-| 金額バッジ | padding: 4px 12px、border-radius: 16px |
-
-**配色（YouTubeから取得）:**
-
-| プロパティ | 用途 |
-|-----------|------|
-| `header_background` | ヘッダー背景、左枠線 |
-| `header_text` | ヘッダーテキスト（通常は白） |
-| `body_background` | 本文背景 |
-| `body_text` | 本文テキスト |
-
-**背景色:**
-
-SuperChatの色情報がある場合はYouTube APIから取得した色を使用。色情報がない場合は `var(--bg-surface-2)` をフォールバックとして使用。
-
-#### スーパーステッカー（supersticker）
-
-**ヘッダー行:**
-```
-[🎨] Super Sticker [金額バッジ]
-```
-
-| 項目 | デフォルト値 |
-|-----|-------------|
-| 背景 | YouTube API提供色、なければ `var(--bg-surface-2)` |
-| 左枠線 | 4px solid（ヘッダー背景色） |
-
-#### メンバーシップ（membership）
-
-**新規メンバー加入（milestone_months: None）:**
-
-```
-[🎉] メンバー加入
-```
-
-| 項目 | 値 |
-|-----|-----|
-| 背景 | `var(--member-subtle)` |
-| 左枠線 | 4px solid `var(--member-accent)` |
-
-**マイルストーン達成（milestone_months: Some(n)）:**
-
-```
-[🏆] マイルストーン [{n}ヶ月バッジ]
-```
-
-| 項目 | 値 |
-|-----|-----|
-| 背景 | `var(--bg-surface-2)` |
-| 左枠線 | 4px solid `var(--accent)` |
-
-#### メンバーシップギフト（membership_gift）
-
-```
-[🎁] メンバーシップギフト [{gift_count}人バッジ]
-```
-
-| 項目 | 値 |
-|-----|-----|
-| 背景 | `var(--info-subtle)` |
-| 左枠線 | 4px solid `var(--info)` |
-
-#### ギフト（gift）
-
-```
-[ギフト画像 32px] {author} が {gift_name} を送りました [{jewel_count} ジュエルバッジ]
-```
-
-| 項目 | 値 |
-|-----|-----|
-| 背景 | `var(--accent-subtle)` |
-| 左枠線 | 4px solid `var(--accent)` |
-| ジュエル数バッジ | `jewel_count` があるときだけ表示 |
-| 画像が無い・読めない | 画像を出さずに文だけ表示 |
-| 初見バッジ・配信内コメント回数 | 視聴者を特定できたときだけ既存の規則どおり表示 |
-
-#### システムメッセージ（system）
-
-| 項目 | 値 |
-|-----|-----|
-| 背景 | `var(--info-subtle)` |
-| 左枠線 | 4px solid `var(--info)` |
-| テキスト色 | `var(--text-secondary)` |
-| 著者 | "System"（アイコンなし） |
-
-### バッジ表示
-
-#### バッジの種類
-
-バッジは各メッセージの `authorBadges[].liveChatAuthorBadgeRenderer` から読む（テキスト・スーパーチャット・スーパーステッカー・メンバーシップ）。
-判定は tooltip の文言ではなく、言語に依らない `icon.iconType` と `customThumbnail` の有無で行う。
-
-| バッジ | 判定条件 | `badge_type` | 表示 |
-|-------|---------|------|------|
-| メンバー | `customThumbnail` がある（tooltip 例: `Member (6 months)`, `New member`） | `member` | `var(--member-subtle)` 背景 + `var(--member-accent)` テキスト |
-| モデレーター | `icon.iconType == "MODERATOR"` | `moderator` | `var(--info-subtle)` 背景 + `var(--info)` テキスト |
-| 認証済み | `icon.iconType == "VERIFIED"` | `verified` | `var(--bg-surface-3)` 背景 + `var(--text-secondary)` テキスト |
-| 配信者本人 | `icon.iconType == "OWNER"` | `owner` | 表示しない（`badges`・`badge_info` には入れる） |
-
-- `badges` は `badge_type` の並び、`badge_info` は各バッジの `label`（tooltip）・`tooltip`・`image_url`（`customThumbnail` の最初の URL）
-- `is_member`・`is_moderator`・`is_verified` は上の判定と一致させる（スーパーチャット・スーパーステッカーでもメンバーなら `is_member = true`）
-- 上のどれにも当たらないバッジは読み飛ばす
-
-#### バッジ表示優先順位
-
-1. YouTube API提供の画像バッジ（`badge_info[].image_url`）
-2. テキストフォールバック
-
-### メンバー識別
-
-配信者がメンバーを一目で識別できるよう、複数の視覚的手がかりを提供する。
-
-| 手がかり | 表示 |
-|---------|------|
-| 著者名の色 | メンバー: `var(--member-accent)`、非メンバー: `var(--accent)` |
-| メッセージ背景 | メンバー: `var(--member-subtle)` |
-| バッジ | メンバーバッジ画像または「Member」テキスト |
-| 枠線 | メンバー: `var(--member-accent)` |
-
-### 初見さんバッジ
-
-配信者チャンネルで初めてコメントした視聴者（初見さん）を識別するためのバッジ。
-初見さんは配信内で一貫して表示され、コメント回数に応じて表示スタイルが変化する。
-
-| 条件 | 表示 | スタイル |
-|------|------|---------|
-| `is_first_time_viewer == true` かつ `in_stream_comment_count == 1` | `🎉初見さん` | `var(--success)` テキスト、`var(--success-subtle)` 背景、太字、border-radius: 4px、padding: 1px 6px |
-| `is_first_time_viewer == true` かつ `in_stream_comment_count > 1` | `初見さん` | `var(--text-muted)` テキスト、背景なし |
-| `is_first_time_viewer == false` | （非表示） | - |
-
-**初見さんの判定基準:**
-
-| 項目 | 仕様 |
 |------|------|
-| スコープ | 配信者チャンネル単位（`viewer_profiles` の `(broadcaster_channel_id, channel_id)` ペア） |
-| 判定タイミング | 各メッセージ処理時に `is_first_time_viewer` でDBクエリを実行。キャッシュなしで毎回最新の状態を参照 |
-| 永続性 | `viewer_streams` + `viewer_profiles` テーブルに基づくため、アプリ再起動後も同一視聴者は初見扱いにならない |
-| 配信者間の独立性 | 配信者Aで初見でも、配信者Bでは別途初見判定される |
-| 配信内一貫性 | `viewer_streams` テーブルの最古 `video_id` が現在の `video_id` と一致するかで判定するため、同一配信中は一貫して `is_first_time_viewer == true` を維持する |
+| 要素 | `div[role=button][tabindex=0]`。クリック・Enter で視聴者情報パネルを開く |
+| 属性 | `data-message-id`、`data-priority` (1〜5、`messagePriority` の結果)、`data-origin` (`primary` / `partner`、`chatStore.originOf`) |
+| 文字の大きさ | 行の `font-size` = 表示の設定 (`messageFontSize`、10〜24px)。中の文字は em の段階 (`text-chat-body` 1em / `text-chat-meta` 0.85em / `text-chat-amount` 1.15em) |
+| 文字色 | `text-fg-1` (周りの色を引き継がない) |
+| 選択中 (パネルの過去コメントから飛んだ先、3 秒) | `outline-2 -outline-offset-2 outline-accent` |
 
-### 配信内コメント回数表示
+### 優先順位 2〜5 の行
 
-同一配信（video_id単位）内での視聴者のコメント回数を表示する。
+```
+[アイコン] [配信元の札] [強調の印] 名前 (読み仮名) [バッジ] [金額の札] 本文… #N 時刻
+```
 
-| 回数 | 表示 | スタイル |
-|------|------|---------|
-| 1回目 | `#1` | `var(--warning)` テキスト、太字 |
-| 2回目以降 | `#N` | `var(--text-muted)` テキスト |
-| 取得不可 | （非表示） | - |
+- 1 つの段落 (`<p>`) に続けて書き、幅が足りなければ折り返す。`truncate`・`text-overflow` は使わない
+- 余白 `px-3 py-1.5`。マウスを載せると `fg-1` を 8% 重ねる
 
-**配信内コメント回数の仕様:**
-
-| 項目 | 仕様 |
+| 要素 | 表し方 |
 |------|------|
-| スコープ | video_id単位（URLから抽出） |
-| カウント対象 | 当該video_idのセッションに紐づく全メッセージ |
-| 再接続時 | DBから復元した前回セッションのメッセージも含めてカウント |
-| カウント方法 | メモリ上のHashMap<channel_id, u32>でO(1)管理 |
+| アイコン | `size-chat-icon` (1.5em) の丸。画像が無い・読めなければ頭文字 |
+| 配信元の札 (`data-testid="source-label"`) | 相手の配信のときだけ。`bg-surface-highest`・`text-fg-2`・`text-chat-meta` に配信者名 |
+| 強調の印 | 2: `bg-highlight` に `text-surface` の「初見」+ 行の背景 `bg-highlight/20` / 3: `border-highlight` の「初見」 / 4: `text-highlight` の「●」(`aria-label="配信内で初めてのコメント"`) / 5: なし |
+| 名前 (`data-testid="author-name"`) | `font-bold`。メンバーは `text-member-text`。ただし優先順位 2 の行では通常の色 |
+| 読み仮名 | `chatStore.readingOf(message)` (パネルで保存した値) があればそれ、無ければ `author_reading`。空なら出さない。`text-chat-meta`・`text-fg-2` で `(たなか)` |
+| バッジ | `badge_info` の画像 (`size-chat-badge`、読めなければ消す)。メンバーで画像が無ければ `border-member-text` の札「メンバー」。モデレーター 🔧・認証済み ✓ |
+| 金額の札 (`data-testid="paid-label"`) | 相手の配信のスパチャ等のとき。`border-outline` の枠に `paidLabelOf` の文言 |
+| 本文 | `runs` (テキストと絵文字)。絵文字は `h-chat-emoji` (1.3em)。ステッカーは本文を出さない (`content` は代わりの文字「[Sticker]」) |
+| #N・時刻 (`data-testid="message-time"`) | `text-chat-meta`・`text-fg-3` (優先順位 2 の行では `text-fg-2`)。時刻は表示の設定で消せる (HH:MM:SS、ローカル時刻) |
 
-**初見バッジとの同時表示:**
+### 優先順位 1 の面
 
-初見さんバッジと配信内コメント回数は独立した要素として同時に表示できる。
+主の配信のものだけ。面は `mx-2 my-1 rounded-control` (浮いて見える理由がある数少ない要素なので角丸)。
 
-| ケース | 表示例 |
-|--------|--------|
-| チャンネル初見 + 配信1回目 | `🎉初見さん` `#1` |
-| チャンネル初見 + 配信2回目以降 | `初見さん` `#N` |
-| チャンネル初見ではない + 配信1回目 | `#1` |
-| チャンネル初見ではない + 配信3回目 | `#3` |
+| 種類 | 面 | 見出し | 本文 |
+|------|------|------|------|
+| スパチャ・ステッカー (色あり) | 背景 `body_background` | 背景 `header_background`・文字 `header_text`: アイコン、名前 (読み仮名)、#N・時刻、右端に金額 (`text-chat-amount`) | 文字 `body_text` (`data-testid="paid-body"`)。本文が無ければ出さない。ステッカーは出さない |
+| スパチャ・ステッカー (色なし) | `bg-surface-highest`・`border-outline` | 同上 (トークンの色) | 同上 |
+| メンバーシップ・マイルストーン・メンバーシップギフト | `bg-member`・`text-on-member` | アイコン、名前、#N・時刻、右端に `paidLabelOf` (新規メンバー / メンバー N か月 / メンバーシップを N 件ギフト。件数が分からなければ「メンバーシップのギフト」) | メッセージがあれば |
+| ギフト (ジュエル) | `bg-surface-highest`・`border-outline` | ギフトの画像 (`size-chat-gift`、読めなければ消す)、「{author} が {gift_name} を送りました」、#N・時刻、右端に「N ジュエル」(`data-testid="gift-jewels"`、jewel_count があるときだけ) | なし |
 
-### 絵文字表示
+- 札の文言は `src/lib/design/paid-label.ts` の `paidLabelOf` (流れたもの・お礼の一覧と共通)
+- 視聴者を特定できないギフトは #N を出さない (`in_stream_comment_count` が null)
+- 件数・か月数・ギフト名は `message_type` から `metadata` に載せる。パーサーが `metadata` を付けない種別 (メンバーシップギフト) でも、空の `metadata` を作って載せる (`GuiChatMessage::from`)
 
-| 項目 | 値 |
-|-----|-----|
-| サイズ | フォントサイズ + 4px |
-| 配置 | インライン（vertical-align: middle） |
-| 余白 | 左右2px |
+### システムメッセージ
 
-### インタラクション
+本文だけを `text-fg-2` で出す (名前・アイコンなし)。
 
-#### ホバー時
+### 初見さん判定と配信内コメント回数
 
-| 効果 | 値 |
-|-----|-----|
-| 移動 | translateY(-1px) |
-| 影 | box-shadow: 0 4px 12px rgba(0,0,0,0.1) |
-| 遷移 | all 0.2s ease |
+判定の仕様は「振る舞い」の「初見さん判定」と「チャット監視タスク」の「配信内コメント数カウンタ」。表示は上の強調の印と #N。
+
+| 状態 | 優先順位 | 表示 |
+|------|------|------|
+| 初見 + 配信内 1 回目 | 2 | 薄い背景 + 塗りの「初見」 + `#1` |
+| 初見 + 配信内 2 回目以降 | 3 | 枠の「初見」 + `#N` |
+| 初見ではない + 配信内 1 回目 | 4 | 「●」 + `#1` |
+| 初見ではない + 配信内 2 回目以降 | 5 | `#N` |
+| 回数が分からない (視聴者を特定できないギフトなど) | 5 | #N なし |
 
 #### クリック時
 
 メッセージクリックで**視聴者情報パネル**（ViewerInfoPanel）を表示。詳細は「視聴者情報パネル」セクションを参照。
-
-#### 選択状態
-
-| 効果 | 値 |
-|-----|-----|
-| 枠線 | 2px solid `var(--accent)` |
-| 影 | box-shadow: 0 0 8px rgba(56,189,248,0.4) |
+パネルで読み仮名を保存すると `chatStore.setViewerReading` で記録し、画面にある同じ視聴者 (同じ配信者のもと) の行にもすぐ出す。
 
 ### スクロール動作
 

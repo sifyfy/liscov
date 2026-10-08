@@ -41,13 +41,14 @@ function base(author: string, time: string): Omit<Message, 'message_type' | 'con
     is_first_time_viewer: false,
     in_stream_comment_count: null,
     metadata: null,
-    connection_id: OWN_CONNECTION,
+    connection_id: PRIMARY_CONNECTION,
     platform: 'youtube',
     broadcaster_name: '試作の配信者',
+    author_reading: null,
   };
 }
 
-const OWN_CONNECTION = 1n;
+const PRIMARY_CONNECTION = 1n;
 const PARTNER_CONNECTION = 2n;
 const PARTNER_NAME = 'あおば';
 
@@ -88,7 +89,7 @@ function text(author: string, time: string, content: string, count: number, view
   };
 }
 
-function superchat(author: string, time: string, content: string, amount: string, colors: SuperChatColors): Message {
+function superchat(author: string, time: string, content: string, amount: string, colors: SuperChatColors | null): Message {
   return {
     ...base(author, time),
     message_type: 'superchat',
@@ -238,6 +239,53 @@ const HEAVY_SEEDS: readonly Message[] = [
   ),
 ];
 
+/** ギフト (ジュエル)。画像は無し (読めないときの形) */
+function gift(author: string, time: string, giftName: string, jewels: number): Message {
+  return {
+    ...base(author, time),
+    message_type: 'gift',
+    content: giftName,
+    runs: [],
+    in_stream_comment_count: 2,
+    metadata: metadata({ gift_name: giftName, jewel_count: jewels }),
+  };
+}
+
+function system(time: string, content: string): Message {
+  return { ...base('', time), message_type: 'system', content, runs: [{ type: 'Text', content }] };
+}
+
+/**
+ * コメントの行の見本 (/design-tokens と見た目の回帰テスト e2e/chat-row-visual.spec.ts)。
+ * 優先順位 1〜5・種類・主の配信と相手の配信・読み仮名・バッジ・長い本文の折り返しを 1 つずつ並べる。
+ * 時刻は「21:12」の形の文字列なので、表示はタイムゾーンによらない
+ */
+const ROW_SEEDS: readonly Message[] = [
+  text('ひだまり', '21:20', '初見です、声がきれいですね', 1, 'new'),
+  text('Kaito_92', '21:22', 'チャンネル登録しました', 4, 'new'),
+  text('ゆずぽん', '21:27', 'こんばんはー！', 1),
+  { ...text('しおこんぶ', '21:28', 'いけるいける', 9), author_reading: 'しおこんぶ', metadata: metadata({ is_moderator: true }) },
+  { ...text('のりたま', '21:28', '今日のサムネかわいい', 3), is_member: true },
+  text(
+    'とても長い名前のチャンネルでございますよろしくお願いいたします公式',
+    '21:29',
+    'ここの謎解き、本棚の順番は左から赤・青・緑だった気がする。違ったら次は緑・赤・青の順で試してみて、それでもだめなら机の引き出しのメモを見直すといいかも',
+    5,
+  ),
+  superchat('ねむいペンギン', '21:17', '遅れてきました！今日も見られてうれしいです', '¥10,000', TIER.red),
+  sticker('みずいろ', '21:14', '¥500', TIER.green),
+  superchat('みかん箱', '21:31', '色の情報が無いスパチャ', '¥2,000', null),
+  membership('のりたま', '21:15', '12 か月ありがとう！', 12),
+  membershipGift('ぺんぎん村', '21:23', 5),
+  gift('こもれび', '21:24', 'ハート', 100),
+  system('21:25', 'モデレーターがメッセージを削除しました'),
+  ...[
+    text('そら豆', '21:14', 'あおばちゃんのところから来ました', 1),
+    text('Riku', '21:24', '参加希望！ランクはゴールドです', 1, 'new'),
+    superchat('まつぼっくり', '21:26', 'あおばちゃんいつも応援してます', '¥1,000', TIER.green),
+  ].map(fromPartner),
+];
+
 const withIds = (seeds: readonly Message[], prefix: string): readonly GuiChatMessage[] =>
   seeds.map((m, i) => ({ ...m, id: `${prefix}${i}` }));
 
@@ -245,9 +293,11 @@ const withIds = (seeds: readonly Message[], prefix: string): readonly GuiChatMes
 const merged = (a: readonly GuiChatMessage[], b: readonly GuiChatMessage[]): readonly GuiChatMessage[] =>
   [...a, ...b].map((m, i) => ({ m, i })).sort((x, y) => x.m.timestamp.localeCompare(y.m.timestamp) || x.i - y.i).map(({ m }) => m);
 
-const OWN_FEED = withIds(SEEDS, 'm');
-const COLLAB_FEED = merged(OWN_FEED, withIds(PARTNER_SEEDS, 'p'));
-const HEAVY_FEED = merged(OWN_FEED, withIds(HEAVY_SEEDS, 'h'));
+const PRIMARY_FEED = withIds(SEEDS, 'm');
+const COLLAB_FEED = merged(PRIMARY_FEED, withIds(PARTNER_SEEDS, 'p'));
+const HEAVY_FEED = merged(PRIMARY_FEED, withIds(HEAVY_SEEDS, 'h'));
+
+export const ROW_SAMPLES = withIds(ROW_SEEDS, 'r');
 
 /** ブリーフ §1 の場面。party は参加型のコラボ (2 つの配信 + 参加の一覧) */
 export type Scene = 'normal' | 'collab' | 'thanks' | 'party' | 'heavy';
@@ -263,19 +313,12 @@ export function sceneOf(url: URL): Scene {
 export function feedOf(scene: Scene): readonly GuiChatMessage[] {
   if (scene === 'collab' || scene === 'party') return COLLAB_FEED;
   if (scene === 'heavy') return HEAVY_FEED;
-  return OWN_FEED;
+  return PRIMARY_FEED;
 }
 
-/** スパチャ等の札の文言 (金額、またはメンバーシップの種類)。通常のコメントは null */
-export function paidLabelOf(m: GuiChatMessage): string | null {
-  if (m.message_type === 'text') return null;
-  if (m.amount) return m.amount;
-  if (m.message_type === 'membership_gift') return `メンバーシップを ${m.metadata?.gift_count ?? 0} 件ギフト`;
-  if (m.metadata?.milestone_months) return `メンバー ${m.metadata.milestone_months} か月`;
-  return '新規メンバー';
-}
+export { paidLabelOf } from '$lib/design/paid-label';
 
-export const originOf = (m: GuiChatMessage): MessageOrigin => (m.connection_id === PARTNER_CONNECTION ? 'partner' : 'own');
+export const originOf = (m: GuiChatMessage): MessageOrigin => (m.connection_id === PARTNER_CONNECTION ? 'partner' : 'primary');
 
 export const priorityOf = (m: GuiChatMessage): MessagePriority => messagePriority(m, originOf(m));
 
@@ -292,12 +335,12 @@ type Player = Readonly<{ name: string; origin: MessageOrigin }>;
 /** 参加型の一覧 (参加の受け付け方は未決なので、試作では固定のデータ) */
 export const party = {
   playing: [
-    { name: 'しおこんぶ', origin: 'own' },
+    { name: 'しおこんぶ', origin: 'primary' },
     { name: 'ねぎま', origin: 'partner' },
   ],
   waiting: [
     { name: 'Riku', origin: 'partner' },
-    { name: 'ゆずぽん', origin: 'own' },
+    { name: 'ゆずぽん', origin: 'primary' },
     { name: 'くろまめ', origin: 'partner' },
   ],
 } as const satisfies Record<string, readonly Player[]>;

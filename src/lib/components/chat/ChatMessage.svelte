@@ -1,6 +1,17 @@
 <script lang="ts">
+  /**
+   * コメントの 1 行 (docs/specs/02_chat.md「配信中の画面」「メッセージ表示仕様」、見た目の値は docs/design/tokens.md)
+   *
+   * - 強調は優先順位 (src/lib/design/priority.ts) で決める。1: 面 / 2: 薄い背景 + 塗りの印 / 3: 枠の印 / 4: 点 / 5: 印なし
+   * - 名前と本文を 1 つの段落に続け、省略せず折り返す (省略された文字を読むには操作が要る)
+   * - 相手の配信のコメントは、強さを変えずに配信者名の札で見分ける
+   * - 文字の大きさは表示の設定 (fontSize) を行の font-size にし、中の文字は em の段階 (text-chat-*) で決める
+   * - 試作は src/routes/design-proto/Row.svelte
+   */
   import type { ChatMessage } from '$lib/types';
   import { formatTimestamp } from '$lib/utils/format';
+  import { messagePriority, type MessageOrigin } from '$lib/design/priority';
+  import { paidLabelOf } from '$lib/design/paid-label';
 
   interface Props {
     message: ChatMessage;
@@ -8,318 +19,206 @@
     showTimestamps: boolean;
     highlighted?: boolean;
     onClick?: () => void;
-    // 配信元インジケーター（多接続時に使用）
-    showSourceIndicator?: boolean;
-    sourceColor?: string;
-    sourceName?: string;
+    /** 主の配信か相手の配信か (docs/specs/02_chat.md「主の配信と相手の配信」) */
+    origin?: MessageOrigin;
+    /** パネルで登録し直した読み仮名。undefined なら届いたときの値 (author_reading) を使う。空文字は「読み仮名なし」 */
+    reading?: string;
   }
 
-  let { message, fontSize, showTimestamps, highlighted = false, onClick, showSourceIndicator = false, sourceColor, sourceName }: Props = $props();
+  let { message, fontSize, showTimestamps, highlighted = false, onClick, origin = 'primary', reading }: Props = $props();
 
-  // SuperChat の配色（metadata に含まれる場合のみ）
-  let superchatColors = $derived(message.metadata?.superchat_colors ?? null);
-
-  // メッセージ種別ごとの動的インラインスタイル（liscov オリジナルの左枠スタイル）
-  let dynamicStyle = $derived.by(() => {
-    const colors = superchatColors;
-    if (colors && (message.message_type === 'superchat' || message.message_type === 'supersticker')) {
-      return `border-left-color: ${colors.body_background}; background: linear-gradient(135deg, ${colors.header_background}33 0%, ${colors.body_background} 100%);`;
-    }
-
-    switch (message.message_type) {
-      case 'superchat':
-        return 'border-left-color: #f6ad55; background: var(--bg-surface-2);';
-      case 'supersticker':
-        return 'border-left-color: #fc8181; background: var(--bg-surface-2);';
-      case 'membership':
-        // Check if milestone
-        if (message.metadata?.milestone_months) {
-          return 'border-left-color: #9f7aea; background: var(--bg-surface-2);';
-        }
-        return 'border-left-color: var(--member-accent); background: var(--member-subtle);';
-      case 'membership_gift':
-        return 'border-left-color: #4299e1; background: var(--info-subtle);';
-      case 'gift':
-        return 'border-left-color: var(--accent); background: var(--accent-subtle);';
-      case 'system':
-        return 'border-left-color: #4299e1; background: var(--info-subtle);';
-      default:
-        // Normal text or member
-        if (message.is_member) {
-          return 'border-left-color: var(--member-accent); background: var(--member-subtle);';
-        }
-        return 'border-left-color: var(--accent); background: var(--bg-surface-2);';
-    }
-  });
-
-  // タイムスタンプ（ローカルタイムゾーンの HH:MM:SS）
+  let priority = $derived(messagePriority(message, origin));
+  let partner = $derived(origin === 'partner');
+  let colors = $derived(message.metadata?.superchat_colors ?? null);
+  let paidLabel = $derived(paidLabelOf(message));
+  let authorReading = $derived(reading ?? message.author_reading ?? '');
   let formattedTime = $derived(formatTimestamp(message.timestamp));
-
-  // メッセージ種別のヘッダーテキスト
-  let typeHeader = $derived.by(() => {
-    switch (message.message_type) {
-      case 'superchat':
-        return 'スーパーチャット';
-      case 'supersticker':
-        return 'スーパーステッカー';
-      case 'membership':
-        return '新規メンバー';
-      case 'membership_gift':
-        return 'メンバーシップギフト';
-      default:
-        return null;
-    }
-  });
-
-  // ヘッダー色（YouTube の配色があればそれを使い、なければ種別ごとの既定色）
-  let headerColor = $derived.by(() => {
-    const colors = superchatColors;
-    if (colors && (message.message_type === 'superchat' || message.message_type === 'supersticker')) {
-      return colors.header_background;
-    }
-    switch (message.message_type) {
-      case 'superchat':
-        return '#fbbf24'; // yellow-500
-      case 'supersticker':
-        return '#f97316'; // orange-500
-      case 'membership':
-        return '#22c55e'; // green-500
-      case 'membership_gift':
-        return '#10b981'; // emerald-500
-      default:
-        return null;
-    }
-  });
-
-  // ギフト（ジュエル）の表示内容。画像が読めなければ文だけにする
   let isGift = $derived(message.message_type === 'gift');
+  let isSystem = $derived(message.message_type === 'system');
+  // ステッカーの content は代わりの文字 ([Sticker]) なので本文として出さない
+  let hasBody = $derived(message.message_type !== 'supersticker' && (message.content !== '' || message.runs.length > 0));
+
+  // 画像が読めなければ、アイコンは頭文字に、バッジは消す (壊れた画像の印を出さない)
+  let iconFailed = $state(false);
+  let iconUrl = $derived(iconFailed ? null : message.author_icon_url);
+  let brokenBadges = $state<readonly string[]>([]);
+
+  // バッジ: YouTube の画像があればそれ、メンバーで画像が無ければ「メンバー」の札
+  let badgeImages = $derived(
+    (message.metadata?.badge_info ?? []).filter((b) => b.image_url && !brokenBadges.includes(b.image_url)),
+  );
+  let showMemberText = $derived(message.is_member && badgeImages.length === 0);
+
+  // メンバーの名前は緑。ただし優先順位 2 の薄い背景の上では読みにくいので通常の色 (tokens.md「強調」)
+  let nameClass = $derived(message.is_member && priority !== 2 ? 'text-member-text' : '');
+
+  // ギフト (ジュエル): 画像が読めなければ文だけにする
   let giftName = $derived(message.metadata?.gift_name ?? message.content);
   let jewelCount = $derived(message.metadata?.jewel_count ?? null);
   let giftImageFailed = $state(false);
   let giftImageUrl = $derived(giftImageFailed ? null : (message.metadata?.gift_image_url ?? null));
 
-  // 初見さん判定
-  let isFirstTimeViewer = $derived(message.is_first_time_viewer);
-
-  // 配信内コメント回数表示
-  let commentCountDisplay = $derived(
-    message.in_stream_comment_count == null ? null : `#${message.in_stream_comment_count}`
-  );
-
+  /** 面 (優先順位 1) の種類 */
+  let surface = $derived.by(() => {
+    if (priority !== 1) return null;
+    if (isGift) return 'gift';
+    if (message.message_type === 'membership' || message.message_type === 'membership_gift') return 'member';
+    return colors ? 'tier' : 'plain';
+  });
 </script>
 
+{#snippet face(cls: string)}
+  {#if iconUrl}
+    <img src={iconUrl} alt="" class="mt-px size-chat-icon shrink-0 rounded-full" onerror={() => (iconFailed = true)} />
+  {:else}
+    <span
+      class="mt-px inline-flex size-chat-icon shrink-0 items-center justify-center rounded-full text-chat-meta font-bold {cls}"
+      aria-hidden="true">{[...message.author][0]?.toUpperCase() ?? '?'}</span
+    >
+  {/if}
+{/snippet}
+
+{#snippet runs()}
+  {#if message.runs && message.runs.length > 0}
+    {#each message.runs as run, i (i)}
+      {#if run.type === 'Text'}{run.content}{:else if run.type === 'Emoji'}<img
+          src={run.image_url}
+          alt={run.alt_text}
+          title={run.alt_text}
+          class="mx-0.5 inline-block h-chat-emoji w-auto align-middle"
+        />{/if}
+    {/each}
+  {:else}
+    {message.content}
+  {/if}
+{/snippet}
+
+{#snippet badges()}
+  {#each badgeImages as badge, i (i)}
+    <img
+      src={badge.image_url}
+      alt={badge.tooltip}
+      title={badge.tooltip}
+      class="ml-1 inline-block size-chat-badge align-middle"
+      onerror={() => (brokenBadges = [...brokenBadges, badge.image_url ?? ''])}
+    />
+  {/each}
+  {#if showMemberText}
+    <span class="ml-1 rounded-control border border-member-text px-1 text-chat-meta whitespace-nowrap text-member-text">メンバー</span>
+  {/if}
+  {#if message.metadata?.is_moderator}<span class="ml-1 text-chat-meta" title="モデレーター">🔧</span>{/if}
+  {#if message.metadata?.is_verified}<span class="ml-1 text-chat-meta" title="認証済み">✓</span>{/if}
+{/snippet}
+
+{#snippet meta(tone: string)}
+  {#if message.in_stream_comment_count != null}
+    <span class="ml-1.5 text-chat-meta whitespace-nowrap tabular-nums {tone}">#{message.in_stream_comment_count}</span>
+  {/if}
+  {#if showTimestamps}
+    <span data-testid="message-time" class="ml-1 text-chat-meta whitespace-nowrap tabular-nums {tone}">{formattedTime}</span>
+  {/if}
+{/snippet}
+
+{#snippet name()}
+  <span data-testid="author-name" class="font-bold break-words {nameClass}">{message.author}</span>
+  {#if authorReading}
+    <span class="ml-1 text-chat-meta text-fg-2">({authorReading})</span>
+  {/if}
+{/snippet}
+
 <div
-  class="px-3 py-2 cursor-pointer hover:ring-2 hover:ring-[var(--accent)]/30 transition-all rounded border-l-4"
-  style="{dynamicStyle}{highlighted ? 'border: 2px solid var(--accent); box-shadow: 0 0 8px var(--accent-subtle);' : ''}"
+  class="cursor-pointer text-chat-body text-fg-1 {highlighted ? 'outline-2 -outline-offset-2 outline-accent' : ''}"
+  style="font-size: {fontSize}px;"
   data-message-id={message.id}
+  data-priority={priority}
+  data-origin={origin}
   onclick={onClick}
   role="button"
   tabindex="0"
   onkeydown={(e) => e.key === 'Enter' && onClick?.()}
 >
-  <!-- 配信元インジケーター（多接続時：2接続以上のとき表示） -->
-  {#if showSourceIndicator && sourceColor}
-    <div class="source-indicator-row">
-      <div class="source-indicator" style="background-color: {sourceColor}"></div>
-      <span class="source-label">{sourceName ?? ''}</span>
-    </div>
-  {/if}
-
-  <!-- Type header for special messages -->
-  {#if typeHeader}
-    {#if superchatColors}
-      <div
-        class="-mx-3 -mt-2 mb-1.5 px-3 py-1 flex items-center justify-between rounded-tr"
-        style="background-color: {headerColor}; color: {superchatColors.header_text};"
-      >
-        <span class="text-xs font-semibold tracking-wide">{typeHeader}</span>
-        {#if message.amount}
-          <span class="text-xs font-bold">{message.amount}</span>
-        {/if}
-      </div>
-    {:else}
-      <div class="mb-1.5">
-        <span
-          class="text-xs font-medium px-2 py-0.5 rounded-full"
-          style={headerColor ? `background-color: ${headerColor}; color: white;` : ''}
+  {#if surface === 'tier' && colors}
+    <!-- スパチャ・ステッカー: YouTube のティアの色の面 (浮いて見える理由がある数少ない要素なので角丸) -->
+    <div class="mx-2 my-1 overflow-hidden rounded-control" style="background: {colors.body_background};">
+      <div class="flex items-center gap-2 px-3 py-1.5" style="background: {colors.header_background}; color: {colors.header_text};">
+        {@render face('bg-surface/30')}
+        <span class="min-w-0 font-bold break-words"
+          >{message.author}{#if authorReading}<span class="ml-1 text-chat-meta font-normal">({authorReading})</span>{/if}</span
         >
-          {typeHeader}
-          {#if message.amount}
-            <span class="ml-1 font-bold">{message.amount}</span>
-          {/if}
-        </span>
+        <span class="shrink-0 font-normal">{@render meta('')}</span>
+        <span class="ml-auto shrink-0 text-chat-amount tabular-nums">{paidLabel}</span>
       </div>
-    {/if}
-  {/if}
-
-  <!-- Row 1: Metadata (icon, name, badges, comment count, timestamp) -->
-  <div class="flex items-center gap-2 {superchatColors ? 'bg-[var(--bg-surface-2)]/80 -mx-1 px-1 py-0.5 rounded-md' : ''}" style="font-size: {fontSize}px;">
-    <!-- Author icon -->
-    {#if message.author_icon_url}
-      <img
-        src={message.author_icon_url}
-        alt=""
-        class="w-6 h-6 rounded-full flex-shrink-0"
-      />
-    {:else}
-      <div
-        class="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-white text-xs font-bold"
-        style="background: var(--accent);"
-      >
-        {message.author.charAt(0).toUpperCase()}
-      </div>
-    {/if}
-
-    <!-- Author name (member=green, non-member=blue) -->
-    <!-- min-w-0 で flex の縮小ポイントを名前に集約し、利用可能幅まで表示。
-         バッジ・タイムスタンプ(flex-shrink-0)は常に表示を維持し、
-         1行に収まらない場合のみ名前を末尾省略(…)する -->
-    <span
-      class="font-medium truncate min-w-0"
-      style="color: {message.is_member ? 'var(--member-accent)' : 'var(--accent)'};"
+      {#if hasBody}
+        <p data-testid="paid-body" class="px-3 pt-1 pb-2 break-words" style="color: {colors.body_text};">{@render runs()}</p>
+      {/if}
+    </div>
+  {:else if surface === 'member' || surface === 'plain'}
+    <!-- メンバーシップ・メンバーシップギフト・マイルストーン (member の面)。色の無いスパチャは中立の面 -->
+    <div
+      class="mx-2 my-1 overflow-hidden rounded-control {surface === 'member'
+        ? 'bg-member text-on-member'
+        : 'border border-outline bg-surface-highest'}"
     >
-      {message.author}
-    </span>
-
-    <!-- Badge images from metadata -->
-    {#if message.metadata?.badge_info}
-      {#each message.metadata.badge_info as badge, i (i)}
-        {#if badge.image_url}
+      <div class="flex items-center gap-2 px-3 py-1.5">
+        {@render face('bg-surface/30')}
+        <span class="min-w-0 font-bold break-words"
+          >{message.author}{#if authorReading}<span class="ml-1 text-chat-meta font-normal">({authorReading})</span>{/if}</span
+        >
+        <span class="shrink-0 font-normal">{@render meta('')}</span>
+        <span class="ml-auto shrink-0 font-bold {surface === 'member' ? 'text-chat-meta' : 'text-chat-amount tabular-nums'}">{paidLabel}</span>
+      </div>
+      {#if hasBody}
+        <p data-testid="paid-body" class="px-3 pt-0 pb-2 break-words">{@render runs()}</p>
+      {/if}
+    </div>
+  {:else if surface === 'gift'}
+    <!-- ギフト (ジュエル) -->
+    <div class="mx-2 my-1 overflow-hidden rounded-control border border-outline bg-surface-highest">
+      <div class="flex items-center gap-2 px-3 py-1.5">
+        {#if giftImageUrl}
           <img
-            src={badge.image_url}
-            alt={badge.tooltip}
-            title={badge.tooltip}
-            class="w-4 h-4 flex-shrink-0"
+            data-testid="gift-image"
+            src={giftImageUrl}
+            alt={giftName}
+            class="size-chat-gift shrink-0"
+            onerror={() => (giftImageFailed = true)}
           />
         {/if}
-      {/each}
-    {/if}
-
-    <!-- Moderator badge -->
-    {#if message.metadata?.is_moderator}
-      <span class="px-1 py-0.5 text-xs bg-[var(--info-subtle)] text-[var(--info)] rounded border border-[var(--border-default)] font-medium" title="モデレーター">
-        🔧
-      </span>
-    {/if}
-
-    <!-- Verified badge -->
-    {#if message.metadata?.is_verified}
-      <span class="px-1 py-0.5 text-xs bg-[var(--bg-surface-3)] text-[var(--text-secondary)] rounded border border-[var(--border-default)] font-medium" title="認証済み">
-        ✓
-      </span>
-    {/if}
-
-    <!-- Member badge (only if no badge_info image) -->
-    {#if message.is_member && (!message.metadata?.badge_info || message.metadata.badge_info.every(b => !b.image_url))}
-      <span class="px-1.5 py-0.5 text-xs bg-[var(--member-subtle)] text-[var(--member-accent)] rounded border border-[var(--border-default)] font-medium">
-        メンバー
-      </span>
-    {/if}
-
-    <!-- 初見さんバッジ (初コメ時は目立つ、2回目以降はmuted) -->
-    {#if isFirstTimeViewer}
-      {#if message.in_stream_comment_count === 1}
-        <span class="px-1.5 py-0.5 bg-[var(--success-subtle)] text-[var(--success)] rounded font-bold" style="font-size: {fontSize}px;">
-          🎉初見さん
-        </span>
-      {:else}
-        <span class="text-[var(--text-muted)]" style="font-size: {fontSize}px;">
-          初見さん
-        </span>
-      {/if}
-    {/if}
-
-    <!-- 配信内コメント回数 (#1は目立つ色、#2以降はmuted) -->
-    {#if commentCountDisplay}
-      <span class="{message.in_stream_comment_count === 1 ? 'font-bold text-[var(--warning)]' : 'text-[var(--text-muted)]'}" style="font-size: {fontSize}px;">
-        {commentCountDisplay}
-      </span>
-    {/if}
-
-    <!-- Amount badge for SuperChat (when not shown in header) -->
-    {#if message.amount && !typeHeader}
-      <span class="px-1.5 py-0.5 text-xs bg-[var(--warning-subtle)] text-[var(--warning)] rounded border border-[var(--border-default)] font-bold">
-        {message.amount}
-      </span>
-    {/if}
-
-    <!-- Timestamp -->
-    {#if showTimestamps}
-      <span class="text-xs text-[var(--text-muted)] ml-auto flex-shrink-0">
-        {formattedTime}
-      </span>
-    {/if}
-  </div>
-
-  <!-- Row 2: Message content with runs (text + emoji) -->
-  {#if isGift}
-    <div class="mt-1 ml-8 flex items-center gap-2" style="font-size: {fontSize}px;">
-      {#if giftImageUrl}
-        <img
-          data-testid="gift-image"
-          src={giftImageUrl}
-          alt={giftName}
-          class="flex-shrink-0"
-          style="width: 32px; height: 32px;"
-          onerror={() => (giftImageFailed = true)}
-        />
-      {/if}
-      <span class="break-words leading-relaxed text-[var(--text-secondary)]">
-        {message.author} が {giftName} を送りました
-      </span>
-      {#if jewelCount != null}
-        <span
-          data-testid="gift-jewels"
-          class="px-1.5 py-0.5 text-xs bg-[var(--warning-subtle)] text-[var(--warning)] rounded border border-[var(--border-default)] font-bold flex-shrink-0"
-        >
-          {jewelCount} ジュエル
-        </span>
-      {/if}
+        <span class="min-w-0 break-words">{message.author} が {giftName} を送りました{@render meta('text-fg-2')}</span>
+        {#if jewelCount != null}
+          <span data-testid="gift-jewels" class="ml-auto shrink-0 text-chat-amount font-bold tabular-nums">{jewelCount} ジュエル</span>
+        {/if}
+      </div>
     </div>
+  {:else if isSystem}
+    <p class="px-3 py-1.5 break-words text-fg-2">{@render runs()}</p>
   {:else}
-  <div class="mt-1 ml-8">
-    <p class="break-words leading-relaxed" style="font-size: {fontSize}px; color: {superchatColors && (message.message_type === 'superchat' || message.message_type === 'supersticker') ? superchatColors.body_text : 'var(--text-secondary)'};">
-      {#if message.runs && message.runs.length > 0}
-        {#each message.runs as run, i (i)}
-          {#if run.type === 'Text'}
-            <span>{run.content}</span>
-          {:else if run.type === 'Emoji'}
-            <img
-              src={run.image_url}
-              alt={run.alt_text}
-              title={run.alt_text}
-              class="inline-block align-middle mx-0.5"
-              style="height: {fontSize + 4}px; width: auto;"
-            />
-          {/if}
-        {/each}
-      {:else}
-        {message.content}
-      {/if}
-    </p>
-  </div>
+    <!-- 優先順位 2〜5: 名前と本文を同じ段落に続ける -->
+    <div class="flex items-start gap-2 px-3 py-1.5 hover:bg-fg-1/8 {priority === 2 ? 'bg-highlight/20' : ''}">
+      {@render face('bg-surface-highest text-fg-2')}
+      <p class="min-w-0 break-words">
+        {#if partner}
+          <span data-testid="source-label" class="mr-1 rounded-control bg-surface-highest px-1 text-chat-meta whitespace-nowrap text-fg-2"
+            >{message.broadcaster_name}</span
+          >
+        {/if}
+        {#if priority === 2}
+          <span class="mr-1 rounded-control bg-highlight px-1 text-chat-meta font-bold text-surface">初見</span>
+        {:else if priority === 3}
+          <span class="mr-1 rounded-control border border-highlight px-1 text-chat-meta text-highlight">初見</span>
+        {:else if priority === 4}
+          <span class="mr-0.5 text-chat-meta text-highlight" aria-label="配信内で初めてのコメント">●</span>
+        {/if}
+        {@render name()}
+        {@render badges()}
+        {#if paidLabel}
+          <span data-testid="paid-label" class="ml-1 rounded-control border border-outline px-1 text-chat-meta whitespace-nowrap tabular-nums"
+            >{paidLabel}</span
+          >
+        {/if}
+        {#if hasBody}<span class="ml-1.5">{@render runs()}</span>{/if}
+        {@render meta(priority === 2 ? 'text-fg-2' : 'text-fg-3')}
+      </p>
+    </div>
   {/if}
 </div>
-
-<style>
-  /* 配信元インジケーター（多接続時に使用） */
-  .source-indicator-row {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    margin-bottom: 4px;
-  }
-  .source-indicator {
-    width: 3px;
-    height: 12px;
-    border-radius: 1px;
-    flex-shrink: 0;
-  }
-  .source-label {
-    font-size: 0.7em;
-    color: var(--text-secondary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-</style>
