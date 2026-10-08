@@ -537,6 +537,28 @@ pub fn get_viewer_custom_info(
     Ok(info)
 }
 
+/// 配信者のもとで視聴者に登録した読み仮名を引く（04_tts.md「視聴者カスタム読み仮名」）
+///
+/// プロフィールやカスタム情報が無い、または読み仮名が None なら None。
+pub fn get_viewer_reading(
+    conn: &Connection,
+    broadcaster_channel_id: &str,
+    channel_id: &str,
+) -> Result<Option<String>> {
+    let reading = conn
+        .query_row(
+            "SELECT vci.reading
+             FROM viewer_profiles vp
+             JOIN viewer_custom_info vci ON vci.viewer_profile_id = vp.id
+             WHERE vp.broadcaster_channel_id = ?1 AND vp.channel_id = ?2",
+            params![broadcaster_channel_id, channel_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?;
+
+    Ok(reading.flatten())
+}
+
 /// Upsert viewer custom info
 pub fn upsert_viewer_custom_info(conn: &Connection, info: &ViewerCustomInfo) -> Result<()> {
     conn.execute(
@@ -1179,6 +1201,71 @@ mod tests {
         let loaded = get_viewer_custom_info(&conn, profile.id).unwrap().unwrap();
         assert_eq!(loaded.reading.as_deref(), Some("やまだ たろう"));
         assert_eq!(loaded.notes.as_deref(), Some("常連さん"));
+    }
+
+    // ---- get_viewer_reading（04_tts.md「どの読み仮名を使うか」、06_viewer.md「配信者スコープ」） ----
+
+    /// 配信者のもとに視聴者のプロフィールを作り、読み仮名を登録する
+    fn register_reading(conn: &Connection, broadcaster: &str, viewer: &str, reading: Option<&str>) {
+        let profile_id =
+            upsert_viewer_profile(conn, broadcaster, viewer, "@田中-abc", None).unwrap();
+        let info = ViewerCustomInfo {
+            reading: reading.map(str::to_string),
+            ..ViewerCustomInfo::new(profile_id)
+        };
+        upsert_viewer_custom_info(conn, &info).unwrap();
+    }
+
+    #[tokio::test]
+    async fn viewer_reading_is_scoped_by_broadcaster() {
+        // spec: X の読み仮名は A のもとで「たなか」、B のもとで「タナカ」
+        let db = setup_db();
+        let conn = db.connection().await;
+        register_reading(&conn, "UCaaa", "UCxxx", Some("たなか"));
+        register_reading(&conn, "UCbbb", "UCxxx", Some("タナカ"));
+
+        assert_eq!(
+            get_viewer_reading(&conn, "UCaaa", "UCxxx")
+                .unwrap()
+                .as_deref(),
+            Some("たなか")
+        );
+        assert_eq!(
+            get_viewer_reading(&conn, "UCbbb", "UCxxx")
+                .unwrap()
+                .as_deref(),
+            Some("タナカ")
+        );
+    }
+
+    #[tokio::test]
+    async fn viewer_reading_of_other_broadcaster_is_not_used() {
+        // spec: A のもとでだけ「たなか」を登録している。B の接続では読み仮名なし
+        let db = setup_db();
+        let conn = db.connection().await;
+        register_reading(&conn, "UCaaa", "UCxxx", Some("たなか"));
+        upsert_viewer_profile(&conn, "UCbbb", "UCxxx", "@田中-abc", None).unwrap();
+
+        assert_eq!(get_viewer_reading(&conn, "UCbbb", "UCxxx").unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn viewer_reading_cleared_is_none() {
+        // spec: 読み仮名を空にして保存した（None として保存される）→ 読み仮名なし
+        let db = setup_db();
+        let conn = db.connection().await;
+        register_reading(&conn, "UCaaa", "UCxxx", Some("たなか"));
+        register_reading(&conn, "UCaaa", "UCxxx", None);
+
+        assert_eq!(get_viewer_reading(&conn, "UCaaa", "UCxxx").unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn viewer_reading_of_unknown_viewer_is_none() {
+        let db = setup_db();
+        let conn = db.connection().await;
+
+        assert_eq!(get_viewer_reading(&conn, "UCaaa", "UCxxx").unwrap(), None);
     }
 
     #[tokio::test]

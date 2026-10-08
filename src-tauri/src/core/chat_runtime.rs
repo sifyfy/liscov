@@ -253,8 +253,11 @@ pub async fn run_monitoring_loop(
             })
             .collect();
 
-        // DB への保存と判定（DB のロックは 1 回、1 トランザクション。08_database.md「書き込み」）
-        if !fresh.is_empty() {
+        // DB への保存と判定（DB のロックは 1 回、1 トランザクション。08_database.md「書き込み」）。
+        // 読み上げに使う読み仮名も、同じロックのうちにこの接続の配信者のもとで引く
+        let readings: Vec<Option<String>> = if fresh.is_empty() {
+            Vec::new()
+        } else {
             let target = MessageTarget {
                 video_id: &video_id,
                 session_id: session_id.as_deref(),
@@ -272,9 +275,14 @@ pub async fn run_monitoring_loop(
                 &mut in_stream_counts,
                 &mut known_handles,
             );
-        }
+            let db_scope = conn.as_deref().zip(broadcaster_id.as_deref());
+            fresh
+                .iter()
+                .map(|msg| viewer_reading(msg, db_scope))
+                .collect()
+        };
 
-        for msg in &fresh {
+        for (msg, reading) in fresh.iter().zip(readings) {
             // 画面に送る
             output.message(msg);
 
@@ -287,7 +295,7 @@ pub async fn run_monitoring_loop(
             }
 
             // TTS キューに追加
-            enqueue_tts(&deps.tts_manager, msg).await;
+            enqueue_tts(&deps.tts_manager, msg, reading).await;
         }
 
         // ライブリアクション: 保存・GUI・WebSocket（読み上げはしない）
@@ -541,8 +549,29 @@ async fn save_raw_response(config: &SaveConfig, raw_json: &str) {
     }
 }
 
-/// メッセージを TTS キューに追加する
-async fn enqueue_tts(tts_manager: &TtsManager, msg: &ChatMessage) {
+/// メッセージの視聴者に、この接続の配信者のもとで登録した読み仮名（04_tts.md「どの読み仮名を使うか」）
+///
+/// 視聴者を特定できない・配信者が分からない・DB を使えないときは None。
+/// 検索に失敗したら警告ログを出して None（投稿者名で読み上げる）。
+fn viewer_reading(msg: &ChatMessage, db_scope: Option<(&Connection, &str)>) -> Option<String> {
+    if msg.channel_id.is_empty() {
+        return None;
+    }
+    let (conn, broadcaster_id) = db_scope?;
+    database::get_viewer_reading(conn, broadcaster_id, &msg.channel_id)
+        .inspect_err(|e| {
+            tracing::warn!(
+                "読み仮名を引けない（投稿者名で読み上げる） message_id: {}: {}",
+                msg.id,
+                e
+            )
+        })
+        .ok()
+        .flatten()
+}
+
+/// メッセージを TTS キューに追加する（author_reading は viewer_reading で引いたもの）
+async fn enqueue_tts(tts_manager: &TtsManager, msg: &ChatMessage, author_reading: Option<String>) {
     let priority = match &msg.message_type {
         MessageType::SuperChat { .. } | MessageType::SuperSticker { .. } | MessageType::Gift(_) => {
             TtsPriority::SuperChat
@@ -573,6 +602,7 @@ async fn enqueue_tts(tts_manager: &TtsManager, msg: &ChatMessage) {
         text,
         priority,
         author_name: Some(msg.author.clone()),
+        author_reading,
         amount,
         in_stream_comment_count: msg.in_stream_comment_count,
         message_id: Some(msg.id.clone()),
@@ -775,6 +805,52 @@ mod tests {
             is_first_time_viewer: false,
             in_stream_comment_count: None,
         }
+    }
+
+    // 04_tts.md「どの読み仮名を使うか」: 視聴者X の読み仮名は A のもとで「たなか」、B のもとで「タナカ」
+    async fn db_with_readings() -> Database {
+        let db = Database::new_in_memory().expect("in-memory DB");
+        {
+            let conn = db.connection().await;
+            for (broadcaster, reading) in [("UCaaa", "たなか"), ("UCbbb", "タナカ")] {
+                let id =
+                    database::upsert_viewer_profile(&conn, broadcaster, "UCxxx", "@田中-abc", None)
+                        .unwrap();
+                let info = database::ViewerCustomInfo::new(id).with_reading(reading);
+                database::upsert_viewer_custom_info(&conn, &info).unwrap();
+            }
+        }
+        db
+    }
+
+    #[tokio::test]
+    async fn reading_comes_from_broadcaster_of_the_connection() {
+        // spec: 配信者A・B を同時に接続。B の接続に X のコメント → タナカ（A の接続なら たなか）
+        let db = db_with_readings().await;
+        let conn = db.connection().await;
+        let msg = text_message("m1", "UCxxx");
+        assert_eq!(
+            viewer_reading(&msg, Some((&conn, "UCbbb"))).as_deref(),
+            Some("タナカ")
+        );
+        assert_eq!(
+            viewer_reading(&msg, Some((&conn, "UCaaa"))).as_deref(),
+            Some("たなか")
+        );
+    }
+
+    #[tokio::test]
+    async fn unidentified_viewer_has_no_reading() {
+        // spec: 視聴者を特定できないギフト（channel_id が無い）→ 投稿者名で読む
+        let db = db_with_readings().await;
+        let conn = db.connection().await;
+        let msg = text_message("m1", "");
+        assert_eq!(viewer_reading(&msg, Some((&conn, "UCaaa"))), None);
+    }
+
+    #[test]
+    fn no_reading_without_db_or_broadcaster() {
+        assert_eq!(viewer_reading(&text_message("m1", "UCxxx"), None), None);
     }
 
     // 08_database.md「書き込み」: 1 回のポーリング分をまとめて保存し、1 件の失敗はほかを止めない。
