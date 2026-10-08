@@ -2,7 +2,7 @@ import { test, expect } from './utils/fixtures';
 import type { BrowserContext, Page, Browser } from '@playwright/test';
 import { log } from './utils/logger';
 import {
-  MOCK_SERVER_URL,
+  mockServerUrl,
   setupTestEnvironment,
   teardownTestEnvironment,
   resetMockServer,
@@ -79,7 +79,7 @@ test.describe('Timestamp Timezone Display', () => {
 
     // Connect to stream
     const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-    await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+    await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
     await mainPage.locator('button:has-text("開始")').click();
     await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
@@ -182,7 +182,7 @@ test.describe('Timestamp Timezone Display', () => {
 
     // Connect to stream
     const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-    await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+    await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
     await mainPage.locator('button:has-text("開始")').click();
     await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 

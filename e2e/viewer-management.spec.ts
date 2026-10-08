@@ -2,7 +2,7 @@ import { test, expect } from './utils/fixtures';
 import type { BrowserContext, Page, Browser } from '@playwright/test';
 import { log } from './utils/logger';
 import {
-  MOCK_SERVER_URL,
+  mockServerUrl,
   setupTestEnvironment,
   teardownTestEnvironment,
   resetMockServer,
@@ -84,7 +84,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
     // Enter mock stream URL (full URL format to pass validation)
     // Note: The URL validation accepts localhost URLs with /watch?v= format
     const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-    await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test123`);
+    await urlInput.fill(`${mockServerUrl()}/watch?v=test123`);
 
     const connectButton = mainPage.getByRole('button', { name: '開始' });
     await connectButton.click();
@@ -722,7 +722,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
 
       // Step 3: Configure mock server to use Broadcaster B
       log.info('Switching to Broadcaster B...');
-      await fetch(`${MOCK_SERVER_URL}/set_stream_state`, {
+      await fetch(`${mockServerUrl()}/set_stream_state`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -733,7 +733,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
       });
 
       // Add a message from the SAME viewer (same channel_id pattern) for Broadcaster B
-      await fetch(`${MOCK_SERVER_URL}/add_message`, {
+      await fetch(`${mockServerUrl()}/add_message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -746,7 +746,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
 
       // Step 4: Connect to Broadcaster B
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_b_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_b_123`);
       await mainPage.getByRole('button', { name: '開始' }).click();
 
       // Wait for connection
@@ -820,7 +820,7 @@ test.describe.serial('Viewer Management Feature (06_viewer.md)', () => {
       }
 
       // Cleanup: Reset mock server state for next tests
-      await fetch(`${MOCK_SERVER_URL}/set_stream_state`, {
+      await fetch(`${mockServerUrl()}/set_stream_state`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

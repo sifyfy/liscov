@@ -2,17 +2,15 @@
 /**
  * E2E 用の静的フロントエンドサーバーの単体テスト
  *
- * 仕様 (e2e/README.md「ポート 5173 が使用中でエラーになる」):
- * - build/ を 127.0.0.1 と ::1 の両方の同じポートで配信する
- *   (WebView2 は localhost を ::1 から試すため、片方だけだと別のサーバーに読み込まれる)
- * - どちらかのアドレスが使用中なら再利用せずにエラーで止め、掴みかけたポートも解放する
+ * 仕様 (e2e/README.md「並列実行と分離」、ADR-005):
+ * - build/ を 127.0.0.1 の空きポートで配信する (WebView2 の localhost:5173 はそこへ付け替える)
+ * - 起動ごとの ID を GET /__liscov_e2e_server_id で返す。ほかのパスは build/ のファイル、無ければ index.html
  */
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
-import * as http from 'http';
 import * as os from 'os';
 import * as path from 'path';
-import { startStaticFrontendServer, type StaticFrontendServer } from './static-frontend-server';
+import { FRONTEND_SERVER_ID_PATH, startStaticFrontendServer, type StaticFrontendServer } from './static-frontend-server';
 
 let rootDir: string;
 const cleanups: (() => Promise<void>)[] = [];
@@ -29,103 +27,56 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-function listen(server: http.Server, port: number, host: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(port, host, resolve);
-  });
-}
-
-/** 127.0.0.1 と ::1 の両方で空いているポートを探す */
-async function findFreePort(): Promise<number> {
-  for (;;) {
-    const v4 = http.createServer();
-    await listen(v4, 0, '127.0.0.1');
-    const { port } = v4.address() as { port: number };
-    const v6 = http.createServer();
-    const ok = await listen(v6, port, '::1').then(() => true, () => false);
-    await new Promise((resolve) => v4.close(resolve));
-    if (ok) await new Promise((resolve) => v6.close(resolve));
-    if (ok) return port;
-  }
-}
-
-/** 別のプロセス (pnpm dev の Vite や別ワークツリーの E2E) が先に掴んでいる状況を作る */
-async function occupy(port: number, host: string): Promise<void> {
-  const server = http.createServer((_req, res) => res.end('other server'));
-  await listen(server, port, host);
-  cleanups.push(() => new Promise((resolve) => server.close(() => resolve())));
-}
-
-async function start(port: number): Promise<StaticFrontendServer> {
-  const server = await startStaticFrontendServer(rootDir, port);
+async function start(): Promise<StaticFrontendServer> {
+  const server = await startStaticFrontendServer(rootDir);
   cleanups.push(() => server.close());
   return server;
 }
 
-async function get(host: string, port: number, urlPath: string): Promise<{ status: number; type: string; body: string }> {
-  const url = `http://${host.includes(':') ? `[${host}]` : host}:${port}${urlPath}`;
-  const response = await fetch(url);
+async function get(port: number, urlPath: string): Promise<{ status: number; type: string; body: string }> {
+  const response = await fetch(`http://127.0.0.1:${port}${urlPath}`);
   return { status: response.status, type: response.headers.get('content-type') ?? '', body: await response.text() };
 }
 
 describe('startStaticFrontendServer', () => {
-  it('127.0.0.1 と ::1 の両方で build/ を配信する', async () => {
-    const port = await findFreePort();
-    await start(port);
+  it('127.0.0.1 の空きポートで build/ を配信し、そのポートを返す', async () => {
+    const { port } = await start();
 
-    for (const host of ['127.0.0.1', '::1']) {
-      expect(await get(host, port, '/')).toEqual({ status: 200, type: 'text/html; charset=utf-8', body: '<p>index</p>' });
-      expect(await get(host, port, '/_app/app.js')).toMatchObject({ type: 'application/javascript; charset=utf-8', body: 'console.log(1)' });
-    }
+    expect(port).toBeGreaterThan(0);
+    expect(await get(port, '/')).toEqual({ status: 200, type: 'text/html; charset=utf-8', body: '<p>index</p>' });
+    expect(await get(port, '/_app/app.js')).toMatchObject({ type: 'application/javascript; charset=utf-8', body: 'console.log(1)' });
+  });
+
+  it('同時に起動しても別のポートになる (別のワークツリーの E2E と並列に動く)', async () => {
+    const [a, b] = await Promise.all([start(), start()]);
+
+    expect(a.port).not.toBe(b.port);
+  });
+
+  it(`${FRONTEND_SERVER_ID_PATH} に起動ごとの ID を返す`, async () => {
+    const [a, b] = await Promise.all([start(), start()]);
+
+    expect(await get(a.port, FRONTEND_SERVER_ID_PATH)).toEqual({ status: 200, type: 'text/plain; charset=utf-8', body: a.serverId });
+    expect(a.serverId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(a.serverId).not.toBe(b.serverId);
   });
 
   it('存在しないパスは index.html を返す (SPA のフォールバック)', async () => {
-    const port = await findFreePort();
-    await start(port);
+    const { port } = await start();
 
-    expect((await get('127.0.0.1', port, '/settings')).body).toBe('<p>index</p>');
+    expect((await get(port, '/settings')).body).toBe('<p>index</p>');
   });
 
   it('build/ の外を指すパスでも build/ の外のファイルは返さない', async () => {
-    const port = await findFreePort();
-    await start(port);
+    const { port } = await start();
 
-    expect((await get('127.0.0.1', port, '/..%2F..%2Fwindows%2Fwin.ini')).body).toBe('<p>index</p>');
+    expect((await get(port, '/..%2F..%2Fwindows%2Fwin.ini')).body).toBe('<p>index</p>');
   });
 
-  it.each(['::1', '127.0.0.1'])('%s が使用中なら、ポート番号と原因の候補を示して失敗する', async (busyHost) => {
-    const port = await findFreePort();
-    await occupy(port, busyHost);
-
-    const error = await startStaticFrontendServer(rootDir, port).then(
-      (server) => { cleanups.push(() => server.close()); return null; },
-      (e: unknown) => e,
-    );
-
-    expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toContain(`${busyHost}:${port}`);
-    expect((error as Error).message).toContain('pnpm dev');
-  });
-
-  it('片方だけ掴めた状態で失敗したら、掴んだ側も解放する', async () => {
-    const port = await findFreePort();
-    await occupy(port, '::1');
-
-    await expect(startStaticFrontendServer(rootDir, port)).rejects.toThrow();
-
-    // 127.0.0.1 側が解放されていれば、あらためて listen できる
-    const probe = http.createServer();
-    await listen(probe, port, '127.0.0.1');
-    await new Promise((resolve) => probe.close(resolve));
-  });
-
-  it('close() で両方のアドレスを解放する', async () => {
-    const port = await findFreePort();
-    const server = await startStaticFrontendServer(rootDir, port);
+  it('close() でポートを解放する', async () => {
+    const server = await startStaticFrontendServer(rootDir);
     await server.close();
 
-    const restarted = await start(port);
-    expect(restarted).toBeDefined();
+    await expect(fetch(`http://127.0.0.1:${server.port}/`)).rejects.toThrow();
   });
 });

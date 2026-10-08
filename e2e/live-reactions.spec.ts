@@ -1,7 +1,7 @@
 import { test, expect } from './utils/fixtures';
 import type { BrowserContext, Page, Browser } from '@playwright/test';
 import {
-  MOCK_SERVER_URL,
+  mockServerUrl,
   setupTestEnvironment,
   teardownTestEnvironment,
   resetMockServer,
@@ -34,7 +34,7 @@ test.describe('ライブリアクション (02_chat.md)', () => {
     await resetMockServer();
   });
 
-  async function connect(videoId: string, url = `${MOCK_SERVER_URL}/watch?v=${videoId}`) {
+  async function connect(videoId: string, url = `${mockServerUrl()}/watch?v=${videoId}`) {
     const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
     await urlInput.fill(url);
     await mainPage.locator('button:has-text("開始")').click();
@@ -99,7 +99,7 @@ test.describe('ライブリアクション (02_chat.md)', () => {
   // 仕様: 同じ配信なら URL の書き方（/live/ と watch?v=）が違っても累計は続きから（08_database.md sessions.video_id）
   test('/live/ の URL で接続した配信に watch?v= で再接続しても累計を続きから数える', async () => {
     const videoId = 'test_video_reactions_live_url';
-    await connect(videoId, `${MOCK_SERVER_URL}/live/${videoId}`);
+    await connect(videoId, `${mockServerUrl()}/live/${videoId}`);
     await addMockReaction({ '❤': 5 });
     await expect(total('❤')).toHaveText('❤ 5', { timeout: 5000 });
     await disconnectAndInitialize(mainPage);

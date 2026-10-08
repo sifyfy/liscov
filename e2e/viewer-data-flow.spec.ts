@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { log } from './utils/logger';
 import {
-  MOCK_SERVER_URL,
+  mockServerUrl,
   setupTestEnvironment,
   teardownTestEnvironment,
   resetMockServer,
@@ -91,7 +91,7 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
 
   test('Step 2.5: Verify mock server returns broadcaster info', async () => {
     // Directly verify the mock server HTML contains broadcaster info
-    const response = await fetch(`${MOCK_SERVER_URL}/watch?v=test123`);
+    const response = await fetch(`${mockServerUrl()}/watch?v=test123`);
     const html = await response.text();
 
     // Extract ytInitialData
@@ -123,7 +123,7 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
     // Add messages to mock server queue BEFORE connecting
     // These will be delivered when the app polls for messages
     log.info('Adding messages to mock server...');
-    await fetch(`${MOCK_SERVER_URL}/add_message`, {
+    await fetch(`${mockServerUrl()}/add_message`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -133,7 +133,7 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
         content: 'Hello from RealViewer1!'
       })
     });
-    await fetch(`${MOCK_SERVER_URL}/add_message`, {
+    await fetch(`${mockServerUrl()}/add_message`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -148,7 +148,7 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
     // Navigate to Chat and connect
     await mainPage.locator('button:has-text("Chat")').click();
     const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-    await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=real_test_123`);
+    await urlInput.fill(`${mockServerUrl()}/watch?v=real_test_123`);
 
     const connectButton = mainPage.locator('button:has-text("開始")');
     await connectButton.click();

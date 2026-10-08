@@ -2,7 +2,7 @@ import { test, expect } from './utils/fixtures';
 import type { BrowserContext, Page, Browser } from '@playwright/test';
 import { log } from './utils/logger';
 import {
-  MOCK_SERVER_URL,
+  mockServerUrl,
   setupTestEnvironment,
   teardownTestEnvironment,
   resetMockServer,
@@ -50,7 +50,7 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
   test.describe('Connected State (接続中)', () => {
     test('接続するとストリームタイトルが接続リストに表示される', async () => {
       const urlInput = mainPage.locator('input[placeholder*="YouTube URL"], input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
 
       // 接続リストにエントリが追加される
@@ -64,7 +64,7 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
 
     test('接続中はURL入力フォームが引き続き表示される', async () => {
       const urlInput = mainPage.locator('input[placeholder*="YouTube URL"], input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
@@ -77,7 +77,7 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
 
     test('接続中はメッセージが受信できる', async () => {
       const urlInput = mainPage.locator('input[placeholder*="YouTube URL"], input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
@@ -98,7 +98,7 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
   test.describe('Disconnect (切断)', () => {
     test('個別切断ボタンで接続が切断される', async () => {
       const urlInput = mainPage.locator('input[placeholder*="YouTube URL"], input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.locator('.connection-item').first()).toBeVisible({ timeout: 10000 });
 
@@ -113,7 +113,7 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
 
     test('切断後もURL入力フォームは表示されている', async () => {
       const urlInput = mainPage.locator('input[placeholder*="YouTube URL"], input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.locator('.connection-item').first()).toBeVisible({ timeout: 10000 });
 
@@ -126,7 +126,7 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
 
     test('切断後にメッセージが保持される', async () => {
       const urlInput = mainPage.locator('input[placeholder*="YouTube URL"], input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
@@ -158,14 +158,14 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
   test.describe('Reconnect (再接続)', () => {
     test('切断後に同じURLで再接続できる', async () => {
       const urlInput = mainPage.locator('input[placeholder*="YouTube URL"], input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       await disconnectAndInitialize(mainPage);
 
       // 再接続
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.locator('.connection-item').first()).toBeVisible({ timeout: 10000 });
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
@@ -175,14 +175,14 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
 
     test('再接続後にメッセージを受信できる', async () => {
       const urlInput = mainPage.locator('input[placeholder*="YouTube URL"], input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
       await disconnectAndInitialize(mainPage);
 
       // 再接続
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.locator('.connection-item').first()).toBeVisible({ timeout: 10000 });
 
@@ -214,7 +214,7 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
 
       // 接続
       const urlInput = mainPage.locator('input[placeholder*="YouTube URL"], input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
 
       // 接続中状態
@@ -227,7 +227,7 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
       await expect(mainPage.locator('.connection-item')).toHaveCount(0, { timeout: 5000 });
 
       // 再接続
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
 
       // 再び接続中状態
@@ -239,7 +239,7 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
 
   test.describe('Auto-Message Continuous Flow (実際のYouTubeシミュレーション)', () => {
     async function enableAutoMessages(messagesPerPoll: number = 10): Promise<void> {
-      await fetch(`${MOCK_SERVER_URL}/set_auto_message`, {
+      await fetch(`${mockServerUrl()}/set_auto_message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: true, messages_per_poll: messagesPerPoll }),
@@ -247,7 +247,7 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
     }
 
     async function disableAutoMessages(): Promise<void> {
-      await fetch(`${MOCK_SERVER_URL}/set_auto_message`, {
+      await fetch(`${mockServerUrl()}/set_auto_message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: false }),
@@ -255,7 +255,7 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
     }
 
     async function getAutoMessageStatus(): Promise<{ enabled: boolean; total_generated: number }> {
-      const response = await fetch(`${MOCK_SERVER_URL}/auto_message_status`);
+      const response = await fetch(`${mockServerUrl()}/auto_message_status`);
       return response.json();
     }
 
@@ -263,7 +263,7 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
       await enableAutoMessages(10);
 
       const urlInput = mainPage.locator('input[placeholder*="YouTube URL"], input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_auto_msg`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_auto_msg`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.locator('.connection-item').first()).toBeVisible({ timeout: 10000 });
 
@@ -288,7 +288,7 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
       await enableAutoMessages(5);
 
       const urlInput = mainPage.locator('input[placeholder*="YouTube URL"], input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_reconnect_auto`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_reconnect_auto`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.locator('.connection-item').first()).toBeVisible({ timeout: 10000 });
 
@@ -302,7 +302,7 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
       await disconnectAndInitialize(mainPage);
 
       // 再接続
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_reconnect_auto`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_reconnect_auto`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.locator('.connection-item').first()).toBeVisible({ timeout: 10000 });
 
@@ -322,7 +322,7 @@ test.describe('Connection State Transitions (02_chat.md)', () => {
   test.describe('High Volume (UIフリーズ回避)', () => {
     test('大量メッセージ受信中もUIがフリーズしない', async () => {
       const urlInput = mainPage.locator('input[placeholder*="YouTube URL"], input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.locator('.connection-item').first()).toBeVisible({ timeout: 10000 });
 

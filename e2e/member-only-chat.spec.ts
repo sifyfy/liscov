@@ -2,7 +2,7 @@ import { test, expect } from './utils/fixtures';
 import type { BrowserContext, Page, Browser } from '@playwright/test';
 import { log } from './utils/logger';
 import {
-  MOCK_SERVER_URL,
+  mockServerUrl,
   setupTestEnvironment,
   teardownTestEnvironment,
   addMockMessage,
@@ -30,7 +30,7 @@ async function setStreamState(state: {
   watch_force_no_chat?: boolean;
   title?: string;
 }): Promise<void> {
-  const response = await fetch(`${MOCK_SERVER_URL}/set_stream_state`, {
+  const response = await fetch(`${mockServerUrl()}/set_stream_state`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(state),
@@ -42,7 +42,7 @@ async function setStreamState(state: {
 
 // Helper to set auth state on mock server
 async function setAuthState(state: { session_valid?: boolean }): Promise<void> {
-  const response = await fetch(`${MOCK_SERVER_URL}/set_auth_state`, {
+  const response = await fetch(`${mockServerUrl()}/set_auth_state`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(state),
@@ -115,7 +115,7 @@ test.describe('Member-Only Stream Chat Access', () => {
     // ストリームURLを入力して接続
     const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
     await expect(urlInput).toBeVisible();
-    await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=member_only_stream`);
+    await urlInput.fill(`${mockServerUrl()}/watch?v=member_only_stream`);
     await mainPage.locator('button:has-text("開始")').click();
 
     // 接続成功: ストリームタイトルが表示される
@@ -157,7 +157,7 @@ test.describe('Member-Only Stream Chat Access', () => {
     // ストリームURLを入力して接続
     const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
     await expect(urlInput).toBeVisible();
-    await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=normal_stream`);
+    await urlInput.fill(`${mockServerUrl()}/watch?v=normal_stream`);
     await mainPage.locator('button:has-text("開始")').click();
 
     // 接続成功
@@ -197,7 +197,7 @@ test.describe('Member-Only Stream Chat Access', () => {
     // ストリームURLを入力して接続
     const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
     await expect(urlInput).toBeVisible();
-    await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=fallback_stream`);
+    await urlInput.fill(`${mockServerUrl()}/watch?v=fallback_stream`);
     await mainPage.locator('button:has-text("開始")').click();
 
     // 接続成功: /next APIフォールバック経由でストリームタイトルが表示される
@@ -241,7 +241,7 @@ test.describe('Member-Only Stream Chat Access', () => {
     // ストリームURLを入力して接続
     const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
     await expect(urlInput).toBeVisible();
-    await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=cookie_pipeline_test`);
+    await urlInput.fill(`${mockServerUrl()}/watch?v=cookie_pipeline_test`);
     await mainPage.locator('button:has-text("開始")').click();
 
     // 接続成功を待つ
@@ -250,7 +250,7 @@ test.describe('Member-Only Stream Chat Access', () => {
     ).toBeVisible({ timeout: 10000 });
 
     // モックサーバーから実際に受信したCookieヘッダーを取得
-    const cookieResponse = await fetch(`${MOCK_SERVER_URL}/last_request_cookies`);
+    const cookieResponse = await fetch(`${mockServerUrl()}/last_request_cookies`);
     const lastCookies: { watch: string | null; next: string | null } = await cookieResponse.json();
 
     // /watch リクエストでCookieが送信されていることを確認
@@ -300,7 +300,7 @@ test.describe('Member-Only Stream Chat Access', () => {
     await mainPage.getByRole('button', { name: 'Chat' }).click();
     const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
     await expect(urlInput).toBeVisible();
-    await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=no_auth_stream`);
+    await urlInput.fill(`${mockServerUrl()}/watch?v=no_auth_stream`);
     await mainPage.locator('button:has-text("開始")').click();
 
     // 接続失敗: エラー表示を確認

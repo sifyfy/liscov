@@ -385,27 +385,28 @@ WebViewはフルブラウザとして動作するため、以下の2FA方式に�
 ### テスト分離
 
 E2Eテストは本番データと分離された専用の名前空間を使用する。以下の環境変数でテスト用の名前空間を指定可能。
+テスト用の名前はワークツリーごとに分け、`liscov-test-<ワークツリー ID>` とする（複数のワークツリーの E2E を同時に走らせても干渉しない。ADR-005、ワークツリー ID の決め方は e2e/README.md）。以下では `liscov-test-1a2b3c4d` を例にする。
 
 | 環境変数 | デフォルト値 | テスト時の値 | 影響範囲 |
 |---------|-------------|-------------|---------|
-| `LISCOV_APP_NAME` | `liscov` | `liscov-test` | 設定ファイルパス、DBパス、ウィンドウ状態のファイル名（10_window_state.md） |
-| `LISCOV_KEYRING_SERVICE` | `liscov` | `liscov-test` | Windows資格情報マネージャーのサービス名 |
+| `LISCOV_APP_NAME` | `liscov` | `liscov-test-1a2b3c4d` | 設定ファイルパス、DBパス、ウィンドウ状態のファイル名（10_window_state.md） |
+| `LISCOV_KEYRING_SERVICE` | `liscov` | `liscov-test-1a2b3c4d` | Windows資格情報マネージャーのサービス名 |
 | `LISCOV_AUTH_URL` | YouTube URL | mock server URL | 認証ウィンドウの初期URL |
 | `LISCOV_SESSION_CHECK_URL` | YouTube API | mock server URL | セッション検証エンドポイント |
-| `WEBVIEW2_USER_DATA_FOLDER` | なし（`%LOCALAPPDATA%/com.liscov-tauri.app/EBWebView`） | `%LOCALAPPDATA%/liscov-test/EBWebView` | WebView2 のデータ（Cookie・キャッシュ）。WebView2 自体が読む環境変数で、`identifier` で決まる本番のフォルダと分ける。同じフォルダだと本番の起動中にテスト用アプリが CDP を開けない |
+| `WEBVIEW2_USER_DATA_FOLDER` | なし（`%LOCALAPPDATA%/com.liscov-tauri.app/EBWebView`） | `%LOCALAPPDATA%/liscov-test-1a2b3c4d/EBWebView` | WebView2 のデータ（Cookie・キャッシュ）。WebView2 自体が読む環境変数で、`identifier` で決まる本番のフォルダと分ける。同じフォルダだと、先に起動したアプリ（本番や別のワークツリーの E2E）のブラウザプロセスを共有し、テスト用アプリが CDP を開けない |
 
 ### テストデータのパス
 
-テスト実行時（`LISCOV_APP_NAME=liscov-test`）のデータ保存先：
+テスト実行時（`LISCOV_APP_NAME=liscov-test-1a2b3c4d`）のデータ保存先：
 
 | 種別 | パス |
 |-----|------|
-| 設定ファイル | `%APPDATA%/liscov-test/config.toml` |
-| 認証情報（fallback） | `%APPDATA%/liscov-test/credentials.toml` |
-| データベース | `%APPDATA%/liscov-test/liscov.db` |
-| ウィンドウ状態 | `%APPDATA%/com.liscov-tauri.app/.window-state.liscov-test.json` |
-| WebView2 のデータ | `%LOCALAPPDATA%/liscov-test/EBWebView` |
-| 認証情報（secure） | Windows資格情報マネージャー（サービス名: `liscov-test`） |
+| 設定ファイル | `%APPDATA%/liscov-test-1a2b3c4d/config.toml` |
+| 認証情報（fallback） | `%APPDATA%/liscov-test-1a2b3c4d/credentials.toml` |
+| データベース | `%APPDATA%/liscov-test-1a2b3c4d/liscov.db` |
+| ウィンドウ状態 | `%APPDATA%/com.liscov-tauri.app/.window-state.liscov-test-1a2b3c4d.json` |
+| WebView2 のデータ | `%LOCALAPPDATA%/liscov-test-1a2b3c4d/EBWebView` |
+| 認証情報（secure） | Windows資格情報マネージャー（サービス名: `liscov-test-1a2b3c4d`） |
 
 ### テストスイート
 

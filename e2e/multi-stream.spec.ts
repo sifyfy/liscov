@@ -2,7 +2,7 @@ import { test, expect } from './utils/fixtures';
 import type { BrowserContext, Page, Browser } from '@playwright/test';
 import { log } from './utils/logger';
 import {
-  MOCK_SERVER_URL,
+  mockServerUrl,
   setupTestEnvironment,
   teardownTestEnvironment,
   resetMockServer,
@@ -24,7 +24,7 @@ import {
 async function connectStream(page: Page, videoId: string, expectedTitle: string): Promise<void> {
   const urlInput = page.locator('input[placeholder*="YouTube URL"], input[placeholder*="youtube.com"]');
   // 入力欄をクリアしてから新しいURLを入力
-  await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=${videoId}`);
+  await urlInput.fill(`${mockServerUrl()}/watch?v=${videoId}`);
   await page.locator('button:has-text("開始")').click();
   // 接続リストに該当タイトルが表示されるまで待機
   await expect(page.getByText(expectedTitle).first()).toBeVisible({ timeout: 10000 });
