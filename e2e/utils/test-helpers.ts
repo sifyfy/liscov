@@ -5,10 +5,10 @@
 import { chromium, BrowserContext, Page, Browser, expect } from '@playwright/test';
 import { execSync, spawn, ChildProcess } from 'child_process';
 import * as fs from 'fs';
-import * as http from 'http';
 import * as path from 'path';
 import * as os from 'os';
 import { log } from './logger';
+import { startStaticFrontendServer, type StaticFrontendServer } from './static-frontend-server';
 
 export const CDP_URL = 'http://127.0.0.1:9222';
 export const MOCK_SERVER_URL = 'http://127.0.0.1:3456';
@@ -23,7 +23,7 @@ let mockServerProcess: ChildProcess | null = null;
 
 // Tauriアプリプロセス参照
 let tauriProcess: ChildProcess | null = null;
-let staticFrontendServer: http.Server | null = null;
+let staticFrontendServer: StaticFrontendServer | null = null;
 
 // プリビルドバイナリのパス（Windowsのみ対応）
 // 注: workspace 化により cargo build の出力先は <root>/target/ (旧: src-tauri/target/)
@@ -31,6 +31,7 @@ const PREBUILT_TAURI_APP_PATH = path.join(PROJECT_DIR, 'target', 'debug', 'lisco
 const PREBUILT_MOCK_SERVER_PATH = path.join(PROJECT_DIR, 'target', 'debug', 'mock-server.exe');
 const PREBUILT_FRONTEND_INDEX_PATH = path.join(PROJECT_DIR, 'build', 'index.html');
 const PREBUILT_FRONTEND_DIR = path.join(PROJECT_DIR, 'build');
+// src-tauri/tauri.conf.json の devUrl (http://localhost:5173) と一致させる
 const PREBUILT_FRONTEND_PORT = 5173;
 
 /**
@@ -111,79 +112,12 @@ export async function cleanupTestCredentials(): Promise<void> {
 }
 
 /**
- * レスポンスコンテンツタイプを拡張子から解決する
- */
-function getStaticContentType(filePath: string): string {
-  switch (path.extname(filePath).toLowerCase()) {
-    case '.css':
-      return 'text/css; charset=utf-8';
-    case '.html':
-      return 'text/html; charset=utf-8';
-    case '.ico':
-      return 'image/x-icon';
-    case '.js':
-      return 'application/javascript; charset=utf-8';
-    case '.json':
-      return 'application/json; charset=utf-8';
-    case '.png':
-      return 'image/png';
-    case '.svg':
-      return 'image/svg+xml';
-    case '.txt':
-      return 'text/plain; charset=utf-8';
-    case '.woff2':
-      return 'font/woff2';
-    default:
-      return 'application/octet-stream';
-  }
-}
-
-/**
- * リクエストURLからビルド済みフロントエンドのファイルパスを解決する
- */
-function resolveStaticFrontendFile(requestUrl?: string): string {
-  const requestPath = decodeURIComponent(new URL(requestUrl ?? '/', 'http://127.0.0.1').pathname);
-  const relativePath = requestPath === '/' ? 'index.html' : requestPath.replace(/^\/+/, '');
-  const resolvedPath = path.resolve(PREBUILT_FRONTEND_DIR, relativePath);
-
-  if (resolvedPath.startsWith(path.resolve(PREBUILT_FRONTEND_DIR)) && fs.existsSync(resolvedPath) && fs.statSync(resolvedPath).isFile()) {
-    return resolvedPath;
-  }
-
-  return PREBUILT_FRONTEND_INDEX_PATH;
-}
-
-/**
- * 静的フロントエンドサーバーを起動する（既に起動済みの場合は再利用）
+ * このワークツリーの build/ を devUrl のポートで配信する（同じプロセス内で起動済みなら何もしない）
+ * ポートが使用中なら再利用せず失敗する（static-frontend-server.ts を参照）
  */
 async function ensureStaticFrontendServer(): Promise<void> {
   if (staticFrontendServer) return;
-
-  staticFrontendServer = http.createServer((req, res) => {
-    const filePath = resolveStaticFrontendFile(req.url);
-    try {
-      const content = fs.readFileSync(filePath);
-      res.writeHead(200, { 'Content-Type': getStaticContentType(filePath) });
-      res.end(content);
-    } catch {
-      res.writeHead(404);
-      res.end('Not found');
-    }
-  });
-
-  await new Promise<void>((resolve, reject) => {
-    staticFrontendServer!.once('error', (error) => {
-      if ((error as NodeJS.ErrnoException).code === 'EADDRINUSE') {
-        log.debug(`Port ${PREBUILT_FRONTEND_PORT} already in use, reusing existing server`);
-        staticFrontendServer = null;
-        resolve();
-        return;
-      }
-      reject(error);
-    });
-    staticFrontendServer!.listen(PREBUILT_FRONTEND_PORT, '127.0.0.1', resolve);
-  });
-
+  staticFrontendServer = await startStaticFrontendServer(PREBUILT_FRONTEND_DIR, PREBUILT_FRONTEND_PORT);
   log.debug(`Static frontend server started on port ${PREBUILT_FRONTEND_PORT}`);
 }
 
@@ -592,10 +526,11 @@ export async function teardownTestEnvironment(browser?: Browser): Promise<void> 
     ['browser.close', () => browser?.close()],
     ['killTauriApp', killTauriApp],
     ['killMockServer', killMockServer],
-    ['stopStaticServer', () => new Promise<void>((resolve) => {
-      if (!staticFrontendServer) { resolve(); return; }
-      staticFrontendServer.close(() => { staticFrontendServer = null; resolve(); });
-    })],
+    ['stopStaticServer', async () => {
+      const server = staticFrontendServer;
+      staticFrontendServer = null;
+      await server?.close();
+    }],
     ['cleanupTestData', cleanupTestData],
     ['cleanupTestCredentials', cleanupTestCredentials],
   ] as [string, () => Promise<void> | undefined][]) {
