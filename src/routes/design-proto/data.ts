@@ -13,6 +13,7 @@
 import type { GuiChatMessage } from '$lib/types/generated/GuiChatMessage';
 import type { SuperChatColors } from '$lib/types/generated/SuperChatColors';
 import { messagePriority, type MessageOrigin, type MessagePriority } from '$lib/design/priority';
+import { newcomersOf as newcomersOfFeed, supportersOf as supportersOfFeed } from '$lib/design/flow';
 
 type Message = Omit<GuiChatMessage, 'id'>;
 
@@ -323,12 +324,10 @@ export const originOf = (m: GuiChatMessage): MessageOrigin => (m.connection_id =
 export const priorityOf = (m: GuiChatMessage): MessagePriority => messagePriority(m, originOf(m));
 
 /** 配信の最後のお礼の対象 (自分の配信のスパチャ等、時刻順)。ブリーフ §2 */
-export const supportersOf = (feed: readonly GuiChatMessage[]): readonly GuiChatMessage[] =>
-  feed.filter((m) => priorityOf(m) === 1);
+export const supportersOf = (feed: readonly GuiChatMessage[]): readonly GuiChatMessage[] => supportersOfFeed(feed, originOf);
 
 /** 新規さんの初回コメント (新しい順) */
-export const newcomersOf = (feed: readonly GuiChatMessage[]): readonly GuiChatMessage[] =>
-  feed.filter((m) => priorityOf(m) === 2).reverse();
+export const newcomersOf = (feed: readonly GuiChatMessage[]): readonly GuiChatMessage[] => [...newcomersOfFeed(feed, originOf)].reverse();
 
 type Player = Readonly<{ name: string; origin: MessageOrigin }>;
 

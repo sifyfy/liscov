@@ -118,6 +118,11 @@ test.describe('Design capture', () => {
     await page.waitForTimeout(3000);
     await captureAll('chat-5-heavy');
 
+    // 配信の最後のお礼: この配信のスパチャ等の一覧を開く (02_chat.md「配信の最後のお礼」)
+    await page.getByRole('button', { name: /この配信のスパチャ等の一覧/ }).click();
+    await captureAll('chat-5-thanks');
+    await page.locator('section[aria-label="この配信のスパチャ等"]').getByRole('button', { name: '閉じる' }).click();
+
     // 2 番目の用途: 視聴者の補足情報の確認・登録
     await page.getByText(superMessages[0].author).first().click();
     await expect(page.locator('h2:has-text("視聴者情報")')).toBeVisible({ timeout: 5000 });

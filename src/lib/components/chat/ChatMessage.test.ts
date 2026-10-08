@@ -228,6 +228,51 @@ describe('ChatMessage', () => {
 		});
 	});
 
+	// 02_chat.md「メッセージ表示仕様」「詰めた形」: 流れたものの欄 (新しい 2 件) とお礼の一覧で使う
+	describe('詰めた形 (compact)', () => {
+		it('アイコンを出さない', () => {
+			const { container } = renderRow(createMessage({ author_icon_url: 'https://example.com/a.png' }), { compact: true });
+			expect(container.querySelector('img')).toBeNull();
+			expect(container.querySelector('[aria-hidden="true"].size-chat-icon')).toBeNull();
+		});
+
+		it('スパチャは面にせず、時刻・金額・名前・本文を 1 行に続ける (時刻は表示の設定によらず出す)', () => {
+			const { container } = renderRow(superchat({ author: 'ねむいペンギン', timestamp: '21:17' }), { compact: true, showTimestamps: false });
+			expect(container.querySelector('[data-testid="paid-body"]')).toBeNull();
+			expect(root(container).dataset.priority).toBe('1');
+			expect(root(container).textContent?.replace(/\s+/g, ' ').trim()).toBe('21:17 ¥10,000 ねむいペンギン 遅れてきました！');
+		});
+
+		it('金額の札はティアの見出しの色', () => {
+			const { container } = renderRow(superchat(), { compact: true });
+			const chip = container.querySelector('[data-testid="paid-chip"]') as HTMLElement;
+			expect(chip.textContent).toBe('¥10,000');
+			expect(chip.style.backgroundColor).toBe('rgb(208, 0, 0)');
+		});
+
+		it('メンバーシップの札は member の色で種類を出す', () => {
+			const { container } = renderRow(
+				createMessage({ message_type: 'membership', is_member: true, metadata: { ...superchat().metadata!, amount: null, superchat_colors: null, milestone_months: 12 } }),
+				{ compact: true },
+			);
+			const chip = container.querySelector('[data-testid="paid-chip"]') as HTMLElement;
+			expect(chip.textContent).toBe('メンバー 12 か月');
+			expect(chip.classList.contains('bg-member')).toBe(true);
+		});
+
+		it('読み仮名を名前の横に出す (お礼で名前を呼ぶため)', () => {
+			const { container } = renderRow(superchat({ author: '@田中-abc', author_reading: 'たなか' }), { compact: true });
+			expect(root(container).textContent).toContain('(たなか)');
+		});
+
+		it('新規さんの初回は流れと同じ強調 (薄い背景 + 「初見」)', () => {
+			const { container } = renderRow(createMessage({ is_first_time_viewer: true, in_stream_comment_count: 1 }), { compact: true });
+			expect(root(container).dataset.priority).toBe('2');
+			expect(root(container).textContent).toContain('初見');
+			expect(container.querySelector('img')).toBeNull();
+		});
+	});
+
 	// 02_chat.md「メッセージ表示仕様」「優先順位 1 の面」のギフト (ジュエル)
 	describe('ギフト', () => {
 		function createGift(jewelCount: number | null, imageUrl: string | null = 'https://www.gstatic.com/gift/press_f.png') {

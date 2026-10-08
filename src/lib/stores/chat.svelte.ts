@@ -10,6 +10,7 @@ import type {
 } from '$lib/types';
 import { SvelteMap } from 'svelte/reactivity';
 import type { MessageOrigin } from '$lib/design/priority';
+import { newcomersOf, supportersOf } from '$lib/design/flow';
 import * as chatApi from '$lib/tauri/chat';
 import { getConnectionColor } from '$lib/utils/connection-colors';
 import { applyReactionUpdate, emptyReactionMeter, restoreReactionMeter } from '$lib/utils/reactions';
@@ -34,6 +35,14 @@ function createChatStore() {
 
   // 主の配信の接続（最初の接続。Map は接続した順。最初を切断すれば次に古いものが繰り上がる）
   let primaryConnection = $derived(connections.values().next().value);
+
+  // そのメッセージが主の配信のものか相手の配信のものか（02_chat.md「主の配信と相手の配信」）
+  function originOf(message: ChatMessage): MessageOrigin {
+    return primaryConnection === undefined || Number(message.connection_id) === primaryConnection.id ? 'primary' : 'partner';
+  }
+
+  let supporters = $derived(supportersOf(list.messages, originOf));
+  let newcomers = $derived(newcomersOf(list.messages, originOf));
 
   // 多接続ベースの派生状態
   let isConnected = $derived(connections.size > 0);
@@ -382,9 +391,14 @@ function createChatStore() {
     get broadcasterChannelId() {
       return primaryConnection?.broadcasterChannelId || null;
     },
-    // そのメッセージが主の配信のものか相手の配信のものか（02_chat.md「主の配信と相手の配信」）
-    originOf(message: ChatMessage): MessageOrigin {
-      return primaryConnection === undefined || Number(message.connection_id) === primaryConnection.id ? 'primary' : 'partner';
+    originOf,
+    // お礼の一覧・流れたスパチャ等の候補と、流れた新規さんの候補（02_chat.md「流れたもの」「配信の最後のお礼」）。
+    // フィルタ・表示件数によらず、一覧にあるものすべてから取る（クリアすると消える）。届いた順
+    get supporters() {
+      return supporters;
+    },
+    get newcomers() {
+      return newcomers;
     },
     // パネルで保存した読み仮名。保存していなければ undefined（届いたときの author_reading を使う）
     readingOf(message: ChatMessage): string | undefined {

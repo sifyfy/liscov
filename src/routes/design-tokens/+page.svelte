@@ -8,7 +8,16 @@
    * コメントの行は本物の ChatMessage を固定の架空データ (design-proto/data.ts の ROW_SAMPLES) で並べる。fontSize 13 は利用者の設定の既定の代わり。
    */
   import ChatMessage from '$lib/components/chat/ChatMessage.svelte';
-  import { ROW_SAMPLES, originOf } from '../design-proto/data';
+  import FlowedSection from '$lib/components/chat/FlowedSection.svelte';
+  import ThanksList from '$lib/components/chat/ThanksList.svelte';
+  import { ROW_SAMPLES, feedOf, newcomersOf, originOf, supportersOf } from '../design-proto/data';
+
+  // 流れたものの欄とお礼の一覧の見本 (試作の通常の場面のデータ)
+  const feed = feedOf('normal');
+  const supporters = supportersOf(feed);
+  const flowedSupporters = [...supporters].reverse();
+  const flowedNewcomers = newcomersOf(feed);
+  const noReading = () => undefined;
 
   const SAMPLE = '初見です！よろしくお願いします 0123456789 ¥10,000 さっきの謎解き、本棚の順番は左から赤・青・緑';
 
@@ -103,6 +112,16 @@
       {#each ROW_SAMPLES as message (message.id)}
         <ChatMessage {message} fontSize={13} showTimestamps origin={originOf(message)} />
       {/each}
+    </div>
+  </section>
+
+  <!-- 流れたものの欄とお礼の一覧 (見た目の回帰テスト e2e/chat-row-visual.spec.ts が撮る) -->
+  <section class="mt-8">
+    <h2 class="text-label text-fg-2">流れたものの欄とお礼の一覧</h2>
+    <div data-testid="flow-samples" class="mt-3 flex max-w-lg flex-col bg-surface">
+      <ThanksList items={supporters} fontSize={13} showTimestamps {originOf} readingOf={noReading} onClose={() => {}} />
+      <FlowedSection label="流れた新規さん" items={flowedNewcomers} fontSize={13} showTimestamps {originOf} readingOf={noReading} />
+      <FlowedSection label="流れたスパチャ等" items={flowedSupporters} fontSize={13} showTimestamps {originOf} readingOf={noReading} />
     </div>
   </section>
 </main>

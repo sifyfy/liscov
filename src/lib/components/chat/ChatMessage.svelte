@@ -23,9 +23,20 @@
     origin?: MessageOrigin;
     /** パネルで登録し直した読み仮名。undefined なら届いたときの値 (author_reading) を使う。空文字は「読み仮名なし」 */
     reading?: string;
+    /** 詰めた形 (流れたものの欄・お礼の一覧)。アイコンを出さず、優先順位 1 を面にせず 1 行にする */
+    compact?: boolean;
   }
 
-  let { message, fontSize, showTimestamps, highlighted = false, onClick, origin = 'primary', reading }: Props = $props();
+  let {
+    message,
+    fontSize,
+    showTimestamps,
+    highlighted = false,
+    onClick,
+    origin = 'primary',
+    reading,
+    compact = false,
+  }: Props = $props();
 
   let priority = $derived(messagePriority(message, origin));
   let partner = $derived(origin === 'partner');
@@ -58,17 +69,22 @@
   let giftImageFailed = $state(false);
   let giftImageUrl = $derived(giftImageFailed ? null : (message.metadata?.gift_image_url ?? null));
 
-  /** 面 (優先順位 1) の種類 */
+  let isMembership = $derived(message.message_type === 'membership' || message.message_type === 'membership_gift');
+
+  /** 面 (優先順位 1) の種類。詰めた形では面にせず 1 行 (line) にする */
   let surface = $derived.by(() => {
     if (priority !== 1) return null;
+    if (compact) return 'line';
     if (isGift) return 'gift';
-    if (message.message_type === 'membership' || message.message_type === 'membership_gift') return 'member';
+    if (isMembership) return 'member';
     return colors ? 'tier' : 'plain';
   });
 </script>
 
 {#snippet face(cls: string)}
-  {#if iconUrl}
+  {#if compact}
+    <!-- 詰めた形ではアイコンを出さない -->
+  {:else if iconUrl}
     <img src={iconUrl} alt="" class="mt-px size-chat-icon shrink-0 rounded-full" onerror={() => (iconFailed = true)} />
   {:else}
     <span
@@ -137,7 +153,27 @@
   tabindex="0"
   onkeydown={(e) => e.key === 'Enter' && onClick?.()}
 >
-  {#if surface === 'tier' && colors}
+  {#if surface === 'line'}
+    <!-- 優先順位 1 を 1 行に詰めたもの: 時刻・札 (金額・メンバーシップの種類)・名前・本文。お礼で順番に読み上げるので時刻は表示の設定によらず出す -->
+    <div class="flex items-baseline gap-2 px-3 py-1.5 hover:bg-fg-1/8">
+      <span class="shrink-0 text-chat-meta whitespace-nowrap text-fg-3 tabular-nums">{formattedTime}</span>
+      <span
+        data-testid="paid-chip"
+        class="shrink-0 rounded-control px-1.5 text-chat-meta font-bold whitespace-nowrap tabular-nums {colors
+          ? ''
+          : isMembership
+            ? 'bg-member text-on-member'
+            : 'border border-outline'}"
+        style={colors ? `background-color: ${colors.header_background}; color: ${colors.header_text};` : undefined}>{paidLabel}</span
+      >
+      <p class="min-w-0 break-words">
+        {@render name()}
+        {#if isGift}{#if jewelCount != null}<span class="ml-1.5">{giftName} を送りました</span>{/if}{:else if hasBody}<span
+            class="ml-1.5">{@render runs()}</span
+          >{/if}
+      </p>
+    </div>
+  {:else if surface === 'tier' && colors}
     <!-- スパチャ・ステッカー: YouTube のティアの色の面 (浮いて見える理由がある数少ない要素なので角丸) -->
     <div class="mx-2 my-1 overflow-hidden rounded-control" style="background: {colors.body_background};">
       <div class="flex items-center gap-2 px-3 py-1.5" style="background: {colors.header_background}; color: {colors.header_text};">

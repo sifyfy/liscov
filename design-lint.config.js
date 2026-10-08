@@ -16,6 +16,9 @@ export const DESIGN_MIGRATED = [
 	'src/routes/design-tokens/+page.svelte',
 	'src/routes/design-proto/**',
 	'src/lib/components/chat/ChatMessage.svelte',
+	'src/lib/components/chat/ChatDisplay.svelte',
+	'src/lib/components/chat/FlowedSection.svelte',
+	'src/lib/components/chat/ThanksList.svelte',
 ];
 
 const DOC = 'docs/design/tokens.md';

@@ -135,7 +135,13 @@ test.describe('Multi-Stream Connection', () => {
     });
 
     test('2接続時にメッセージの配信元インジケーターが表示される', async () => {
+      // 2 接続のポーリングの時刻が近いと接続2 にはほとんど届かないので、接続1 がポーリングした直後
+      // (同期用のメッセージが見えた時点) から周期の半分ほどずらして接続2 をつなぐ (「視聴者パネルの配信者」と同じ)
+      const syncContent = `IndicatorSync_${Date.now()}`;
       await connectStream(mainPage, 'test_video_123', 'Mock Live');
+      await addMockMessage({ message_type: 'text', author: 'IndicatorSync', content: syncContent, channel_id: 'UC_indicator_sync' });
+      await expect(mainPage.locator(`text=${syncContent}`)).toBeVisible({ timeout: 8000 });
+      await mainPage.waitForTimeout(700);
       await connectStream(mainPage, 'test_video_456', 'Mock Live 2');
 
       // 仕様「1 行の形」: 相手の配信 (2 つ目以降の接続) のコメントには名前の前に配信者名の札が付き、

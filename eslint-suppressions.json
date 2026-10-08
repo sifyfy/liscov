@@ -19,11 +19,6 @@
       "count": 25
     }
   },
-  "src/lib/components/chat/ChatDisplay.svelte": {
-    "better-tailwindcss/no-restricted-classes": {
-      "count": 2
-    }
-  },
   "src/lib/components/chat/ConnectionList.svelte": {
     "no-restricted-syntax": {
       "count": 1
