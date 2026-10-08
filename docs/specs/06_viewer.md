@@ -12,14 +12,14 @@
 
 | 配信者 | 視聴者 | メッセージ数 | 読み仮名 |
 |-------|-------|------------|---------|
-| 配信者A (UCaaa) | 視聴者X (UCxxx) | 150 | "たなかさん" |
+| 配信者A (UCaaa) | 視聴者X (UCxxx) | 150 | "たなか" |
 | 配信者B (UCbbb) | 視聴者X (UCxxx) | 10 | "タナカ" |
 
 ### カスタム情報の管理
 
 | 操作 | 結果 |
 |------|------|
-| 読み仮名を入力して保存 | DBにUpsert。以降のTTS読み上げでカスタム読み仮名を使用 |
+| 読み仮名を入力して保存 | DBにUpsert。次に届くコメントから、TTS読み上げで投稿者名の代わりにカスタム読み仮名を使用（「さん」は TTS 設定どおり付く。例: 読み仮名「たなか」→「たなかさん」） |
 | 読み仮名を空にして保存 | Noneとして保存。TTS読み上げは投稿者名を使用 |
 | 視聴者を削除 | viewer_profiles + viewer_custom_info（CASCADE）が削除される |
 | 配信者を削除 | その配信者に関連する全viewer_profiles + viewer_custom_info + broadcaster_profilesが削除される |
@@ -228,7 +228,7 @@ pub struct BroadcasterChannel {
   - message_count: 150
   - total_contribution: 5000.0
 - viewer_custom_info:
-  - reading: "たなかさん"
+  - reading: "たなか"
   - notes: "常連さん"
 
 配信者B (UCbbb) での情報:
@@ -254,7 +254,7 @@ pub struct BroadcasterChannel {
 |-----|------|
 | 用途 | TTS読み上げ時の読み仮名 |
 | 例 | 表示名「山田太郎」→ reading「やまだたろう」 |
-| 適用 | TTS読み上げ時に投稿者名の代わりに使用 |
+| 適用 | TTS読み上げ時に投稿者名の代わりに使用。「さん」は TTS の `add_honorific` で付くので、読み仮名には名前だけを書く。使うのはメッセージが届いた接続の配信者のもとでの読み仮名（04_tts.md「読み上げテキスト生成」） |
 
 ### notes（メモ）
 
