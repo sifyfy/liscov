@@ -4,44 +4,43 @@
 
 ## 前提条件
 
-- Tauri開発ビルドが可能な環境
-- Playwrightがインストール済み
+- Windows (WebView2)。Rust と pnpm でビルドできる環境
+- Playwright がインストール済み
 
 ## テスト実行方法
 
-### 1. モックサーバーを起動
+```bash
+pnpm test:e2e              # ビルド → 全テスト
+pnpm test:e2e:chat         # ビルド → チャット表示のテストだけ
+pnpm test:e2e:auth         # ビルド → 認証フローのテストだけ
+pnpm test:e2e:ws           # ビルド → WebSocket のテストだけ
+```
+
+モックサーバー・静的フロントエンドサーバー・Tauri アプリは、テストが自動で起動・終了する
+(`utils/test-helpers.ts` の `setupTestEnvironment()`)。手で `pnpm tauri dev` を起動する必要は無い。
+
+### ビルドについて
+
+`pnpm test:e2e:build` (`scripts/build-for-e2e.ts`) は、**毎回** `pnpm build` と `cargo build --workspace` を実行する。
+成果物の有無や mtime では判定しない。以前は「存在すれば skip」だったため、変更後も古い成果物のまま
+E2E が走り、壊した本番経路でもテストが通ってしまった。変更が無いときの上乗せは約 14 秒
+(cargo はインクリメンタルで約 1 秒、`pnpm build` が約 13 秒)。
+
+テストが使う成果物と配信のされ方:
+
+| 成果物 | 使われ方 |
+|--------|----------|
+| `build/` (`pnpm build`) | テスト中に `127.0.0.1:5173` (Tauri の `devUrl`) で配信される |
+| `target/debug/liscov-tauri.exe` | debug ビルドはフロントエンドを埋め込まず、上の `devUrl` を読む |
+| `target/debug/mock-server.exe` | InnerTube API のモック |
+
+フロントエンドだけ変えたときに exe を作り直す (`lib.rs` を touch する等) 必要は無い。
+
+ビルドを挟まずにテストだけ回したいとき (spec だけ直して繰り返すとき) は、Playwright を直接呼ぶ。
+**直前のビルドより後にソースを変えていれば、古い成果物でテストすることになる**ので注意する。
 
 ```bash
-cargo run --manifest-path src-tauri/Cargo.toml --bin mock_server
-```
-
-### 2. Tauriアプリを起動（デバッグポート有効）
-
-**PowerShell:**
-```powershell
-$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222"
-$env:LISCOV_AUTH_URL="http://localhost:3456/?auto_login=true"
-pnpm tauri dev
-```
-
-**コマンドプロンプト:**
-```cmd
-set WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222
-set LISCOV_AUTH_URL=http://localhost:3456/?auto_login=true
-pnpm tauri dev
-```
-
-**Git Bash:**
-```bash
-WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222" \
-LISCOV_AUTH_URL="http://localhost:3456/?auto_login=true" \
-pnpm tauri dev
-```
-
-### 3. E2Eテストを実行
-
-```bash
-pnpm exec playwright test --config e2e/playwright.config.ts
+pnpm exec playwright test --config e2e/playwright.config.ts e2e/viewer-management.spec.ts
 ```
 
 ## テスト内容
@@ -56,6 +55,8 @@ pnpm exec playwright test --config e2e/playwright.config.ts
 
 ## 環境変数
 
+Tauri アプリに渡す環境変数。`setupTestEnvironment()` が設定するので、手で設定する必要は無い。
+
 | 変数名 | 説明 |
 |--------|------|
 | `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` | WebView2に渡す追加引数。CDPを有効にするために `--remote-debugging-port=9222` を指定 |
@@ -65,10 +66,18 @@ pnpm exec playwright test --config e2e/playwright.config.ts
 
 ### "No browser contexts found" エラー
 
-Tauriアプリが `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` 環境変数を設定して起動されていることを確認してください。
+`setupTestEnvironment()` が Tauri アプリに `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` を渡せているか、
+アプリが起動直後に落ちていないか (テスト失敗時に添付されるログ) を確認する。
 
 ### 接続タイムアウト
 
 1. Tauriアプリが完全に起動していることを確認
 2. ポート9222が使用可能であることを確認（`netstat -an | findstr 9222`）
 3. ファイアウォールがローカル接続をブロックしていないことを確認
+
+### 変更したはずのフロントエンドが反映されない
+
+1. `pnpm test:e2e*` ではなく Playwright を直接呼んでいないか (ビルドが挟まらない)
+2. ポート 5173 を別のプロセス (`pnpm dev` の Vite や、別ワークツリーの E2E) が使っていないか。
+   使用中だと静的サーバーは起動をあきらめて既存のサーバーを再利用するので、このワークツリーの `build/` は配信されない
+   (`netstat -ano | findstr :5173`)

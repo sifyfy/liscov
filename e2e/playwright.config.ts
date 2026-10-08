@@ -6,13 +6,9 @@ import { defineConfig } from '@playwright/test';
  * This config connects to a running Tauri app via CDP (Chrome DevTools Protocol).
  * WebView2 must be started with --remote-debugging-port enabled.
  *
- * Usage:
- * 1. Start mock server: cargo run --manifest-path src-tauri/Cargo.toml --bin mock_server
- * 2. Start Tauri app with debug port:
- *    set WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222
- *    set LISCOV_AUTH_URL=http://localhost:3456/
- *    pnpm tauri dev
- * 3. Run tests: pnpm exec playwright test --config e2e/playwright.config.ts
+ * Usage: `pnpm test:e2e` (builds, then runs). The mock server, the static frontend
+ * server and the Tauri app are started by setupTestEnvironment() in utils/test-helpers.ts.
+ * See e2e/README.md.
  */
 export default defineConfig({
   testDir: '.',
