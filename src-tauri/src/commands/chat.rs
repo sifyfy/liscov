@@ -214,34 +214,40 @@ impl From<ChatMessage> for GuiChatMessage {
             })
             .collect();
 
-        // metadata を変換
-        let metadata = msg.metadata.map(|m| GuiMessageMetadata {
-            amount: m.amount,
-            milestone_months,
-            gift_count,
-            gift_name,
-            gift_image_url,
-            jewel_count,
-            badges: m.badges,
-            badge_info: m
-                .badge_info
-                .into_iter()
-                .map(|b| BadgeInfo {
-                    badge_type: b.badge_type,
-                    label: b.label.clone(),
-                    tooltip: b.tooltip.or(Some(b.label)),
-                    image_url: b.icon_url,
-                })
-                .collect(),
-            is_moderator: m.is_moderator,
-            is_verified: m.is_verified,
-            superchat_colors: m.superchat_colors.map(|c| SuperChatColors {
-                header_background: c.header_background,
-                header_text: c.header_text,
-                body_background: c.body_background,
-                body_text: c.body_text,
-            }),
-        });
+        // metadata を変換。種別に件数などがあるのに metadata が無いとき (パーサーはメンバーシップギフトに付けない) は、
+        // 空の metadata に種別の値を載せる。載せないと件数が画面に届かない
+        let has_type_details =
+            milestone_months.is_some() || gift_count.is_some() || gift_name.is_some();
+        let metadata = msg
+            .metadata
+            .or_else(|| has_type_details.then(crate::core::models::MessageMetadata::default))
+            .map(|m| GuiMessageMetadata {
+                amount: m.amount,
+                milestone_months,
+                gift_count,
+                gift_name,
+                gift_image_url,
+                jewel_count,
+                badges: m.badges,
+                badge_info: m
+                    .badge_info
+                    .into_iter()
+                    .map(|b| BadgeInfo {
+                        badge_type: b.badge_type,
+                        label: b.label.clone(),
+                        tooltip: b.tooltip.or(Some(b.label)),
+                        image_url: b.icon_url,
+                    })
+                    .collect(),
+                is_moderator: m.is_moderator,
+                is_verified: m.is_verified,
+                superchat_colors: m.superchat_colors.map(|c| SuperChatColors {
+                    header_background: c.header_background,
+                    header_text: c.header_text,
+                    body_background: c.body_background,
+                    body_text: c.body_text,
+                }),
+            });
 
         Self {
             id: msg.id,
@@ -624,4 +630,41 @@ pub async fn set_chat_mode(
     );
 
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::models::MessageType;
+
+    fn text_message() -> ChatMessage {
+        ChatMessage {
+            id: "m1".to_string(),
+            timestamp: "12:00:00".to_string(),
+            timestamp_usec: "1000000".to_string(),
+            message_type: MessageType::Text,
+            author: "@田中-abc".to_string(),
+            author_icon_url: None,
+            channel_id: "UCxxx".to_string(),
+            content: "こんにちは".to_string(),
+            runs: vec![],
+            metadata: None,
+            is_member: false,
+            is_first_time_viewer: false,
+            in_stream_comment_count: None,
+        }
+    }
+
+    // 02_chat.md「メッセージ表示仕様」優先順位 1 の面: メンバーシップギフトは「メンバーシップを N 件ギフト」。
+    // パーサーはメンバーシップギフトに metadata を付けないが、件数は画面に届く
+    #[test]
+    fn membership_gift_count_reaches_gui_without_metadata() {
+        let msg = ChatMessage {
+            message_type: MessageType::MembershipGift { gift_count: 5 },
+            content: "Sent 5 Channel gift memberships".to_string(),
+            ..text_message()
+        };
+        let gui = GuiChatMessage::from(msg);
+        assert_eq!(gui.metadata.and_then(|m| m.gift_count), Some(5));
+    }
 }

@@ -26,6 +26,13 @@ use warp::{Filter, Reply};
 /// HTTPモックでは代替名を使用してCookieパイプライン完全性を検証する。
 const MOCK_SECURE_COOKIE: &str = "SecurePSID";
 
+/// 投稿者のアイコン・バッジ・ステッカーの画像。
+/// E2E の環境では外のサイトの画像を読めないので、読める画像 (data URI) を返す。
+/// 読めない URL を返すと、画面は頭文字や「メンバー」の札に置き換えるので、画像の表示を確かめられない
+const MOCK_AVATAR_URL: &str = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='16' fill='%23808080'/%3E%3C/svg%3E";
+const MOCK_BADGE_URL: &str = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%232ba640'/%3E%3C/svg%3E";
+const MOCK_STICKER_URL: &str = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%23ffb300'/%3E%3C/svg%3E";
+
 /// token を読む（%3D のパディング付き・無しの URL-safe base64、および標準 base64）
 fn decode_mock_token(token: &str) -> Option<Vec<u8>> {
     let unpadded = token.replace("%3D", "=");
@@ -964,7 +971,7 @@ fn get_actions(s: &ServerState) -> Vec<Value> {
                     "id": id,
                     "timestampUsec": ts,
                     "authorName": {"simpleText": author},
-                    "authorPhoto": {"thumbnails": [{"url": "https://example.com/av.png", "width": 32, "height": 32}]},
+                    "authorPhoto": {"thumbnails": [{"url": MOCK_AVATAR_URL, "width": 32, "height": 32}]},
                     "authorExternalChannelId": channel_id,
                     "message": {"runs": runs},
                     "authorBadges": badges
@@ -1203,28 +1210,28 @@ fn gen_msg(s: &ServerState, r: &AMR) -> Value {
         badges.push(json!({"liveChatAuthorBadgeRenderer":{"icon":{"iconType":"MODERATOR"},"tooltip":"Moderator"}}));
     }
     if r.is_member {
-        badges.push(json!({"liveChatAuthorBadgeRenderer":{"customThumbnail":{"thumbnails":[{"url":"https://example.com/author_badges.png"}]},"tooltip":"Member"}}));
+        badges.push(json!({"liveChatAuthorBadgeRenderer":{"customThumbnail":{"thumbnails":[{"url":MOCK_BADGE_URL}]},"tooltip":"Member"}}));
     }
     let author_badges = Value::Array(badges);
     match r.message_type.as_str() {
         "superchat" => {
-            json!({"addChatItemAction":{"item":{"liveChatPaidMessageRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":"https://example.com/av.png"}]},"authorExternalChannelId":&r.channel_id,"purchaseAmountText":{"simpleText":r.amount.as_deref().unwrap_or("¥500")},"message":{"runs":[{"text":&r.content}]},"headerBackgroundColor":tier_col(r.tier.as_deref()),"headerTextColor":0xFFFFFF,"bodyBackgroundColor":tier_col(r.tier.as_deref()),"bodyTextColor":0xFFFFFF,"authorBadges":author_badges}}}})
+            json!({"addChatItemAction":{"item":{"liveChatPaidMessageRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":MOCK_AVATAR_URL}]},"authorExternalChannelId":&r.channel_id,"purchaseAmountText":{"simpleText":r.amount.as_deref().unwrap_or("¥500")},"message":{"runs":[{"text":&r.content}]},"headerBackgroundColor":tier_col(r.tier.as_deref()),"headerTextColor":tier_text_col(r.tier.as_deref()),"bodyBackgroundColor":tier_col(r.tier.as_deref()),"bodyTextColor":tier_text_col(r.tier.as_deref()),"authorBadges":author_badges}}}})
         }
         "supersticker" => {
-            json!({"addChatItemAction":{"item":{"liveChatPaidStickerRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":"https://example.com/av.png"}]},"authorExternalChannelId":&r.channel_id,"purchaseAmountText":{"simpleText":r.amount.as_deref().unwrap_or("¥500")},"sticker":{"thumbnails":[{"url":"https://example.com/sticker.png"}]},"moneyChipBackgroundColor":tier_col(r.tier.as_deref()),"moneyChipTextColor":0xFFFFFF,"authorBadges":author_badges}}}})
+            json!({"addChatItemAction":{"item":{"liveChatPaidStickerRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":MOCK_AVATAR_URL}]},"authorExternalChannelId":&r.channel_id,"purchaseAmountText":{"simpleText":r.amount.as_deref().unwrap_or("¥500")},"sticker":{"thumbnails":[{"url":MOCK_STICKER_URL}]},"moneyChipBackgroundColor":tier_col(r.tier.as_deref()),"moneyChipTextColor":tier_text_col(r.tier.as_deref()),"authorBadges":author_badges}}}})
         }
         "membership" => {
-            json!({"addChatItemAction":{"item":{"liveChatMembershipItemRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":"https://example.com/av.png"}]},"authorExternalChannelId":&r.channel_id,"headerSubtext":{"runs":[{"text":"Welcome to "},{"text":"Channel"},{"text":"!"}]},"authorBadges":[{"liveChatAuthorBadgeRenderer":{"tooltip":"New member","customThumbnail":{"thumbnails":[{"url":"https://example.com/badge.png"}]}}}]}}}})
+            json!({"addChatItemAction":{"item":{"liveChatMembershipItemRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":MOCK_AVATAR_URL}]},"authorExternalChannelId":&r.channel_id,"headerSubtext":{"runs":[{"text":"Welcome to "},{"text":"Channel"},{"text":"!"}]},"authorBadges":[{"liveChatAuthorBadgeRenderer":{"tooltip":"New member","customThumbnail":{"thumbnails":[{"url":MOCK_BADGE_URL}]}}}]}}}})
         }
         "membership_milestone" => {
             let months = r.milestone_months.unwrap_or(6);
             // Actual YouTube format: months in badge tooltip, not headerSubtext
-            json!({"addChatItemAction":{"item":{"liveChatMembershipItemRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":"https://example.com/av.png"}]},"authorExternalChannelId":&r.channel_id,"headerSubtext":{"runs":[{"text":"Welcome to "},{"text":"Channel"},{"text":"!"}]},"message":{"runs":[{"text":&r.content}]},"authorBadges":[{"liveChatAuthorBadgeRenderer":{"tooltip":format!("Member ({} months)", months),"customThumbnail":{"thumbnails":[{"url":"https://example.com/badge.png"}]}}}]}}}})
+            json!({"addChatItemAction":{"item":{"liveChatMembershipItemRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":MOCK_AVATAR_URL}]},"authorExternalChannelId":&r.channel_id,"headerSubtext":{"runs":[{"text":"Welcome to "},{"text":"Channel"},{"text":"!"}]},"message":{"runs":[{"text":&r.content}]},"authorBadges":[{"liveChatAuthorBadgeRenderer":{"tooltip":format!("Member ({} months)", months),"customThumbnail":{"thumbnails":[{"url":MOCK_BADGE_URL}]}}}]}}}})
         }
         "membership_gift" => {
             let count = r.gift_count.unwrap_or(5);
             // Actual YouTube format: authorExternalChannelId at root level
-            json!({"addChatItemAction":{"item":{"liveChatSponsorshipsGiftPurchaseAnnouncementRenderer":{"id":id,"timestampUsec":ts,"authorExternalChannelId":&r.channel_id,"header":{"liveChatSponsorshipsHeaderRenderer":{"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":"https://example.com/av.png"}]},"primaryText":{"runs":[{"text":"Sent "},{"text":format!("{}", count)},{"text":" "},{"text":"Channel"},{"text":" gift memberships"}]}}}}}}})
+            json!({"addChatItemAction":{"item":{"liveChatSponsorshipsGiftPurchaseAnnouncementRenderer":{"id":id,"timestampUsec":ts,"authorExternalChannelId":&r.channel_id,"header":{"liveChatSponsorshipsHeaderRenderer":{"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":MOCK_AVATAR_URL}]},"primaryText":{"runs":[{"text":"Sent "},{"text":format!("{}", count)},{"text":" "},{"text":"Channel"},{"text":" gift memberships"}]}}}}}}})
         }
         "gift" => {
             // ジュエルで送るギフト: channelId・timestampUsec が無く、authorName は末尾に空白が付く（実データ準拠）
@@ -1235,13 +1242,13 @@ fn gen_msg(s: &ServerState, r: &AMR) -> Value {
                 .unwrap_or("//www.gstatic.com/youtube/img/pdg/gift/assets/press_f.png=w480-h480");
             let name = r.content.strip_prefix("sent ").unwrap_or(&r.content);
             let name = name.split(" for ").next().unwrap_or(name);
-            json!({"addChatItemAction":{"item":{"giftMessageViewModel":{"id":id,"authorName":{"content":format!("{} ", r.author)},"authorAvatar":{"avatarViewModel":{"image":{"sources":[{"url":"https://example.com/av.png"}]}}},"text":{"content":&r.content},"giftImage":{"sources":[{"url":image,"width":480,"height":480}]},"giftImageA11yLabel":format!("{} sent a gift, {}", r.author, name)}}}})
+            json!({"addChatItemAction":{"item":{"giftMessageViewModel":{"id":id,"authorName":{"content":format!("{} ", r.author)},"authorAvatar":{"avatarViewModel":{"image":{"sources":[{"url":MOCK_AVATAR_URL}]}}},"text":{"content":&r.content},"giftImage":{"sources":[{"url":image,"width":480,"height":480}]},"giftImageA11yLabel":format!("{} sent a gift, {}", r.author, name)}}}})
         }
         "system" => {
             json!({"addChatItemAction":{"item":{"liveChatTextMessageRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":"System"},"authorExternalChannelId":"system","message":{"runs":[{"text":&r.content}]}}}}})
         }
         _ => {
-            json!({"addChatItemAction":{"item":{"liveChatTextMessageRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":"https://example.com/av.png"}]},"authorExternalChannelId":&r.channel_id,"message":{"runs":[{"text":&r.content}]},"authorBadges":author_badges}}}})
+            json!({"addChatItemAction":{"item":{"liveChatTextMessageRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":MOCK_AVATAR_URL}]},"authorExternalChannelId":&r.channel_id,"message":{"runs":[{"text":&r.content}]},"authorBadges":author_badges}}}})
         }
     }
 }
@@ -1256,6 +1263,14 @@ fn tier_col(t: Option<&str>) -> u32 {
         Some("magenta") => 0xC2185B,
         Some("red") => 0xD00000,
         _ => 0x00BFA5,
+    }
+}
+
+/// ティアの文字色。YouTube は明るいティア (シアン・緑・黄) では黒、それ以外では白の文字を送ってくる
+fn tier_text_col(t: Option<&str>) -> u32 {
+    match t {
+        Some("blue" | "orange" | "magenta" | "red") => 0xFFFFFF,
+        _ => 0x000000,
     }
 }
 
