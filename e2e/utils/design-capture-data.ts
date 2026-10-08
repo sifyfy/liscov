@@ -73,11 +73,11 @@ export const longMessages: readonly MockMessage[] = [
   },
 ];
 
-/** スパチャ・メンバーシップの連続 (目立つべきもの) */
+/** スパチャ・メンバーシップの連続 (目立つべきもの)。金額とティアの色は docs/specs/07_revenue.md の表のとおりに組む */
 export const superMessages: readonly MockMessage[] = [
-  { message_type: 'superchat', ...authors[0], content: 'いつも楽しい配信ありがとう！', amount: '¥500', tier: 'blue' },
-  { message_type: 'superchat', ...authors[5], content: 'クリアおめでとう！', amount: '¥1,000', tier: 'green' },
-  { message_type: 'supersticker', ...authors[6], content: '', amount: '¥200', tier: 'yellow' },
+  { message_type: 'superchat', ...authors[0], content: 'いつも楽しい配信ありがとう！', amount: '¥500', tier: 'green' },
+  { message_type: 'superchat', ...authors[5], content: 'クリアおめでとう！', amount: '¥1,000', tier: 'yellow' },
+  { message_type: 'supersticker', ...authors[6], content: '', amount: '¥200', tier: 'cyan' },
   { message_type: 'membership', ...authors[7], content: 'メンバーになりました' },
   { message_type: 'superchat', ...authors[1], content: '次の配信も楽しみにしてます', amount: '¥10,000', tier: 'red' },
   { message_type: 'membership_milestone', ...authors[4], content: '1 年経ちました！', milestone_months: 12 },

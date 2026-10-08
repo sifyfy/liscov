@@ -19,13 +19,18 @@ type Message = Omit<GuiChatMessage, 'id'>;
 
 /**
  * YouTube から届くスパチャのティアの色 (docs/design/tokens.md「強調」: トークンにせずデータとして扱う)。
- * 本体では metadata.superchat_colors で届く値なので、試作でもデータとして生の色値を書く
+ * 本体では metadata.superchat_colors で届く値なので、試作でもデータとして生の色値を書く。
+ * 見出しの色と金額の組み合わせは docs/specs/07_revenue.md の表のとおり
+ * (青 ¥100・水色 ¥200・緑 ¥500・黄 ¥1,000・オレンジ ¥2,000・マゼンタ ¥5,000・赤 ¥10,000)。本文の背景色は仕様に無く、YouTube の実際の値に近いもの
  */
 /* eslint-disable no-restricted-syntax -- YouTube から届くデータの色の再現 (上の注釈) */
 const TIER = {
   blue: { header_background: '#1565c0', header_text: '#ffffff', body_background: '#1565c0', body_text: '#ffffff' },
+  cyan: { header_background: '#00b8d4', header_text: '#000000', body_background: '#00e5ff', body_text: '#000000' },
   green: { header_background: '#00bfa5', header_text: '#000000', body_background: '#1de9b6', body_text: '#000000' },
   yellow: { header_background: '#ffb300', header_text: '#000000', body_background: '#ffca28', body_text: '#000000' },
+  orange: { header_background: '#e65100', header_text: '#ffffff', body_background: '#f57c00', body_text: '#ffffff' },
+  magenta: { header_background: '#c2185b', header_text: '#ffffff', body_background: '#e91e63', body_text: '#ffffff' },
   red: { header_background: '#d00000', header_text: '#ffffff', body_background: '#e62117', body_text: '#ffffff' },
 } as const satisfies Record<string, SuperChatColors>;
 /* eslint-enable no-restricted-syntax */
@@ -138,7 +143,7 @@ function membershipGift(author: string, time: string, count: number): Message {
 const SEEDS: readonly Message[] = [
   text('しおこんぶ', '21:12', 'こんばんは〜', 1),
   text('夜ふかし研究会', '21:12', 'きたきた', 1),
-  superchat('ねこ山', '21:13', '', '¥200', TIER.blue),
+  superchat('ねこ山', '21:13', '', '¥200', TIER.cyan),
   text('しおこんぶ', '21:13', '今日はどこまで進む予定？', 2),
   text('Kaito_92', '21:13', 'はじめまして！切り抜きから来ました', 1, 'new'),
   text('たまごやき', '21:14', 'こんばんは', 1),
@@ -198,7 +203,7 @@ const SEEDS: readonly Message[] = [
   text('こもれび', '21:30', 'はじめてコメントします！ずっと見てました', 1, 'new'),
   text('夜ふかし研究会', '21:30', '弾切れ注意', 10),
   text('ゆずぽん', '21:31', 'がんばって〜', 3),
-  superchat('みかん箱', '21:31', 'ボス戦がんばって！これで回復薬買ってください', '¥2,000', TIER.yellow),
+  superchat('みかん箱', '21:31', 'ボス戦がんばって！これで回復薬買ってください', '¥2,000', TIER.orange),
   text('みずいろ', '21:31', 'いけ！', 8),
   text('しおこんぶ', '21:31', '倒したああああ', 11),
   text('のりたま', '21:32', 'おめでとう！', 4),
@@ -211,7 +216,7 @@ const PARTNER_SEEDS: readonly Message[] = [
   text('そら豆', '21:14', 'あおばちゃんのところから来ました', 1),
   text('ねぎま', '21:20', '参加希望です！', 1),
   text('Riku', '21:24', '参加希望！ランクはゴールドです', 1, 'new'),
-  superchat('まつぼっくり', '21:26', 'あおばちゃんいつも応援してます', '¥1,000', TIER.green),
+  superchat('まつぼっくり', '21:26', 'あおばちゃんいつも応援してます', '¥1,000', TIER.yellow),
   text('ねぎま', '21:28', 'よろしくお願いします！', 2),
   text('そら豆', '21:29', 'コラボ最高', 2),
   text('くろまめ', '21:30', '次の試合に参加したいです', 1),
@@ -220,7 +225,7 @@ const PARTNER_SEEDS: readonly Message[] = [
 ].map(fromPartner);
 
 /** 大量の場面で、流れの前のほうに足すもの (スパチャ等 15 件、新規さん 8 人) */
-const HEAVY_TIERS = [TIER.blue, TIER.green, TIER.yellow, TIER.red] as const;
+const HEAVY_TIERS = [TIER.cyan, TIER.green, TIER.yellow, TIER.magenta] as const;
 const HEAVY_AMOUNTS = ['¥200', '¥500', '¥1,000', '¥5,000'] as const;
 const HEAVY_SEEDS: readonly Message[] = [
   ...['あんず', 'いぶき', 'うみねこ', 'えだまめ', 'おもち', 'かすてら', 'きなこ', 'くるみ', 'けやき', 'こはく', 'さくらもち', 'しらたま', 'すだち', 'せんべい', 'そばちゃ'].map(
@@ -283,7 +288,7 @@ const ROW_SEEDS: readonly Message[] = [
   ...[
     text('そら豆', '21:14', 'あおばちゃんのところから来ました', 1),
     text('Riku', '21:24', '参加希望！ランクはゴールドです', 1, 'new'),
-    superchat('まつぼっくり', '21:26', 'あおばちゃんいつも応援してます', '¥1,000', TIER.green),
+    superchat('まつぼっくり', '21:26', 'あおばちゃんいつも応援してます', '¥1,000', TIER.yellow),
   ].map(fromPartner),
 ];
 
