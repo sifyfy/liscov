@@ -5,6 +5,8 @@
  * - 「意味」の層の色は、ダークとライトの両方に定義する
  * - 文字・操作・状態・ハイライトの色は、すべての面の上で WCAG 2 AA (4.5:1) を満たす。
  *   ただし fg-3 は surface-highest (入力欄) の上では使わないので検査しない
+ * - 優先順位 2 の行 (面に highlight を 20% 重ねた背景) の上では、fg-1 と fg-2 が 4.5:1 を満たす。
+ *   fg-3 はこの背景の上では使わない
  */
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
@@ -37,6 +39,15 @@ function luminance(hex: string): number {
   const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
   const lin = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
   return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+}
+
+/** 面 (base) の上に色 (top) を alpha の不透明度で重ねた色 */
+function blend(top: string, base: string, alpha: number): string {
+  const channel = (hex: string, i: number) => parseInt(hex.slice(i, i + 2), 16);
+  return `#${[1, 3, 5]
+    .map((i) => Math.round(channel(top, i) * alpha + channel(base, i) * (1 - alpha)))
+    .map((c) => c.toString(16).padStart(2, '0'))
+    .join('')}`;
 }
 
 function contrast(a: string, b: string): number {
@@ -72,4 +83,11 @@ describe.each(['dark', 'light'] as const)('デザイントークン (%s)', (them
   it.each(SURFACES.filter((s) => s !== 'surface-highest'))('fg-3 は %s の上で 4.5:1 以上', (surface) => {
     expect(contrast(color('fg-3'), color(surface))).toBeGreaterThanOrEqual(4.5);
   });
+
+  it.each((['fg-1', 'fg-2'] as const).flatMap((fg) => SURFACES.map((s) => [fg, s] as const)))(
+    '%s は %s に highlight を 20% 重ねた背景 (優先順位 2 の行) の上で 4.5:1 以上',
+    (fg, surface) => {
+      expect(contrast(color(fg), blend(color('highlight'), color(surface), 0.2))).toBeGreaterThanOrEqual(4.5);
+    },
+  );
 });

@@ -28,14 +28,17 @@ import {
  * 通常の E2E では動かさない (ファイル名が *.spec.ts ではない)。`pnpm design:capture` で動かす。
  * 出力先のフォルダ名は LISCOV_DESIGN_CAPTURE_LABEL で変えられる (既定は latest)。
  * 出力は .tmp/design-capture/ (git に入れない)。データは架空のものだけを使う。
- * 各状態・テーマで、いちばん広い幅のときに axe (WCAG 2 AA) のコントラスト検査も行い、<名前>-<テーマ>.axe.json に残す。
+ * 各状態・テーマで、最後の大きさ (いちばん広い幅) のときに axe (WCAG 2 AA) のコントラスト検査も行い、<名前>-<テーマ>.axe.json に残す。
  */
 
 const OUT_DIR = path.join(PROJECT_DIR, '.tmp', 'design-capture', process.env.LISCOV_DESIGN_CAPTURE_LABEL ?? 'latest');
 
-// 幅は、サブモニターの細いウィンドウ・半分・広めの 3 つ (ブリーフで面積の目標が決まったら見直す)
-const WIDTHS = [360, 640, 1024];
-const HEIGHT = 800;
+// 設計の基準にする大きさ (docs/design/brief.md §3): いちばん小さい・いちばんよく使われる想定・広め
+const SIZES = [
+  { width: 540, height: 960 },
+  { width: 640, height: 1080 },
+  { width: 960, height: 1080 },
+] as const;
 const THEMES = ['dark', 'light'] as const;
 
 test.describe('Design capture', () => {
@@ -61,8 +64,8 @@ test.describe('Design capture', () => {
   async function captureAll(name: string): Promise<void> {
     for (const theme of THEMES) {
       await page.evaluate((t) => document.documentElement.setAttribute('data-theme', t), theme);
-      for (const width of WIDTHS) {
-        await page.setViewportSize({ width, height: HEIGHT });
+      for (const { width, height } of SIZES) {
+        await page.setViewportSize({ width, height });
         await page.mouse.move(-1, -1);
         // レイアウトの再計算と仮想リストの再描画を待つ
         await page.waitForTimeout(300);
@@ -148,12 +151,28 @@ test.describe('Design capture', () => {
     await page.evaluate(() => location.assign('/design-tokens'));
     await expect(page.getByText('デザイントークンの見本')).toBeVisible({ timeout: 15000 });
     await page.addStyleTag({ content: '*, *::before, *::after { transition: none !important; }' });
-    await page.setViewportSize({ width: 1024, height: HEIGHT });
+    await page.setViewportSize(SIZES[2]);
     for (const theme of THEMES) {
       await page.evaluate((t) => document.documentElement.setAttribute('data-theme', t), theme);
       await page.waitForTimeout(300);
       await page.screenshot({ path: path.join(OUT_DIR, `design-tokens-${theme}.png`), fullPage: true, animations: 'disabled' });
       await checkContrast(`design-tokens-${theme}`);
+    }
+  });
+
+  // 方向性の試作 (src/routes/design-proto)。架空のデータを持っているので、モックサーバーは使わない。
+  // 場面 (docs/design/brief.md §1) ごとに撮る: 通常・コラボ・配信の最後のお礼・参加型
+  test('方向性の試作', async () => {
+    test.setTimeout(600000);
+    const SCENES = ['normal', 'collab', 'thanks', 'party'] as const;
+    for (const id of ['a', 'b', 'c'] as const) {
+      // 選ばれた案 C は、スパチャ等と新規さんが大量に流れた後 (heavy) も撮る
+      for (const scene of id === 'c' ? [...SCENES, 'heavy'] : SCENES) {
+        await page.evaluate((p) => location.assign(p), `/design-proto/${id}?scene=${scene}`);
+        await expect(page.getByText('倒したああああ').first()).toBeVisible({ timeout: 15000 });
+        await page.addStyleTag({ content: '*, *::before, *::after { transition: none !important; }' });
+        await captureAll(`proto-${id}-${scene}`);
+      }
     }
   });
 });
