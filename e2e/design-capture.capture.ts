@@ -220,6 +220,19 @@ test.describe('Design capture', () => {
     }
   });
 
+  // 視聴者のタブの試作 (段階 5.3b)。A 表 / B 一覧と詳細 / C 2 行の一覧。一覧・編集中・削除の確認
+  test('視聴者のタブの試作', async () => {
+    test.setTimeout(600000);
+    for (const v of ['a', 'b', 'c'] as const) {
+      for (const st of ['list', 'edit', 'delete'] as const) {
+        await page.evaluate((p) => location.assign(p), `/design-proto/viewers?v=${v}&st=${st}`);
+        await expect(page.getByRole('searchbox', { name: '視聴者を探す' })).toBeVisible({ timeout: 15000 });
+        await page.addStyleTag({ content: '*, *::before, *::after { transition: none !important; }' });
+        await captureAll(`viewers-${v}-${st}`);
+      }
+    }
+  });
+
   // 方向性の試作 (src/routes/design-proto)。架空のデータを持っているので、モックサーバーは使わない。
   // 場面 (docs/design/brief.md §1) ごとに撮る: 通常・コラボ・配信の最後のお礼・参加型
   test('方向性の試作', async () => {
