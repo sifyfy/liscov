@@ -18,6 +18,8 @@ import {
   getTestDatabasePath,
   openUrlInput,
   navigateToTab,
+  viewerTabRow,
+  viewerTabBroadcasterSelect,
 } from './utils/test-helpers';
 
 /**
@@ -57,25 +59,10 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
   });
 
   test('Step 1: Before connecting - Viewer Management should be empty', async () => {
-    // Navigate to Viewers tab WITHOUT connecting to a stream first
+    // 接続する前は記録のある配信者がいない (06_viewer.md「視聴者のタブ」: 記録のある配信者がいない)
     await navigateToTab(mainPage, 'Viewers');
-    await expect(mainPage.getByRole('heading', { name: '視聴者管理' }).first()).toBeVisible();
-
-    // Wait for the broadcaster list to load (async operation)
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    const broadcasterSelect = mainPage.locator('#broadcaster-select');
-    await expect(broadcasterSelect).toBeVisible();
-
-    // Should have NO broadcasters (only placeholder)
-    const options = await broadcasterSelect.locator('option').all();
-    log.debug(`Broadcasters before connecting: ${options.length - 1}`);
-
-    // CRITICAL: Without connecting to a stream, there should be NO broadcasters
-    expect(options.length).toBe(1); // Only placeholder
-
-    // Should show "配信者を選択してください" message (Japanese UI)
-    await expect(mainPage.getByText('配信者を選択してください')).toBeVisible();
+    await expect(mainPage.getByText('まだ記録がありません。配信に接続してコメントが届くと記録されます')).toBeVisible({ timeout: 5000 });
+    await expect(viewerTabBroadcasterSelect(mainPage)).toHaveCount(0);
   });
 
   test('Step 2: Authenticate', async () => {
@@ -205,81 +192,23 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
   });
 
   test('Step 4: Viewer Management should show broadcaster and viewers from stream', async () => {
-    // Capture browser console logs
-    const consoleLogs: string[] = [];
-    mainPage.on('console', msg => {
-      const text = `[browser] ${msg.type()}: ${msg.text()}`;
-      consoleLogs.push(text);
-      if (msg.text().includes('[viewerStore]')) {
-        log.debug(text);
-      }
-    });
-
-    // Navigate to Viewers tab
+    // 接続した配信の配信者が選ばれ、届いたコメントの視聴者が出る
     await navigateToTab(mainPage, 'Viewers');
-    await expect(mainPage.getByRole('heading', { name: '視聴者管理' }).first()).toBeVisible();
-
-    // Wait for the store to load and log
-    await new Promise(resolve => setTimeout(resolve, 3000));
-
-    // Log any viewerStore related messages
-    log.debug('Relevant console logs:');
-    consoleLogs.filter(l => l.includes('[viewerStore]')).forEach(l => log.debug(l));
-
-    const broadcasterSelect = mainPage.locator('#broadcaster-select');
-
-    // CRITICAL TEST: After connecting to a stream, broadcaster should appear
-    const options = await broadcasterSelect.locator('option').all();
-    log.debug(`Broadcasters after connecting: ${options.length - 1}`);
-
-    // Log all options for debugging
-    for (let i = 0; i < options.length; i++) {
-      const text = await options[i].textContent();
-      log.debug(`  Option ${i}: ${text}`);
-    }
-
-    // ASSERTION: There should be at least 1 broadcaster (from the connected stream)
-    expect(options.length).toBeGreaterThan(1);
-
-    // Select the broadcaster
-    await broadcasterSelect.selectOption({ index: 1 });
-
-    // Wait for viewer list to load
-    await expect(mainPage.locator('table')).toBeVisible({ timeout: 5000 });
-
-    // CRITICAL TEST: Viewers from the stream should appear
-    const viewerRows = await mainPage.locator('tbody tr').all();
-    log.debug(`Viewers found: ${viewerRows.length}`);
-
-    // ASSERTION: Should have at least 2 viewers (RealViewer1 and RealSuperChatter)
-    expect(viewerRows.length).toBeGreaterThanOrEqual(2);
-
-    // Verify specific viewers exist
-    const tableText = await mainPage.locator('table').textContent();
-    expect(tableText).toContain('RealViewer1');
-    expect(tableText).toContain('RealSuperChatter');
+    await expect(viewerTabBroadcasterSelect(mainPage)).not.toHaveValue('', { timeout: 5000 });
+    await expect(viewerTabRow(mainPage, 'RealViewer1')).toBeVisible({ timeout: 5000 });
+    await expect(viewerTabRow(mainPage, 'RealSuperChatter')).toBeVisible();
     log.info('Viewers from stream are visible in Viewer Management');
   });
 
   test('Step 5: Edit viewer info from Viewer Management', async () => {
-    // Click on a viewer to edit
-    const viewerRow = mainPage.locator('tbody tr').first();
-    await viewerRow.click();
+    const row = viewerTabRow(mainPage, 'RealViewer1');
+    await row.getByRole('button', { name: 'RealViewer1' }).click();
+    const reading = row.getByLabel('読み仮名', { exact: true });
+    await reading.fill('テスト読み仮名');
+    await reading.press('Enter');
 
-    await expect(mainPage.getByRole('heading', { name: '視聴者情報の編集' })).toBeVisible();
-
-    // Set reading
-    const readingInput = mainPage.locator('#reading');
-    await readingInput.fill('テスト読み仮名');
-
-    // Save
-    await mainPage.getByRole('button', { name: '保存' }).click();
-
-    // Modal should close
-    await expect(mainPage.getByRole('heading', { name: '視聴者情報の編集' })).not.toBeVisible({ timeout: 3000 });
-
-    // Verify reading appears in table
-    await expect(mainPage.getByText('テスト読み仮名')).toBeVisible();
+    await expect(reading).toHaveCount(0);
+    await expect(row).toContainText('(テスト読み仮名)');
     log.info('Viewer info saved successfully');
   });
 
@@ -302,32 +231,13 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
     mainPage = connection.page;
     log.info('App restarted');
 
-    // Navigate directly to Viewers tab (without connecting to stream)
+    // 接続せずに視聴者のタブを開く (記録のある最初の配信者が選ばれる)
     await navigateToTab(mainPage, 'Viewers');
-    await expect(mainPage.getByRole('heading', { name: '視聴者管理' }).first()).toBeVisible();
+    await expect(viewerTabBroadcasterSelect(mainPage)).not.toHaveValue('', { timeout: 10000 });
 
-    // Wait for the broadcaster list to load (async operation)
-    await new Promise(resolve => setTimeout(resolve, 3000));
-
-    const broadcasterSelect = mainPage.locator('#broadcaster-select');
-    const options = await broadcasterSelect.locator('option').all();
-
-    log.debug(`Broadcasters after restart: ${options.length - 1}`);
-
-    // CRITICAL: Broadcaster should still exist (persisted in DB)
-    expect(options.length).toBeGreaterThan(1);
-
-    // Select the broadcaster
-    await broadcasterSelect.selectOption({ index: 1 });
-    await expect(mainPage.locator('table')).toBeVisible({ timeout: 5000 });
-
-    // CRITICAL: Viewers should still exist
-    const viewerRows = await mainPage.locator('tbody tr').all();
-    log.debug(`Viewers after restart: ${viewerRows.length}`);
-    expect(viewerRows.length).toBeGreaterThanOrEqual(2);
-
-    // CRITICAL: Custom reading should be persisted
-    await expect(mainPage.getByText('テスト読み仮名')).toBeVisible();
+    // CRITICAL: 視聴者と読み仮名が DB に残っている
+    await expect(viewerTabRow(mainPage, 'RealViewer1')).toContainText('(テスト読み仮名)', { timeout: 5000 });
+    await expect(viewerTabRow(mainPage, 'RealSuperChatter')).toBeVisible();
     log.info('Data persisted successfully after restart');
   });
 });

@@ -62,31 +62,6 @@
       "count": 7
     }
   },
-  "src/lib/components/viewer/BroadcasterSelector.svelte": {
-    "better-tailwindcss/no-restricted-classes": {
-      "count": 7
-    }
-  },
-  "src/lib/components/viewer/DeleteConfirmDialog.svelte": {
-    "better-tailwindcss/no-restricted-classes": {
-      "count": 21
-    }
-  },
-  "src/lib/components/viewer/ViewerEditModal.svelte": {
-    "better-tailwindcss/no-restricted-classes": {
-      "count": 63
-    }
-  },
-  "src/lib/components/viewer/ViewerList.svelte": {
-    "better-tailwindcss/no-restricted-classes": {
-      "count": 63
-    }
-  },
-  "src/lib/components/viewer/ViewerManagement.svelte": {
-    "better-tailwindcss/no-restricted-classes": {
-      "count": 17
-    }
-  },
   "src/lib/utils/connection-colors.ts": {
     "no-restricted-syntax": {
       "count": 8

@@ -9,9 +9,10 @@ function createViewerStore() {
   let viewers = $state<ViewerWithCustomInfo[]>([]);
   let sessions = $state<Session[]>([]);
   let broadcasters = $state<BroadcasterChannel[]>([]);
-  let selectedViewer = $state<ViewerWithCustomInfo | null>(null);
   let selectedBroadcasterId = $state<string | null>(null);
+  // 絞り込み (06_viewer.md「視聴者のタブ」: 探す欄と「読み仮名なしだけ」)
   let searchQuery = $state('');
+  let withoutReading = $state(false);
   let isLoading = $state(false);
   let error = $state<string | null>(null);
   let currentPage = $state(0);
@@ -39,12 +40,7 @@ function createViewerStore() {
 
     try {
       const query = searchQuery.trim() || undefined;
-      viewers = await viewerApi.viewerGetList(
-        broadcasterId,
-        query,
-        pageSize,
-        page * pageSize
-      );
+      viewers = await viewerApi.viewerGetList(broadcasterId, query, pageSize, page * pageSize, withoutReading);
     } catch (e) {
       error = normalizeError(e).message;
       viewers = [];
@@ -53,17 +49,14 @@ function createViewerStore() {
     }
   }
 
-  async function searchViewersAction(broadcasterId: string, query: string): Promise<void> {
-    searchQuery = query;
+  /** 絞り込みを変えて、最初のページから読み直す */
+  async function setFilter(
+    broadcasterId: string,
+    filter: Readonly<{ search?: string; withoutReading?: boolean }>
+  ): Promise<void> {
+    if (filter.search !== undefined) searchQuery = filter.search;
+    if (filter.withoutReading !== undefined) withoutReading = filter.withoutReading;
     await loadViewers(broadcasterId, 0);
-  }
-
-  async function selectViewer(viewer: ViewerWithCustomInfo): Promise<void> {
-    selectedViewer = viewer;
-  }
-
-  function clearSelection(): void {
-    selectedViewer = null;
   }
 
   /**
@@ -77,11 +70,6 @@ function createViewerStore() {
   ): Promise<void> {
     try {
       await viewerApi.viewerUpsertCustomInfo(viewerProfileId, reading, notes, customData);
-
-      // ローカル状態を更新
-      if (selectedViewer && selectedViewer.id === viewerProfileId) {
-        selectedViewer = { ...selectedViewer, reading, notes, custom_data: customData ?? selectedViewer.custom_data };
-      }
 
       // ビューワー一覧を再取得
       if (selectedBroadcasterId) {
@@ -105,17 +93,6 @@ function createViewerStore() {
   ): Promise<void> {
     try {
       await viewerApi.viewerUpdateInfo(viewerProfileId, reading, notes, customData, tags);
-
-      // ローカル状態を更新
-      if (selectedViewer && selectedViewer.id === viewerProfileId) {
-        selectedViewer = {
-          ...selectedViewer,
-          reading,
-          notes,
-          custom_data: customData,
-          tags: tags || []
-        };
-      }
 
       // ビューワー一覧を再取得
       if (selectedBroadcasterId) {
@@ -161,11 +138,6 @@ function createViewerStore() {
     try {
       const result = await viewerApi.viewerDelete(viewerProfileId);
 
-      // 削除したビューワーが選択中だった場合は選択解除
-      if (selectedViewer && selectedViewer.id === viewerProfileId) {
-        selectedViewer = null;
-      }
-
       // ビューワー一覧を再取得
       if (selectedBroadcasterId) {
         await loadViewers(selectedBroadcasterId, currentPage);
@@ -186,7 +158,6 @@ function createViewerStore() {
       if (selectedBroadcasterId === broadcasterId) {
         selectedBroadcasterId = null;
         viewers = [];
-        selectedViewer = null;
       }
 
       // 配信者一覧を再取得
@@ -210,14 +181,14 @@ function createViewerStore() {
     get broadcasters() {
       return broadcasters;
     },
-    get selectedViewer() {
-      return selectedViewer;
-    },
     get selectedBroadcasterId() {
       return selectedBroadcasterId;
     },
     get searchQuery() {
       return searchQuery;
+    },
+    get withoutReading() {
+      return withoutReading;
     },
     get isLoading() {
       return isLoading;
@@ -236,9 +207,7 @@ function createViewerStore() {
     loadSessions,
     loadViewers,
     loadBroadcasters,
-    searchViewers: searchViewersAction,
-    selectViewer,
-    clearSelection,
+    setFilter,
     updateViewerCustomInfo,
     updateViewerInfo,
     deleteViewer,

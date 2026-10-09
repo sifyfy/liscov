@@ -27,6 +27,10 @@ export const DESIGN_MIGRATED = [
 	'src/lib/components/layout/AppShell.svelte',
 	'src/lib/components/tabs/ChatTab.svelte',
 	'src/lib/components/viewer/ViewerInfoPanel.svelte',
+	'src/lib/components/viewer/ViewerManagement.svelte',
+	'src/lib/components/viewer/ViewerList.svelte',
+	'src/lib/components/viewer/ViewerEditor.svelte',
+	'src/lib/components/viewer/DeleteConfirmDialog.svelte',
 ];
 
 const DOC = 'docs/design/tokens.md';

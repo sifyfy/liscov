@@ -163,7 +163,29 @@ test.describe('Design capture', () => {
   test('その他のタブ', async () => {
     test.setTimeout(600000);
     await navigateToTab(page, 'Viewers');
+    // 読み仮名・タグ・メモのある行も見えるように、上の 2 人に登録してから撮る
+    for (const [i, values] of [
+      [0, { reading: 'よふかしけんきゅうかい', tags: '常連、攻略', notes: '攻略情報をよくくれる。ホラーが苦手' }],
+      [2, { reading: '', tags: '注意', notes: 'ネタバレしがち' }],
+    ] as const) {
+      await page.getByRole('listitem').nth(i).getByRole('button').first().click();
+      await page.getByLabel('読み仮名', { exact: true }).fill(values.reading);
+      await page.getByLabel(/タグ/).fill(values.tags);
+      await page.getByLabel('メモ', { exact: true }).fill(values.notes);
+      await page.getByLabel('メモ', { exact: true }).press('Enter');
+      await expect(page.getByLabel('読み仮名', { exact: true })).toHaveCount(0);
+    }
     await captureAll('viewers');
+    // 1 人目を押して編集を広げた場面と、その人を消す確認の場面 (06_viewer.md「視聴者のタブ」)
+    const firstRow = page.getByRole('listitem').filter({ has: page.getByRole('button', { expanded: false }) }).first();
+    await firstRow.getByRole('button').first().click();
+    const reading = page.getByLabel('読み仮名', { exact: true });
+    await expect(reading).toBeFocused();
+    await captureAll('viewers-edit');
+    await page.getByRole('button', { name: 'この視聴者を消す…' }).click();
+    await captureAll('viewers-delete');
+    await page.keyboard.press('Escape');
+    await reading.press('Escape');
 
     await navigateToTab(page, 'Analytics');
     await captureAll('analytics');

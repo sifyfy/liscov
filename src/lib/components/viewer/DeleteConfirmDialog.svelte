@@ -1,10 +1,17 @@
 <script lang="ts">
+  /**
+   * 取り消せない削除の確認ダイアログ (docs/specs/06_viewer.md「視聴者のタブ」の「この配信者の記録を消す…」)
+   *
+   * 開いたらフォーカスは「やめる」(Enter の押し間違いで消さない)。Esc・外側を押してもやめる (消している間は除く)
+   */
   interface Props {
     title: string;
     message: string;
     confirmText?: string;
     cancelText?: string;
     isDeleting?: boolean;
+    /** 失敗したときの文。あればダイアログの中に出す */
+    error?: string | null;
     onConfirm: () => void;
     onCancel: () => void;
   }
@@ -12,17 +19,19 @@
   let {
     title,
     message,
-    confirmText = '削除',
-    cancelText = 'キャンセル',
+    confirmText = '消す',
+    cancelText = 'やめる',
     isDeleting = false,
+    error = null,
     onConfirm,
     onCancel
   }: Props = $props();
+
+  const focusOnOpen = (node: HTMLElement) => node.focus();
 </script>
 
-<!-- Modal backdrop -->
 <div
-  class="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+  class="fixed inset-0 z-50 flex items-center justify-center bg-surface/80 p-4"
   onclick={(e) => {
     if (e.target === e.currentTarget && !isDeleting) onCancel();
   }}
@@ -31,42 +40,32 @@
   }}
   role="dialog"
   aria-modal="true"
+  aria-labelledby="delete-confirm-title"
   tabindex="-1"
 >
-  <!-- Modal content -->
-  <div class="bg-[var(--bg-surface-2)] rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden border border-[var(--border-default)]">
-    <!-- Header -->
-    <div class="px-6 py-4 bg-[var(--error-subtle)] border-b border-[var(--border-default)]">
-      <div class="flex items-center gap-3">
-        <div class="p-2 bg-[var(--error)]/20 rounded-full">
-          <svg class="w-6 h-6 text-[var(--error)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-          </svg>
-        </div>
-        <h2 class="text-xl font-semibold text-[var(--text-primary)]">{title}</h2>
-      </div>
-    </div>
-
-    <!-- Body -->
-    <div class="p-6">
-      <p class="text-[var(--text-secondary)]">{message}</p>
-    </div>
-
-    <!-- Footer -->
-    <div class="px-6 py-4 bg-[var(--bg-surface-3)] border-t border-[var(--border-default)] flex justify-end gap-3">
+  <div class="flex w-full max-w-md flex-col gap-3 rounded-control border border-error bg-surface-high p-4 text-fg-1">
+    <h2 id="delete-confirm-title" class="text-title">{title}</h2>
+    <p class="text-body">{message}</p>
+    {#if error}
+      <p role="alert" class="text-caption text-error">{error}</p>
+    {/if}
+    <div class="flex justify-end gap-2">
       <button
+        type="button"
         onclick={onCancel}
         disabled={isDeleting}
-        class="px-4 py-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors disabled:opacity-50"
+        {@attach focusOnOpen}
+        class="rounded-control border border-outline px-3 py-1 text-label text-fg-2 hover:bg-fg-1/8 disabled:opacity-50"
       >
         {cancelText}
       </button>
       <button
+        type="button"
         onclick={onConfirm}
         disabled={isDeleting}
-        class="px-6 py-2 bg-[var(--error)] text-[var(--text-inverse)] font-semibold rounded-lg hover:opacity-90 transition-colors disabled:opacity-50"
+        class="rounded-control bg-error px-3 py-1 text-label text-surface hover:opacity-90 disabled:opacity-50"
       >
-        {isDeleting ? '削除中...' : confirmText}
+        {isDeleting ? '消しています…' : confirmText}
       </button>
     </div>
   </div>

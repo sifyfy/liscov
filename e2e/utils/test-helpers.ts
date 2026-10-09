@@ -728,6 +728,16 @@ export async function openViewerPanel(page: Page, text: string): Promise<Locator
   return viewerPanel(page);
 }
 
+/** 視聴者のタブの配信者の選択 (06_viewer.md「視聴者のタブ」) */
+export function viewerTabBroadcasterSelect(page: Page): Locator {
+  return page.getByRole('combobox', { name: '配信者' });
+}
+
+/** 視聴者のタブの一覧で、name を含む 1 人の行 (押すと下に編集が広がる。広がった編集もこの行の中) */
+export function viewerTabRow(page: Page, name: string): Locator {
+  return page.getByRole('listitem').filter({ has: page.getByRole('button', { name }) }).first();
+}
+
 /** 開いている視聴者情報パネルで読み仮名を入れ、Enter で保存する (保存すると閉じる) */
 export async function saveReadingInPanel(page: Page, reading: string): Promise<void> {
   const input = viewerPanel(page).getByLabel('読み仮名');

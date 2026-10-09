@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatContribution, formatTimestamp } from './format';
+import { formatContribution, formatDay, formatTimestamp } from './format';
 
 describe('formatContribution', () => {
   // 仕様: 視聴者の貢献額は日本円通貨表記（小数点なし）で表示する
@@ -36,5 +36,23 @@ describe('formatTimestamp', () => {
   // 仕様: 解釈できないタイムスタンプは原文をそのまま表示する
   it('不正な日付文字列のときは原文を返す', () => {
     expect(formatTimestamp('not-a-date')).toBe('not-a-date');
+  });
+});
+
+// spec: docs/specs/06_viewer.md「視聴者のタブ」1 人の行の最終確認の日付
+describe('formatDay', () => {
+  const now = new Date(2026, 9, 9, 21, 0);
+
+  it('今年の日付は 月/日', () => {
+    expect(formatDay(new Date(2026, 9, 9, 12, 0).toISOString(), now)).toBe('10/9');
+    expect(formatDay(new Date(2026, 0, 3, 12, 0).toISOString(), now)).toBe('1/3');
+  });
+
+  it('去年より前は 年/月/日', () => {
+    expect(formatDay(new Date(2025, 9, 1, 12, 0).toISOString(), now)).toBe('2025/10/1');
+  });
+
+  it('解釈できない文字列はそのまま', () => {
+    expect(formatDay('不明', now)).toBe('不明');
   });
 });

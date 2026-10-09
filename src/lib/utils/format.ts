@@ -37,3 +37,14 @@ export function formatTimestamp(timestamp: string): string {
   const s = String(date.getSeconds()).padStart(2, '0');
   return `${h}:${m}:${s}`;
 }
+
+/**
+ * 日付をローカルタイムゾーンの短い形にする。今年なら「10/9」、それより前は「2025/10/1」。
+ * 解釈できない文字列は原文をそのまま返す (06_viewer.md「視聴者のタブ」の最終確認)
+ */
+export function formatDay(timestamp: string, now: Date = new Date()): string {
+  const date = new Date(timestamp);
+  if (isNaN(date.getTime())) return timestamp;
+  const day = `${date.getMonth() + 1}/${date.getDate()}`;
+  return date.getFullYear() === now.getFullYear() ? day : `${date.getFullYear()}/${day}`;
+}

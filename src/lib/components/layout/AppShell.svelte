@@ -82,7 +82,8 @@
       </ErrorBoundary>
     </div>
     {#if activeTab === 'viewers'}
-      <div class="flex-1 overflow-y-auto bg-surface p-4">
+      <!-- 視聴者のタブは端まで使い、一覧だけをスクロールする (06_viewer.md「視聴者のタブ」) -->
+      <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
         <ErrorBoundary name="視聴者タブ">
           <ViewerManagement broadcasterId={broadcasterId || undefined} />
         </ErrorBoundary>
