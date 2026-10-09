@@ -11,12 +11,12 @@ import {
 
 // Helper to wait for SvelteKit app to fully render (not just HTML load)
 async function waitForAppReady(page: Page): Promise<void> {
-  await expect(page.locator('nav button:has-text("Chat")')).toBeVisible({ timeout: 30000 });
+  await expect(page.locator('nav button[aria-label="チャット"]')).toBeVisible({ timeout: 30000 });
 }
 
 // Navigate to TTS settings tab
 async function navigateToTtsSettings(page: Page): Promise<void> {
-  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('button', { name: '設定', exact: true }).click();
   await expect(page.getByRole('button', { name: 'TTS読み上げ' })).toBeVisible({ timeout: 5000 });
   await page.getByRole('button', { name: 'TTS読み上げ' }).click();
   await expect(page.getByRole('heading', { name: 'TTS設定' })).toBeVisible({ timeout: 5000 });

@@ -79,7 +79,7 @@ pub enum ChatModeSetting {
 pub struct ChatDisplayConfig {
     pub message_font_size: u32,
     pub show_timestamps: bool,
-    /// 配信につながったら操作パネルを隠す (02_chat.md「上の行と操作パネル」)
+    /// 配信に接続したら操作パネルを隠す (02_chat.md「上の行と操作パネル」)
     pub hide_panel_on_connect: bool,
     pub chat_mode: ChatModeSetting,
 }
@@ -641,7 +641,7 @@ future_setting = true
 
     #[test]
     fn config_lookup_chat_display_hide_panel_on_connect_default() {
-        // 09_config.md: hide_panel_on_connect の既定は true (配信につながったら操作パネルを隠す)
+        // 09_config.md: hide_panel_on_connect の既定は true (配信に接続したら操作パネルを隠す)
         let config = Config::default();
         let val = config_lookup(&config, "chat_display", "hide_panel_on_connect");
         assert_eq!(val, Some(serde_json::json!(true)));
@@ -749,7 +749,7 @@ auto_scroll_enabled = false
 
     #[test]
     fn config_apply_value_hide_panel_on_connect_false() {
-        // 09_config.md: 「つないだら操作パネルを隠す」を無効にできる
+        // 09_config.md: 「接続したら操作パネルを隠す」を無効にできる
         let config = Config::default();
         let new_config = config_apply_value(
             &config,

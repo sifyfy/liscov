@@ -1,4 +1,5 @@
-// 接続設定の統計（02_chat.md「接続設定の統計（InputSection）」）
+// 状態の行の統計（02_chat.md「状態の行の統計（StatusLine）」）
+import { formatCount } from './format';
 
 /** /分 の窓（直近 60 秒） */
 const RECENT_WINDOW_MS = 60_000;
@@ -21,4 +22,11 @@ export function countRecentMessages(
 		if (postedMs > nowMs - RECENT_WINDOW_MS) count++;
 	}
 	return count;
+}
+
+/**
+ * フィルタ・表示件数で一部を隠しているときの「表示中 N / 全 M 件」。隠していなければ null
+ */
+export function shownCountLabel(shown: number, total: number): string | null {
+	return shown < total ? `表示中 ${formatCount(shown)} / 全 ${formatCount(total)} 件` : null;
 }

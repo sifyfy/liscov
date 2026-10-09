@@ -8,6 +8,8 @@ import {
   resetMockServer,
   addMockMessage,
   disconnectAndInitialize,
+  openUrlInput,
+  openControlPanel,
 } from './utils/test-helpers';
 
 /**
@@ -44,10 +46,10 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
   test.describe('ViewerInfoPanel and Scroll', () => {
     test('should open ViewerInfoPanel when clicking a message', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Add message
       await addMockMessage({
@@ -82,10 +84,10 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
 
     test('should scroll to message when clicking past comment in panel', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Add multiple messages from the same user
       for (let i = 1; i <= 10; i++) {
@@ -157,10 +159,10 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
 
     test('should have data-message-id attribute on messages', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Add message
       await addMockMessage({
@@ -191,10 +193,10 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
       chatContainer().evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
 
     async function connect() {
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
     }
 
     async function addMessages(prefix: string, from: number, to: number) {
@@ -224,10 +226,10 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
       // Bug: Sometimes scroll stops short of the actual bottom
 
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Add many messages to create scrollable content
       for (let i = 1; i <= 30; i++) {
@@ -355,10 +357,10 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
   test.describe('ViewerInfoPanel Details', () => {
     test('should display channel ID in viewer panel', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Add message with specific channel ID
       await addMockMessage({
@@ -385,10 +387,10 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
 
     test('should have reading (furigana) input field', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Add message
       await addMockMessage({
@@ -415,10 +417,10 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
 
     test('should save and persist reading (furigana) input', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Add a message
       const testChannelId = 'UC_reading_test_user';
@@ -478,10 +480,10 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
 
     test('should scroll to message when clicking past comment in ViewerInfoPanel', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Add many messages to enable scrolling
       const targetUserId = 'UC_scroll_target_user';
@@ -535,10 +537,10 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
 
     test('should show multiple comments from same user', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Add multiple messages from same user
       const sameUserId = 'UC_same_user_id';
@@ -570,10 +572,10 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
   test.describe('Scroll Behavior with Auto-scroll', () => {
     test('should scroll to past message even when auto-scroll is enabled', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Add first message from target user
       const targetUserId = 'UC_autoscroll_test_user';
@@ -677,10 +679,10 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
   test.describe('Display Limit (displayLimit)', () => {
     test('should limit displayed messages when displayLimit is set', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Add 80 messages
       const addPromises = [];
@@ -693,18 +695,18 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
       }
       await Promise.all(addPromises);
 
-      // Verify all messages received (status bar shows total)
-      await expect(mainPage.getByText(/全80件/)).toBeVisible({ timeout: 10000 });
+      // Verify all messages received (状態の行の件数)
+      await expect(mainPage.getByText('80 件', { exact: true })).toBeVisible({ timeout: 10000 });
 
       // Set displayLimit to 50 via select
-      const displayLimitSelect = mainPage.locator('select').filter({
-        has: mainPage.locator('option[value="unlimited"]'),
-      });
+      await openControlPanel(mainPage);
+      const displayLimitSelect = mainPage.getByRole('combobox', { name: '表示件数' });
       await displayLimitSelect.selectOption('50');
+      // 選んだ件数が選択欄に出たまま (以前の不具合: 数値と選択肢の文字列が合わず空欄になっていた)
+      await expect(displayLimitSelect).toHaveValue('50');
 
-      // Status bar should show filtered count and display limit
-      await expect(mainPage.getByText(/表示枠: 50件/)).toBeVisible({ timeout: 3000 });
-      await expect(mainPage.getByText(/フィルタ後: 80件/)).toBeVisible();
+      // 状態の行に「表示中 50 / 全 80 件」が出る (全 80 件のうち 50 件だけ表示)
+      await expect(mainPage.getByText('表示中 50 / 全 80 件')).toBeVisible({ timeout: 3000 });
 
       // Scroll VList to bottom to ensure latest message is rendered in DOM
       const vlistContainer = mainPage.locator('[style*="overflow-y"]').filter({ has: mainPage.locator('[data-message-id]') }).first();
@@ -722,8 +724,8 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
       // Reset to unlimited
       await displayLimitSelect.selectOption('unlimited');
 
-      // Status bar should now show unlimited
-      await expect(mainPage.getByText(/表示枠: 無制限/)).toBeVisible({ timeout: 3000 });
+      // 隠しているものが無くなるので「表示中」は消える
+      await expect(mainPage.getByText(/表示中/)).toHaveCount(0, { timeout: 3000 });
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
@@ -731,10 +733,10 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
 
     test('should update status bar counts when displayLimit changes', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Add 30 messages sequentially (preserves order for VList scroll verification)
       for (let i = 1; i <= 30; i++) {
@@ -745,18 +747,18 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
         });
       }
 
-      // Verify initial state: unlimited
-      await expect(mainPage.getByText(/全30件/)).toBeVisible({ timeout: 10000 });
-      await expect(mainPage.getByText(/表示枠: 無制限/)).toBeVisible();
+      // Verify initial state: unlimited (隠しているものが無いので「表示中」は出ない)
+      await expect(mainPage.getByText('30 件', { exact: true })).toBeVisible({ timeout: 10000 });
+      await expect(mainPage.getByText(/表示中/)).toHaveCount(0);
 
       // Switch to 50 (all 30 should still display since 30 < 50)
-      const displayLimitSelect = mainPage.locator('select').filter({
-        has: mainPage.locator('option[value="unlimited"]'),
-      });
+      await openControlPanel(mainPage);
+      const displayLimitSelect = mainPage.getByRole('combobox', { name: '表示件数' });
       await displayLimitSelect.selectOption('50');
 
-      await expect(mainPage.getByText(/表示枠: 50件/)).toBeVisible({ timeout: 3000 });
-      await expect(mainPage.getByText(/フィルタ後: 30件/)).toBeVisible();
+      // 30 件は 50 件の枠に収まるので、隠しているものが無く「表示中」は出ないまま
+      await expect(mainPage.getByText('30 件', { exact: true })).toBeVisible();
+      await expect(mainPage.getByText(/表示中/)).toHaveCount(0);
 
       // All messages should still be in displayedMessages (30 < 50)
       // VList virtualizes rendering, so scroll to check specific items
@@ -778,17 +780,16 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
 
     test('should restrict display to displayLimit with large message count', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Set displayLimit to 100 before adding messages
-      const displayLimitSelect = mainPage.locator('select').filter({
-        has: mainPage.locator('option[value="unlimited"]'),
-      });
+      await openControlPanel(mainPage);
+      const displayLimitSelect = mainPage.getByRole('combobox', { name: '表示件数' });
       await displayLimitSelect.selectOption('100');
-      await expect(mainPage.getByText(/表示枠: 100件/)).toBeVisible({ timeout: 3000 });
+      // 効いたことは、下で件数を受けたあとの「表示中 100 / 全 150 件」で確かめる
 
       // Add 150 messages in parallel batches for speed
       // 並列バッチ内の到着順は非決定的なので、最終メッセージは順次送信で保証
@@ -805,10 +806,9 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
         await Promise.all(addPromises);
       }
 
-      // Status bar: all messages received, but display limited to 100
-      await expect(mainPage.getByText(/全150件/)).toBeVisible({ timeout: 5000 });
-      await expect(mainPage.getByText(/表示枠: 100件/)).toBeVisible();
-      await expect(mainPage.getByText(/フィルタ後: 150件/)).toBeVisible();
+      // 状態の行: 150 件を受けたが、表示は 100 件に絞られる
+      await expect(mainPage.getByText('150 件', { exact: true })).toBeVisible({ timeout: 5000 });
+      await expect(mainPage.getByText('表示中 100 / 全 150 件')).toBeVisible();
 
       // Scroll to top to check early messages are trimmed
       const vlistContainer = mainPage.locator('[style*="overflow-y"]').filter({ has: mainPage.locator('[data-message-id]') }).first();

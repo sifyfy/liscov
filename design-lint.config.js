@@ -19,6 +19,13 @@ export const DESIGN_MIGRATED = [
 	'src/lib/components/chat/ChatDisplay.svelte',
 	'src/lib/components/chat/FlowedSection.svelte',
 	'src/lib/components/chat/ThanksList.svelte',
+	'src/lib/components/chat/StatusLine.svelte',
+	'src/lib/components/chat/ConnectForm.svelte',
+	'src/lib/components/chat/ConnectionList.svelte',
+	'src/lib/components/chat/ControlPanel.svelte',
+	'src/lib/components/layout/TopBar.svelte',
+	'src/lib/components/layout/AppShell.svelte',
+	'src/lib/components/tabs/ChatTab.svelte',
 ];
 
 const DOC = 'docs/design/tokens.md';

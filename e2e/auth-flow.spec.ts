@@ -11,6 +11,8 @@ import {
   resetMockServer,
   cleanupTestData,
   cleanupTestCredentials,
+  navigateToTab,
+  openControlPanel,
 } from './utils/test-helpers';
 
 /**
@@ -53,9 +55,16 @@ test.describe('Authentication Feature (01_auth.md)', () => {
     await teardownTestEnvironment(browser);
   });
 
+  // AuthIndicator は操作パネル (チャットのタブ) の中にある。開いて返す
+  async function openAuthIndicator() {
+    await navigateToTab(mainPage, 'Chat');
+    await openControlPanel(mainPage);
+    return mainPage.getByRole('region', { name: '操作パネル' }).getByTestId('auth-indicator');
+  }
+
   test.beforeEach(async () => {
     // Ensure we're on the Settings page for auth tests
-    await mainPage.getByRole('button', { name: 'Settings' }).click();
+    await mainPage.getByRole('button', { name: '設定', exact: true }).click();
     // Wait for YouTube認証 section to be visible
     await expect(mainPage.getByRole('heading', { name: 'YouTube認証' })).toBeVisible();
   });
@@ -69,7 +78,7 @@ test.describe('Authentication Feature (01_auth.md)', () => {
 
     test('should display AuthIndicator with unauthenticated state', async () => {
       // Spec: "| 未認証 | グレー / 鍵アイコン（閉） | 「未ログイン」 |"
-      const authIndicator = mainPage.getByTestId('auth-indicator');
+      const authIndicator = await openAuthIndicator();
       await expect(authIndicator).toContainText('未ログイン');
     });
   });
@@ -97,7 +106,7 @@ test.describe('Authentication Feature (01_auth.md)', () => {
       // Spec: "| 認証済み（有効） | 緑 / 鍵アイコン（開） | 「ログイン中: 有効」 |"
       // After login, indicator should show "認証済み" (session validated successfully)
       // This verifies the full flow: login -> session validation -> indicator update
-      const authIndicator = mainPage.getByTestId('auth-indicator');
+      const authIndicator = await openAuthIndicator();
       await expect(authIndicator).toContainText('認証済み', { timeout: 15000 });
 
       // "未ログイン" should not be visible in indicator
@@ -133,7 +142,7 @@ test.describe('Authentication Feature (01_auth.md)', () => {
       mainPage = connection.page;
 
       // Navigate to Settings
-      await mainPage.getByRole('button', { name: 'Settings' }).click();
+      await mainPage.getByRole('button', { name: '設定', exact: true }).click();
       await expect(mainPage.getByRole('heading', { name: 'YouTube認証' })).toBeVisible();
 
       // Should be authenticated after restart (credentials loaded from secure storage)
@@ -145,7 +154,7 @@ test.describe('Authentication Feature (01_auth.md)', () => {
       await expect(loginButton).not.toBeVisible();
 
       // Indicator should show "認証済み" after session validation completes
-      const authIndicator = mainPage.getByTestId('auth-indicator');
+      const authIndicator = await openAuthIndicator();
       await expect(authIndicator).toContainText('認証済み', { timeout: 15000 });
 
       // "検証中" should not be visible (session validation should complete)
@@ -175,7 +184,7 @@ test.describe('Authentication Feature (01_auth.md)', () => {
 
     test('should show unauthenticated AuthIndicator after logout', async () => {
       // Spec: "| 未認証 | グレー / 鍵アイコン（閉） | 「未ログイン」 |"
-      const authIndicator = mainPage.getByTestId('auth-indicator');
+      const authIndicator = await openAuthIndicator();
       await expect(authIndicator).toContainText('未ログイン');
     });
 
@@ -201,7 +210,7 @@ test.describe('Authentication Feature (01_auth.md)', () => {
       await expect(logoutButton).toBeVisible({ timeout: 15000 });
 
       // Verify indicator shows authenticated state
-      const authIndicator = mainPage.getByTestId('auth-indicator');
+      const authIndicator = await openAuthIndicator();
       await expect(authIndicator).toContainText('認証済み', { timeout: 15000 });
 
       // Verify mock server received a fresh login page visit

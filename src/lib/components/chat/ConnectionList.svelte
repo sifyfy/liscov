@@ -1,106 +1,59 @@
 <script lang="ts">
+  /**
+   * 操作パネルの接続の一覧 (docs/specs/02_chat.md「配信中の画面」の「上の行と操作パネル」)
+   *
+   * 配信者名・配信タイトル・ジュエル数の注意・切断。2 つ以上なら全切断。省略せず折り返す
+   */
   import { chatStore } from '$lib/stores/chat.svelte';
 
   // 失敗しても一覧からは消える（バックエンド側で既に終わっていた接続など）。未処理の reject にしない
   function handleDisconnect(connectionId: number) {
-    chatStore
-      .disconnect(connectionId)
-      .catch((e) => console.warn(`切断に失敗 (connection ${connectionId}):`, e));
+    chatStore.disconnect(connectionId).catch((e) => console.warn(`切断に失敗 (connection ${connectionId}):`, e));
   }
 
+  function handleDisconnectAll() {
+    chatStore.disconnectAll().catch((e) => console.warn('全切断に失敗:', e));
+  }
 </script>
 
 {#if chatStore.connections.size > 0}
-  <div class="connection-list">
-    {#each [...chatStore.connections.values()] as conn (conn.id)}
-      <div class="connection-item">
-        <div class="color-indicator" style="background-color: {conn.color}"></div>
-        <div class="connection-info">
-          <span class="broadcaster-name">{conn.broadcasterName}</span>
-          <span class="stream-title" data-testid="stream-title">{conn.streamTitle}</span>
-          {#if conn.jewelCountUnavailable}
-            <span class="jewel-notice" data-testid="jewel-count-notice">
-              ジュエル数を取得できません。配信者本人としてログインした接続でのみ取得できます
-            </span>
-          {/if}
-        </div>
-        <button
-          class="disconnect-btn"
-          title="切断"
-          onclick={() => handleDisconnect(conn.id)}
-          disabled={conn.connectionState !== 'connected'}
-        >
-          ×
-        </button>
-      </div>
-    {/each}
-  </div>
+  <section class="flex flex-col gap-1" aria-label="接続">
+    <ul class="flex flex-col gap-1">
+      {#each [...chatStore.connections.values()] as conn (conn.id)}
+        <li data-testid="connection-item" class="flex items-start gap-2 rounded-control bg-surface px-2 py-1">
+          <span
+            class="mt-1.5 size-1.5 shrink-0 rounded-full {conn.connectionState === 'connected' ? 'bg-success' : 'bg-fg-3'}"
+            aria-hidden="true"
+          ></span>
+          <span class="flex min-w-0 flex-1 flex-col">
+            <span class="text-label break-words text-fg-1">{conn.broadcasterName}</span>
+            <span class="text-caption break-words text-fg-2" data-testid="stream-title">{conn.streamTitle}</span>
+            {#if conn.jewelCountUnavailable}
+              <span class="text-caption text-warning" data-testid="jewel-count-notice">
+                ジュエル数を取得できません。配信者本人としてログインした接続でのみ取得できます
+              </span>
+            {/if}
+          </span>
+          <button
+            type="button"
+            title="{conn.broadcasterName} を切断"
+            onclick={() => handleDisconnect(conn.id)}
+            disabled={conn.connectionState !== 'connected'}
+            class="shrink-0 rounded-control px-2 py-0.5 text-label whitespace-nowrap text-fg-2 hover:bg-fg-1/8 disabled:opacity-50"
+          >
+            切断
+          </button>
+        </li>
+      {/each}
+    </ul>
+    {#if chatStore.connections.size > 1}
+      <button
+        type="button"
+        onclick={handleDisconnectAll}
+        class="self-end rounded-control border border-outline px-3 py-0.5 text-label whitespace-nowrap text-fg-2 hover:bg-fg-1/8"
+      >
+        全切断
+      </button>
+    {/if}
+  </section>
 {/if}
-
-<style>
-  /* テーマのCSS変数を使用 */
-  .connection-list {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    padding: 0 8px 4px;
-    background: var(--bg-surface-1);
-  }
-  .connection-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 4px 8px;
-    border-radius: 4px;
-    background: var(--bg-surface-2);
-  }
-  .color-indicator {
-    width: 4px;
-    height: 24px;
-    border-radius: 2px;
-    flex-shrink: 0;
-  }
-  .connection-info {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-  }
-  .broadcaster-name {
-    font-size: 0.85em;
-    font-weight: 500;
-    color: var(--text-primary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .stream-title {
-    font-size: 0.75em;
-    color: var(--text-secondary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .jewel-notice {
-    font-size: 0.7em;
-    color: var(--warning);
-  }
-  .disconnect-btn {
-    padding: 2px 6px;
-    border-radius: 4px;
-    background: transparent;
-    color: var(--text-secondary);
-    border: none;
-    cursor: pointer;
-    font-size: 1em;
-    line-height: 1;
-  }
-  .disconnect-btn:hover {
-    background: rgba(234, 67, 53, 0.2);
-    color: #ea4335;
-  }
-  .disconnect-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-</style>

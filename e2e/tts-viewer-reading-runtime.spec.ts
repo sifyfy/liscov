@@ -69,7 +69,7 @@ test.describe('TTS Viewer Reading Runtime (実 Tauri + モック棒読みちゃ�
     browser = conn.browser;
     mainPage = conn.page;
 
-    await expect(mainPage.locator('nav button:has-text("Chat")')).toBeVisible({
+    await expect(mainPage.locator('nav button[aria-label="チャット"]')).toBeVisible({
       timeout: 30000,
     });
   });

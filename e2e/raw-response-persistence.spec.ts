@@ -9,6 +9,7 @@ import {
   navigateToTab,
   restartApp,
   getTestAppDataDir,
+  APP_READY,
 } from './utils/test-helpers';
 
 /**
@@ -77,7 +78,7 @@ test.describe.serial('Raw Response Save Settings', () => {
   test('再起動後も有効のまま', async () => {
     await browser.close();
     ({ browser, page } = await restartApp());
-    await page.getByRole('heading', { name: 'Chat Monitor' }).waitFor({ state: 'visible', timeout: 30000 });
+    await page.locator(APP_READY).waitFor({ state: 'visible', timeout: 30000 });
 
     await openRawResponseSettings(page);
     await expect(enabledToggle(page)).toBeChecked();

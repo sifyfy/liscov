@@ -70,7 +70,7 @@ function createConfigStore() {
     }
   }
 
-  // 配信につながったら操作パネルを隠す (09_config.md、02_chat.md「上の行と操作パネル」)
+  // 配信に接続したら操作パネルを隠す (09_config.md、02_chat.md「上の行と操作パネル」)
   async function setHidePanelOnConnect(enabled: boolean): Promise<void> {
     config.chat_display.hide_panel_on_connect = enabled;
     try {

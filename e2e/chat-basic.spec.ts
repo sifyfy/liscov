@@ -12,6 +12,11 @@ import {
   disconnectAndInitialize,
   setStreamState,
   getTestAppDataDir,
+  openUrlInput,
+  openControlPanel,
+  connectionChips,
+  chatModeCheckbox,
+  APP_READY,
 } from './utils/test-helpers';
 
 // config.toml の chat_display.chat_mode を読む（09_config.md）
@@ -82,16 +87,16 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
   test.describe('Stream Connection', () => {
     test('should connect to a stream and show stream info', async () => {
       // Enter mock video URL
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await expect(urlInput).toBeVisible();
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
 
       // Click Connect button
-      const connectButton = mainPage.locator('button:has-text("開始")');
+      const connectButton = mainPage.getByRole('button', { name: '接続', exact: true });
       await connectButton.click();
 
       // Wait for connection - stream title appears in connection list (use first() to avoid strict mode violation)
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Disconnect after test
       await disconnectAndInitialize(mainPage);
@@ -99,10 +104,10 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
 
     test('should receive and display chat messages', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Add mock messages
       await addMockMessage({
@@ -134,81 +139,72 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
   });
 
   test.describe('Chat Mode Selection', () => {
-    test('should have chat mode toggle button in connection area', async () => {
-      // Chat mode toggle button should be visible in the connection area
-      // Default mode is 'top' which shows as "🔝 トップ"
-      const chatModeButton = mainPage.locator('button[title="チャットモード切り替え"]');
-      await expect(chatModeButton).toBeVisible();
+    // チャットモードは配信に接続する欄の「すべてのコメントを取る」チェック (チェック = 全て、外す = トップ)。
+    // 接続した後は操作パネルが閉じるので、確かめるたびに欄を出す
+    const chatMode = () => chatModeCheckbox(mainPage);
 
-      // Should show either "トップ" or "全て"
-      const buttonText = await chatModeButton.textContent();
-      expect(buttonText).toMatch(/トップ|全て/);
+    /** チャットモードを指定の状態にする (切り替えは配信に接続する欄のチェックで行う) */
+    async function setChatModeAll(all: boolean) {
+      const box = await chatMode();
+      await box.setChecked(all);
+      await expect(box).toBeChecked({ checked: all });
+    }
+
+    test('should have chat mode checkbox in connect form', async () => {
+      // 配信に接続する欄にチャットモードのチェックがあり、既定はトップ (外れている)
+      const box = await chatMode();
+      await expect(box).toBeVisible();
+      await expect(box).not.toBeChecked();
     });
 
     test('should switch from TopChat to AllChat while connected', async () => {
+      // 前のテストの状態に依らずトップから始める
+      await setChatModeAll(false);
+
       // Connect to stream (default is TopChat)
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
-      // Chat mode toggle button should be visible
-      const chatModeButton = mainPage.locator('button[title="チャットモード切り替え"]');
-      await expect(chatModeButton).toBeVisible();
+      // 接続中もトップのまま
+      await expect(await chatMode()).not.toBeChecked();
 
-      // Default mode should be TopChat (shows "🔝 トップ")
-      await expect(chatModeButton).toHaveText(/トップ/);
-
-      // Click to switch to AllChat
-      await chatModeButton.click();
-
-      // Verify switched to AllChat (shows "💬 全て")
-      await expect(chatModeButton).toHaveText(/全て/);
+      // 全てに切り替える
+      await setChatModeAll(true);
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
     });
 
     test('should switch from AllChat to TopChat while connected', async () => {
-      // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-
-      // Chat mode toggle button should be visible (before connecting too)
-      const chatModeButton = mainPage.locator('button[title="チャットモード切り替え"]');
-
-      // Ensure we're in AllChat mode before connecting
-      // (previous test may have left it in a different state)
-      const buttonText = await chatModeButton.textContent();
-      if (buttonText?.includes('トップ')) {
-        await chatModeButton.click();
-        await expect(chatModeButton).toHaveText(/全て/);
-      }
-      await expect(chatModeButton).toHaveText(/全て/);
+      // 接続する前に全てにしておく (前のテストの状態に依らない)
+      await setChatModeAll(true);
 
       // Connect
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      const urlInput = (await openUrlInput(mainPage));
+      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Verify still in AllChat mode
-      await expect(chatModeButton).toHaveText(/全て/);
+      await expect(await chatMode()).toBeChecked();
 
       // Switch back to TopChat
-      await chatModeButton.click();
-
-      // Verify switched to TopChat
-      await expect(chatModeButton).toHaveText(/トップ/);
+      await setChatModeAll(false);
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
     });
 
     test('should receive messages after switching chat mode', async () => {
+      await setChatModeAll(false);
+
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Add messages for TopChat mode
       await addMockMessage({
@@ -221,10 +217,8 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
       await expect(mainPage.locator('text=TopChatUser')).toBeVisible({ timeout: 5000 });
       await expect(mainPage.locator('text=Message in TopChat mode')).toBeVisible();
 
-      // Switch to AllChat mode using toggle button
-      const chatModeButton = mainPage.locator('button[title="チャットモード切り替え"]');
-      await chatModeButton.click();
-      await expect(chatModeButton).toHaveText(/全て/);
+      // Switch to AllChat mode
+      await setChatModeAll(true);
 
       // Add messages for AllChat mode
       await addMockMessage({
@@ -250,28 +244,18 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
       // Reset mock server state and ensure TopChat is selected in the app
       await fetch(`${MOCK_SERVER_URL}/reset`, { method: 'POST' });
 
-      // Chat mode toggle button
-      const chatModeButton = mainPage.locator('button[title="チャットモード切り替え"]');
-
       // Ensure TopChat is selected before connecting
       // (previous test may have left it in a different state)
-      const buttonText = await chatModeButton.textContent();
-      if (buttonText?.includes('全て')) {
-        await chatModeButton.click();
-      }
-      await expect(chatModeButton).toHaveText(/トップ/);
+      await setChatModeAll(false);
 
       // Connect to stream (default is TopChat)
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
-
-      // Wait for initial polling to establish chat mode (backend needs to receive token)
-      await expect(chatModeButton).toHaveText(/トップ/);
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Verify initial state: UI shows TopChat AND backend uses TopChat token
-      await expect(chatModeButton).toHaveText(/トップ/);
+      await expect(await chatMode()).not.toBeChecked();
 
       // Check detailed token validation for TopChat
       const topChatValidation = await getTokenValidation();
@@ -285,8 +269,7 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
       expect(initialBackendMode, 'Backend should use TopChat token when UI shows TopChat').toBe('TopChat');
 
       // Switch to AllChat mode in UI
-      await chatModeButton.click();
-      await expect(chatModeButton).toHaveText(/全て/);
+      await setChatModeAll(true);
 
       // Wait for backend to receive AllChat token (requires next poll cycle)
       await expect.poll(async () => {
@@ -304,8 +287,7 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
       expect(allChatBackendMode, 'Backend should use AllChat token when UI shows AllChat').toBe('AllChat');
 
       // Switch back to TopChat in UI
-      await chatModeButton.click();
-      await expect(chatModeButton).toHaveText(/トップ/);
+      await setChatModeAll(false);
 
       // Wait for backend to receive TopChat token (requires next poll cycle)
       await expect.poll(async () => {
@@ -325,32 +307,29 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
     });
 
     test('should persist chat mode selection across reconnection', async () => {
-      // Chat mode toggle button
-      const chatModeButton = mainPage.locator('button[title="チャットモード切り替え"]');
-
       // Switch to AllChat before connecting
-      await chatModeButton.click();
-      await expect(chatModeButton).toHaveText(/全て/);
+      await setChatModeAll(true);
 
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
 
       // Verify AllChat is still selected after disconnect
-      await expect(chatModeButton).toHaveText(/全て/);
+      await expect(await chatMode()).toBeChecked();
 
       // Reconnect
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_456`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await (await openUrlInput(mainPage)).fill(`${MOCK_SERVER_URL}/watch?v=test_video_456`);
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      // 2 本目の配信はモックがタイトルを変える。タイトルが出れば接続が成立していて、操作パネルの自動で隠す動きも済む
+      await expect(connectionChips(mainPage, 'Mock Live 2').first()).toBeVisible({ timeout: 10000 });
 
       // Verify AllChat is still selected after reconnection
-      await expect(chatModeButton).toHaveText(/全て/);
+      await expect(await chatMode()).toBeChecked();
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
@@ -358,27 +337,22 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
 
     // 02_chat.md: 選んだモードは config.toml に保存し、F5・再起動後もそのモードで始める
     test('should remember chat mode in config.toml across reload', async () => {
-      const chatModeButton = mainPage.locator('button[title="チャットモード切り替え"]');
-      if ((await chatModeButton.textContent())?.includes('トップ')) {
-        await chatModeButton.click();
-      }
-      await expect(chatModeButton).toHaveText(/全て/);
+      await setChatModeAll(true);
       await expect.poll(readConfigChatMode).toBe('all');
 
       await mainPage.reload();
-      await expect(mainPage.locator('nav button:has-text("Chat")')).toBeVisible({ timeout: 30000 });
-      await expect(chatModeButton).toHaveText(/全て/, { timeout: 10000 });
+      await expect(mainPage.locator(APP_READY)).toBeVisible({ timeout: 30000 });
+      await expect(await chatMode()).toBeChecked({ timeout: 10000 });
 
       // 切り替えずに接続しても、最初のポーリングから全てで取得する
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_remember_mode`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
       await expect.poll(getChatModeStatus, { timeout: 15000 }).toBe('AllChat');
 
       // トップに戻すと config.toml も戻る
-      await chatModeButton.click();
-      await expect(chatModeButton).toHaveText(/トップ/);
+      await setChatModeAll(false);
       await expect.poll(readConfigChatMode).toBe('top');
 
       await disconnectAndInitialize(mainPage);
@@ -388,10 +362,10 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
   test.describe('Clear Messages', () => {
     test('should clear all messages when clicking Clear button', async () => {
       // Connect and add messages
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       await addMockMessage({
         message_type: 'text',
@@ -401,12 +375,14 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
 
       await expect(mainPage.locator('text=ClearTestUser')).toBeVisible({ timeout: 5000 });
 
-      // Click Clear button (in control bar)
-      await mainPage.locator('button:has-text("クリア")').first().click();
+      // 操作パネルの「コメントを消す」を押す
+      await openControlPanel(mainPage);
+      await mainPage.getByRole('button', { name: 'コメントを消す' }).click();
 
-      // Confirmation dialog appears - click the confirm button in the dialog
-      await expect(mainPage.getByRole('heading', { name: 'メッセージをクリア' })).toBeVisible();
-      await mainPage.locator('div.fixed button:has-text("クリア")').click();
+      // 確認ダイアログが出る - 「消す」で確定する
+      const dialog = mainPage.getByRole('dialog');
+      await expect(dialog).toBeVisible();
+      await dialog.getByRole('button', { name: '消す', exact: true }).click();
 
       // Message should be gone
       await expect(mainPage.locator('text=ClearTestUser')).not.toBeVisible();
@@ -419,7 +395,7 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
   test.describe('Member-Only Stream', () => {
     test('should connect to member-only stream with authentication', async () => {
       // First authenticate
-      await mainPage.getByRole('button', { name: 'Settings' }).click();
+      await mainPage.getByRole('button', { name: '設定', exact: true }).click();
       await expect(mainPage.getByRole('heading', { name: 'YouTube認証' })).toBeVisible();
 
       const loginButton = mainPage.getByRole('button', { name: 'YouTubeにログイン' });
@@ -429,18 +405,18 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
       }
 
       // Go back to chat
-      await mainPage.getByRole('button', { name: 'Chat' }).click();
+      await mainPage.getByRole('button', { name: 'チャット', exact: true }).click();
 
       // Set mock server to member-only mode
       await setStreamState({ member_only: true, require_auth: true });
 
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=member_only_video`);
-      await mainPage.locator('button:has-text("開始")').click();
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
 
       // Should connect successfully with auth
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Add member message
       await addMockMessage({
@@ -463,10 +439,10 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
   test.describe('Filter Functionality', () => {
     test('should filter messages by type - SuperChat only', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Add mixed messages
       await addMockMessage({ message_type: 'text', author: 'TextUser', content: 'Regular message' });
@@ -478,22 +454,14 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
       await expect(mainPage.locator('text=SCUser')).toBeVisible();
       await expect(mainPage.locator('text=MemberUser')).toBeVisible();
 
-      // Open filter panel
-      await mainPage.locator('button:has-text("フィルター")').click();
-      // Wait for filter panel to be visible
-      await expect(mainPage.locator('label').filter({ hasText: '通常' })).toBeVisible();
+      // 操作パネルの種類のチェックを開く
+      await openControlPanel(mainPage);
 
-      // Uncheck text messages (labeled as "通常" in Japanese UI)
-      const textFilter = mainPage.locator('label').filter({ hasText: '通常' }).locator('input[type="checkbox"]');
-      if (await textFilter.isChecked()) {
-        await textFilter.uncheck();
-      }
-
-      // Uncheck membership messages (labeled as "メンバー" in Japanese UI)
-      const membershipFilter = mainPage.locator('label').filter({ hasText: 'メンバー' }).locator('input[type="checkbox"]');
-      if (await membershipFilter.isChecked()) {
-        await membershipFilter.uncheck();
-      }
+      // 「通常」と「メンバー」を外す (スパチャ等だけ残す)
+      const textFilter = mainPage.getByRole('checkbox', { name: '通常' });
+      await textFilter.uncheck();
+      const membershipFilter = mainPage.getByRole('checkbox', { name: 'メンバー' });
+      await membershipFilter.uncheck();
 
       // Only SuperChat should be visible
       await expect(mainPage.locator('text=TextUser')).not.toBeVisible();
@@ -501,12 +469,8 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
       await expect(mainPage.locator('text=MemberUser')).not.toBeVisible();
 
       // Reset filters
-      if (!(await textFilter.isChecked())) {
-        await textFilter.check();
-      }
-      if (!(await membershipFilter.isChecked())) {
-        await membershipFilter.check();
-      }
+      await textFilter.check();
+      await membershipFilter.check();
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
@@ -514,10 +478,10 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
 
     test('should filter messages by search query', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Add messages with different content
       await addMockMessage({ message_type: 'text', author: 'User1', content: 'Hello world' });
@@ -527,32 +491,18 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
       // Wait for messages to appear
       await expect(mainPage.locator('text=SearchTarget')).toBeVisible({ timeout: 5000 });
 
-      // Open filter panel
-      await mainPage.locator('button:has-text("フィルター")').click();
+      // 操作パネルの「コメントを探す」で絞り込む
+      await openControlPanel(mainPage);
+      const searchInput = mainPage.getByRole('searchbox', { name: 'コメントを探す' });
+      await searchInput.fill('SearchTarget');
 
-      // Find search input - try different selectors
-      const searchInput = mainPage.locator('input[type="text"]').filter({ hasText: '' }).nth(1);
-      const searchInputAlt = mainPage.locator('input[placeholder*="検索"]');
-      const searchInputAlt2 = mainPage.locator('input[placeholder*="search" i]');
+      // Only matching message should be visible
+      await expect(mainPage.locator('text=User1')).not.toBeVisible();
+      await expect(mainPage.locator('text=SearchTarget')).toBeVisible();
 
-      // Check if search input exists
-      const hasSearch = await searchInputAlt.isVisible().catch(() => false) ||
-                        await searchInputAlt2.isVisible().catch(() => false);
-
-      if (hasSearch) {
-        const input = await searchInputAlt.isVisible() ? searchInputAlt : searchInputAlt2;
-        await input.fill('SearchTarget');
-
-        // Only matching message should be visible
-        await expect(mainPage.locator('text=User1')).not.toBeVisible();
-        await expect(mainPage.locator('text=SearchTarget')).toBeVisible();
-
-        // Clear search
-        await input.clear();
-      } else {
-        // Search functionality may not be implemented yet - test passes if filter panel opens
-        log.debug('Search input not found - filter panel exists but search not implemented');
-      }
+      // 絞り込みを解除する
+      await searchInput.clear();
+      await expect(mainPage.locator('text=User1')).toBeVisible();
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
@@ -562,51 +512,44 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
   test.describe('Connection and Disconnection', () => {
     test('should show error for invalid URL', async () => {
       // Enter invalid URL
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill('not-a-valid-url');
 
       // Click Connect
-      await mainPage.locator('button:has-text("開始")').click();
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
 
-      // Check if error message appears (may be in various formats)
-      const errorText = mainPage.locator('.text-red-500, [class*="error"], text=/error|失敗|Invalid|エラー/i').first();
-      const hasError = await errorText.isVisible().catch(() => false);
-
-      // If no visible error, check that we're still in disconnected state (URL input visible)
-      // This is also valid behavior - app may silently reject invalid URLs
-      if (!hasError) {
-        // Verify we didn't connect (URL input should still be visible)
-        await expect(urlInput).toBeVisible();
-        log.debug('No visible error message, but connection was prevented (URL input still visible)');
-      }
+      // 状態の行にエラーが出て、接続は成立しない (URL の入力欄はそのまま直せる)
+      await expect(mainPage.getByRole('alert')).toBeVisible({ timeout: 10000 });
+      await expect(mainPage.locator('[data-testid="connection-chip"]')).toHaveCount(0);
+      await expect(urlInput).toBeVisible();
     });
 
     test('should properly disconnect and clear connection state', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // 接続状態の確認: 接続リストにエントリが表示されている
-      await expect(mainPage.locator('.connection-item').first()).toBeVisible();
+      await expect(mainPage.locator('[data-testid="connection-chip"]').first()).toBeVisible();
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
 
       // 切断後の状態確認: 接続リストが空になり、URL入力欄と開始ボタンは引き続き表示される
-      await expect(mainPage.locator('.connection-item')).toHaveCount(0);
-      await expect(mainPage.locator('button:has-text("開始")')).toBeVisible();
-      await expect(mainPage.locator('input[placeholder*="youtube.com"]')).toBeVisible();
+      await expect(mainPage.locator('[data-testid="connection-chip"]')).toHaveCount(0);
+      await expect(mainPage.getByRole('button', { name: '接続', exact: true })).toBeVisible();
+      await expect((await openUrlInput(mainPage))).toBeVisible();
     });
 
     test('should show replay indicator for archived streams', async () => {
       // This test would need mock server to return isReplay: true
       // For now, we verify the UI element exists when not in replay mode
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Replay badge should NOT be visible for live streams
       const replayBadge = mainPage.locator('text=Replay');

@@ -12,6 +12,7 @@ import {
   startTauriAppWithEnv,
   connectToApp,
   disconnectAndInitialize,
+  openUrlInput,
 } from './utils/test-helpers';
 
 /**
@@ -60,13 +61,13 @@ async function testApplicationLogicWorks(page: Page): Promise<{ works: boolean; 
 
   // Settingsタブをクリック
   log.debug('Clicking Settings tab...');
-  await page.locator('button:has-text("Settings")').click();
+  await page.locator('nav button[aria-label="設定"]').click();
 
   // Settings内容が表示されているか確認
   const settingsVisibleAfter = await settingsHeading.isVisible().catch(() => false);
 
   if (!settingsVisibleAfter) {
-    const activeTabButton = await page.locator('button:has-text("Settings")').evaluate((el) => {
+    const activeTabButton = await page.locator('nav button[aria-label="設定"]').evaluate((el) => {
       const style = window.getComputedStyle(el);
       return {
         background: style.background.substring(0, 100),
@@ -82,7 +83,7 @@ async function testApplicationLogicWorks(page: Page): Promise<{ works: boolean; 
   }
 
   // Chatタブに戻る
-  await page.locator('button:has-text("Chat")').click();
+  await page.locator('nav button[aria-label="チャット"]').click();
 
   const settingsVisibleAfterChat = await settingsHeading.isVisible().catch(() => false);
   if (settingsVisibleAfterChat) {
@@ -99,10 +100,10 @@ async function testApplicationLogicWorks(page: Page): Promise<{ works: boolean; 
  * 接続を切断する（個別切断ボタン使用、メッセージはクリアしない）
  */
 async function disconnectStream(page: Page): Promise<void> {
-  const disconnectBtn = page.locator('.connection-item .disconnect-btn').first();
+  const disconnectBtn = page.locator('[data-testid="connection-chip"] button').first();
   if (await disconnectBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
     await disconnectBtn.click();
-    await expect(page.locator('.connection-item')).toHaveCount(0, { timeout: 10000 });
+    await expect(page.locator('[data-testid="connection-chip"]')).toHaveCount(0, { timeout: 10000 });
   }
 }
 
@@ -110,10 +111,11 @@ async function disconnectStream(page: Page): Promise<void> {
  * ストリームに接続する
  */
 async function connectToStream(page: Page, url: string, timeout = 30000): Promise<void> {
-  const urlInput = page.locator('input[placeholder*="YouTube URL"], input[placeholder*="youtube.com"]');
+  // 切断してもコメントが残っていると URL の入力欄は操作パネルの中なので、「+」で開く
+  const urlInput = await openUrlInput(page);
   await urlInput.fill(url);
-  await page.locator('button:has-text("開始")').click();
-  await expect(page.locator('.connection-item').first()).toBeVisible({ timeout });
+  await page.getByRole('button', { name: '接続', exact: true }).click();
+  await expect(page.locator('[data-testid="connection-chip"]').first()).toBeVisible({ timeout });
 }
 
 // Real YouTube test

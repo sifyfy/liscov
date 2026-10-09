@@ -70,7 +70,7 @@ test.describe('TTS First Comment Prefix Runtime (実 Tauri + モック棒読み�
     browser = conn.browser;
     mainPage = conn.page;
 
-    await expect(mainPage.locator('nav button:has-text("Chat")')).toBeVisible({
+    await expect(mainPage.locator('nav button[aria-label="チャット"]')).toBeVisible({
       timeout: 30000,
     });
   });

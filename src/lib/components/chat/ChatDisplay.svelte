@@ -132,7 +132,7 @@
   let fontSize = $derived(chatStore.messageFontSize);
   let showTimestamps = $derived(chatStore.showTimestamps);
 
-  // コメントが無くなったら (クリア・つなぎ直し) 離れる先も無いので、最新を追う状態に戻す
+  // コメントが無くなったら (クリア・再接続) 離れる先も無いので、最新を追う状態に戻す
   $effect(() => {
     if (chatStore.displayedMessages.length === 0) untrack(() => updateAutoReturn(reachLatest));
   });

@@ -6,6 +6,12 @@ const JPY_FORMATTER = new Intl.NumberFormat('ja-JP', {
   currency: 'JPY',
   maximumFractionDigits: 0,
 });
+const COUNT_FORMATTER = new Intl.NumberFormat('ja-JP');
+
+/** 件数・人数を 3 桁ごとに区切る（例: 1,820） */
+export function formatCount(n: number): string {
+  return COUNT_FORMATTER.format(n);
+}
 
 /**
  * 視聴者の貢献額を日本円通貨表記にする。0 は「貢献なし」として '-' を返す

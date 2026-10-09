@@ -6,6 +6,6 @@ import type { ChatModeSetting } from "./ChatModeSetting";
  */
 export type ChatDisplayConfig = { message_font_size: number, show_timestamps: boolean, 
 /**
- * 配信につながったら操作パネルを隠す (02_chat.md「上の行と操作パネル」)
+ * 配信に接続したら操作パネルを隠す (02_chat.md「上の行と操作パネル」)
  */
 hide_panel_on_connect: boolean, chat_mode: ChatModeSetting, };

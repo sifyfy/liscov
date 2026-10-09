@@ -162,6 +162,17 @@ describe('chatStore 接続管理', () => {
 			expect(chatStore.error).toBeNull();
 		});
 
+		// spec: 02_chat.md「配信中の画面」の「状態」: エラーの「閉じる」を押す → エラーを消す
+		it('dismissError() でエラーを消す', async () => {
+			const { connectToStream } = await import('$lib/tauri/chat');
+			vi.mocked(connectToStream).mockRejectedValueOnce(new Error('network error'));
+			await chatStore.connect('https://example.com');
+			expect(chatStore.error).toBe('network error');
+
+			chatStore.dismissError();
+			expect(chatStore.error).toBeNull();
+		});
+
 		// spec: 複数接続を同時に保持できる
 		it('複数URLを接続すると connections に複数エントリが追加される', async () => {
 			const { connectToStream } = await import('$lib/tauri/chat');
@@ -420,6 +431,17 @@ describe('chatStore 接続管理', () => {
 			await chatStore.disconnect(1);
 			expect(chatStore.originOf(messageFrom(2))).toBe('primary');
 			expect(chatStore.originOf(messageFrom(3))).toBe('partner');
+		});
+
+		// spec: 状態の行のリアクション「主の配信を切断し、他の接続が残った → 新しい主の配信の累計を出す」
+		it('primaryConnection は主の配信の接続。切断したら残ったうちいちばん先のもの', async () => {
+			const { disconnectStream } = await import('$lib/tauri/chat');
+			vi.mocked(disconnectStream).mockResolvedValue(undefined);
+			expect(chatStore.primaryConnection).toBeUndefined();
+			await connect(1, 2);
+			expect(chatStore.primaryConnection?.id).toBe(1);
+			await chatStore.disconnect(1);
+			expect(chatStore.primaryConnection?.id).toBe(2);
 		});
 	});
 
@@ -1568,8 +1590,8 @@ describe('chatStore ジュエル数を取れない接続の注記', () => {
 	});
 });
 
-// spec: docs/specs/02_chat.md「リアクションメーター」
-describe('chatStore リアクションメーター', () => {
+// spec: docs/specs/02_chat.md「ライブリアクション」
+describe('chatStore リアクションの累計', () => {
 	let store: typeof import('./chat.svelte').chatStore;
 	let emitReaction: (update: GuiReactionUpdate) => void;
 	const nowUsec = () => Date.now() * 1000;
@@ -1636,12 +1658,11 @@ describe('chatStore リアクションメーター', () => {
 		expect(store.connections.get(1)?.reactions.totals).toEqual({});
 	});
 
-	it('chat:reaction をその接続のメーターに加える', () => {
+	it('chat:reaction をその接続の累計に加える', () => {
 		emitReaction(reaction(1, { '🎉': 4 }));
 		emitReaction(reaction(1, { '❤': 3 }));
 
 		expect(store.connections.get(1)?.reactions.totals).toEqual({ '🎉': 4, '❤': 3 });
-		expect(store.connections.get(1)?.reactions.recent).toHaveLength(2);
 		expect(store.connections.get(2)?.reactions.totals).toEqual({});
 	});
 
@@ -1663,7 +1684,7 @@ describe('chatStore リアクションメーター', () => {
 	});
 
 	// spec: F5リロード → get_connection_reactions で読み直す
-	it('復元した接続のメーターを読み直す', async () => {
+	it('復元した接続の累計を読み直す', async () => {
 		await store.initialize();
 		const { getConnections, getConnectionReactions } = await import('$lib/tauri/chat');
 		vi.mocked(getConnections).mockResolvedValueOnce([makeConnectionInfo({ id: BigInt(5) })]);
@@ -1675,10 +1696,9 @@ describe('chatStore リアクションメーター', () => {
 		await store.restoreConnections();
 
 		expect(store.connections.get(5)?.reactions.totals).toEqual({ '🎉': 2 });
-		expect(store.connections.get(5)?.reactions.peakPerMinute).toBe(2);
 	});
 
-	// spec: 読み直しに失敗したらその接続のメーターは空から始める
+	// spec: 読み直しに失敗したらその接続の累計は 0 から始める
 	it('読み直しに失敗しても接続は復元する', async () => {
 		await store.initialize();
 		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});

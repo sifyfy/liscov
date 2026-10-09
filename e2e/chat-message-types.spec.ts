@@ -9,6 +9,9 @@ import {
   addMockMessage,
   disconnectAndInitialize,
   setStreamState,
+  openUrlInput,
+  openControlPanel,
+  connectionChips,
 } from './utils/test-helpers';
 
 /**
@@ -45,10 +48,10 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
   test.describe('SuperChat and Special Messages', () => {
     test('should display SuperChat with amount', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Add SuperChat message
       await addMockMessage({
@@ -73,10 +76,10 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
 
     test('should display membership message', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Add membership message
       await addMockMessage({
@@ -101,10 +104,10 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
       // - 面の背景 = body_background、見出しの背景 = header_background (インライン style)
 
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Add SuperChat with 'blue' tier (0x1565C0 = rgb(21, 101, 192))
       await addMockMessage({
@@ -143,10 +146,10 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
       // Test multiple SuperChat tiers to verify color differentiation
 
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Add red tier SuperChat (0xD00000 = rgb(208, 0, 0))
       await addMockMessage({
@@ -176,10 +179,10 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
   test.describe('Additional Message Types', () => {
     test('should display SuperSticker with amount', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Add SuperSticker message
       await addMockMessage({
@@ -203,10 +206,10 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
       // Milestone months are extracted from badge tooltip (e.g., "Member (12 months)")
 
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Add membership milestone message
       await addMockMessage({
@@ -229,10 +232,10 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
       // Gift messages use liveChatSponsorshipsGiftPurchaseAnnouncementRenderer
 
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Add membership gift message
       await addMockMessage({
@@ -254,10 +257,10 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
 
   test.describe('バッジ (02_chat.md「バッジの種類」)', () => {
     test('モデレーターのコメントにモデレーターのバッジが表示される', async () => {
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       await addMockMessage({
         message_type: 'text',
@@ -295,14 +298,15 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
       await setStreamState({ title: fullTitle });
 
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=hashtag_title_test`);
-      await mainPage.locator('button:has-text("開始")').click();
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
 
       // Wait for connection
-      await expect(mainPage.getByText('【雑談配信】').first()).toBeVisible({ timeout: 10000 });
+      await expect(connectionChips(mainPage, fullTitle)).toBeVisible({ timeout: 10000 });
 
-      // Find the title element specifically (in InputSection - the div with truncate class)
+      // 配信タイトルは操作パネルの接続の一覧に全文が出る
+      await openControlPanel(mainPage);
       const titleElement = mainPage.locator('[data-testid="stream-title"]').first();
       await expect(titleElement).toBeVisible();
 
@@ -329,14 +333,15 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
       await setStreamState({ title: fullTitle });
 
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=special_title_test`);
-      await mainPage.locator('button:has-text("開始")').click();
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
 
       // Wait for connection
-      await expect(mainPage.getByText('🎮 Gaming Stream').first()).toBeVisible({ timeout: 10000 });
+      await expect(connectionChips(mainPage, fullTitle)).toBeVisible({ timeout: 10000 });
 
-      // Find the title element specifically (in InputSection - the div with truncate class)
+      // 配信タイトルは操作パネルの接続の一覧に全文が出る
+      await openControlPanel(mainPage);
       const titleElement = mainPage.locator('[data-testid="stream-title"]').first();
       await expect(titleElement).toBeVisible();
       const titleTextContent = await titleElement.textContent();
@@ -359,10 +364,10 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
 
     test('should display messages with hashtags correctly', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Add message with hashtag
       await addMockMessage({
@@ -382,10 +387,10 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
 
     test('should display messages with various special characters', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Add message with special characters
       await addMockMessage({
@@ -404,10 +409,10 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
 
     test('should display messages with URLs', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Add message with URL
       await addMockMessage({
@@ -425,10 +430,10 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
 
     test('should display long messages without breaking layout', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Add long message
       const longText = 'これは非常に長いメッセージです。'.repeat(10);
@@ -456,10 +461,10 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
   test.describe('初見さんバッジと配信内コメント回数', () => {
     test('新規さんの初回コメントは優先順位 2 (塗りの印「初見」) で #1 が表示される', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_first_time`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Add message from a new user (test DB is clean, so all users are first-time)
       await addMockMessage({
@@ -484,10 +489,10 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
 
     test('新規さんの2回目は優先順位 3 (枠の印「初見」) で #2 が表示される', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_repeat`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // 1回目のメッセージ
       await addMockMessage({
@@ -525,10 +530,10 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
 
     test('異なるユーザーはそれぞれ優先順位 2 の「初見」と #1 が表示される', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_multi_first`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // ユーザーAのメッセージ
       await addMockMessage({
@@ -573,10 +578,10 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
   // spec: 02_chat.md「ギフト」— ジュエルで送るギフト（giftMessageViewModel、channelId 無し）
   test.describe('ギフト（ジュエル）', () => {
     async function connect(videoId: string) {
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=${videoId}`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
     }
 
     function giftRow(author: string, giftName: string) {
@@ -596,6 +601,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
       const row = giftRow('@gift-jewel-user', 'Press F');
       await expect(row).toBeVisible({ timeout: 5000 });
       await expect(row.locator('[data-testid="gift-jewels"]')).toHaveText('10 ジュエル');
+      await openControlPanel(mainPage);
       await expect(mainPage.locator('[data-testid="jewel-count-notice"]')).toHaveCount(0);
 
       await disconnectAndInitialize(mainPage);
@@ -612,6 +618,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
       const row = giftRow('@gift-plain-user', 'Hiding');
       await expect(row).toBeVisible({ timeout: 5000 });
       await expect(row.locator('[data-testid="gift-jewels"]')).toHaveCount(0);
+      await openControlPanel(mainPage);
       await expect(mainPage.locator('[data-testid="jewel-count-notice"]')).toBeVisible();
 
       await disconnectAndInitialize(mainPage);

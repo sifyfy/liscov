@@ -19,26 +19,6 @@
       "count": 25
     }
   },
-  "src/lib/components/chat/ConnectionList.svelte": {
-    "no-restricted-syntax": {
-      "count": 1
-    }
-  },
-  "src/lib/components/chat/FilterPanel.svelte": {
-    "better-tailwindcss/no-restricted-classes": {
-      "count": 92
-    }
-  },
-  "src/lib/components/chat/InputSection.svelte": {
-    "better-tailwindcss/no-restricted-classes": {
-      "count": 53
-    }
-  },
-  "src/lib/components/layout/AppShell.svelte": {
-    "better-tailwindcss/no-restricted-classes": {
-      "count": 20
-    }
-  },
   "src/lib/components/settings/AuthSettings.svelte": {
     "better-tailwindcss/no-restricted-classes": {
       "count": 51
@@ -70,11 +50,6 @@
   "src/lib/components/tabs/AnalyticsTab.svelte": {
     "better-tailwindcss/no-restricted-classes": {
       "count": 1
-    }
-  },
-  "src/lib/components/tabs/ChatTab.svelte": {
-    "better-tailwindcss/no-restricted-classes": {
-      "count": 15
     }
   },
   "src/lib/components/tabs/SettingsTab.svelte": {

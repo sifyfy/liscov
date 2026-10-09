@@ -12,6 +12,8 @@ import {
   startTauriApp,
   connectToApp,
   getTestAppDataDir,
+  APP_READY,
+  openControlPanel,
 } from './utils/test-helpers';
 
 /**
@@ -61,14 +63,15 @@ test.describe('Font Size Persistence', () => {
 
     // Svelteアプリのマウント完了を待つ
     await page.waitForLoadState('networkidle');
-    await page.getByRole('heading', { name: 'Chat Monitor' }).waitFor({ state: 'visible', timeout: 30000 });
+    await page.locator(APP_READY).waitFor({ state: 'visible', timeout: 30000 });
 
-    // 初期フォントサイズを確認 (13px)
-    const fontSizeDisplay = page.locator('.text-xs.text-center').filter({ hasText: /\d+px/ });
+    // 文字の大きさは操作パネルにある。開いて初期フォントサイズを確認 (13px)
+    await openControlPanel(page);
+    const fontSizeDisplay = page.getByRole('region', { name: '操作パネル' }).getByText(/^\d+px$/);
     await expect(fontSizeDisplay).toHaveText('13px');
 
-    // A+ボタンを3回クリック (13→16px)
-    const increaseButton = page.getByTitle('文字を大きく');
+    // 「文字を大きく」ボタンを3回クリック (13→16px)
+    const increaseButton = page.getByRole('button', { name: '文字を大きく' });
     for (let i = 0; i < 3; i++) {
       await increaseButton.click();
     }
@@ -95,10 +98,11 @@ test.describe('Font Size Persistence', () => {
 
     // Svelteアプリのマウント完了を待つ
     await page2.waitForLoadState('networkidle');
-    await page2.getByRole('heading', { name: 'Chat Monitor' }).waitFor({ state: 'visible', timeout: 30000 });
+    await page2.locator(APP_READY).waitFor({ state: 'visible', timeout: 30000 });
 
-    // フォントサイズが維持されていることを確認
-    const fontSizeDisplay2 = page2.locator('.text-xs.text-center').filter({ hasText: /\d+px/ });
+    // フォントサイズが維持されていることを確認 (操作パネルを開いて見る)
+    await openControlPanel(page2);
+    const fontSizeDisplay2 = page2.getByRole('region', { name: '操作パネル' }).getByText(/^\d+px$/);
     await expect(fontSizeDisplay2).toHaveText('16px');
 
     await browser2.close();
@@ -113,11 +117,12 @@ test.describe('Font Size Persistence', () => {
     const { browser, page } = await connectToApp();
 
     await page.waitForLoadState('networkidle');
-    await page.getByRole('heading', { name: 'Chat Monitor' }).waitFor({ state: 'visible', timeout: 30000 });
+    await page.locator(APP_READY).waitFor({ state: 'visible', timeout: 30000 });
 
-    const fontSizeDisplay = page.locator('.text-xs.text-center').filter({ hasText: /\d+px/ });
-    const increaseButton = page.getByTitle('文字を大きく');
-    const decreaseButton = page.getByTitle('文字を小さく');
+    await openControlPanel(page);
+    const fontSizeDisplay = page.getByRole('region', { name: '操作パネル' }).getByText(/^\d+px$/);
+    const increaseButton = page.getByRole('button', { name: '文字を大きく' });
+    const decreaseButton = page.getByRole('button', { name: '文字を小さく' });
 
     // 上限テスト: 13px → 24px (11回クリック)
     for (let i = 0; i < 15; i++) {

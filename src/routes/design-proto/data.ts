@@ -351,7 +351,7 @@ export const party = {
 
 export const partnerName = PARTNER_NAME;
 
-export const formatCount = (n: number): string => n.toLocaleString('ja-JP');
+export { formatCount } from '$lib/utils/format';
 
 /** 一覧を最新 (いちばん下) に合わせ続ける ({@attach})。ウィンドウの大きさが変わっても最新が見える */
 export function stickToBottom(node: HTMLElement): () => void {

@@ -12,6 +12,8 @@ import {
   addMockMessage,
   connectToMockStream,
   navigateToTab,
+  openControlPanel,
+  closeControlPanel,
 } from './utils/test-helpers';
 import {
   type MockMessage,
@@ -105,6 +107,11 @@ test.describe('Design capture', () => {
     await addMessages(normalMessages);
     await expect(page.getByText(normalMessages.at(-1)!.content).first()).toBeVisible({ timeout: 15000 });
     await captureAll('chat-2-normal');
+
+    // 合間・準備: 操作パネルを開いたところ (02_chat.md「上の行と操作パネル」)
+    await openControlPanel(page);
+    await captureAll('chat-2-panel');
+    await closeControlPanel(page);
 
     await addMessages(longMessages);
     await expect(page.getByText(longMessages[0].author).first()).toBeVisible({ timeout: 15000 });

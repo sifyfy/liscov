@@ -9,6 +9,7 @@ import {
   addMockMessage,
   disconnectAndInitialize,
   navigateToTab,
+  openUrlInput,
 } from './utils/test-helpers';
 
 /**
@@ -28,18 +29,18 @@ import {
 // Helper to wait for app to be fully loaded
 async function waitForAppReady(page: Page): Promise<void> {
   // Wait for the tab navigation to be visible (indicates SvelteKit app has rendered)
-  await expect(page.locator('nav button:has-text("Chat")')).toBeVisible({ timeout: 30000 });
+  await expect(page.locator('nav button[aria-label="チャット"]')).toBeVisible({ timeout: 30000 });
 }
 
 // NOTE: 共有版 connectToMockStream と異なり、waitForAppReady + 明示的 visibility check が必要
 // analytics テストはタブ切替後の再接続が多く、UI安定化を待つ追加ステップが必須
 async function connectToMockStream(page: Page): Promise<void> {
   await waitForAppReady(page);
-  const urlInput = page.locator('input[placeholder*="youtube.com"]');
+  const urlInput = (await openUrlInput(page));
   await expect(urlInput).toBeVisible({ timeout: 10000 });
   await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-  await page.locator('button:has-text("開始")').click();
-  await expect(page.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+  await page.getByRole('button', { name: '接続', exact: true }).click();
+  await expect(page.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 }
 
 test.describe('Analytics Tab Freeze Bug', () => {
@@ -143,9 +144,8 @@ test.describe('Analytics Tab Freeze Bug', () => {
     //    With the bug, Svelte's reactivity is broken and tab switching fails
     await navigateToTab(mainPage, 'Chat');
 
-    // 5. Verify Chat tab content is visible (URL input or connected state)
-    const chatContent = mainPage.locator('button:has-text("停止"), input[placeholder*="youtube.com"]');
-    await expect(chatContent.first()).toBeVisible({ timeout: 5000 });
+    // 5. Verify Chat tab content is visible (接続中の状態の行: 「N 件」)
+    await expect(mainPage.getByText(/^[\d,]+ 件$/)).toBeVisible({ timeout: 5000 });
 
     // 6. Switch to Settings tab to confirm navigation works
     await navigateToTab(mainPage, 'Settings');

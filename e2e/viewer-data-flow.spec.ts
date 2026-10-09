@@ -16,6 +16,8 @@ import {
   cleanupTestCredentials,
   TEST_APP_NAME,
   getTestDatabasePath,
+  openUrlInput,
+  navigateToTab,
 } from './utils/test-helpers';
 
 /**
@@ -56,7 +58,7 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
 
   test('Step 1: Before connecting - Viewer Management should be empty', async () => {
     // Navigate to Viewers tab WITHOUT connecting to a stream first
-    await mainPage.locator('button:has-text("Viewer")').click();
+    await navigateToTab(mainPage, 'Viewers');
     await expect(mainPage.getByRole('heading', { name: '視聴者管理' }).first()).toBeVisible();
 
     // Wait for the broadcaster list to load (async operation)
@@ -77,7 +79,7 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
   });
 
   test('Step 2: Authenticate', async () => {
-    await mainPage.locator('button:has-text("Settings")').click();
+    await mainPage.locator('nav button[aria-label="設定"]').click();
     await expect(mainPage.getByRole('heading', { name: 'YouTube認証' })).toBeVisible();
 
     const loginButton = mainPage.getByRole('button', { name: 'YouTubeにログイン' });
@@ -146,15 +148,15 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
     });
 
     // Navigate to Chat and connect
-    await mainPage.locator('button:has-text("Chat")').click();
-    const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+    await mainPage.locator('nav button[aria-label="チャット"]').click();
+    const urlInput = (await openUrlInput(mainPage));
     await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=real_test_123`);
 
-    const connectButton = mainPage.locator('button:has-text("開始")');
+    const connectButton = mainPage.getByRole('button', { name: '接続', exact: true });
     await connectButton.click();
 
     // Wait for connection and stream title
-    await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 15000 });
+    await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 15000 });
     log.info('Connected to stream');
 
     // Debug: Check connection status display
@@ -214,7 +216,7 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
     });
 
     // Navigate to Viewers tab
-    await mainPage.locator('button:has-text("Viewer")').click();
+    await navigateToTab(mainPage, 'Viewers');
     await expect(mainPage.getByRole('heading', { name: '視聴者管理' }).first()).toBeVisible();
 
     // Wait for the store to load and log
@@ -301,7 +303,7 @@ test.describe.serial('Viewer Data Flow - Real E2E Tests', () => {
     log.info('App restarted');
 
     // Navigate directly to Viewers tab (without connecting to stream)
-    await mainPage.locator('button:has-text("Viewer")').click();
+    await navigateToTab(mainPage, 'Viewers');
     await expect(mainPage.getByRole('heading', { name: '視聴者管理' }).first()).toBeVisible();
 
     // Wait for the broadcaster list to load (async operation)

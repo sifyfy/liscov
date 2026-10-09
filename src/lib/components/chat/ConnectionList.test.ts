@@ -22,6 +22,6 @@ describe('ConnectionList', () => {
 		void chatStore.connect('https://www.youtube.com/watch?v=abc');
 		render(ConnectionList);
 
-		expect((screen.getByTitle('切断') as HTMLButtonElement).disabled).toBe(true);
+		expect((screen.getByRole('button', { name: '切断' }) as HTMLButtonElement).disabled).toBe(true);
 	});
 });

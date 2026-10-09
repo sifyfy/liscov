@@ -53,8 +53,8 @@ test.describe('同じ配信への再接続 (02_chat.md)', () => {
     await expect(comment('再接続前のコメント')).toHaveCount(1, { timeout: 10000 });
 
     // 切断してもメッセージは残る。同じ配信に再接続すると、直近のコメントが同じ id で届く
-    await mainPage.locator('.connection-item .disconnect-btn').first().click();
-    await expect(mainPage.locator('.connection-item')).toHaveCount(0);
+    await mainPage.locator('[data-testid="connection-chip"] button').first().click();
+    await expect(mainPage.locator('[data-testid="connection-chip"]')).toHaveCount(0);
     await connectToMockStream(mainPage, 'test_video_reconnect_same');
     await addMockMessage(backlog);
     await expect(comment('再接続前のコメント')).toHaveCount(2, { timeout: 10000 });
