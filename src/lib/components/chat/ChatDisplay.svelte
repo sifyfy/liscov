@@ -59,6 +59,15 @@
     }
   }
 
+  /**
+   * 「最新へ」を押した。押したときの入力 (pointerdown・keydown) を手でのスクロールと数えないよう記録を消す
+   * (ボタンが消えて流れが伸びるときのスクロールで、また離れたとみなさないため)
+   */
+  function goLatest() {
+    lastUserInput = 0;
+    updateAutoReturn(reachLatest);
+  }
+
   /** 流れの上での操作 (クリック・マウスの移動)。離れている間は戻るまでの時間を延ばす */
   function handleActivity() {
     updateAutoReturn(activity);
@@ -250,8 +259,9 @@
       </VList>
     {/if}
     {#if !autoReturn.following && chatStore.displayedMessages.length > 0}
-      <div class="absolute right-3 bottom-3 z-10">
-        <LatestButton deadline={autoReturn.deadline} {now} onClick={() => updateAutoReturn(reachLatest)} />
+      <!-- 「最新へ」はコメントの行に重ねない。離れている間だけ流れの下端に帯をとり、その右に置く (流れは帯の高さぶん縮む) -->
+      <div class="flex shrink-0 justify-end px-3 py-1">
+        <LatestButton deadline={autoReturn.deadline} {now} onClick={goLatest} />
       </div>
     {/if}
   </div>

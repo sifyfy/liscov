@@ -281,6 +281,12 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
       await expect(mainPage.locator('text=Manual_01')).toBeVisible({ timeout: 5000 });
       await expect(latestButton()).toBeVisible();
 
+      // ボタンはコメントの行に重ねない (流れの下端の帯に置く)
+      const flowBox = await chatContainer().boundingBox();
+      const buttonBox = await latestButton().boundingBox();
+      if (!flowBox || !buttonBox) throw new Error('流れか「最新へ」が見つからない');
+      expect(buttonBox.y).toBeGreaterThanOrEqual(flowBox.y + flowBox.height - 1);
+
       // 離れている間に届いても、見ている場所は動かない
       await addMessages('Manual', 41, 50);
       await expect(mainPage.locator('text=Manual_01')).toBeVisible({ timeout: 5000 });

@@ -10,6 +10,7 @@ pub mod errors;
 pub mod paths;
 pub mod state;
 pub mod tts;
+pub mod window_size;
 
 pub use database::Database;
 pub use state::AppState;
@@ -135,6 +136,38 @@ fn log_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// 保存サイズが最小サイズ未満なら最小サイズへ広げる（10_window_state.md）。
+/// 最小サイズは tauri.conf.json の minWidth・minHeight を使う（値を二重に持たない）
+fn fit_main_window_to_min_size(app: &tauri::App, window: &tauri::WebviewWindow) {
+    let Some(config) = app.config().app.windows.iter().find(|w| w.label == "main") else {
+        return;
+    };
+    let (Some(min_width), Some(min_height)) = (config.min_width, config.min_height) else {
+        return;
+    };
+    let size = match (window.inner_size(), window.scale_factor()) {
+        (Ok(size), Ok(scale)) => size.to_logical::<f64>(scale),
+        (Err(e), _) | (_, Err(e)) => {
+            log::warn!("ウィンドウのサイズを読めないため最小サイズを適用しない: {e}");
+            return;
+        }
+    };
+    if let Some(fitted) =
+        window_size::fit_to_min_size(size, tauri::LogicalSize::new(min_width, min_height))
+    {
+        log::info!(
+            "保存サイズ {}x{} が最小サイズ未満のため {}x{} にする",
+            size.width,
+            size.height,
+            fitted.width,
+            fitted.height
+        );
+        if let Err(e) = window.set_size(fitted) {
+            log::warn!("最小サイズを適用できない: {e}");
+        }
+    }
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(log_plugin())
@@ -157,6 +190,7 @@ pub fn run() {
             let window = app
                 .get_webview_window("main")
                 .expect("main window not found");
+            fit_main_window_to_min_size(app, &window);
             window.show().expect("failed to show window");
 
             // Auto-start WebSocket server

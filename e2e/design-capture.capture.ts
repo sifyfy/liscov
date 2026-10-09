@@ -111,6 +111,13 @@ test.describe('Design capture', () => {
     // 合間・準備: 操作パネルを開いたところ (02_chat.md「上の行と操作パネル」)
     await openControlPanel(page);
     await captureAll('chat-2-panel');
+    // いちばん小さい窓 (10_window_state.md の最小サイズ 540x600) でも操作パネルと流れが使えるか
+    for (const theme of THEMES) {
+      await page.evaluate((t) => document.documentElement.setAttribute('data-theme', t), theme);
+      await page.setViewportSize({ width: 540, height: 600 });
+      await page.waitForTimeout(300);
+      await page.screenshot({ path: path.join(OUT_DIR, `chat-2-panel-${theme}-540x600.png`), animations: 'disabled' });
+    }
     await closeControlPanel(page);
 
     await addMessages(longMessages);
