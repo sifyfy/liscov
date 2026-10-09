@@ -150,10 +150,14 @@ test.describe('Design capture', () => {
     await captureAll('chat-5-away');
 
     // 2 番目の用途: 視聴者の補足情報の確認・登録
+    // (押した行のすぐ下に広がる。02_chat.md「視聴者の読み仮名・メモ」)
     await page.getByText(superMessages[0].author).first().click();
-    await expect(page.locator('h2:has-text("視聴者情報")')).toBeVisible({ timeout: 5000 });
+    const panel = page.getByRole('region', { name: '視聴者情報' });
+    await expect(panel.getByLabel('読み仮名')).toBeEnabled({ timeout: 5000 });
     await captureAll('chat-6-viewer-panel');
-    await page.locator('button:has-text("✕")').first().click();
+    await panel.getByRole('button', { name: /この人のコメント/ }).click();
+    await captureAll('chat-6-viewer-panel-history');
+    await panel.getByLabel('読み仮名').press('Escape');
   });
 
   test('その他のタブ', async () => {

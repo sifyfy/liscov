@@ -77,14 +77,6 @@
       "count": 63
     }
   },
-  "src/lib/components/viewer/ViewerInfoPanel.svelte": {
-    "better-tailwindcss/no-restricted-classes": {
-      "count": 41
-    },
-    "no-restricted-syntax": {
-      "count": 3
-    }
-  },
   "src/lib/components/viewer/ViewerList.svelte": {
     "better-tailwindcss/no-restricted-classes": {
       "count": 63

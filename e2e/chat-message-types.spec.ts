@@ -12,6 +12,7 @@ import {
   openUrlInput,
   openControlPanel,
   connectionChips,
+  viewerPanel,
 } from './utils/test-helpers';
 
 /**
@@ -660,7 +661,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
       await expect(row.getByText('初見')).toHaveCount(0);
 
       await row.click();
-      await expect(mainPage.locator('h2:has-text("視聴者情報")')).toHaveCount(0);
+      await expect(viewerPanel(mainPage)).toHaveCount(0);
 
       await disconnectAndInitialize(mainPage);
     });

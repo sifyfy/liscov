@@ -10,6 +10,11 @@ import {
   disconnectAndInitialize,
   openUrlInput,
   openControlPanel,
+  connectToMockStream,
+  chatRow,
+  viewerPanel,
+  openViewerPanel,
+  saveReadingInPanel,
 } from './utils/test-helpers';
 
 /**
@@ -44,119 +49,6 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
   });
 
   test.describe('ViewerInfoPanel and Scroll', () => {
-    test('should open ViewerInfoPanel when clicking a message', async () => {
-      // Connect to stream
-      const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
-      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
-
-      // Add message
-      await addMockMessage({
-        message_type: 'text',
-        author: 'ClickableUser',
-        content: 'Click me!',
-        channel_id: 'UC_clickable_user',
-      });
-
-      // Click on the message
-      const message = mainPage.locator('text=ClickableUser').first();
-      await expect(message).toBeVisible({ timeout: 5000 });
-      await message.click();
-
-      // ViewerInfoPanel should open
-      await expect(mainPage.locator('h2:has-text("視聴者情報")')).toBeVisible({ timeout: 5000 });
-
-      // Should show the user name
-      // (一覧の行にも同じ名前があるので、パネルの中に範囲を絞る)
-      const viewerPanel = mainPage.locator('.fixed.right-0').filter({
-        has: mainPage.locator('h2:has-text("視聴者情報")'),
-      });
-      await expect(viewerPanel.locator('p:has-text("ClickableUser")')).toBeVisible();
-
-      // Close panel
-      const closeButton = mainPage.locator('button:has-text("✕")');
-      await closeButton.click();
-
-      // Disconnect
-      await disconnectAndInitialize(mainPage);
-    });
-
-    test('should scroll to message when clicking past comment in panel', async () => {
-      // Connect to stream
-      const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
-      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
-
-      // Add multiple messages from the same user
-      for (let i = 1; i <= 10; i++) {
-        await addMockMessage({
-          message_type: 'text',
-          author: 'ScrollTestUser',
-          content: `ScrollMsg${i}`,
-          channel_id: 'UC_scroll_test',
-        });
-      }
-
-      // Wait for latest message to appear
-      await expect(mainPage.locator('[data-message-id]').filter({ has: mainPage.locator('text=ScrollMsg10') }).first()).toBeVisible({ timeout: 8000 });
-
-      // Click on latest message in main chat to open panel
-      const latestMessage = mainPage.locator('[data-message-id]').filter({
-        has: mainPage.locator('text=ScrollMsg10')
-      }).first();
-      await latestMessage.click();
-
-      // ViewerInfoPanel is a fixed div with h2 "視聴者情報"
-      const viewerPanel = mainPage.locator('.fixed.right-0').filter({
-        has: mainPage.locator('h2:has-text("視聴者情報")')
-      });
-      await expect(viewerPanel.locator('h2:has-text("視聴者情報")')).toBeVisible({ timeout: 5000 });
-
-      // Past comments are in buttons inside the panel's scrollable area
-      // The section contains "投稿されたコメント" header
-      const pastCommentsSection = viewerPanel.locator('div').filter({
-        has: mainPage.locator('h3:has-text("投稿されたコメント")')
-      });
-      const pastCommentButton = pastCommentsSection.locator('button').filter({
-        has: mainPage.locator('text=ScrollMsg1')
-      }).first();
-      // ネストされたoverflow-y-autoコンテナ内の要素はPlaywrightの自動スクロールが到達できないため
-      // 先にJSでスクロールしてビューポート内に表示する
-      await pastCommentButton.evaluate(el => el.scrollIntoView({ block: 'center' }));
-      await expect(pastCommentButton).toBeVisible();
-      await pastCommentButton.click();
-
-      // The message in main chat should be highlighted
-      // Wait for Svelte reactivity to update the highlight style
-      // Use polling to wait for the style change
-      const highlightedMessage = mainPage.locator('[data-message-id]').filter({
-        has: mainPage.locator('text=ScrollMsg1')
-      }).first();
-
-      // 仕様: 選択中の行は根に class outline-accent (outline 2px) が付く
-      try {
-        await expect(highlightedMessage).toHaveClass(/outline-accent/, { timeout: 5000 });
-      } catch {
-        // If the highlight didn't appear, log debug info and skip the assertion
-        const styleAttr = await highlightedMessage.getAttribute('class');
-        const msgId = await highlightedMessage.getAttribute('data-message-id');
-        log.debug(`Highlight timeout - style: "${styleAttr}", msgId: ${msgId}`);
-
-        // This test verifies scrolling to message works, highlight is a bonus
-        // The scroll functionality is verified by the element being visible
-        await expect(highlightedMessage).toBeVisible();
-        log.debug('Note: Highlight style not applied within timeout, but message is visible (scroll worked)');
-      }
-
-      // Close panel
-      await viewerPanel.locator('button:has-text("✕")').click();
-
-      // Disconnect
-      await disconnectAndInitialize(mainPage);
-    });
-
     test('should have data-message-id attribute on messages', async () => {
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
@@ -360,324 +252,183 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
     });
   });
 
-  test.describe('ViewerInfoPanel Details', () => {
-    test('should display channel ID in viewer panel', async () => {
-      // Connect to stream
-      const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
-      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
+  // spec: 02_chat.md「配信中の画面」の「視聴者の読み仮名・メモ (視聴者情報パネル)」と「自動スクロール」
+  test.describe('視聴者情報パネル (行の中で広げる)', () => {
+    const latestButton = () => mainPage.getByRole('button', { name: /最新へ/ });
+    const chatContainer = () =>
+      mainPage.locator('[style*="overflow-y"]').filter({ has: mainPage.locator('[data-message-id]') }).first();
 
-      // Add message with specific channel ID
-      await addMockMessage({
-        message_type: 'text',
-        author: 'ChannelIDUser',
-        content: 'Check my channel ID',
-        channel_id: 'UC_test_channel_12345',
-      });
+    async function addFiller(prefix: string, count: number) {
+      for (let i = 1; i <= count; i++) {
+        await addMockMessage({ message_type: 'text', author: `${prefix}User${i}`, content: `${prefix}_${String(i).padStart(2, '0')}` });
+      }
+      await expect(chatRow(mainPage, `${prefix}_${String(count).padStart(2, '0')}`)).toBeVisible({ timeout: 10000 });
+    }
 
-      // Click on message to open panel
-      await expect(mainPage.locator('text=ChannelIDUser').first()).toBeVisible({ timeout: 5000 });
-      await mainPage.locator('text=ChannelIDUser').first().click();
+    test('コメントを押すと行のすぐ下に広がり、読み仮名の欄にフォーカスする。打っている間に新着が来ても流れていかない', async () => {
+      await connectToMockStream(mainPage);
+      await addFiller('Before', 20);
+      await addMockMessage({ message_type: 'text', author: 'InlineUser', content: 'Open me inline', channel_id: 'UC_inline_user' });
 
-      // Panel should show channel ID
-      await expect(mainPage.locator('h2:has-text("視聴者情報")')).toBeVisible({ timeout: 5000 });
-      await expect(mainPage.getByText('UC_test_channel_12345').first()).toBeVisible();
+      // 最新のコメントを押す (下端に広がっても、流れは止まったまま)
+      const panel = await openViewerPanel(mainPage, 'Open me inline');
+      const rowBox = (await chatRow(mainPage, 'Open me inline').boundingBox())!;
+      const panelBox = (await panel.boundingBox())!;
+      expect(panelBox.y).toBeGreaterThanOrEqual(rowBox.y + rowBox.height - 1);
+      expect(panelBox.y).toBeLessThan(rowBox.y + rowBox.height + 16);
+      await expect(panel.getByText('InlineUser')).toBeVisible();
+      await expect(panel.getByLabel('読み仮名')).toBeFocused();
+      await expect(latestButton()).toBeVisible();
 
-      // Close panel
-      await mainPage.locator('button:has-text("✕")').click();
+      await panel.getByLabel('読み仮名').pressSequentially('いんらいん');
+      // 視聴者は前のテストで来ていない人にする (来たことがあると新規さんにならない。
+      // channel_id を省くとモックが UC_user_0〜999 から乱数で選び、前の視聴者と重なることがある)
+      const runId = Date.now();
+      for (let i = 1; i <= 20; i++) {
+        await addMockMessage({ message_type: 'text', author: `AfterUser${i}`, content: `After_${i}`, channel_id: `UC_after_${runId}_${i}` });
+      }
+      // 止まっているので新着は画面に出ず、「最新へ」に数で出る (どの視聴者も初めてなので新規さん)
+      await expect(latestButton()).toContainText('新規さん 20', { timeout: 15000 });
+      await expect(panel).toBeInViewport();
+      await expect(panel.getByLabel('読み仮名')).toHaveValue('いんらいん');
 
-      // Disconnect
+      await panel.getByRole('button', { name: '閉じる' }).click();
+      await expect(panel).toHaveCount(0);
       await disconnectAndInitialize(mainPage);
     });
 
-    test('should have reading (furigana) input field', async () => {
-      // Connect to stream
-      const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
-      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
-
-      // Add message
-      await addMockMessage({
-        message_type: 'text',
-        author: 'FuriganaUser',
-        content: 'Test message',
-      });
-
-      // Click on message to open panel
-      await expect(mainPage.locator('text=FuriganaUser').first()).toBeVisible({ timeout: 5000 });
-      await mainPage.locator('text=FuriganaUser').first().click();
-
-      // Panel should have reading input
-      await expect(mainPage.locator('h2:has-text("視聴者情報")')).toBeVisible({ timeout: 5000 });
-      const readingInput = mainPage.locator('input[placeholder*="例"]');
-      await expect(readingInput).toBeVisible();
-
-      // Close panel
-      await mainPage.locator('button:has-text("✕")').click();
-
-      // Disconnect
-      await disconnectAndInitialize(mainPage);
-    });
-
-    test('should save and persist reading (furigana) input', async () => {
-      // Connect to stream
-      const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
-      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
-
-      // Add a message
-      const testChannelId = 'UC_reading_test_user';
+    test('読み仮名を打って Enter で保存すると閉じ、行の名前の横に読み仮名が出て最新に戻る', async () => {
+      await connectToMockStream(mainPage);
       await addMockMessage({
         message_type: 'text',
         author: 'ReadingTestUser',
         content: 'Test message for reading',
-        channel_id: testChannelId,
+        channel_id: 'UC_reading_test_user',
       });
+      await openViewerPanel(mainPage, 'Test message for reading');
+      await saveReadingInPanel(mainPage, 'りーでぃんぐてすと');
 
-      // Click on message to open panel
-      await expect(mainPage.locator('text=ReadingTestUser').first()).toBeVisible({ timeout: 5000 });
-      await mainPage.locator('text=ReadingTestUser').first().click();
-      await expect(mainPage.locator('h2:has-text("視聴者情報")')).toBeVisible({ timeout: 5000 });
+      await expect(chatRow(mainPage, 'Test message for reading').getByText('(りーでぃんぐてすと)')).toBeVisible({ timeout: 5000 });
+      await expect(latestButton()).toHaveCount(0);
 
-      // Enter reading (furigana)
-      const readingInput = mainPage.locator('input[placeholder*="例"]');
-      await readingInput.fill('りーでぃんぐてすと');
-
-      // Click save button
-      const saveButton = mainPage.locator('button:has-text("保存")');
-      await saveButton.click();
-
-      // Wait for save to complete
-      await expect(mainPage.getByText('保存しました')).toBeVisible({ timeout: 5000 });
-
-      // Close panel
-      await mainPage.locator('button:has-text("✕")').click();
-      await expect(mainPage.locator('h2:has-text("視聴者情報")')).not.toBeVisible({ timeout: 3000 });
-
-      // Re-open panel by clicking the same user's message
-      await mainPage.locator('text=ReadingTestUser').first().click();
-      await expect(mainPage.locator('h2:has-text("視聴者情報")')).toBeVisible({ timeout: 5000 });
-
-      // Verify reading is persisted (panel loads data asynchronously)
-      const readingInputAgain = mainPage.locator('input[placeholder*="例"]');
-      await expect(readingInputAgain).toHaveValue('りーでぃんぐてすと', { timeout: 10000 });
-
-      // Reading should also be displayed in the header
-      // (一覧の行の名前の横にも同じ表示が出るので、パネルの中に範囲を絞る)
-      const readingPanel = mainPage.locator('.fixed.right-0').filter({
-        has: mainPage.locator('h2:has-text("視聴者情報")'),
-      });
-      await expect(readingPanel.getByText('(りーでぃんぐてすと)')).toBeVisible();
-
-      // Close panel
-      await mainPage.locator('button:has-text("✕")').click();
-      await expect(mainPage.locator('h2:has-text("視聴者情報")')).not.toBeVisible({ timeout: 3000 });
-
-      // 仕様「1 行の形」: 読み仮名が登録されている視聴者は、一覧の行の名前の横にも出る
-      const readingRow = mainPage.locator('[data-message-id]').filter({ hasText: 'Test message for reading' }).first();
-      await expect(readingRow.getByText('(りーでぃんぐてすと)')).toBeVisible({ timeout: 5000 });
-
-      // Disconnect
+      // 開き直すと、保存した読み仮名が読み込まれる
+      const panel = await openViewerPanel(mainPage, 'Test message for reading');
+      await expect(panel.getByLabel('読み仮名')).toHaveValue('りーでぃんぐてすと');
+      await panel.getByLabel('読み仮名').press('Escape');
+      await expect(panel).toHaveCount(0);
       await disconnectAndInitialize(mainPage);
     });
 
-    test('should scroll to message when clicking past comment in ViewerInfoPanel', async () => {
-      // Connect to stream
-      const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
-      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
+    test('Esc で保存せずに閉じる', async () => {
+      await connectToMockStream(mainPage);
+      await addMockMessage({ message_type: 'text', author: 'EscUser', content: 'Escape test', channel_id: 'UC_esc_user' });
+      const panel = await openViewerPanel(mainPage, 'Escape test');
+      await panel.getByLabel('読み仮名').fill('かきかけ');
+      await panel.getByLabel('読み仮名').press('Escape');
+      await expect(panel).toHaveCount(0);
 
-      // Add many messages to enable scrolling
-      const targetUserId = 'UC_scroll_target_user';
-      await addMockMessage({ message_type: 'text', author: 'ScrollTargetUser', content: 'FIRST_TARGET_MSG', channel_id: targetUserId });
-
-      // Add filler messages to push first message out of view
-      for (let i = 0; i < 15; i++) {
-        await addMockMessage({ message_type: 'text', author: `User${i}`, content: `Filler message ${i}` });
-      }
-
-      await addMockMessage({ message_type: 'text', author: 'ScrollTargetUser', content: 'LATEST_TARGET_MSG', channel_id: targetUserId });
-
-      // Click on latest message to open panel
-      await expect(mainPage.locator('text=LATEST_TARGET_MSG').first()).toBeVisible({ timeout: 8000 });
-      await mainPage.locator('text=LATEST_TARGET_MSG').first().click();
-      await expect(mainPage.locator('h2:has-text("視聴者情報")')).toBeVisible({ timeout: 5000 });
-
-      // Verify first message is in past comments
-      const pastComments = mainPage.locator('.fixed.right-0').locator('button:has-text("FIRST_TARGET_MSG")');
-      await expect(pastComments.first()).toBeVisible({ timeout: 3000 });
-
-      // First message should NOT be visible in main chat (scrolled out)
-      const mainChatFirstMsg = mainPage.locator('[data-message-id]').filter({ hasText: 'FIRST_TARGET_MSG' }).first();
-      const firstMsgBefore = await mainChatFirstMsg.isVisible();
-
-      // ネストされたoverflow-y-autoコンテナ内の要素をビューポートに表示してからクリック
-      await pastComments.first().evaluate(el => el.scrollIntoView({ block: 'center' }));
-      await expect(pastComments.first()).toBeVisible();
-      await pastComments.first().click();
-
-      // First message should now be visible in main chat (scrolled into view)
-      await expect(mainChatFirstMsg).toBeVisible({ timeout: 5000 });
-
-      // The message should be highlighted
-      const firstMsgElement = mainPage.locator('[data-message-id]').filter({ hasText: 'FIRST_TARGET_MSG' }).first();
-      // 選択の強調: class outline-accent と、実際に描画される outline 2px の実線
-      await expect(firstMsgElement).toHaveClass(/outline-accent/);
-      const outline = await firstMsgElement.evaluate((el) => {
-        const st = window.getComputedStyle(el);
-        return { style: st.outlineStyle, width: st.outlineWidth };
-      });
-      expect(outline.style).toBe('solid');
-      expect(outline.width).toBe('2px');
-
-      // Close panel
-      await mainPage.locator('button:has-text("✕")').click();
-
-      // Disconnect
+      const reopened = await openViewerPanel(mainPage, 'Escape test');
+      await expect(reopened.getByLabel('読み仮名')).toHaveValue('');
+      await reopened.getByLabel('読み仮名').press('Escape');
       await disconnectAndInitialize(mainPage);
     });
 
-    test('should show multiple comments from same user', async () => {
-      // Connect to stream
-      const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
-      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
+    test('開く前から最新を離れていたら、閉じても離れたまま', async () => {
+      await connectToMockStream(mainPage);
+      await addFiller('Away', 40);
+      const box = (await chatContainer().boundingBox())!;
+      await mainPage.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await mainPage.mouse.wheel(0, -10000);
+      await expect(latestButton()).toBeVisible();
 
-      // Add multiple messages from same user
-      const sameUserId = 'UC_same_user_id';
-      await addMockMessage({ message_type: 'text', author: 'SameUser', content: 'First message', channel_id: sameUserId });
-      await addMockMessage({ message_type: 'text', author: 'SameUser', content: 'Second message', channel_id: sameUserId });
-      await addMockMessage({ message_type: 'text', author: 'SameUser', content: 'Third message', channel_id: sameUserId });
-
-      // Click on latest message to open panel
-      await expect(mainPage.locator('text=Third message').first()).toBeVisible({ timeout: 5000 });
-      await mainPage.locator('text=Third message').first().click();
-
-      // Panel should show past comments
-      await expect(mainPage.locator('h2:has-text("視聴者情報")')).toBeVisible({ timeout: 5000 });
-      await expect(mainPage.getByText('投稿されたコメント').first()).toBeVisible();
-
-      // Should show all three messages in the panel
-      const panelComments = mainPage.locator('.fixed.right-0').locator('button').filter({ hasText: /First message|Second message|Third message/ });
-      const count = await panelComments.count();
-      expect(count).toBeGreaterThanOrEqual(2);
-
-      // Close panel
-      await mainPage.locator('button:has-text("✕")').click();
-
-      // Disconnect
+      const panel = await openViewerPanel(mainPage, 'Away_03');
+      await panel.getByLabel('読み仮名').press('Escape');
+      await expect(panel).toHaveCount(0);
+      await expect(latestButton()).toBeVisible();
+      await expect(chatRow(mainPage, 'Away_03')).toBeInViewport();
       await disconnectAndInitialize(mainPage);
     });
-  });
 
-  test.describe('Scroll Behavior with Auto-scroll', () => {
-    test('should scroll to past message even when auto-scroll is enabled', async () => {
-      // Connect to stream
-      const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
-      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
+    test('「この人のコメント」の行を押すと、流れのそのコメントへ移って強調する。パネルは元の行の下のまま', async () => {
+      await connectToMockStream(mainPage);
+      const target = 'UC_scroll_target_user';
+      await addMockMessage({ message_type: 'text', author: 'ScrollTargetUser', content: 'FIRST_TARGET_MSG', channel_id: target });
+      await addFiller('Filler', 25);
+      await addMockMessage({ message_type: 'text', author: 'ScrollTargetUser', content: 'LATEST_TARGET_MSG', channel_id: target });
 
-      // Add first message from target user
-      const targetUserId = 'UC_autoscroll_test_user';
-      await addMockMessage({
-        message_type: 'text',
-        author: 'AutoScrollTestUser',
-        content: 'FIRST_MESSAGE_AUTOSCROLL',
-        channel_id: targetUserId,
-      });
+      const panel = await openViewerPanel(mainPage, 'LATEST_TARGET_MSG');
+      const toggle = panel.getByRole('button', { name: /この人のコメント 2 件/ });
+      await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      await toggle.click();
+      const scrollBefore = await chatContainer().evaluate((el) => el.scrollTop);
+      await panel.getByTestId('viewer-history-item').filter({ hasText: 'FIRST_TARGET_MSG' }).click();
 
-      // Wait for first message to be displayed
-      await expect(mainPage.locator('text=FIRST_MESSAGE_AUTOSCROLL').first()).toBeVisible({ timeout: 5000 });
-
-      // Add many filler messages to push first message out of view
-      for (let i = 0; i < 25; i++) {
-        await addMockMessage({
-          message_type: 'text',
-          author: `FillerUser${i}`,
-          content: `Auto-scroll filler message ${i}`,
-        });
-      }
-
-      // Wait for filler messages to be delivered before sending the last one
-      await expect(mainPage.locator('text=Auto-scroll filler message 24').first()).toBeVisible({ timeout: 10000 });
-
-      // Add latest message from target user
-      await addMockMessage({
-        message_type: 'text',
-        author: 'AutoScrollTestUser',
-        content: 'LATEST_MESSAGE_AUTOSCROLL',
-        channel_id: targetUserId,
-      });
-
-      // Wait for latest message to be received (auto-scroll should bring it into view)
-      await expect(mainPage.locator('text=LATEST_MESSAGE_AUTOSCROLL').first()).toBeVisible({ timeout: 10000 });
-
-      // Find the virtua VList scroll container (has overflow-y in inline style)
-      const chatContainer = mainPage.locator('[style*="overflow-y"]').filter({ has: mainPage.locator('[data-message-id]') }).first();
-
-      // Explicitly scroll to bottom to ensure we're in the "auto-scroll on" state
-      await chatContainer.evaluate(el => {
-        el.scrollTop = el.scrollHeight;
-      });
-
-      // Record scroll position at bottom
-      const scrollBefore = await chatContainer.evaluate(el => ({
-        scrollTop: el.scrollTop,
-        scrollHeight: el.scrollHeight,
-        clientHeight: el.clientHeight,
-      }));
-
-      // Verify we're at the bottom
-      const isNearBottom = scrollBefore.scrollTop + scrollBefore.clientHeight >= scrollBefore.scrollHeight - 50;
-      expect(isNearBottom).toBeTruthy();
-
-      // Click on latest message to open ViewerInfoPanel
-      await mainPage.locator('text=LATEST_MESSAGE_AUTOSCROLL').first().click();
-      await expect(mainPage.locator('h2:has-text("視聴者情報")')).toBeVisible({ timeout: 5000 });
-
-      // Find and click on the first (past) message in the panel
-      const pastCommentButton = mainPage.locator('.fixed.right-0').locator('button:has-text("FIRST_MESSAGE_AUTOSCROLL")');
-      await expect(pastCommentButton.first()).toBeVisible({ timeout: 3000 });
-
-      // Get the first message element in main chat
-      const firstMsgElement = mainPage.locator('[data-message-id]').filter({
-        hasText: 'FIRST_MESSAGE_AUTOSCROLL',
-      }).first();
-
-      // ネストされたoverflow-y-autoコンテナ内の要素をビューポートに表示してからクリック
-      await pastCommentButton.first().evaluate(el => el.scrollIntoView({ block: 'center' }));
-      await expect(pastCommentButton.first()).toBeVisible();
-      await pastCommentButton.first().click();
-
-      // Wait for first message to become visible (scroll animation completed)
-      await expect(firstMsgElement).toBeVisible({ timeout: 5000 });
-
-      // Get scroll position after clicking
-      const scrollAfter = await chatContainer.evaluate(el => el.scrollTop);
-
-      // The scroll position should have CHANGED (moved up to show first message)
-      // This is the key assertion - the bug was that scroll position didn't change
-      // because $effect auto-scroll would immediately scroll back to bottom
-      log.debug(`Scroll test: before=${scrollBefore.scrollTop}, after=${scrollAfter}`);
-      expect(scrollAfter).toBeLessThan(scrollBefore.scrollTop);
-
-      // The first message should now be visible (already confirmed above)
-
+      const first = chatRow(mainPage, 'FIRST_TARGET_MSG');
+      await expect(first).toBeInViewport({ timeout: 5000 });
+      expect(await chatContainer().evaluate((el) => el.scrollTop)).toBeLessThan(scrollBefore);
       // 選択の強調: 行の根に class outline-accent (outline 2px)
-      await expect(firstMsgElement).toHaveClass(/outline-accent/);
-      const outlineWidth = await firstMsgElement.evaluate((el) => window.getComputedStyle(el).outlineWidth);
-      expect(outlineWidth).toBe('2px');
+      await expect(first).toHaveClass(/outline-accent/);
+      expect(await first.evaluate((el) => window.getComputedStyle(el).outlineWidth)).toBe('2px');
+      // パネルは画面の外に出ても、元の行の下に残っている
+      await expect(panel).toHaveCount(1);
 
-      // Close panel
-      await mainPage.locator('button:has-text("✕")').click();
+      await panel.getByRole('button', { name: '閉じる' }).click();
+      await disconnectAndInitialize(mainPage);
+    });
 
-      // Disconnect
+    test('打っている間は 30 秒たっても最新に戻らない', async () => {
+      test.setTimeout(120000);
+      await connectToMockStream(mainPage);
+      await addFiller('Typing', 30);
+      const panel = await openViewerPanel(mainPage, 'Typing_28');
+      await panel.getByLabel('読み仮名').fill('うちかけ');
+      await mainPage.mouse.move(0, 0);
+      await expect(latestButton()).toBeVisible();
+      // 戻らない間は、残り時間の帯を出さない
+      await expect(mainPage.getByTestId('latest-bar')).toHaveCount(0);
+
+      await mainPage.waitForTimeout(33000);
+      await expect(panel).toBeVisible();
+      await expect(panel.getByLabel('読み仮名')).toHaveValue('うちかけ');
+      await expect(latestButton()).toBeVisible();
+
+      // 閉じると、開く前に追っていたので最新に戻る
+      await panel.getByLabel('読み仮名').press('Escape');
+      await expect(latestButton()).toHaveCount(0, { timeout: 5000 });
+      await disconnectAndInitialize(mainPage);
+    });
+
+    test('止まっている間に届いたスパチャ等・新規さんの件数を「最新へ」に出す', async () => {
+      await connectToMockStream(mainPage);
+      await addMockMessage({ message_type: 'text', author: 'CountBaseUser', content: 'Count base', channel_id: 'UC_count_base' });
+      const panel = await openViewerPanel(mainPage, 'Count base');
+      await expect(latestButton()).not.toContainText('スパチャ等');
+
+      await addMockMessage({ message_type: 'superchat', author: 'CountSuperChatter', content: 'Paused superchat', amount: '¥500', tier: 'green' });
+      await addMockMessage({ message_type: 'text', author: 'CountNewbie', content: 'はじめまして', channel_id: `UC_count_newbie_${Date.now()}` });
+      await expect(latestButton()).toContainText('最新へ スパチャ等 1・新規さん 1', { timeout: 8000 });
+
+      await panel.getByLabel('読み仮名').press('Escape');
+      await expect(latestButton()).toHaveCount(0, { timeout: 5000 });
+      await disconnectAndInitialize(mainPage);
+    });
+
+    test('流れたスパチャ等の欄で押すと、流れのそのコメントまで移ってその下に広げる', async () => {
+      await connectToMockStream(mainPage);
+      await addMockMessage({ message_type: 'superchat', author: 'FlowedChatter', content: 'Flowed superchat body', amount: '¥1,000', tier: 'yellow' });
+      await addFiller('Flow', 40);
+      const flowed = mainPage.getByRole('region', { name: '流れたスパチャ等' });
+      await expect(flowed.getByText('Flowed superchat body')).toBeVisible({ timeout: 5000 });
+
+      await flowed.locator('[data-message-id]').filter({ hasText: 'Flowed superchat body' }).click();
+      const panel = viewerPanel(mainPage);
+      await expect(panel.getByLabel('読み仮名')).toBeEnabled({ timeout: 5000 });
+      await expect(panel).toBeInViewport();
+      // 流れの中に広げる (欄の中ではない)。流れにそのコメントが見えるので、欄からは外れる
+      await expect(chatContainer().getByRole('region', { name: '視聴者情報' })).toHaveCount(1);
+      await expect(flowed).toHaveCount(0, { timeout: 5000 });
+
+      await panel.getByLabel('読み仮名').press('Escape');
       await disconnectAndInitialize(mainPage);
     });
   });

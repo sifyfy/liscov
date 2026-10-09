@@ -711,6 +711,31 @@ export async function navigateToTab(page: Page, tabName: string): Promise<void> 
   await page.locator(`nav[aria-label="画面"] button[aria-label="${TAB_LABELS[tabName] ?? tabName}"]`).click();
 }
 
+/** 流れ・流れたものの欄・お礼の一覧の中で、text を含むコメントの行 (いちばん上のもの) */
+export function chatRow(page: Page, text: string): Locator {
+  return page.locator('[data-message-id]').filter({ hasText: text }).first();
+}
+
+/** 視聴者情報パネル (押した行のすぐ下に広がる。02_chat.md「視聴者の読み仮名・メモ」) */
+export function viewerPanel(page: Page): Locator {
+  return page.getByRole('region', { name: '視聴者情報' });
+}
+
+/** text を含むコメントを押して視聴者情報パネルを開き、読み込みが終わる (読み仮名の欄が押せる) まで待つ */
+export async function openViewerPanel(page: Page, text: string): Promise<Locator> {
+  await chatRow(page, text).click();
+  await expect(viewerPanel(page).getByLabel('読み仮名')).toBeEnabled({ timeout: 5000 });
+  return viewerPanel(page);
+}
+
+/** 開いている視聴者情報パネルで読み仮名を入れ、Enter で保存する (保存すると閉じる) */
+export async function saveReadingInPanel(page: Page, reading: string): Promise<void> {
+  const input = viewerPanel(page).getByLabel('読み仮名');
+  await input.fill(reading);
+  await input.press('Enter');
+  await expect(viewerPanel(page)).toHaveCount(0, { timeout: 5000 });
+}
+
 /**
  * モックサーバーのストリーム状態を設定する
  */

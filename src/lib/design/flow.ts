@@ -34,3 +34,16 @@ export function flowedAbove<T>(candidates: readonly T[], all: readonly T[], firs
     .filter((m) => candidateSet.has(m))
     .reverse();
 }
+
+/**
+ * 最新から離れている間に届いた優先順位 1・2 の件数 (「最新へ」に添える)。
+ * since は離れたときの一覧の最後のもの。一覧 (all、届いた順) に無ければ表示件数で外れたので、一覧のすべてが離れた後に届いたもの
+ */
+export function arrivedSince<T extends Classifiable>(
+  all: readonly T[],
+  since: T,
+  originOf: (m: T) => MessageOrigin,
+): Readonly<{ supporters: number; newcomers: number }> {
+  const arrived = all.slice(all.lastIndexOf(since) + 1);
+  return { supporters: supportersOf(arrived, originOf).length, newcomers: newcomersOf(arrived, originOf).length };
+}

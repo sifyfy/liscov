@@ -8,11 +8,12 @@
  * - 相手の配信のスパチャ等はどちらの欄にも入らない (お礼の対象ではない)
  * - お礼の一覧は自分の配信の優先順位 1 を時刻順 (古いものが上)
  * - 例 (640×1080): ¥10,000 の赤スパのあとにコメントが 40 件来て流れの画面から外れた → 「流れたスパチャ等」の先頭に出る
+ * - 最新から離れている間に、流れに出る優先順位 1・2 が届いた → 「最新へ」に件数を添える (「自動スクロール」)
  */
 import { describe, expect, it } from 'vitest';
 import type { GuiChatMessage } from '$lib/types/generated/GuiChatMessage';
 import type { MessageOrigin } from './priority';
-import { flowedAbove, newcomersOf, supportersOf } from './flow';
+import { arrivedSince, flowedAbove, newcomersOf, supportersOf } from './flow';
 
 type Message = Pick<GuiChatMessage, 'id' | 'message_type' | 'is_first_time_viewer' | 'in_stream_comment_count' | 'connection_id'>;
 
@@ -87,5 +88,29 @@ describe('flowedAbove (流れの画面の外 (上) に出たもの)', () => {
     expect(flowedAbove([], [], undefined)).toEqual([]);
     const a = paid('a');
     expect(flowedAbove([a], [a], undefined)).toEqual([]);
+  });
+});
+
+describe('arrivedSince (離れている間に届いた優先順位 1・2 の件数、「最新へ」に添える)', () => {
+  it('離れたときの最後のコメントより後に届いた、自分の配信のスパチャ等と新規さんの初回を数える', () => {
+    const left = text('left');
+    const messages = [paid('before'), text('new-before', 1, true), left, paid('sc1'), text('t'), paid('sc2', 'membership'), text('new1', 1, true)];
+    expect(arrivedSince(messages, left, originOf)).toEqual({ supporters: 2, newcomers: 1 });
+  });
+
+  it('相手の配信のスパチャ等は数えない。相手の配信の新規さんの初回は数える (流れた新規さんと同じ)', () => {
+    const left = text('left');
+    const messages = [left, paid('theirs', 'superchat', PARTNER), text('their-new', 1, true, PARTNER), text('new-2nd', 2, true)];
+    expect(arrivedSince(messages, left, originOf)).toEqual({ supporters: 0, newcomers: 1 });
+  });
+
+  it('離れたときの最後のコメントが表示件数で一覧から外れたら、一覧のすべてが離れた後に届いたもの', () => {
+    const messages = [paid('sc1'), text('t'), text('new1', 1, true)];
+    expect(arrivedSince(messages, text('gone'), originOf)).toEqual({ supporters: 1, newcomers: 1 });
+  });
+
+  it('何も届いていなければ 0 件', () => {
+    const left = text('left');
+    expect(arrivedSince([paid('before'), left], left, originOf)).toEqual({ supporters: 0, newcomers: 0 });
   });
 });

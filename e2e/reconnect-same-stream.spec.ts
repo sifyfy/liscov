@@ -7,6 +7,7 @@ import {
   addMockMessage,
   connectToMockStream,
   disconnectAndInitialize,
+  openViewerPanel,
 } from './utils/test-helpers';
 
 /**
@@ -63,9 +64,10 @@ test.describe('同じ配信への再接続 (02_chat.md)', () => {
     await addMockMessage({ ...backlog, id: 'after-reconnect-1', content: '再接続後のコメント' });
     await expect(comment('再接続後のコメント')).toHaveCount(1, { timeout: 10000 });
 
-    // 視聴者パネルにも同じ id のコメントが 2 つ並ぶ
-    await comment('再接続後のコメント').click();
-    await expect(mainPage.getByText('投稿されたコメント (3件)')).toBeVisible({ timeout: 5000 });
-    await mainPage.locator('button[title="閉じる"]').click();
+    // 視聴者パネルの「この人のコメント」にも同じ id のコメントが 2 つ並ぶ
+    const panel = await openViewerPanel(mainPage, '再接続後のコメント');
+    await panel.getByRole('button', { name: /この人のコメント 3 件/ }).click();
+    await expect(panel.getByTestId('viewer-history-item')).toHaveCount(3);
+    await panel.getByRole('button', { name: '閉じる' }).click();
   });
 });

@@ -3,11 +3,13 @@
    * 配信の最後のお礼の一覧 (docs/specs/02_chat.md「配信中の画面」の「配信の最後のお礼」)
    *
    * 自分の配信のスパチャ等を時刻順 (古いものが上) に並べる。上に開き、下にコメントの流れを残す (最新も見える)。
-   * 高さは親の 1/2 まで。行は ChatMessage の詰めた形 (時刻・札・名前 (読み仮名)・本文)
+   * 高さは親の 1/2 まで。行は ChatMessage の詰めた形 (時刻・札・名前 (読み仮名)・本文)。
+   * 押したコメントが流れに無いとき (フィルタで隠している・表示件数で外れた) は、視聴者情報パネルをその行のすぐ下に広げる (openKey と panel)
    */
+  import type { Snippet } from 'svelte';
   import type { ChatMessage } from '$lib/types';
   import type { MessageOrigin } from '$lib/design/priority';
-  import { messageKey } from '$lib/utils/message-key';
+  import { messageKey, type MessageKey } from '$lib/utils/message-key';
   import ChatMessageComponent from './ChatMessage.svelte';
 
   interface Props {
@@ -19,9 +21,12 @@
     readingOf: (message: ChatMessage) => string | undefined;
     onClick?: (message: ChatMessage) => void;
     onClose: () => void;
+    /** 視聴者情報パネルを広げる行 */
+    openKey?: MessageKey | null;
+    panel?: Snippet;
   }
 
-  let { items, fontSize, showTimestamps, originOf, readingOf, onClick, onClose }: Props = $props();
+  let { items, fontSize, showTimestamps, originOf, readingOf, onClick, onClose, openKey = null, panel }: Props = $props();
 </script>
 
 <section class="flex max-h-1/2 shrink-0 flex-col border-b border-outline bg-surface-low" aria-label="この配信のスパチャ等">
@@ -45,6 +50,7 @@
           reading={readingOf(message)}
           onClick={() => onClick?.(message)}
         />
+        {#if panel && messageKey(message) === openKey}{@render panel()}{/if}
       </li>
     {/each}
   </ol>

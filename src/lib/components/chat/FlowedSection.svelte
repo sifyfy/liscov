@@ -6,12 +6,14 @@
    * - 新しい 2 件は全文の行 (ChatMessage の詰めた形)、それより前は短い札を折り返して並べる (消さない、省略しない、古いほど小さく)
    * - 札の区切りが金額と名前の間と紛れないよう、札の頭に印 (ティアの色の点 / メンバーの点 / 初見) を付け、札の間を広くとる
    * - 高さは親の 1/8 まで。超えた分はこの欄の中でスクロールする (もう一方の欄を押し出さない)
+   * - 押したコメントが流れに無いとき (表示件数で外れた) は、視聴者情報パネルをその行のすぐ下に広げる (openKey と panel)
    * - 試作は src/routes/design-proto/c
    */
+  import type { Snippet } from 'svelte';
   import type { ChatMessage } from '$lib/types';
   import type { MessageOrigin } from '$lib/design/priority';
   import { paidLabelOf } from '$lib/design/paid-label';
-  import { messageKey } from '$lib/utils/message-key';
+  import { messageKey, type MessageKey } from '$lib/utils/message-key';
   import ChatMessageComponent from './ChatMessage.svelte';
 
   interface Props {
@@ -23,9 +25,12 @@
     originOf: (message: ChatMessage) => MessageOrigin;
     readingOf: (message: ChatMessage) => string | undefined;
     onClick?: (message: ChatMessage) => void;
+    /** 視聴者情報パネルを広げる行 */
+    openKey?: MessageKey | null;
+    panel?: Snippet;
   }
 
-  let { label, items, fontSize, showTimestamps, originOf, readingOf, onClick }: Props = $props();
+  let { label, items, fontSize, showTimestamps, originOf, readingOf, onClick, openKey = null, panel }: Props = $props();
 
   /** 全文の行で出す件数 (新しいほうから) */
   const FULL = 2;
@@ -46,6 +51,7 @@
         reading={readingOf(message)}
         onClick={() => onClick?.(message)}
       />
+      {#if panel && messageKey(message) === openKey}{@render panel()}{/if}
     {/each}
     {#if items.length > FULL}
       <p class="flex flex-wrap gap-x-4 gap-y-1 px-3 pt-0.5 pb-1.5 text-chat-meta text-fg-2" style="font-size: {fontSize}px;">

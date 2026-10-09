@@ -15,6 +15,8 @@ import {
   MOCK_SERVER_URL,
   TEST_APP_NAME,
   TEST_KEYRING_SERVICE,
+  openViewerPanel,
+  saveReadingInPanel,
 } from './utils/test-helpers';
 import {
   type MockBouyomichan,
@@ -85,17 +87,8 @@ test.describe('TTS Viewer Reading Runtime (実 Tauri + モック棒読みちゃ�
 
   /** 視聴者パネルを開き、読み仮名を入れて保存する */
   async function saveReading(messageContent: string, reading: string): Promise<void> {
-    await mainPage
-      .locator('[data-message-id]')
-      .filter({ hasText: messageContent })
-      .first()
-      .click();
-    const input = mainPage.locator('#viewer-reading');
-    await expect(input).toBeEnabled({ timeout: 5000 });
-    await input.fill(reading);
-    await mainPage.locator('button:has-text("保存")').click();
-    await expect(mainPage.getByText('保存しました')).toBeVisible({ timeout: 5000 });
-    await mainPage.locator('button:has-text("✕")').click();
+    await openViewerPanel(mainPage, messageContent);
+    await saveReadingInPanel(mainPage, reading);
   }
 
   test('読み仮名を保存すると次のコメントから読み仮名で読み、空にすると投稿者名に戻る', async () => {

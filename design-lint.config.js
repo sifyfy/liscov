@@ -26,6 +26,7 @@ export const DESIGN_MIGRATED = [
 	'src/lib/components/layout/TopBar.svelte',
 	'src/lib/components/layout/AppShell.svelte',
 	'src/lib/components/tabs/ChatTab.svelte',
+	'src/lib/components/viewer/ViewerInfoPanel.svelte',
 ];
 
 const DOC = 'docs/design/tokens.md';

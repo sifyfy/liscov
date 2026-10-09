@@ -12,6 +12,8 @@ import {
   openUrlInput,
   openControlPanel,
   connectionChips,
+  openViewerPanel,
+  saveReadingInPanel,
 } from './utils/test-helpers';
 
 /**
@@ -219,21 +221,17 @@ test.describe('Multi-Stream Connection', () => {
       expect(target, '12 件とも接続1 に届いた').not.toBeNull();
       const { content, channelId } = target!;
 
-      // 接続2 の配信者 B のもとにはこの視聴者のプロフィールがある。最初の接続の配信者 A のもとには無い
-      await mainPage.locator('[data-message-id]').filter({ hasText: content }).first().click();
-      await expect(mainPage.getByText(channelId).first()).toBeVisible({ timeout: 5000 });
-      const readingInput = mainPage.locator('#viewer-reading');
-      await expect(readingInput).toBeEnabled({ timeout: 5000 });
-      await readingInput.fill('びーのしちょうしゃ');
-      await mainPage.locator('button:has-text("保存")').click();
-      await expect(mainPage.getByText('保存しました')).toBeVisible({ timeout: 5000 });
+      // 接続2 の配信者 B のもとにはこの視聴者のプロフィールがある。最初の接続の配信者 A のもとには無い。
+      // 接続が 2 つなので、保存先の配信者名をパネルに出す (02_chat.md「視聴者の読み仮名・メモ」)
+      const panel = await openViewerPanel(mainPage, content);
+      await expect(panel.getByTestId('viewer-broadcaster')).toHaveText('保存先 MockBroadcaster2');
+      await saveReadingInPanel(mainPage, 'びーのしちょうしゃ');
+      log.debug(`${channelId} を配信者 B のもとに保存した`);
 
       // 開き直すと、B のもとに保存した読み仮名が読み込まれる
-      await mainPage.locator('button:has-text("✕")').click();
-      await mainPage.locator('[data-message-id]').filter({ hasText: content }).first().click();
-      await expect(mainPage.locator('#viewer-reading')).toHaveValue('びーのしちょうしゃ', { timeout: 5000 });
-      // パネルは接続一覧の上に重なるので、次のテストの切断の前に閉じる
-      await mainPage.locator('button:has-text("✕")').click();
+      const reopened = await openViewerPanel(mainPage, content);
+      await expect(reopened.getByLabel('読み仮名')).toHaveValue('びーのしちょうしゃ', { timeout: 5000 });
+      await reopened.getByLabel('読み仮名').press('Escape');
     });
   });
 
