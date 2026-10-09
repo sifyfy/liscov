@@ -197,8 +197,6 @@ pub struct ReactionSummary {
     // 絵文字別の累計（ts-rs がフィールドの doc コメントを行末空白付きで出力するため // にする）
     #[ts(type = "Record<string, number>")]
     pub totals: BTreeMap<String, u64>,
-    // 指定時刻以降の更新（古い順）
-    pub recent: Vec<ReactionUpdate>,
 }
 
 /// Chat statistics

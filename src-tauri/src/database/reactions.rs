@@ -27,12 +27,8 @@ pub fn save_reaction_update(
     Ok(())
 }
 
-/// その配信（video_id）の絵文字別累計と、`since_usec` 以降の更新を返す
-pub fn get_reaction_summary(
-    conn: &Connection,
-    video_id: &str,
-    since_usec: i64,
-) -> Result<ReactionSummary> {
+/// その配信（video_id）の絵文字別累計を返す
+pub fn get_reaction_summary(conn: &Connection, video_id: &str) -> Result<ReactionSummary> {
     let mut stmt = conn.prepare(
         "SELECT r.emoji, SUM(r.count)
          FROM reactions r
@@ -44,39 +40,7 @@ pub fn get_reaction_summary(
         .query_map(params![video_id], |row| Ok((row.get(0)?, row.get(1)?)))?
         .collect::<Result<_, _>>()?;
 
-    // 同じ時刻の更新が別セッション（同じ配信への同時接続）にあっても混ぜないよう、セッションごとにまとめる
-    let mut stmt = conn.prepare(
-        "SELECT r.session_id, r.update_time_usec, r.duration_seconds, r.emoji, r.count
-         FROM reactions r
-         JOIN sessions s ON r.session_id = s.id
-         WHERE s.video_id = ?1 AND r.update_time_usec >= ?2
-         ORDER BY r.update_time_usec, r.session_id",
-    )?;
-    let rows = stmt
-        .query_map(params![video_id, since_usec], |row| {
-            Ok((
-                (
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, u32>(2)?,
-                ),
-                (row.get::<_, String>(3)?, row.get::<_, u32>(4)?),
-            ))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-    let recent = rows
-        .chunk_by(|(a, _), (b, _)| a == b)
-        .filter_map(|group| {
-            let (_, time, duration) = group[0].0;
-            let counts = group
-                .iter()
-                .map(|(_, emoji_count)| emoji_count.clone())
-                .collect();
-            ReactionUpdate::new(time, duration, counts)
-        })
-        .collect();
-
-    Ok(ReactionSummary { totals, recent })
+    Ok(ReactionSummary { totals })
 }
 
 #[cfg(test)]
@@ -174,13 +138,12 @@ mod tests {
         save_reaction_update(&conn, &reconnect, &update(200, 1, &[("❤", 2)])).unwrap();
         save_reaction_update(&conn, &other, &update(300, 1, &[("😄", 9)])).unwrap();
 
-        let summary = get_reaction_summary(&conn, "vid1", i64::MAX).unwrap();
+        let summary = get_reaction_summary(&conn, "vid1").unwrap();
 
         assert_eq!(
             summary.totals,
             BTreeMap::from([("❤".to_string(), 5), ("🎉".to_string(), 4)])
         );
-        assert!(summary.recent.is_empty());
     }
 
     // 02_chat.md: /live/ の URL で接続したセッションも同じ配信として累計する
@@ -200,29 +163,9 @@ mod tests {
         save_reaction_update(&conn, &watch, &update(100, 1, &[("❤", 3)])).unwrap();
         save_reaction_update(&conn, &live, &update(200, 1, &[("❤", 2)])).unwrap();
 
-        let summary = get_reaction_summary(&conn, "vid1", 0).unwrap();
+        let summary = get_reaction_summary(&conn, "vid1").unwrap();
 
         assert_eq!(summary.totals, BTreeMap::from([("❤".to_string(), 5)]));
-        assert_eq!(summary.recent.len(), 2);
-    }
-
-    // 02_chat.md: recent は指定時刻以降の更新を、更新ごとにまとめて古い順に返す
-    #[tokio::test]
-    async fn recent_returns_updates_since_given_time_in_order() {
-        let db = Database::new_in_memory().unwrap();
-        let conn = db.connection().await;
-        let s1 = session(&conn, "vid1");
-        let old = update(1_000_000, 1, &[("❤", 1)]);
-        let a = update(61_000_000, 2, &[("❤", 3), ("🎉", 5)]);
-        let b = update(62_000_000, 1, &[("😄", 1)]);
-        for u in [&b, &old, &a] {
-            save_reaction_update(&conn, &s1, u).unwrap();
-        }
-
-        let summary = get_reaction_summary(&conn, "vid1", 2_000_000).unwrap();
-
-        assert_eq!(summary.recent, vec![a, b]);
-        assert_eq!(summary.totals.values().sum::<u64>(), 10);
     }
 
     #[tokio::test]
@@ -230,7 +173,7 @@ mod tests {
         let db = Database::new_in_memory().unwrap();
         let conn = db.connection().await;
         assert_eq!(
-            get_reaction_summary(&conn, "none", 0).unwrap(),
+            get_reaction_summary(&conn, "none").unwrap(),
             ReactionSummary::default()
         );
     }

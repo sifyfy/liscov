@@ -328,7 +328,7 @@
 | `disconnect_all_streams` | なし | `()` | 全接続を一括切断 |
 | `get_connections` | なし | `Vec<ConnectionInfo>` | アクティブな全接続情報を取得 |
 | `set_chat_mode` | `connection_id: u64, mode: String` | `Result<bool, Error>` | チャットモード切り替え（watchチャネル経由で次回ポーリング時に適用） |
-| `get_connection_reactions` | `connection_id: u64` | `Result<ReactionSummary, Error>` | その接続の配信（video_id）のリアクション累計と、直近60秒の更新（F5リロード後の復元用。画面は累計だけを使う。直近60秒は勢いを出していた頃のもので、今の画面は使っていない） |
+| `get_connection_reactions` | `connection_id: u64` | `Result<ReactionSummary, Error>` | その接続の配信（video_id）のリアクションの絵文字別累計（接続直後・F5リロード後の復元用） |
 
 ## データモデル
 
@@ -438,7 +438,6 @@ pub struct GuiReactionUpdate {
 /// `get_connection_reactions` の戻り値
 pub struct ReactionSummary {
     pub totals: BTreeMap<String, u64>,         // 配信（video_id）単位の絵文字別累計
-    pub recent: Vec<ReactionUpdate>,           // update_time_usec が現在から60秒以内の更新（古い順）
 }
 ```
 

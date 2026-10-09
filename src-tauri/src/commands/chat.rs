@@ -578,10 +578,7 @@ pub async fn get_connections(
     Ok(connections.values().map(ConnectionInfo::from).collect())
 }
 
-/// リアクションメーターの「勢い」の窓（02_chat.md: 直近60秒）
-const REACTION_RECENT_WINDOW_USEC: i64 = 60 * 1_000_000;
-
-/// その接続の配信のリアクション累計と直近60秒の更新を返す（F5 リロード後のメーター復元用）
+/// その接続の配信のリアクション累計を返す（接続直後・F5 リロード後の復元用）
 #[tauri::command]
 pub async fn get_connection_reactions(
     state: State<'_, AppState>,
@@ -598,10 +595,9 @@ pub async fn get_connection_reactions(
     };
     let video_id = extract_video_id(&stream_url)
         .ok_or_else(|| CommandError::InvalidInput("Invalid YouTube URL".to_string()))?;
-    let since_usec = chrono::Utc::now().timestamp_micros() - REACTION_RECENT_WINDOW_USEC;
 
     let conn = state.db_connection().await?;
-    database::get_reaction_summary(&conn, &video_id, since_usec)
+    database::get_reaction_summary(&conn, &video_id)
         .map_err(|e| CommandError::DatabaseError(e.to_string()))
 }
 

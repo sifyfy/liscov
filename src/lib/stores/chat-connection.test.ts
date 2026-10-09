@@ -1624,7 +1624,7 @@ describe('chatStore リアクションの累計', () => {
 			disconnectAllStreams: vi.fn(),
 			setChatMode: vi.fn(),
 			getConnections: vi.fn(),
-			getConnectionReactions: vi.fn().mockResolvedValue({ totals: {}, recent: [] }),
+			getConnectionReactions: vi.fn().mockResolvedValue({ totals: {} }),
 		}));
 		vi.doMock('./config.svelte', () => ({
 			configStore: {
@@ -1674,7 +1674,7 @@ describe('chatStore リアクションの累計', () => {
 	// spec: 同じ配信に再接続 → 累計は DB の続きから
 	it('接続したら DB の累計を読み込む', async () => {
 		const { connectToStream, getConnectionReactions } = await import('$lib/tauri/chat');
-		vi.mocked(getConnectionReactions).mockResolvedValueOnce({ totals: { '❤': 430 }, recent: [] });
+		vi.mocked(getConnectionReactions).mockResolvedValueOnce({ totals: { '❤': 430 } });
 		vi.mocked(connectToStream).mockResolvedValueOnce(makeSuccessResult({ connection_id: BigInt(3) }));
 
 		await store.connect('https://www.youtube.com/watch?v=a');
@@ -1688,10 +1688,7 @@ describe('chatStore リアクションの累計', () => {
 		await store.initialize();
 		const { getConnections, getConnectionReactions } = await import('$lib/tauri/chat');
 		vi.mocked(getConnections).mockResolvedValueOnce([makeConnectionInfo({ id: BigInt(5) })]);
-		vi.mocked(getConnectionReactions).mockResolvedValueOnce({
-			totals: { '🎉': 2 },
-			recent: [{ update_time_usec: nowUsec(), duration_seconds: 1, counts: { '🎉': 2 }, total: 2 }],
-		});
+		vi.mocked(getConnectionReactions).mockResolvedValueOnce({ totals: { '🎉': 2 } });
 
 		await store.restoreConnections();
 
@@ -1725,7 +1722,7 @@ describe('chatStore チャットモードの記憶', () => {
 			disconnectAllStreams: vi.fn(),
 			setChatMode: vi.fn().mockResolvedValue(true),
 			getConnections: vi.fn(),
-			getConnectionReactions: vi.fn().mockResolvedValue({ totals: {}, recent: [] }),
+			getConnectionReactions: vi.fn().mockResolvedValue({ totals: {} }),
 		};
 		const configStoreMock = {
 			...config,

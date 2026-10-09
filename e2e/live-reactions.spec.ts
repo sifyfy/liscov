@@ -83,7 +83,7 @@ test.describe('ライブリアクション (02_chat.md)', () => {
     await disconnectAndInitialize(mainPage);
   });
 
-  // 仕様: F5リロード → 累計と直近60秒の件数を get_connection_reactions で読み直す
+  // 仕様: F5リロード → 累計を get_connection_reactions で読み直す
   test('F5 リロード後も状態の行のリアクションを復元する', async () => {
     await connect('test_video_reactions_reload');
     await addMockReaction({ '😄': 2, '💯': 1 });

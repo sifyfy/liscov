@@ -54,7 +54,7 @@ export async function getConnections(): Promise<ConnectionInfo[]> {
 }
 
 /**
- * その接続の配信のリアクション累計と直近60秒の更新を取得する
+ * その接続の配信のリアクション累計を取得する
  */
 export async function getConnectionReactions(connectionId: number): Promise<ReactionSummary> {
   try {

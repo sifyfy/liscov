@@ -63,7 +63,7 @@ describe('リアクションの累計', () => {
 
   // 仕様例: F5リロード → 累計を get_connection_reactions で読み直す
   it('get_connection_reactions の結果から累計を復元する', () => {
-    const state = restoreReactions({ totals: { '❤': 430, '🎉': 5 }, recent: [update(T0 - 10 * SEC, { '🎉': 5 })] });
+    const state = restoreReactions({ totals: { '❤': 430, '🎉': 5 } });
     expect(state.totals).toEqual({ '❤': 430, '🎉': 5 });
   });
 
@@ -71,6 +71,6 @@ describe('リアクションの累計', () => {
   it('リアクションが無ければ出さない', () => {
     expect(hasReactions(emptyReactions)).toBe(false);
     expect(hasReactions(applyReactionUpdate(emptyReactions, update(T0, { '❤': 1 })))).toBe(true);
-    expect(hasReactions(restoreReactions({ totals: { '❤': 1 }, recent: [] }))).toBe(true);
+    expect(hasReactions(restoreReactions({ totals: { '❤': 1 } }))).toBe(true);
   });
 });

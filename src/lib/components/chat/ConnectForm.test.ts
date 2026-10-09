@@ -31,7 +31,7 @@ const success = (id: number): ConnectionResult => ({
 describe('ConnectForm', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		vi.mocked(chatApi.getConnectionReactions).mockResolvedValue({ totals: {}, recent: [] });
+		vi.mocked(chatApi.getConnectionReactions).mockResolvedValue({ totals: {} });
 	});
 
 	function setup(onConnected = vi.fn()) {
@@ -89,7 +89,7 @@ describe('ConnectForm', () => {
 		await connect(input);
 		await vi.waitFor(() => expect(chatApi.getConnectionReactions).toHaveBeenCalled());
 		await fireEvent.input(input, { target: { value: 'https://www.youtube.com/watch?v=second' } });
-		resolveReactions({ totals: {}, recent: [] });
+		resolveReactions({ totals: {} });
 
 		await new Promise((r) => setTimeout(r, 0));
 		expect(input.value).toBe('https://www.youtube.com/watch?v=second');

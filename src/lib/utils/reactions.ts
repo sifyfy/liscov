@@ -22,7 +22,7 @@ export function applyReactionUpdate(state: ReactionState, update: ReactionUpdate
   return { totals };
 }
 
-/** F5 リロード後・接続直後に get_connection_reactions の結果から復元する（累計だけを使う） */
+/** F5 リロード後・接続直後に get_connection_reactions の結果から復元する */
 export function restoreReactions(summary: ReactionSummary): ReactionState {
   return { totals: { ...summary.totals } };
 }

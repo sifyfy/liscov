@@ -252,7 +252,7 @@ CREATE INDEX IF NOT EXISTS idx_reactions_session_time ON reactions(session_id, u
 - 「どの時間帯に何件」は `update_time_usec` で区切って `SUM(count)` する。同じ更新の行は同じ `update_time_usec` を持つので、更新単位の合計は `GROUP BY update_time_usec` で出る
 - 送り主が分からないため、視聴者系のテーブルとは紐づかない
 
-**配信（video_id）単位の累計**（`get_connection_reactions` の totals。再接続・F5 後のメーター復元用）:
+**配信（video_id）単位の累計**（`get_connection_reactions` の totals。再接続・F5 後の状態の行の復元用）:
 
 ```sql
 SELECT r.emoji, SUM(r.count)
@@ -261,8 +261,6 @@ JOIN sessions s ON r.session_id = s.id
 WHERE s.video_id = {video_id}   -- 配信内コメント数カウンタの復元と同じ条件
 GROUP BY r.emoji
 ```
-
-直近60秒（recent）は同じ条件に `r.update_time_usec >= {現在 − 60秒}` を足し、更新ごとにまとめて古い順に返す。
 
 ### viewer_profiles テーブル
 
