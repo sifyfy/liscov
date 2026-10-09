@@ -379,3 +379,9 @@ export const reactions = {
     { emoji: '🎉', count: 31 },
   ],
 } as const;
+
+/** 枠の試作 (/design-proto/frame) の接続。タイトルは架空 */
+export const connections = [
+  { id: 1, name: '試作の配信者', title: '【初見】ホラーゲームを最後まで #5', origin: 'primary' },
+  { id: 2, name: PARTNER_NAME, title: '【参加型】まったりランク', origin: 'partner' },
+] as const satisfies readonly Readonly<{ id: number; name: string; title: string; origin: MessageOrigin }>[];

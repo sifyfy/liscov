@@ -123,6 +123,18 @@ test.describe('Design capture', () => {
     await captureAll('chat-5-thanks');
     await page.locator('section[aria-label="この配信のスパチャ等"]').getByRole('button', { name: '閉じる' }).click();
 
+    // 手でスクロールして最新から離れた: 「最新へ」と、戻るまでの残り時間の帯 (02_chat.md「自動スクロール」)
+    await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
+    await page.setViewportSize({ width: 640, height: 1080 });
+    await page.locator('[style*="overflow-y"]').filter({ has: page.locator('[data-message-id]') }).first().hover();
+    await page.mouse.wheel(0, -1500);
+    await expect(page.getByRole('button', { name: /最新へ/ })).toBeVisible({ timeout: 5000 });
+    await page.mouse.move(-1, -1);
+    // 帯の縮む途中 (animations: 'disabled' だと縮み切った形で撮れるので、ここは動きを止めずに撮る)
+    await page.waitForTimeout(5000);
+    await page.screenshot({ path: path.join(OUT_DIR, 'chat-5-away-bar-dark-640.png') });
+    await captureAll('chat-5-away');
+
     // 2 番目の用途: 視聴者の補足情報の確認・登録
     await page.getByText(superMessages[0].author).first().click();
     await expect(page.locator('h2:has-text("視聴者情報")')).toBeVisible({ timeout: 5000 });
@@ -162,6 +174,20 @@ test.describe('Design capture', () => {
       await page.waitForTimeout(300);
       await page.screenshot({ path: path.join(OUT_DIR, `design-tokens-${theme}.png`), fullPage: true, animations: 'disabled' });
       await checkContrast(`design-tokens-${theme}`);
+    }
+  });
+
+  // 画面の枠の試作 (段階 5.2c、src/routes/design-proto/frame)。中身は同じで、操作と状態の置き場所だけを比べる
+  test('枠の試作', async () => {
+    test.setTimeout(600000);
+    for (const v of ['a', 'b', 'c'] as const) {
+      for (const st of ['live', 'open', 'empty'] as const) {
+        await page.evaluate((p) => location.assign(p), `/design-proto/frame?v=${v}&st=${st}`);
+        await expect(page.locator('main')).toBeVisible({ timeout: 15000 });
+        await page.waitForTimeout(500);
+        await page.addStyleTag({ content: '*, *::before, *::after { transition: none !important; }' });
+        await captureAll(`frame-${v}-${st}`);
+      }
     }
   });
 
