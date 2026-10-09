@@ -205,6 +205,17 @@ test.describe('Design capture', () => {
     }
   });
 
+  // 視聴者情報パネルの置き方の試作 (段階 5.3)。A 右に置く / B 下に開く / C 行の中で広げる
+  test('視聴者情報の試作', async () => {
+    test.setTimeout(600000);
+    for (const v of ['a', 'b', 'c'] as const) {
+      await page.evaluate((p) => location.assign(p), `/design-proto/viewer?v=${v}`);
+      await expect(page.getByRole('region', { name: '視聴者情報' }).or(page.getByRole('complementary', { name: '視聴者情報' }))).toBeVisible({ timeout: 15000 });
+      await page.addStyleTag({ content: '*, *::before, *::after { transition: none !important; }' });
+      await captureAll(`viewer-${v}`);
+    }
+  });
+
   // 方向性の試作 (src/routes/design-proto)。架空のデータを持っているので、モックサーバーは使わない。
   // 場面 (docs/design/brief.md §1) ごとに撮る: 通常・コラボ・配信の最後のお礼・参加型
   test('方向性の試作', async () => {
