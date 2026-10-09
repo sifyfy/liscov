@@ -22,7 +22,7 @@ export const DEFAULT_CONFIG: Config = {
   chat_display: {
     message_font_size: 13,
     show_timestamps: true,
-    auto_scroll_enabled: true,
+    hide_panel_on_connect: true,
     chat_mode: 'top'
   },
   ui: {

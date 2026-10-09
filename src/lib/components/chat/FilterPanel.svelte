@@ -4,11 +4,6 @@
   let showFilterPanel = $state(false);
   let showClearConfirm = $state(false);
 
-  function scrollToLatest() {
-    chatStore.setAutoScroll(true);
-    chatStore.scrollToLatest();
-  }
-
   function handleClearMessages() {
     showClearConfirm = true;
   }
@@ -38,25 +33,6 @@
     >
       フィルター
     </button>
-
-    <!-- Scroll to latest button -->
-    <button
-      onclick={scrollToLatest}
-      class="flex items-center gap-1.5 px-3 py-1 text-sm rounded border border-[var(--border-default)] bg-[var(--success-subtle)] text-[var(--success)] hover:bg-[var(--bg-surface-3)] transition-colors"
-    >
-      最新に戻る
-    </button>
-
-    <!-- Auto scroll checkbox -->
-    <label class="flex items-center gap-1.5 cursor-pointer">
-      <input
-        type="checkbox"
-        checked={chatStore.autoScroll}
-        onchange={(e) => chatStore.setAutoScroll(e.currentTarget.checked)}
-        class="w-4 h-4 rounded accent-[var(--accent)]"
-      />
-      <span class="text-sm text-[var(--text-primary)]">自動スクロール</span>
-    </label>
 
     <!-- Timestamp checkbox -->
     <label class="flex items-center gap-1.5 cursor-pointer">

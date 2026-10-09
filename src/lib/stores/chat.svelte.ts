@@ -54,8 +54,6 @@ function createChatStore() {
   const DEFAULT_FONT_SIZE = 13;
   let messageFontSize = $state(DEFAULT_FONT_SIZE);
   let showTimestamps = $state(true);
-  let autoScroll = $state(true);
-  let scrollToLatestTrigger = $state(0); // インクリメントでスクロールをトリガー
 
   function addMessage(message: ChatMessage): void {
     if (list.add(message)) {
@@ -256,14 +254,6 @@ function createChatStore() {
     showTimestamps = show;
   }
 
-  function setAutoScroll(enabled: boolean): void {
-    autoScroll = enabled;
-  }
-
-  function scrollToLatest(): void {
-    scrollToLatestTrigger++;
-  }
-
   // イベントリスナーのクリーンアップ関数
   let unlisten: (() => void) | null = null;
 
@@ -362,7 +352,6 @@ function createChatStore() {
     if (configStore.isLoaded) {
       messageFontSize = configStore.messageFontSize;
       showTimestamps = configStore.showTimestamps;
-      autoScroll = configStore.autoScrollEnabled;
       chatMode = configStore.chatMode;
     }
   }
@@ -431,14 +420,8 @@ function createChatStore() {
     get showTimestamps() {
       return showTimestamps;
     },
-    get autoScroll() {
-      return autoScroll;
-    },
     get displayLimit() {
       return list.displayLimit;
-    },
-    get scrollToLatestTrigger() {
-      return scrollToLatestTrigger;
     },
 
     // アクション
@@ -453,8 +436,6 @@ function createChatStore() {
     increaseFontSize,
     decreaseFontSize,
     setShowTimestamps,
-    setAutoScroll,
-    scrollToLatest,
     setDisplayLimit: list.setDisplayLimit,
     getMessagesForChannel: list.getMessagesForChannel,
     setupEventListeners,

@@ -181,30 +181,41 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
     });
   });
 
+  // spec: 02_chat.md「配信中の画面」の「自動スクロール」
+  // 新着は最新まで追う / 手でスクロールして離れたら止め「最新へ」を出す / 30 秒操作が無ければ戻る / 手で最新まで戻れば再開
   test.describe('Auto-Scroll Behavior', () => {
-    test('should auto-scroll to new messages when checkbox is enabled', async () => {
-      // Connect to stream
+    const latestButton = () => mainPage.getByRole('button', { name: /最新へ/ });
+    const chatContainer = () =>
+      mainPage.locator('[style*="overflow-y"]').filter({ has: mainPage.locator('[data-message-id]') }).first();
+    const distanceFromBottom = () =>
+      chatContainer().evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
+
+    async function connect() {
       const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
       await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+    }
 
-      // Ensure auto-scroll checkbox is ON (may be affected by previous tests)
-      const autoScrollCheckbox = mainPage.locator('label').filter({ hasText: '自動スクロール' }).locator('input[type="checkbox"]');
-      if (!(await autoScrollCheckbox.isChecked())) {
-        await autoScrollCheckbox.check();
+    async function addMessages(prefix: string, from: number, to: number) {
+      for (let i = from; i <= to; i++) {
+        await addMockMessage({ message_type: 'text', author: `${prefix}User${i}`, content: `${prefix}_${String(i).padStart(2, '0')}` });
       }
-      await expect(autoScrollCheckbox).toBeChecked();
+    }
 
-      // Add many messages to create scroll
-      for (let i = 1; i <= 20; i++) {
-        await addMockMessage({ message_type: 'text', author: `User${i}`, content: `Message ${i}` });
-      }
+    /** 流れの上でホイールを上に回す (手でスクロールして最新から離れる) */
+    async function scrollUpByHand() {
+      const box = await chatContainer().boundingBox();
+      if (!box) throw new Error('流れが見つからない');
+      await mainPage.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await mainPage.mouse.wheel(0, -10000);
+    }
 
-      // The latest message should be visible (auto-scrolled)
-      await expect(mainPage.locator('text=Message 20')).toBeVisible({ timeout: 8000 });
-
-      // Disconnect
+    test('新着が来たら最新まで追う', async () => {
+      await connect();
+      await addMessages('Follow', 1, 20);
+      await expect(mainPage.locator('text=Follow_20')).toBeVisible({ timeout: 8000 });
+      await expect(latestButton()).toHaveCount(0);
       await disconnectAndInitialize(mainPage);
     });
 
@@ -247,143 +258,96 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
       await disconnectAndInitialize(mainPage);
     });
 
-    test('should maintain auto-scroll when many messages arrive at once (checkbox stays ON)', async () => {
-      // This test verifies that auto-scroll checkbox remains ON when messages arrive rapidly
-      // Bug: Previously, adding many messages would cause auto-scroll to be incorrectly disabled
-
-      // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
-
-      // Verify auto-scroll checkbox is ON
-      const autoScrollCheckbox = mainPage.locator('label').filter({ hasText: '自動スクロール' }).locator('input[type="checkbox"]');
-      await expect(autoScrollCheckbox).toBeChecked();
-
-      // Add initial messages
-      for (let i = 1; i <= 10; i++) {
-        await addMockMessage({ message_type: 'text', author: `InitUser${i}`, content: `Initial message ${i}` });
-      }
-
-      // Wait for initial messages to appear
-      await expect(mainPage.locator('text=Initial message 10')).toBeVisible({ timeout: 8000 });
-
-      // Checkbox should still be ON
-      await expect(autoScrollCheckbox).toBeChecked();
-
-      // Note: "最新に戻る" button is always visible in current UI design
-      // (it allows manual scroll regardless of auto-scroll state)
-
-      // Now add many messages rapidly (simulating burst of chat messages)
-      for (let i = 1; i <= 20; i++) {
-        await addMockMessage({ message_type: 'text', author: `BurstUser${i}`, content: `Burst message ${i}` });
-      }
-
-      // The latest message should be visible (auto-scroll maintained)
-      await expect(mainPage.locator('text=Burst message 20')).toBeVisible({ timeout: 10000 });
-
-      // CRITICAL: Checkbox should still be ON (not automatically unchecked)
-      await expect(autoScrollCheckbox).toBeChecked();
-
-      // Find the virtua VList scroll container (has overflow-y in inline style) and verify we're at the bottom
-      const chatContainer = mainPage.locator('[style*="overflow-y"]').filter({ has: mainPage.locator('[data-message-id]') }).first();
-
-      const scrollInfo = await chatContainer.evaluate(el => ({
-        distanceFromBottom: el.scrollHeight - el.scrollTop - el.clientHeight,
-      }));
-      expect(scrollInfo.distanceFromBottom).toBeLessThanOrEqual(50);
-
-      // Disconnect
+    test('一度にたくさん届いても追うのをやめない (「最新へ」は出ない)', async () => {
+      // 以前の不具合: たくさん届くと自動スクロールが外れていた。virtua が行の高さを測り直すときのスクロールでも止めない
+      await connect();
+      await addMessages('Init', 1, 10);
+      await expect(mainPage.locator('text=Init_10')).toBeVisible({ timeout: 8000 });
+      await addMessages('Burst', 1, 20);
+      await expect(mainPage.locator('text=Burst_20')).toBeVisible({ timeout: 10000 });
+      await expect(latestButton()).toHaveCount(0);
+      expect(await distanceFromBottom()).toBeLessThanOrEqual(50);
       await disconnectAndInitialize(mainPage);
     });
 
-    test('should scroll to latest when clicking 最新に戻る button', async () => {
-      // This test verifies that the button scrolls to latest and enables auto-scroll
+    test('手でスクロールして離れたら止まり「最新へ」が出る。押すと最新に戻って追うのを再開する', async () => {
+      await connect();
+      await addMessages('Manual', 1, 40);
+      await expect(mainPage.locator('text=Manual_40')).toBeVisible({ timeout: 10000 });
 
-      // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await scrollUpByHand();
+      await expect(mainPage.locator('text=Manual_01')).toBeVisible({ timeout: 5000 });
+      await expect(latestButton()).toBeVisible();
 
-      // Add messages
-      for (let i = 1; i <= 20; i++) {
-        await addMockMessage({ message_type: 'text', author: `User${i}`, content: `Message ${i}` });
-      }
+      // 離れている間に届いても、見ている場所は動かない
+      await addMessages('Manual', 41, 50);
+      await expect(mainPage.locator('text=Manual_01')).toBeVisible({ timeout: 5000 });
+      await expect(mainPage.locator('text=Manual_50')).not.toBeVisible({ timeout: 3000 });
 
-      // Wait for latest message to appear
-      await expect(mainPage.locator('text=Message 20')).toBeVisible({ timeout: 8000 });
+      await latestButton().click();
+      await expect(mainPage.locator('text=Manual_50')).toBeVisible({ timeout: 5000 });
+      await expect(latestButton()).toHaveCount(0);
 
-      // The "最新に戻る" button is always visible in current UI design
-      const scrollButton = mainPage.locator('button:has-text("最新に戻る")');
-      await expect(scrollButton).toBeVisible();
-
-      // Uncheck the auto-scroll checkbox
-      const autoScrollCheckbox = mainPage.locator('label').filter({ hasText: '自動スクロール' }).locator('input[type="checkbox"]');
-      await autoScrollCheckbox.uncheck();
-
-      // Click the button to scroll to latest and re-enable auto-scroll
-      await scrollButton.click();
-
-      // Checkbox should be checked again (auto-scroll re-enabled)
-      await expect(autoScrollCheckbox).toBeChecked();
-
-      // Disconnect
+      // 再開したので、次に届いたものも追う
+      await addMessages('Manual', 51, 55);
+      await expect(mainPage.locator('text=Manual_55')).toBeVisible({ timeout: 8000 });
       await disconnectAndInitialize(mainPage);
     });
 
-    test('should have auto-scroll checkbox that controls scrolling', async () => {
-      // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
-
-      // auto-scroll checkbox should exist and be checked by default
-      const autoScrollCheckbox = mainPage.locator('label').filter({ hasText: '自動スクロール' }).locator('input[type="checkbox"]');
-      await expect(autoScrollCheckbox).toBeVisible();
-      await expect(autoScrollCheckbox).toBeChecked();
-
-      // Step 1: auto-scroll ONでメッセージを追加し、スクロール可能なリストを構築
-      for (let i = 1; i <= 40; i++) {
-        await addMockMessage({ message_type: 'text', author: `User${i}`, content: `ScrollCtrl_${String(i).padStart(2, '0')}` });
+    test('最新へ合わせ直している途中でも、手でスクロールすれば離れられる (最新へ引き戻されない)', async () => {
+      // 以前の不具合: 最新へ合わせる処理 (virtua の scrollToIndex) は行の高さが測れるまで合わせ直し続けるため、
+      // その間 (新着・画面の大きさの変化の直後) に手でスクロールすると最新へ引き戻されていた。
+      // 行の高さがばらばらで、まだ測っていない行へスクロールしたときに起きる
+      await connect();
+      for (let i = 1; i <= 60; i++) {
+        await addMockMessage({ message_type: 'text', author: `PullUser${i}`, content: `Pull_${String(i).padStart(2, '0')} ${'ながいコメント'.repeat((i % 5) * 6)}` });
       }
-      // auto-scroll ONにより最新メッセージが表示されている
-      await expect(mainPage.locator('text=ScrollCtrl_40')).toBeVisible({ timeout: 10000 });
-
-      // Step 2: auto-scroll OFFにする
-      await autoScrollCheckbox.uncheck();
-      await expect(autoScrollCheckbox).not.toBeChecked();
-
-      // Step 3: マウスホイールでTOPにスクロール（VListはDOM scrollTopではなくネイティブスクロールイベントで動作）
-      const vlistContainer = mainPage.locator('[style*="overflow-y"]').filter({ has: mainPage.locator('[data-message-id]') }).first();
-      const vlistBox = await vlistContainer.boundingBox();
-      if (vlistBox) {
-        await mainPage.mouse.move(vlistBox.x + vlistBox.width / 2, vlistBox.y + vlistBox.height / 2);
-        await mainPage.mouse.wheel(0, -10000);
+      await expect(mainPage.locator('text=Pull_60')).toBeVisible({ timeout: 10000 });
+      const [width, height] = await mainPage.evaluate(() => [window.innerWidth, window.innerHeight]);
+      const box = await chatContainer().boundingBox();
+      if (!box) throw new Error('流れが見つからない');
+      try {
+        // 画面の大きさを変える (最新へ合わせ直しが始まる) → すぐに手でスクロール
+        await mainPage.setViewportSize({ width: width - 40, height });
+        await mainPage.mouse.move(box.x + box.width / 2, box.y + 40);
+        await mainPage.mouse.wheel(0, -1500);
+        await expect(latestButton()).toBeVisible({ timeout: 3000 });
+        await mainPage.waitForTimeout(500);
+        await expect(latestButton()).toBeVisible();
+        expect(await distanceFromBottom()).toBeGreaterThan(500);
+      } finally {
+        await mainPage.setViewportSize({ width, height });
       }
-      // TOPにいるので最初のメッセージが表示される
-      await expect(mainPage.locator('text=ScrollCtrl_01')).toBeVisible({ timeout: 5000 });
+      await disconnectAndInitialize(mainPage);
+    });
 
-      // Step 4: auto-scroll OFFの状態で追加メッセージを投入
-      for (let i = 41; i <= 60; i++) {
-        await addMockMessage({ message_type: 'text', author: `User${i}`, content: `ScrollCtrl_${String(i).padStart(2, '0')}` });
-      }
+    test('手で最新までスクロールして戻ったら、追うのを再開する', async () => {
+      await connect();
+      await addMessages('Back', 1, 40);
+      await expect(mainPage.locator('text=Back_40')).toBeVisible({ timeout: 10000 });
+      await scrollUpByHand();
+      await expect(latestButton()).toBeVisible();
 
-      // auto-scroll OFFかつTOPにスクロール済みなので、先頭メッセージが依然表示されている
-      await expect(mainPage.locator('text=ScrollCtrl_01')).toBeVisible({ timeout: 5000 });
-      // 最新メッセージはviewport外
-      await expect(mainPage.locator('text=ScrollCtrl_60')).not.toBeVisible({ timeout: 3000 });
+      await mainPage.mouse.wheel(0, 20000);
+      await expect(latestButton()).toHaveCount(0, { timeout: 5000 });
+      await addMessages('Back', 41, 45);
+      await expect(mainPage.locator('text=Back_45')).toBeVisible({ timeout: 8000 });
+      await disconnectAndInitialize(mainPage);
+    });
 
-      // Step 5: auto-scroll ONに戻す → $effectが再評価され、scrollToIndex(last)が実行される
-      await autoScrollCheckbox.check();
-      await expect(autoScrollCheckbox).toBeChecked();
+    test('離れたまま 30 秒、流れの上で操作が無ければ最新に戻る', async () => {
+      test.setTimeout(120000);
+      await connect();
+      await addMessages('Idle', 1, 40);
+      await expect(mainPage.locator('text=Idle_40')).toBeVisible({ timeout: 10000 });
+      await scrollUpByHand();
+      await expect(latestButton()).toBeVisible();
+      // 流れの外にマウスを出し、操作しないで待つ
+      await mainPage.mouse.move(0, 0);
+      await addMessages('Idle', 41, 42);
 
-      // auto-scroll ONにより最新メッセージが表示される
-      await expect(mainPage.locator('text=ScrollCtrl_60')).toBeVisible({ timeout: 10000 });
-
-      // Disconnect
+      await expect(latestButton()).toHaveCount(0, { timeout: 40000 });
+      await expect(mainPage.locator('text=Idle_42')).toBeVisible({ timeout: 5000 });
       await disconnectAndInitialize(mainPage);
     });
   });
@@ -611,12 +575,6 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
       await mainPage.locator('button:has-text("開始")').click();
       await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
 
-      // Ensure auto-scroll is ON (may be affected by previous tests)
-      const autoScrollCheckbox = mainPage.locator('label').filter({ hasText: '自動スクロール' }).locator('input[type="checkbox"]');
-      if (!(await autoScrollCheckbox.isChecked())) {
-        await autoScrollCheckbox.check();
-      }
-
       // Add first message from target user
       const targetUserId = 'UC_autoscroll_test_user';
       await addMockMessage({
@@ -804,8 +762,10 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
       // VList virtualizes rendering, so scroll to check specific items
       const vlistContainer = mainPage.locator('[style*="overflow-y"]').filter({ has: mainPage.locator('[data-message-id]') }).first();
 
-      // Scroll to top to verify first message
-      await vlistContainer.evaluate(el => { el.scrollTop = 0; });
+      // 手でいちばん上までスクロールして最初のコメントを確かめる
+      // (最新を追っている間にプログラムで scrollTop を変えると、最新への合わせ直しで戻される。手でのスクロールなら追うのが止まる)
+      await vlistContainer.hover();
+      await mainPage.mouse.wheel(0, -20000);
       await expect(mainPage.locator('text=StatusMsg_001')).toBeVisible({ timeout: 5000 });
 
       // Scroll to bottom to verify last message

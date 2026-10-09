@@ -79,7 +79,8 @@ pub enum ChatModeSetting {
 pub struct ChatDisplayConfig {
     pub message_font_size: u32,
     pub show_timestamps: bool,
-    pub auto_scroll_enabled: bool,
+    /// 配信につながったら操作パネルを隠す (02_chat.md「上の行と操作パネル」)
+    pub hide_panel_on_connect: bool,
     pub chat_mode: ChatModeSetting,
 }
 
@@ -88,7 +89,7 @@ impl Default for ChatDisplayConfig {
         Self {
             message_font_size: 13,
             show_timestamps: true,
-            auto_scroll_enabled: true,
+            hide_panel_on_connect: true,
             chat_mode: ChatModeSetting::Top,
         }
     }
@@ -278,8 +279,8 @@ pub(crate) fn config_lookup(config: &Config, section: &str, key: &str) -> Option
             "show_timestamps" => {
                 Some(serde_json::to_value(config.chat_display.show_timestamps).unwrap())
             }
-            "auto_scroll_enabled" => {
-                Some(serde_json::to_value(config.chat_display.auto_scroll_enabled).unwrap())
+            "hide_panel_on_connect" => {
+                Some(serde_json::to_value(config.chat_display.hide_panel_on_connect).unwrap())
             }
             "chat_mode" => Some(serde_json::to_value(config.chat_display.chat_mode).unwrap()),
             _ => None,
@@ -347,11 +348,11 @@ pub(crate) fn config_apply_value(
                         CommandError::InvalidInput(format!("Invalid show_timestamps value: {}", e))
                     })?;
             }
-            "auto_scroll_enabled" => {
-                new_config.chat_display.auto_scroll_enabled = serde_json::from_value(value)
+            "hide_panel_on_connect" => {
+                new_config.chat_display.hide_panel_on_connect = serde_json::from_value(value)
                     .map_err(|e| {
                         CommandError::InvalidInput(format!(
-                            "Invalid auto_scroll_enabled value: {}",
+                            "Invalid hide_panel_on_connect value: {}",
                             e
                         ))
                     })?;
@@ -476,7 +477,7 @@ mod tests {
         assert_eq!(config.storage.mode, StorageMode::Secure);
         assert_eq!(config.chat_display.message_font_size, 13);
         assert!(config.chat_display.show_timestamps);
-        assert!(config.chat_display.auto_scroll_enabled);
+        assert!(config.chat_display.hide_panel_on_connect);
         assert_eq!(config.ui.theme, Theme::Dark);
     }
 
@@ -532,8 +533,8 @@ mod tests {
             config.chat_display.show_timestamps
         );
         assert_eq!(
-            parsed.chat_display.auto_scroll_enabled,
-            config.chat_display.auto_scroll_enabled
+            parsed.chat_display.hide_panel_on_connect,
+            config.chat_display.hide_panel_on_connect
         );
         assert_eq!(parsed.ui.theme, config.ui.theme);
     }
@@ -639,10 +640,28 @@ future_setting = true
     }
 
     #[test]
-    fn config_lookup_chat_display_auto_scroll_enabled_default() {
+    fn config_lookup_chat_display_hide_panel_on_connect_default() {
+        // 09_config.md: hide_panel_on_connect の既定は true (配信につながったら操作パネルを隠す)
         let config = Config::default();
-        let val = config_lookup(&config, "chat_display", "auto_scroll_enabled");
+        let val = config_lookup(&config, "chat_display", "hide_panel_on_connect");
         assert_eq!(val, Some(serde_json::json!(true)));
+    }
+
+    #[test]
+    fn config_toml_removed_auto_scroll_enabled_is_ignored() {
+        // 09_config.md: auto_scroll_enabled は外した。古い config.toml に残っていても無視し、他の値は読める
+        let old_toml = r#"
+[chat_display]
+message_font_size = 18
+auto_scroll_enabled = false
+"#;
+        let config: Config = toml::from_str(old_toml).unwrap();
+        assert_eq!(config.chat_display.message_font_size, 18);
+        assert!(config.chat_display.hide_panel_on_connect);
+        assert_eq!(
+            config_lookup(&config, "chat_display", "auto_scroll_enabled"),
+            None
+        );
     }
 
     #[test]
@@ -729,16 +748,17 @@ future_setting = true
     }
 
     #[test]
-    fn config_apply_value_auto_scroll_enabled_false() {
+    fn config_apply_value_hide_panel_on_connect_false() {
+        // 09_config.md: 「つないだら操作パネルを隠す」を無効にできる
         let config = Config::default();
         let new_config = config_apply_value(
             &config,
             "chat_display",
-            "auto_scroll_enabled",
+            "hide_panel_on_connect",
             serde_json::json!(false),
         )
         .unwrap();
-        assert!(!new_config.chat_display.auto_scroll_enabled);
+        assert!(!new_config.chat_display.hide_panel_on_connect);
     }
 
     #[test]
@@ -829,7 +849,7 @@ mode = "fallback"
 [chat_display]
 message_font_size = 18
 show_timestamps = false
-auto_scroll_enabled = false
+hide_panel_on_connect = false
 
 [ui]
 theme = "light"
@@ -840,7 +860,7 @@ theme = "light"
         assert_eq!(config.storage.mode, StorageMode::Fallback);
         assert_eq!(config.chat_display.message_font_size, 18);
         assert!(!config.chat_display.show_timestamps);
-        assert!(!config.chat_display.auto_scroll_enabled);
+        assert!(!config.chat_display.hide_panel_on_connect);
         assert_eq!(config.ui.theme, Theme::Light);
 
         let _ = fs::remove_file(&path);

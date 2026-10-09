@@ -59,7 +59,7 @@ mode = "secure"  # "secure" or "fallback"
 [chat_display]
 message_font_size = 13
 show_timestamps = true
-auto_scroll_enabled = true
+hide_panel_on_connect = true
 chat_mode = "top"  # "top" or "all"
 
 [ui]
@@ -91,8 +91,10 @@ max_backup_files = 5
 |-----|-----|----------|------|------|
 | `message_font_size` | integer | `13` | 10〜24 | メッセージフォントサイズ（px） |
 | `show_timestamps` | boolean | `true` | - | タイムスタンプ表示 |
-| `auto_scroll_enabled` | boolean | `true` | - | 自動スクロール有効 |
+| `hide_panel_on_connect` | boolean | `true` | - | 配信につながったら操作パネルを隠す (02_chat.md「上の行と操作パネル」) |
 | `chat_mode` | string | `"top"` | `top` / `all` | チャットモード（トップ / 全て）。最後に選んだモードを覚えておき、次の起動でもそのモードで接続する |
+
+`auto_scroll_enabled` は 2026-10 に外した (自動スクロールは止めたままにできなくなった。02_chat.md「自動スクロール」)。古い config.toml に残っていても、未知のキーとして無視する。
 
 ### ui セクション
 

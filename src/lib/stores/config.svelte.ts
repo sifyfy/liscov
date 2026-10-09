@@ -70,10 +70,11 @@ function createConfigStore() {
     }
   }
 
-  async function setAutoScrollEnabled(enabled: boolean): Promise<void> {
-    config.chat_display.auto_scroll_enabled = enabled;
+  // 配信につながったら操作パネルを隠す (09_config.md、02_chat.md「上の行と操作パネル」)
+  async function setHidePanelOnConnect(enabled: boolean): Promise<void> {
+    config.chat_display.hide_panel_on_connect = enabled;
     try {
-      await configApi.configSetValue('chat_display', 'auto_scroll_enabled', enabled);
+      await configApi.configSetValue('chat_display', 'hide_panel_on_connect', enabled);
       error = null;
     } catch (e) {
       error = normalizeError(e).message;
@@ -121,8 +122,8 @@ function createConfigStore() {
     get showTimestamps() {
       return config.chat_display.show_timestamps;
     },
-    get autoScrollEnabled() {
-      return config.chat_display.auto_scroll_enabled;
+    get hidePanelOnConnect() {
+      return config.chat_display.hide_panel_on_connect;
     },
     get chatMode() {
       return config.chat_display.chat_mode;
@@ -143,7 +144,7 @@ function createConfigStore() {
     setStorageMode,
     setMessageFontSize,
     setShowTimestamps,
-    setAutoScrollEnabled,
+    setHidePanelOnConnect,
     setChatMode,
     setTheme
   };

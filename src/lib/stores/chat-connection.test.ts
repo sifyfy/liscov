@@ -20,7 +20,7 @@ vi.mock('./config.svelte', () => ({
 		isLoaded: false,
 		messageFontSize: 13,
 		showTimestamps: true,
-		autoScrollEnabled: true,
+		hidePanelOnConnect: true,
 		chatMode: 'top',
 		setMessageFontSize: vi.fn(),
 		setChatMode: vi.fn(),
@@ -494,7 +494,7 @@ describe('chatStore 接続管理', () => {
 					isLoaded: false,
 					messageFontSize: 13,
 					showTimestamps: true,
-					autoScrollEnabled: true,
+					hidePanelOnConnect: true,
 					setMessageFontSize: vi.fn(),
 					setChatMode: vi.fn(),
 				},
@@ -1116,7 +1116,7 @@ describe('chatStore 追加補強テスト', () => {
 				isLoaded: false,
 				messageFontSize: 13,
 				showTimestamps: true,
-				autoScrollEnabled: true,
+				hidePanelOnConnect: true,
 				setMessageFontSize: vi.fn(),
 				setChatMode: vi.fn(),
 			},
@@ -1248,7 +1248,7 @@ describe('chatStore 追加補強テスト', () => {
 				isLoaded: false,
 				messageFontSize: 13,
 				showTimestamps: true,
-				autoScrollEnabled: true,
+				hidePanelOnConnect: true,
 				setMessageFontSize: vi.fn(),
 				setChatMode: vi.fn(),
 			},
@@ -1400,7 +1400,7 @@ describe('chatStore initDisplaySettings', () => {
 				isLoaded: false,
 				messageFontSize: 99, // isLoaded=false なので反映されないはず
 				showTimestamps: false,
-				autoScrollEnabled: false,
+				hidePanelOnConnect: false,
 				setMessageFontSize: vi.fn(),
 				setChatMode: vi.fn(),
 			},
@@ -1414,7 +1414,6 @@ describe('chatStore initDisplaySettings', () => {
 		// spec: isLoaded=false のため configStore の値は反映されず、デフォルト値のまま
 		expect(store.messageFontSize).toBe(13);
 		expect(store.showTimestamps).toBe(true);
-		expect(store.autoScroll).toBe(true);
 
 		store.cleanup();
 		vi.doUnmock('$lib/tauri/chat');
@@ -1422,7 +1421,7 @@ describe('chatStore initDisplaySettings', () => {
 	});
 
 	// spec: isLoaded=true の場合に configStore の値が反映される
-	it('isLoaded=true のとき configStore の値が messageFontSize/showTimestamps/autoScroll に反映される', async () => {
+	it('isLoaded=true のとき configStore の値が messageFontSize/showTimestamps に反映される', async () => {
 		vi.resetModules();
 		vi.doMock('$lib/tauri/chat', () => ({
 			connectToStream: vi.fn(),
@@ -1436,7 +1435,7 @@ describe('chatStore initDisplaySettings', () => {
 				isLoaded: true,
 				messageFontSize: 20,
 				showTimestamps: false,
-				autoScrollEnabled: false,
+				hidePanelOnConnect: false,
 				setMessageFontSize: vi.fn(),
 				setChatMode: vi.fn(),
 			},
@@ -1451,8 +1450,6 @@ describe('chatStore initDisplaySettings', () => {
 		expect(store.messageFontSize).toBe(20);
 		// spec: showTimestamps が configStore の値になる
 		expect(store.showTimestamps).toBe(false);
-		// spec: autoScroll が configStore.autoScrollEnabled になる
-		expect(store.autoScroll).toBe(false);
 
 		store.cleanup();
 		vi.doUnmock('$lib/tauri/chat');
@@ -1523,7 +1520,7 @@ describe('chatStore ジュエル数を取れない接続の注記', () => {
 				isLoaded: false,
 				messageFontSize: 13,
 				showTimestamps: true,
-				autoScrollEnabled: true,
+				hidePanelOnConnect: true,
 				setMessageFontSize: vi.fn(),
 				setChatMode: vi.fn(),
 			},
@@ -1612,7 +1609,7 @@ describe('chatStore リアクションメーター', () => {
 				isLoaded: false,
 				messageFontSize: 13,
 				showTimestamps: true,
-				autoScrollEnabled: true,
+				hidePanelOnConnect: true,
 				setMessageFontSize: vi.fn(),
 				setChatMode: vi.fn(),
 			},
@@ -1714,7 +1711,7 @@ describe('chatStore チャットモードの記憶', () => {
 			...config,
 			messageFontSize: 13,
 			showTimestamps: true,
-			autoScrollEnabled: true,
+			hidePanelOnConnect: true,
 			setMessageFontSize: vi.fn(),
 			setChatMode: vi.fn(),
 		};

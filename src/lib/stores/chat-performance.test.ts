@@ -17,7 +17,7 @@ vi.mock('./config.svelte', () => ({
 		isLoaded: false,
 		messageFontSize: 13,
 		showTimestamps: true,
-		autoScrollEnabled: true,
+		hidePanelOnConnect: true,
 		setMessageFontSize: vi.fn(),
 	},
 }));
@@ -446,18 +446,6 @@ describe('chatStore パフォーマンス最適化', () => {
 		});
 	});
 
-	describe('scrollToLatest トリガー', () => {
-		// scrollToLatest を呼ぶたびに scrollToLatestTrigger が単調増加する
-		it('scrollToLatest を呼ぶたびに scrollToLatestTrigger がインクリメントされる', () => {
-			const initial = chatStore.scrollToLatestTrigger;
-			chatStore.scrollToLatest();
-			expect(chatStore.scrollToLatestTrigger).toBe(initial + 1);
-
-			chatStore.scrollToLatest();
-			expect(chatStore.scrollToLatestTrigger).toBe(initial + 2);
-		});
-	});
-
 	describe('フィルタ初期値', () => {
 		// デフォルト状態でフィルタが全タイプ表示・検索クエリなしであることを確認
 		it('デフォルト状態の filter が showText=true, showSuperchat=true, showMembership=true, searchQuery="" である', () => {
@@ -468,28 +456,21 @@ describe('chatStore パフォーマンス最適化', () => {
 		});
 	});
 
-	// spec: showTimestamps/autoScroll/chatMode の初期値
+	// spec: showTimestamps/chatMode の初期値
 	describe('初期値', () => {
 		it('showTimestamps の初期値は true', () => {
 			expect(chatStore.showTimestamps).toBe(true);
-		});
-		it('autoScroll の初期値は true', () => {
-			expect(chatStore.autoScroll).toBe(true);
 		});
 		it('chatMode の初期値は top', () => {
 			expect(chatStore.chatMode).toBe('top');
 		});
 	});
 
-	// spec: setShowTimestamps/setAutoScroll がストア状態を変更すること
-	describe('setShowTimestamps / setAutoScroll', () => {
+	// spec: setShowTimestamps がストア状態を変更すること
+	describe('setShowTimestamps', () => {
 		it('setShowTimestamps(false) で showTimestamps が false になる', () => {
 			chatStore.setShowTimestamps(false);
 			expect(chatStore.showTimestamps).toBe(false);
-		});
-		it('setAutoScroll(false) で autoScroll が false になる', () => {
-			chatStore.setAutoScroll(false);
-			expect(chatStore.autoScroll).toBe(false);
 		});
 	});
 

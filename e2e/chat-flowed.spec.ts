@@ -75,9 +75,7 @@ test.describe('流れたものの欄とお礼の一覧', () => {
     await expect(thanks).toHaveCount(0);
     await expect(flowedSupers).toContainText('RedDonor');
 
-    // 手でスクロールして戻り、また見えたら欄から外れる。
-    // (手でスクロールしたら自動スクロールを止めるのは段階 5.2c。今は表示の設定で止めてから戻る)
-    await page.locator('label').filter({ hasText: '自動スクロール' }).locator('input[type="checkbox"]').uncheck();
+    // 手でスクロールして戻り (自動スクロールは止まる)、また見えたら欄から外れる
     await page.getByText('コメント 39').hover();
     await page.mouse.wheel(0, -20000);
     await expect(page.getByText('遅れてきました！').first()).toBeVisible({ timeout: 5000 });

@@ -5,7 +5,10 @@
    * 上から: お礼の一覧 (開いたときだけ) / コメントの流れ / 流れた新規さん / 流れたスパチャ等 / お礼の一覧を開くボタン
    * - 流れたもの = 流れの画面のいちばん上に見えている行より前に届いた優先順位 1・2 (src/lib/design/flow.ts)
    * - 流れの高さが変わったとき (欄や一覧が開閉した・ウィンドウの大きさ) も、自動スクロール中なら最新を見せ続ける
+   * - 自動スクロール: 手でスクロールして最新から離れたら止め、流れの上で 30 秒操作が無ければ最新に戻る (src/lib/utils/auto-return.ts)。
+   *   離れている間は右下に「最新へ」のボタン
    */
+  import { untrack } from 'svelte';
   import { chatStore } from '$lib/stores';
   import { VList, type VListHandle } from 'virtua/svelte';
   import ChatMessageComponent from './ChatMessage.svelte';
@@ -15,14 +18,66 @@
   import { ViewerInfoPanel } from '$lib/components/viewer';
   import type { ChatMessage } from '$lib/types';
   import { messageKey, type MessageKey } from '$lib/utils/message-key';
+  import { FOLLOWING, activity, leaveLatest, reachLatest, tick, type AutoReturnState } from '$lib/utils/auto-return';
+  import LatestButton from './LatestButton.svelte';
 
   let vlist = $state<VListHandle | undefined>();
 
-  // Auto-scroll is now controlled by chatStore (synced with FilterPanel)
-  let autoScrollEnabled = $derived(chatStore.autoScroll);
+  // 自動スクロール (最新を追っているか、離れていつ戻るか)
+  let autoReturn = $state<AutoReturnState>(FOLLOWING);
+  let following = $derived(autoReturn.following);
+  // いまの時刻 (離れている間だけ 1 秒ごとに進める。「最新へ」の残りの秒数と期限の確かめに使う)
+  let now = $state(Date.now());
 
-  // Flag to temporarily suppress auto-scroll during programmatic scrolling
-  let suppressAutoScroll = $state(false);
+  // 手でスクロールしたか (ホイール・ドラッグ・キー・タッチの直後のスクロールだけを手によるものとみなす。
+  // virtua が行の高さを測り直してスクロール位置を変えたときに、止めないため)
+  const USER_INPUT_WINDOW_MS = 1000;
+  let lastUserInput = 0;
+  const markUserInput = () => (lastUserInput = Date.now());
+
+  /** 自動スクロールの状態を、いまの時刻で変える */
+  function updateAutoReturn(change: (state: AutoReturnState, at: number) => AutoReturnState) {
+    now = Date.now();
+    const next = change(autoReturn, now);
+    if (next !== autoReturn) autoReturn = next;
+  }
+
+  // 最新とみなす、下端からの距離 (px)
+  const LATEST_SLACK_PX = 4;
+
+  function handleScroll() {
+    updateFirstVisible();
+    if (!vlist) return;
+    const atLatest = vlist.getScrollOffset() + vlist.getViewportSize() >= vlist.getScrollSize() - LATEST_SLACK_PX;
+    if (atLatest) {
+      if (!autoReturn.following) updateAutoReturn(reachLatest);
+    } else if (Date.now() - lastUserInput < USER_INPUT_WINDOW_MS) {
+      // virtua の scrollToIndex は、行の高さが測れるまで目標の位置へ合わせ直し続ける。
+      // 手で離れたら、今の位置への scrollBy(0) で置き換えて、最新へ引き戻されないようにする
+      vlist.scrollBy(0);
+      updateAutoReturn(leaveLatest);
+    }
+  }
+
+  /** 流れの上での操作 (クリック・マウスの移動)。離れている間は戻るまでの時間を延ばす */
+  function handleActivity() {
+    updateAutoReturn(activity);
+  }
+
+  // 離れている間は 1 秒ごとに期限を確かめ、過ぎたら最新に戻る
+  $effect(() => {
+    if (following) return;
+    const timer = setInterval(() => {
+      now = Date.now();
+      autoReturn = tick(autoReturn, now);
+    }, 1000);
+    return () => clearInterval(timer);
+  });
+
+  function scrollToLatest() {
+    const msgs = chatStore.displayedMessages;
+    if (vlist && msgs.length > 0) vlist.scrollToIndex(msgs.length - 1, { align: 'end' });
+  }
 
   // Selected viewer for ViewerInfoPanel
   // broadcasterChannelId は一覧でクリックしたコメントの接続の配信者。パネル内のコメントを押しても変えない（02_chat.md「どの配信者のもとで開くか」）
@@ -64,7 +119,7 @@
   function followResize(node: HTMLElement): () => void {
     const observer = new ResizeObserver(() => {
       const msgs = chatStore.displayedMessages;
-      if (autoScrollEnabled && !suppressAutoScroll && vlist && msgs.length > 0) {
+      if (following && vlist && msgs.length > 0) {
         vlist.scrollToIndex(msgs.length - 1, { align: 'end' });
       }
       updateFirstVisible();
@@ -77,30 +132,16 @@
   let fontSize = $derived(chatStore.messageFontSize);
   let showTimestamps = $derived(chatStore.showTimestamps);
 
-  // Auto-scroll when new messages arrive
+  // コメントが無くなったら (クリア・つなぎ直し) 離れる先も無いので、最新を追う状態に戻す
   $effect(() => {
-    const msgs = chatStore.displayedMessages;
-    if (suppressAutoScroll || !autoScrollEnabled || !vlist || msgs.length === 0) {
-      return;
-    }
-    // Use queueMicrotask to scroll after virtua processes the new data
-    queueMicrotask(() => {
-      vlist?.scrollToIndex(msgs.length - 1, { align: 'end' });
-    });
+    if (chatStore.displayedMessages.length === 0) untrack(() => updateAutoReturn(reachLatest));
   });
 
-  // Respond to scrollToLatest trigger from FilterPanel (fire only on trigger change)
-  let prevScrollTrigger = 0;
+  // 最新を追っている間は、新着が来たら (と、戻ったとき) 最新までスクロールする。virtua が新しい行を受け取ってから動かす
   $effect(() => {
-    const trigger = chatStore.scrollToLatestTrigger;
-    if (trigger === prevScrollTrigger || !vlist) return;
-    prevScrollTrigger = trigger;
-    queueMicrotask(() => {
-      const msgs = chatStore.displayedMessages;
-      if (msgs.length > 0) {
-        vlist?.scrollToIndex(msgs.length - 1, { align: 'end' });
-      }
-    });
+    const msgs = chatStore.displayedMessages;
+    if (!following || !vlist || msgs.length === 0) return;
+    queueMicrotask(scrollToLatest);
   });
 
   function handleMessageClick(message: ChatMessage) {
@@ -131,9 +172,8 @@
       };
     }
 
-    // Disable auto-scroll (same as original liscov)
-    chatStore.setAutoScroll(false);
-    suppressAutoScroll = true;
+    // 過去のコメントに飛ぶので最新から離れる (30 秒操作が無ければ戻る)
+    updateAutoReturn(leaveLatest);
 
     // Highlight the message
     const key = messageKey(message);
@@ -145,11 +185,6 @@
     if (targetIndex !== -1 && vlist) {
       vlist.scrollToIndex(targetIndex, { align: 'center' });
     }
-
-    // Re-enable auto-scroll suppression check after scroll animation completes
-    setTimeout(() => {
-      suppressAutoScroll = false;
-    }, 500);
 
     // Clear highlight after 3 seconds
     setTimeout(() => {
@@ -172,7 +207,17 @@
   {/if}
 
   <!-- コメントの流れ (最新が下) -->
-  <div class="flex min-h-0 flex-1 flex-col" {@attach followResize}>
+  <div
+    class="relative flex min-h-0 flex-1 flex-col"
+    {@attach followResize}
+    onwheel={markUserInput}
+    onpointerdown={markUserInput}
+    onkeydown={markUserInput}
+    ontouchstart={markUserInput}
+    onpointermove={handleActivity}
+    onclick={handleActivity}
+    role="presentation"
+  >
     {#if chatStore.displayedMessages.length === 0}
       <div class="flex flex-1 items-center justify-center p-3">
         <p class="text-center text-body text-fg-2">
@@ -189,7 +234,7 @@
         data={chatStore.displayedMessages}
         getKey={messageKey}
         style="flex: 1; overflow-y: auto;"
-        onscroll={updateFirstVisible}
+        onscroll={handleScroll}
       >
         {#snippet children(message)}
           <ChatMessageComponent
@@ -203,6 +248,11 @@
           />
         {/snippet}
       </VList>
+    {/if}
+    {#if !autoReturn.following && chatStore.displayedMessages.length > 0}
+      <div class="absolute right-3 bottom-3 z-10">
+        <LatestButton deadline={autoReturn.deadline} {now} onClick={() => updateAutoReturn(reachLatest)} />
+      </div>
     {/if}
   </div>
 

@@ -11,7 +11,7 @@ vi.mock('./config.svelte', () => ({
 		isLoaded: false,
 		messageFontSize: 13,
 		showTimestamps: true,
-		autoScrollEnabled: true,
+		hidePanelOnConnect: true,
 		setMessageFontSize: vi.fn(),
 	},
 }));
