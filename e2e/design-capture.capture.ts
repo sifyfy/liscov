@@ -43,6 +43,47 @@ const SIZES = [
 ] as const;
 const THEMES = ['dark', 'light'] as const;
 
+/**
+ * 斜め読みの試作の測定 (ブラウザの中で動かす)。見えている普通のコメントについて、本文の 1 文字目の x を測る。
+ * - spreadPx: 書き出しの x の最大 - 最小 / meanJumpPx: 上下に隣り合う行の書き出しの x の差の平均 (視線が横に振られる量)
+ * - visible: 一覧の見える範囲に入っている、優先順位を問わないコメントの数 (詰まり具合)
+ * - meanNameGapPx: 名前の終わりから本文の書き出しまでの距離の平均 (誰の発言かを結ぶときの視線の移動。名前と本文が別の行なら行頭へ戻る距離)
+ */
+function measureScan() {
+  const list = document.querySelector('[data-scan-list]') as HTMLElement;
+  const view = list.getBoundingClientRect();
+  const inView = (r: DOMRect) => r.bottom > view.top && r.top < view.bottom;
+  const starts: number[] = [];
+  const gaps: number[] = [];
+  for (const row of Array.from(document.querySelectorAll<HTMLElement>('[data-scan-row]'))) {
+    if (!inView(row.getBoundingClientRect())) continue;
+    const nameRects = row.querySelector('[data-testid="author-name"]')?.getClientRects();
+    const nameEnd = nameRects?.length ? nameRects[nameRects.length - 1] : null;
+    const text = row.dataset.scanRow ?? '';
+    const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const at = (node.textContent ?? '').indexOf(text.slice(0, 4));
+      if (at < 0) continue;
+      const range = document.createRange();
+      range.setStart(node, at);
+      range.setEnd(node, at + 1);
+      const start = range.getBoundingClientRect();
+      starts.push(Math.round(start.left - view.left));
+      if (nameEnd) gaps.push(Math.round(Math.hypot(start.left - nameEnd.right, start.top - nameEnd.top)));
+      break;
+    }
+  }
+  const jumps = starts.slice(1).map((x, i) => Math.abs(x - starts[i]));
+  const visible = Array.from(list.children).filter((c) => inView(c.getBoundingClientRect())).length;
+  return {
+    rows: starts.length,
+    spreadPx: starts.length ? Math.max(...starts) - Math.min(...starts) : 0,
+    meanJumpPx: jumps.length ? Math.round(jumps.reduce((a, b) => a + b, 0) / jumps.length) : 0,
+    visible,
+    meanNameGapPx: gaps.length ? Math.round(gaps.reduce((a, b) => a + b, 0) / gaps.length) : 0,
+  };
+}
+
 test.describe('Design capture', () => {
   let browser: Browser;
   let page: Page;
@@ -261,6 +302,27 @@ test.describe('Design capture', () => {
     await page.evaluate((p) => location.assign(p), '/design-proto/memo');
     await expect(page.locator('[data-message-id]').first()).toBeVisible({ timeout: 15000 });
     await captureAll('memo');
+  });
+
+  // 斜め読みしやすい行の試作 (A 名前の行 + 本文 / B 名前の列 / C 今の 1 行 / D 名前の列 (右寄せ))。撮影に加えて、
+  // 画面に見えている普通のコメント (優先順位 2〜5) の本文の書き出しの位置 (x) を測り、scan-<場面>-<案>.metrics.json に残す
+  test('斜め読みの試作', async () => {
+    test.setTimeout(900000);
+    // コメントが速い場面は、最新の付近が通常と同じデータになるので通常だけを撮る
+    for (const scene of ['normal'] as const) {
+      for (const v of ['a', 'b', 'c', 'd'] as const) {
+        await page.evaluate((p) => location.assign(p), `/design-proto/scan?v=${v}&scene=${scene}`);
+        await expect(page.locator('[data-scan-list]')).toBeVisible({ timeout: 15000 });
+        await captureAll(`scan-${scene}-${v}`);
+        const metrics: Record<string, unknown> = {};
+        for (const { width, height } of SIZES) {
+          await page.setViewportSize({ width, height });
+          await page.waitForTimeout(300);
+          metrics[width] = await page.evaluate(measureScan);
+        }
+        fs.writeFileSync(path.join(OUT_DIR, `scan-${scene}-${v}.metrics.json`), JSON.stringify(metrics, null, 2));
+      }
+    }
   });
 
   // 方向性の試作 (src/routes/design-proto)。架空のデータを持っているので、モックサーバーは使わない。
