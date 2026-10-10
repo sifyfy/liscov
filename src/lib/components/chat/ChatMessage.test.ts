@@ -270,10 +270,30 @@ describe('ChatMessage', () => {
 	});
 
 	describe('配信元 (コラボ)', () => {
-		it('相手の配信のコメントには配信者名の札を付ける', () => {
+		// 仕様「1 行の形」: 名前の行の上に 1 行を足して配信者名を出す。名前の行は主の配信と同じ形
+		it('相手の配信のコメントは、名前の行の上の 1 行に配信者名を出す', () => {
 			const { container } = renderRow(createMessage({ broadcaster_name: 'あおば' }), { origin: 'partner' });
 			expect(root(container).dataset.origin).toBe('partner');
-			expect(container.querySelector('[data-testid="source-label"]')?.textContent).toBe('あおば');
+			const source = container.querySelector('[data-testid="source-label"]') as HTMLElement;
+			const nameLine = container.querySelector('[data-testid="name-line"]') as HTMLElement;
+			expect(source.textContent?.trim()).toBe('あおば');
+			expect(nameLine.contains(source)).toBe(false);
+			expect(source.compareDocumentPosition(nameLine) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+			expect(nameLine.textContent).not.toContain('あおば');
+		});
+
+		it('配信元の行は背景のない文字だけ', () => {
+			const { container } = renderRow(createMessage({ broadcaster_name: 'あおば' }), { origin: 'partner' });
+			const source = container.querySelector('[data-testid="source-label"]') as HTMLElement;
+			expect(source.className).not.toMatch(/\bbg-/);
+		});
+
+		it('詰めた形 (流れたものの欄・お礼の一覧) でも、名前の行の上に配信者名を出す', () => {
+			const { container } = renderRow(createMessage({ broadcaster_name: 'あおば' }), { origin: 'partner', compact: true });
+			const source = container.querySelector('[data-testid="source-label"]') as HTMLElement;
+			const nameLine = container.querySelector('[data-testid="name-line"]') as HTMLElement;
+			expect(source.textContent?.trim()).toBe('あおば');
+			expect(nameLine.contains(source)).toBe(false);
 		});
 
 		it('主の配信のコメントには札を付けない', () => {

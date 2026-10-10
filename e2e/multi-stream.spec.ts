@@ -171,7 +171,7 @@ test.describe('Multi-Stream Connection', () => {
       await mainPage.waitForTimeout(700);
       await connectStream(mainPage, 'test_video_456', 'Mock Live 2');
 
-      // 仕様「1 行の形」: 相手の配信 (2 つ目以降の接続) のコメントには名前の前に配信者名の札が付き、
+      // 仕様「1 行の形」: 相手の配信 (2 つ目以降の接続) のコメントには名前の行の上に配信者名の行が付き、
       // 主の配信 (最初の接続) の行には付かない。
       // モックのキューは全接続共通で、積んだあと最初にポーリングした接続に届く。どちらの接続に届くかは
       // 決まらないので、積む時刻を 130ms ずつずらして周期を掃き、両方の行が見えるまで積む
@@ -202,7 +202,7 @@ test.describe('Multi-Stream Connection', () => {
           sawPrimary = true;
         }
       }
-      expect(sawPartner, '2 つ目の接続の行 (配信者名の札つき) が見えた').toBe(true);
+      expect(sawPartner, '2 つ目の接続の行 (配信者名の行つき) が見えた').toBe(true);
       expect(sawPrimary, '最初の接続の行 (札なし) が見えた').toBe(true);
 
       log.debug('配信元インジケーターの表示が確認された');

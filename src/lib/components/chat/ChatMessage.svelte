@@ -250,34 +250,38 @@
   {:else if isSystem}
     <p class="px-3 py-1.5 break-words text-fg-2">{@render runs()}</p>
   {:else}
-    <!-- 優先順位 2〜5: 1 段目に名前の行、2 段目に本文。本文の頭はアイコンの右でそろう -->
-    <div class="flex items-start gap-2 px-3 py-1 hover:bg-fg-1/8 {priority === 2 ? 'bg-highlight/20' : ''}">
-      {@render face('bg-surface-highest text-fg-2')}
-      <div class="min-w-0 flex-1">
-        <p data-testid="name-line" class="break-words">
-          {#if partner}
-            <span data-testid="source-label" class="mr-1 rounded-control bg-surface-highest px-1 text-chat-meta whitespace-nowrap text-fg-2"
-              >{message.broadcaster_name}</span
-            >
-          {/if}
-          {#if priority === 2}
-            <span class="mr-1 rounded-control bg-highlight px-1 text-chat-meta font-bold text-surface">初見</span>
-          {:else if priority === 3}
-            <span class="mr-1 rounded-control border border-highlight px-1 text-chat-meta text-highlight">初見</span>
-          {:else if priority === 4}
-            <span class="mr-0.5 text-chat-meta text-highlight" aria-label="配信内で初めてのコメント">●</span>
-          {/if}
-          {@render name('text-chat-meta')}
-          {@render badges()}
-          {#if paidLabel}
-            <span data-testid="paid-label" class="ml-1 rounded-control border border-outline px-1 text-chat-meta whitespace-nowrap tabular-nums"
-              >{paidLabel}</span
-            >
-          {/if}
-          {@render meta(priority === 2 ? 'text-fg-2' : 'text-fg-3')}
-        </p>
-        {#if hasBody}<p data-testid="message-body" class="break-words">{@render runs()}</p>{/if}
-        {#if authorNotes}{@render notesLine('mt-0.5 text-fg-2')}{/if}
+    <!-- 優先順位 2〜5: 1 段目に名前の行、2 段目に本文。本文の頭はアイコンの右でそろう。
+         相手の配信なら名前の行の上に配信元の行を足す (アイコンは名前の行の横のまま。空きの幅でアイコンの右にそろえる) -->
+    <div class="px-3 py-1 hover:bg-fg-1/8 {priority === 2 ? 'bg-highlight/20' : ''}">
+      {#if partner}
+        <div class="flex gap-2">
+          {#if !compact}<span class="w-chat-icon shrink-0" aria-hidden="true"></span>{/if}
+          <p data-testid="source-label" class="min-w-0 flex-1 text-chat-meta break-words text-fg-2">{message.broadcaster_name}</p>
+        </div>
+      {/if}
+      <div class="flex items-start gap-2">
+        {@render face('bg-surface-highest text-fg-2')}
+        <div class="min-w-0 flex-1">
+          <p data-testid="name-line" class="break-words">
+            {#if priority === 2}
+              <span class="mr-1 rounded-control bg-highlight px-1 text-chat-meta font-bold text-surface">初見</span>
+            {:else if priority === 3}
+              <span class="mr-1 rounded-control border border-highlight px-1 text-chat-meta text-highlight">初見</span>
+            {:else if priority === 4}
+              <span class="mr-0.5 text-chat-meta text-highlight" aria-label="配信内で初めてのコメント">●</span>
+            {/if}
+            {@render name('text-chat-meta')}
+            {@render badges()}
+            {#if paidLabel}
+              <span data-testid="paid-label" class="ml-1 rounded-control border border-outline px-1 text-chat-meta whitespace-nowrap tabular-nums"
+                >{paidLabel}</span
+              >
+            {/if}
+            {@render meta(priority === 2 ? 'text-fg-2' : 'text-fg-3')}
+          </p>
+          {#if hasBody}<p data-testid="message-body" class="break-words">{@render runs()}</p>{/if}
+          {#if authorNotes}{@render notesLine('mt-0.5 text-fg-2')}{/if}
+        </div>
       </div>
     </div>
   {/if}
