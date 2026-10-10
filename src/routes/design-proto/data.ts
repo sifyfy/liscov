@@ -51,6 +51,7 @@ function base(author: string, time: string): Omit<Message, 'message_type' | 'con
     platform: 'youtube',
     broadcaster_name: '試作の配信者',
     author_reading: null,
+    author_notes: null,
   };
 }
 

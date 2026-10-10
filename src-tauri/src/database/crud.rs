@@ -537,26 +537,40 @@ pub fn get_viewer_custom_info(
     Ok(info)
 }
 
-/// 配信者のもとで視聴者に登録した読み仮名を引く（04_tts.md「視聴者カスタム読み仮名」）
+/// 配信者のもとで視聴者に登録した読み仮名とメモ
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ViewerAnnotation {
+    /// 読み上げと名前の横に使う（04_tts.md「視聴者カスタム読み仮名」）
+    pub reading: Option<String>,
+    /// コメントの本文の下に出す（02_chat.md「1 行の形」）。読み上げには使わない
+    pub notes: Option<String>,
+}
+
+/// 配信者のもとで視聴者に登録した読み仮名とメモを引く
 ///
-/// プロフィールやカスタム情報が無い、または読み仮名が None なら None。
-pub fn get_viewer_reading(
+/// プロフィールやカスタム情報が無ければ、どちらも None。
+pub fn get_viewer_annotation(
     conn: &Connection,
     broadcaster_channel_id: &str,
     channel_id: &str,
-) -> Result<Option<String>> {
-    let reading = conn
+) -> Result<ViewerAnnotation> {
+    let annotation = conn
         .query_row(
-            "SELECT vci.reading
+            "SELECT vci.reading, vci.notes
              FROM viewer_profiles vp
              JOIN viewer_custom_info vci ON vci.viewer_profile_id = vp.id
              WHERE vp.broadcaster_channel_id = ?1 AND vp.channel_id = ?2",
             params![broadcaster_channel_id, channel_id],
-            |row| row.get::<_, Option<String>>(0),
+            |row| {
+                Ok(ViewerAnnotation {
+                    reading: row.get(0)?,
+                    notes: row.get(1)?,
+                })
+            },
         )
         .optional()?;
 
-    Ok(reading.flatten())
+    Ok(annotation.unwrap_or_default())
 }
 
 /// Upsert viewer custom info
@@ -1221,17 +1235,36 @@ mod tests {
         register_reading(&conn, "UCaaa", "UCxxx", Some("たなか"));
         register_reading(&conn, "UCbbb", "UCxxx", Some("タナカ"));
 
+        assert_eq!(reading_of(&conn, "UCaaa", "UCxxx").as_deref(), Some("たなか"));
+        assert_eq!(reading_of(&conn, "UCbbb", "UCxxx").as_deref(), Some("タナカ"));
+    }
+
+    fn reading_of(conn: &Connection, broadcaster: &str, viewer: &str) -> Option<String> {
+        get_viewer_annotation(conn, broadcaster, viewer).unwrap().reading
+    }
+
+    // 02_chat.md「1 行の形」: メモも配信者ごと。読み仮名と一緒に引く
+    #[tokio::test]
+    async fn viewer_notes_are_scoped_by_broadcaster() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let id = upsert_viewer_profile(&conn, "UCaaa", "UCxxx", "@田中-abc", None).unwrap();
+        let info = ViewerCustomInfo::new(id)
+            .with_reading("たなか")
+            .with_notes("ネタバレしがち。注意");
+        upsert_viewer_custom_info(&conn, &info).unwrap();
+        upsert_viewer_profile(&conn, "UCbbb", "UCxxx", "@田中-abc", None).unwrap();
+
         assert_eq!(
-            get_viewer_reading(&conn, "UCaaa", "UCxxx")
-                .unwrap()
-                .as_deref(),
-            Some("たなか")
+            get_viewer_annotation(&conn, "UCaaa", "UCxxx").unwrap(),
+            ViewerAnnotation {
+                reading: Some("たなか".to_string()),
+                notes: Some("ネタバレしがち。注意".to_string()),
+            }
         );
         assert_eq!(
-            get_viewer_reading(&conn, "UCbbb", "UCxxx")
-                .unwrap()
-                .as_deref(),
-            Some("タナカ")
+            get_viewer_annotation(&conn, "UCbbb", "UCxxx").unwrap(),
+            ViewerAnnotation::default()
         );
     }
 
@@ -1243,7 +1276,7 @@ mod tests {
         register_reading(&conn, "UCaaa", "UCxxx", Some("たなか"));
         upsert_viewer_profile(&conn, "UCbbb", "UCxxx", "@田中-abc", None).unwrap();
 
-        assert_eq!(get_viewer_reading(&conn, "UCbbb", "UCxxx").unwrap(), None);
+        assert_eq!(reading_of(&conn, "UCbbb", "UCxxx"), None);
     }
 
     #[tokio::test]
@@ -1254,7 +1287,7 @@ mod tests {
         register_reading(&conn, "UCaaa", "UCxxx", Some("たなか"));
         register_reading(&conn, "UCaaa", "UCxxx", None);
 
-        assert_eq!(get_viewer_reading(&conn, "UCaaa", "UCxxx").unwrap(), None);
+        assert_eq!(reading_of(&conn, "UCaaa", "UCxxx"), None);
     }
 
     #[tokio::test]
@@ -1262,7 +1295,7 @@ mod tests {
         let db = setup_db();
         let conn = db.connection().await;
 
-        assert_eq!(get_viewer_reading(&conn, "UCaaa", "UCxxx").unwrap(), None);
+        assert_eq!(reading_of(&conn, "UCaaa", "UCxxx"), None);
     }
 
     #[tokio::test]

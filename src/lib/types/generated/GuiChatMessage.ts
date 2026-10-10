@@ -21,4 +21,8 @@ broadcaster_name: string,
 /**
  * この接続の配信者のもとで登録した、投稿者の読み仮名（02_chat.md「配信中の画面」。読み上げと同じ値）
  */
-author_reading: string | null, };
+author_reading: string | null, 
+/**
+ * この接続の配信者のもとで登録した、投稿者のメモ（02_chat.md「1 行の形」。本文の下に出す。読み上げには使わない）
+ */
+author_notes: string | null, };

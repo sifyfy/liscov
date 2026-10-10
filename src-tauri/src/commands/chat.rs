@@ -15,7 +15,7 @@ use crate::core::models::{
     extract_video_id,
 };
 use crate::core::raw_response::SaveConfig;
-use crate::database;
+use crate::database::{self, ViewerAnnotation};
 use crate::errors::CommandError;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -38,13 +38,13 @@ impl MonitoringOutput for TauriMonitoringOutput {
         self.app.state::<ConfigState>().get().raw_response
     }
 
-    fn message(&self, message: &ChatMessage, author_reading: Option<&str>) {
+    fn message(&self, message: &ChatMessage, annotation: &ViewerAnnotation) {
         let gui_msg = GuiChatMessage::from_with_connection(
             message.clone(),
             self.connection_id,
             &self.platform,
             &self.broadcaster_name,
-            author_reading.map(str::to_string),
+            annotation.clone(),
         );
         let _ = self.app.emit("chat:message", &gui_msg);
     }
@@ -170,6 +170,8 @@ pub struct GuiChatMessage {
     pub broadcaster_name: String,
     /// この接続の配信者のもとで登録した、投稿者の読み仮名（02_chat.md「配信中の画面」。読み上げと同じ値）
     pub author_reading: Option<String>,
+    /// この接続の配信者のもとで登録した、投稿者のメモ（02_chat.md「1 行の形」。本文の下に出す。読み上げには使わない）
+    pub author_notes: Option<String>,
 }
 
 impl From<ChatMessage> for GuiChatMessage {
@@ -272,24 +274,26 @@ impl From<ChatMessage> for GuiChatMessage {
             platform: "youtube".to_string(),
             broadcaster_name: String::new(),
             author_reading: None,
+            author_notes: None,
         }
     }
 }
 
 impl GuiChatMessage {
-    /// 接続情報と投稿者の読み仮名付きで ChatMessage から GuiChatMessage を生成する
+    /// 接続情報と投稿者の読み仮名・メモ付きで ChatMessage から GuiChatMessage を生成する
     pub fn from_with_connection(
         msg: ChatMessage,
         connection_id: u64,
         platform: &str,
         broadcaster_name: &str,
-        author_reading: Option<String>,
+        annotation: ViewerAnnotation,
     ) -> Self {
         Self {
             connection_id,
             platform: platform.to_string(),
             broadcaster_name: broadcaster_name.to_string(),
-            author_reading,
+            author_reading: annotation.reading,
+            author_notes: annotation.notes,
             ..Self::from(msg)
         }
     }
@@ -679,17 +683,27 @@ mod tests {
             1,
             "youtube",
             "配信者A",
-            Some("たなか".to_string()),
+            ViewerAnnotation {
+                reading: Some("たなか".to_string()),
+                notes: Some("赤スパの人".to_string()),
+            },
         );
         assert_eq!(gui.author_reading.as_deref(), Some("たなか"));
+        assert_eq!(gui.author_notes.as_deref(), Some("赤スパの人"));
         assert_eq!(gui.connection_id, 1);
         assert_eq!(gui.broadcaster_name, "配信者A");
     }
 
     #[test]
     fn gui_message_without_reading() {
-        let gui =
-            GuiChatMessage::from_with_connection(text_message(), 1, "youtube", "配信者A", None);
+        let gui = GuiChatMessage::from_with_connection(
+            text_message(),
+            1,
+            "youtube",
+            "配信者A",
+            ViewerAnnotation::default(),
+        );
         assert_eq!(gui.author_reading, None);
+        assert_eq!(gui.author_notes, None);
     }
 }

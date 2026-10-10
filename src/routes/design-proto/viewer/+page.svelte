@@ -26,7 +26,7 @@
   const supporters = supportersOf(feed);
   const flowedSupporters = [...supporters].reverse().filter((m) => outOfView.has(m.id));
   const flowedNewcomers = newcomersOf(feed).filter((m) => outOfView.has(m.id));
-  const noReading = () => undefined;
+  const noInfo = () => undefined;
 
   // 押したコメント (読みにくい名前の常連が、役に立つことを書いたところ)
   const clicked = feed.find((m) => m.content === 'ここのボス、最初は足を狙うと楽')!;
@@ -108,8 +108,8 @@
 
 <!-- 流れたもの・お礼の一覧を開くボタン -->
 {#snippet flowedAndThanks()}
-  <FlowedSection label="流れた新規さん" items={flowedNewcomers} fontSize={13} showTimestamps {originOf} readingOf={noReading} />
-  <FlowedSection label="流れたスパチャ等" items={flowedSupporters} fontSize={13} showTimestamps {originOf} readingOf={noReading} />
+  <FlowedSection label="流れた新規さん" items={flowedNewcomers} fontSize={13} showTimestamps {originOf} infoOf={noInfo} />
+  <FlowedSection label="流れたスパチャ等" items={flowedSupporters} fontSize={13} showTimestamps {originOf} infoOf={noInfo} />
   <button type="button" class="h-7 shrink-0 border-t border-outline-variant bg-surface-low px-3 text-left text-label text-fg-2">
     この配信のスパチャ等の一覧 <span class="tabular-nums">{supporters.length}</span>
   </button>

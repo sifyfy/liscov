@@ -17,7 +17,7 @@
   const supporters = supportersOf(feed);
   const flowedSupporters = [...supporters].reverse();
   const flowedNewcomers = newcomersOf(feed);
-  const noReading = () => undefined;
+  const noInfo = () => undefined;
 
   const SAMPLE = '初見です！よろしくお願いします 0123456789 ¥10,000 さっきの謎解き、本棚の順番は左から赤・青・緑';
 
@@ -119,9 +119,9 @@
   <section class="mt-8">
     <h2 class="text-label text-fg-2">流れたものの欄とお礼の一覧</h2>
     <div data-testid="flow-samples" class="mt-3 flex max-w-lg flex-col bg-surface">
-      <ThanksList items={supporters} fontSize={13} showTimestamps {originOf} readingOf={noReading} onClose={() => {}} />
-      <FlowedSection label="流れた新規さん" items={flowedNewcomers} fontSize={13} showTimestamps {originOf} readingOf={noReading} />
-      <FlowedSection label="流れたスパチャ等" items={flowedSupporters} fontSize={13} showTimestamps {originOf} readingOf={noReading} />
+      <ThanksList items={supporters} fontSize={13} showTimestamps {originOf} infoOf={noInfo} onClose={() => {}} />
+      <FlowedSection label="流れた新規さん" items={flowedNewcomers} fontSize={13} showTimestamps {originOf} infoOf={noInfo} />
+      <FlowedSection label="流れたスパチャ等" items={flowedSupporters} fontSize={13} showTimestamps {originOf} infoOf={noInfo} />
     </div>
   </section>
 </main>

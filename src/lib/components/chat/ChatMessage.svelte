@@ -5,10 +5,10 @@
    * - 強調は優先順位 (src/lib/design/priority.ts) で決める。1: 面 / 2: 薄い背景 + 塗りの印 / 3: 枠の印 / 4: 点 / 5: 印なし
    * - 名前と本文を 1 つの段落に続け、省略せず折り返す (省略された文字を読むには操作が要る)
    * - 相手の配信のコメントは、強さを変えずに配信者名の札で見分ける
+   * - メモが登録されている視聴者は、本文の下に「メモ」の札とメモを毎回出す (試作 src/routes/design-proto/memo の B)
    * - 文字の大きさは表示の設定 (fontSize) を行の font-size にし、中の文字は em の段階 (text-chat-*) で決める
    * - 試作は src/routes/design-proto/Row.svelte
    */
-  import type { Snippet } from 'svelte';
   import type { ChatMessage } from '$lib/types';
   import { formatTimestamp } from '$lib/utils/format';
   import { messagePriority, type MessageOrigin } from '$lib/design/priority';
@@ -26,10 +26,8 @@
     reading?: string;
     /** 詰めた形 (流れたものの欄・お礼の一覧)。アイコンを出さず、優先順位 1 を面にせず 1 行にする */
     compact?: boolean;
-    /** 名前 (読み仮名) のすぐ後ろに足すもの。メモの出し方の試作 (src/routes/design-proto/memo) で使う */
-    afterName?: Snippet<[ChatMessage]>;
-    /** 本文の下に足すもの。メモの出し方の試作で使う */
-    below?: Snippet<[ChatMessage]>;
+    /** パネル・視聴者のタブで登録し直したメモ。undefined なら届いたときの値 (author_notes) を使う。空文字は「メモなし」 */
+    notes?: string;
   }
 
   let {
@@ -41,8 +39,7 @@
     origin = 'primary',
     reading,
     compact = false,
-    afterName,
-    below,
+    notes,
   }: Props = $props();
 
   let priority = $derived(messagePriority(message, origin));
@@ -50,6 +47,7 @@
   let colors = $derived(message.metadata?.superchat_colors ?? null);
   let paidLabel = $derived(paidLabelOf(message));
   let authorReading = $derived(reading ?? message.author_reading ?? '');
+  let authorNotes = $derived(notes ?? message.author_notes ?? '');
   let formattedTime = $derived(formatTimestamp(message.timestamp));
   let isGift = $derived(message.message_type === 'gift');
   let isSystem = $derived(message.message_type === 'system');
@@ -147,7 +145,14 @@
   {#if authorReading}
     <span class="ml-1 text-chat-meta text-fg-2">({authorReading})</span>
   {/if}
-  {@render afterName?.(message)}
+{/snippet}
+
+<!-- メモ: 本文の下の 1 行。札の大きさは囲む文字に合わせる (text-chat-meta を重ねると em が二重にかかって縮む) -->
+{#snippet notesLine(cls: string)}
+  <p data-testid="author-notes" class="text-chat-meta break-words {cls}">
+    <span class="rounded-control border border-current px-1 whitespace-nowrap">メモ</span>
+    {authorNotes}
+  </p>
 {/snippet}
 
 <div
@@ -181,7 +186,7 @@
               class="ml-1.5">{@render runs()}</span
             >{/if}
         </p>
-        {@render below?.(message)}
+        {#if authorNotes}{@render notesLine('mt-0.5 text-fg-2')}{/if}
       </div>
     </div>
   {:else if surface === 'tier' && colors}
@@ -190,7 +195,7 @@
       <div class="flex items-center gap-2 px-3 py-1.5" style="background: {colors.header_background}; color: {colors.header_text};">
         {@render face('bg-surface/30')}
         <span class="min-w-0 font-bold break-words"
-          >{message.author}{#if authorReading}<span class="ml-1 text-chat-meta font-normal">({authorReading})</span>{/if}{@render afterName?.(message)}</span
+          >{message.author}{#if authorReading}<span class="ml-1 text-chat-meta font-normal">({authorReading})</span>{/if}</span
         >
         <span class="shrink-0 font-normal">{@render meta('')}</span>
         <span class="ml-auto shrink-0 text-chat-amount tabular-nums">{paidLabel}</span>
@@ -198,7 +203,7 @@
       {#if hasBody}
         <p data-testid="paid-body" class="px-3 pt-1 pb-2 break-words" style="color: {colors.body_text};">{@render runs()}</p>
       {/if}
-      {#if below}<div class="px-3 pb-2" style="color: {colors.body_text};">{@render below(message)}</div>{/if}
+      {#if authorNotes}<div class="px-3 pb-2" style="color: {colors.body_text};">{@render notesLine('')}</div>{/if}
     </div>
   {:else if surface === 'member' || surface === 'plain'}
     <!-- メンバーシップ・メンバーシップギフト・マイルストーン (member の面)。色の無いスパチャは中立の面 -->
@@ -210,7 +215,7 @@
       <div class="flex items-center gap-2 px-3 py-1.5">
         {@render face('bg-surface/30')}
         <span class="min-w-0 font-bold break-words"
-          >{message.author}{#if authorReading}<span class="ml-1 text-chat-meta font-normal">({authorReading})</span>{/if}{@render afterName?.(message)}</span
+          >{message.author}{#if authorReading}<span class="ml-1 text-chat-meta font-normal">({authorReading})</span>{/if}</span
         >
         <span class="shrink-0 font-normal">{@render meta('')}</span>
         <span class="ml-auto shrink-0 font-bold {surface === 'member' ? 'text-chat-meta' : 'text-chat-amount tabular-nums'}">{paidLabel}</span>
@@ -218,7 +223,7 @@
       {#if hasBody}
         <p data-testid="paid-body" class="px-3 pt-0 pb-2 break-words">{@render runs()}</p>
       {/if}
-      {#if below}<div class="px-3 pb-2">{@render below(message)}</div>{/if}
+      {#if authorNotes}<div class="px-3 pb-2">{@render notesLine('')}</div>{/if}
     </div>
   {:else if surface === 'gift'}
     <!-- ギフト (ジュエル) -->
@@ -269,7 +274,7 @@
           {#if hasBody}<span class="ml-1.5">{@render runs()}</span>{/if}
           {@render meta(priority === 2 ? 'text-fg-2' : 'text-fg-3')}
         </p>
-        {@render below?.(message)}
+        {#if authorNotes}{@render notesLine('mt-0.5 text-fg-2')}{/if}
       </div>
     </div>
   {/if}

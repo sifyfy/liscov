@@ -26,12 +26,13 @@ function superchat(id: string, timestamp: string): ChatMessage {
     platform: 'youtube',
     broadcaster_name: '配信者',
     author_reading: null,
+    author_notes: null,
   };
 }
 
 const renderList = (items: readonly ChatMessage[], onClose = vi.fn()) =>
   render(ThanksList, {
-    props: { items, fontSize: 13, showTimestamps: true, originOf: () => 'primary' as const, readingOf: () => undefined, onClose },
+    props: { items, fontSize: 13, showTimestamps: true, originOf: () => 'primary' as const, infoOf: () => undefined, onClose },
   });
 
 describe('ThanksList', () => {

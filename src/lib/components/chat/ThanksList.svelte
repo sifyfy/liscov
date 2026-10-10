@@ -7,7 +7,7 @@
    * 押したコメントが流れに無いとき (フィルタで隠している・表示件数で外れた) は、視聴者情報パネルをその行のすぐ下に広げる (openKey と panel)
    */
   import type { Snippet } from 'svelte';
-  import type { ChatMessage } from '$lib/types';
+  import type { ChatMessage, ViewerInfo } from '$lib/types';
   import type { MessageOrigin } from '$lib/design/priority';
   import { messageKey, type MessageKey } from '$lib/utils/message-key';
   import ChatMessageComponent from './ChatMessage.svelte';
@@ -18,7 +18,8 @@
     fontSize: number;
     showTimestamps: boolean;
     originOf: (message: ChatMessage) => MessageOrigin;
-    readingOf: (message: ChatMessage) => string | undefined;
+    /** パネル・視聴者のタブで保存し直した読み仮名とメモ (chatStore.infoOf) */
+    infoOf: (message: ChatMessage) => ViewerInfo | undefined;
     onClick?: (message: ChatMessage) => void;
     onClose: () => void;
     /** 視聴者情報パネルを広げる行 */
@@ -26,7 +27,7 @@
     panel?: Snippet;
   }
 
-  let { items, fontSize, showTimestamps, originOf, readingOf, onClick, onClose, openKey = null, panel }: Props = $props();
+  let { items, fontSize, showTimestamps, originOf, infoOf, onClick, onClose, openKey = null, panel }: Props = $props();
 </script>
 
 <section class="flex max-h-1/2 shrink-0 flex-col border-b border-outline bg-surface-low" aria-label="この配信のスパチャ等">
@@ -47,7 +48,8 @@
           {showTimestamps}
           compact
           origin={originOf(message)}
-          reading={readingOf(message)}
+          reading={infoOf(message)?.reading}
+          notes={infoOf(message)?.notes}
           onClick={() => onClick?.(message)}
         />
         {#if panel && messageKey(message) === openKey}{@render panel()}{/if}

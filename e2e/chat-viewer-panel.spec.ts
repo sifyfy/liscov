@@ -319,6 +319,26 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
       await disconnectAndInitialize(mainPage);
     });
 
+    // 02_chat.md「1 行の形」: メモが登録されている視聴者は、本文の下に「メモ」の札とメモを毎回出す
+    test('メモを保存すると、画面の行の本文の下にすぐ出て、その後に届いたコメントにも出る', async () => {
+      const channelId = `UC_notes_user_${Date.now()}`;
+      await connectToMockStream(mainPage);
+      await addMockMessage({ message_type: 'text', author: 'NotesUser', content: 'Notes before save', channel_id: channelId });
+      const panel = await openViewerPanel(mainPage, 'Notes before save');
+      const notes = panel.getByLabel('メモ');
+      await notes.fill('ネタバレしがち。注意');
+      await notes.press('Enter');
+      await expect(panel).toHaveCount(0);
+
+      const notesOf = (text: string) => chatRow(mainPage, text).getByTestId('author-notes');
+      await expect(notesOf('Notes before save')).toHaveText(/メモ\s*ネタバレしがち。注意/, { timeout: 5000 });
+
+      // 保存した後に届いたコメントには、バックエンドがメモを付けて送る
+      await addMockMessage({ message_type: 'text', author: 'NotesUser', content: 'Notes after save', channel_id: channelId });
+      await expect(notesOf('Notes after save')).toHaveText(/メモ\s*ネタバレしがち。注意/, { timeout: 10000 });
+      await disconnectAndInitialize(mainPage);
+    });
+
     test('Esc で保存せずに閉じる', async () => {
       await connectToMockStream(mainPage);
       await addMockMessage({ message_type: 'text', author: 'EscUser', content: 'Escape test', channel_id: 'UC_esc_user' });

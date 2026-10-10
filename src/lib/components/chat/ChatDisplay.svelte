@@ -311,7 +311,7 @@
       {fontSize}
       {showTimestamps}
       originOf={chatStore.originOf}
-      readingOf={chatStore.readingOf}
+      infoOf={chatStore.infoOf}
       onClick={(message) => handleMessageClick(message, 'thanks')}
       onClose={() => (thanksOpen = false)}
       openKey={panel?.place === 'thanks' ? panel.anchorKey : null}
@@ -356,7 +356,8 @@
             {fontSize}
             {showTimestamps}
             origin={chatStore.originOf(message)}
-            reading={chatStore.readingOf(message)}
+            reading={chatStore.infoOf(message)?.reading}
+            notes={chatStore.infoOf(message)?.notes}
             highlighted={highlightedMessageKey === messageKey(message) || panel?.anchorKey === messageKey(message)}
             onClick={() => handleMessageClick(message)}
           />
@@ -379,7 +380,7 @@
     {fontSize}
     {showTimestamps}
     originOf={chatStore.originOf}
-    readingOf={chatStore.readingOf}
+    infoOf={chatStore.infoOf}
     onClick={(message) => handleMessageClick(message, 'flowed')}
     openKey={panel?.place === 'flowed' ? panel.anchorKey : null}
     panel={viewerPanel}
@@ -390,7 +391,7 @@
     {fontSize}
     {showTimestamps}
     originOf={chatStore.originOf}
-    readingOf={chatStore.readingOf}
+    infoOf={chatStore.infoOf}
     onClick={(message) => handleMessageClick(message, 'flowed')}
     openKey={panel?.place === 'flowed' ? panel.anchorKey : null}
     panel={viewerPanel}

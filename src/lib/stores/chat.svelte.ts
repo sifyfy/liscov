@@ -6,7 +6,8 @@ import type {
   ConnectionResult,
   ChatMode,
   FrontendConnectionState,
-  GuiReactionUpdate
+  GuiReactionUpdate,
+  ViewerInfo
 } from '$lib/types';
 import { SvelteMap } from 'svelte/reactivity';
 import type { MessageOrigin } from '$lib/design/priority';
@@ -28,10 +29,10 @@ function createChatStore() {
   let chatMode = $state<ChatMode>('top');
   let error = $state<string | null>(null);
 
-  // パネルで保存した読み仮名（キーは `配信者 channel_id:視聴者 channel_id`）。
+  // パネル・視聴者のタブで保存した読み仮名とメモ（キーは `配信者 channel_id:視聴者 channel_id`）。
   // 届いた後に登録し直したものを、画面にある行にもすぐ出すため（02_chat.md「配信中の画面」1 行の形）
-  const readingOverrides = new SvelteMap<string, string>();
-  const readingKey = (broadcasterChannelId: string, channelId: string) => `${broadcasterChannelId}:${channelId}`;
+  const infoOverrides = new SvelteMap<string, ViewerInfo>();
+  const infoKey = (broadcasterChannelId: string, channelId: string) => `${broadcasterChannelId}:${channelId}`;
 
   // 主の配信の接続（最初の接続。Map は接続した順。最初を切断すれば次に古いものが繰り上がる）
   let primaryConnection = $derived(connections.values().next().value);
@@ -388,13 +389,13 @@ function createChatStore() {
     get newcomers() {
       return newcomers;
     },
-    // パネルで保存した読み仮名。保存していなければ undefined（届いたときの author_reading を使う）
-    readingOf(message: ChatMessage): string | undefined {
+    // パネル・視聴者のタブで保存した読み仮名とメモ。保存していなければ undefined（届いたときの author_reading・author_notes を使う）
+    infoOf(message: ChatMessage): ViewerInfo | undefined {
       const broadcasterChannelId = connections.get(Number(message.connection_id))?.broadcasterChannelId;
-      return broadcasterChannelId ? readingOverrides.get(readingKey(broadcasterChannelId, message.channel_id)) : undefined;
+      return broadcasterChannelId ? infoOverrides.get(infoKey(broadcasterChannelId, message.channel_id)) : undefined;
     },
-    setViewerReading(broadcasterChannelId: string, channelId: string, reading: string) {
-      readingOverrides.set(readingKey(broadcasterChannelId, channelId), reading);
+    setViewerInfo(broadcasterChannelId: string, channelId: string, info: ViewerInfo) {
+      infoOverrides.set(infoKey(broadcasterChannelId, channelId), info);
     },
     // そのメッセージが届いた接続の配信者チャンネル ID（視聴者情報パネル用。TTS が読み仮名を引く配信者と同じ）
     // 接続が一覧に無い（切断済み）か配信者が分からなければ null

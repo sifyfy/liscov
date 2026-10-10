@@ -95,9 +95,9 @@ let tl: typeof import('@testing-library/svelte');
 async function renderManagement(props: { broadcasterId?: string } = {}) {
 	const { default: ViewerManagement } = await import('./ViewerManagement.svelte');
 	const { chatStore } = await import('$lib/stores');
-	const setViewerReading = vi.spyOn(chatStore, 'setViewerReading');
+	const setViewerInfo = vi.spyOn(chatStore, 'setViewerInfo');
 	tl.render(ViewerManagement, props);
-	return { setViewerReading };
+	return { setViewerInfo };
 }
 
 const rowOf = (name: string) => screen.getByText(name).closest('li') as HTMLElement;
@@ -177,8 +177,8 @@ describe('ViewerManagement', () => {
 		await waitFor(() => expect(document.activeElement).toBe(reading));
 	});
 
-	it('Enter で保存して閉じ、チャットの行にも読み仮名を出す', async () => {
-		const { setViewerReading } = await renderManagement();
+	it('Enter で保存して閉じ、チャットの行にも読み仮名とメモを出す', async () => {
+		const { setViewerInfo } = await renderManagement();
 		await tl.fireEvent.click(await screen.findByText('夜ふかし研究会'));
 		const reading = screen.getByLabelText('読み仮名');
 		await tl.fireEvent.input(reading, { target: { value: 'よふかしけんきゅうかい' } });
@@ -192,7 +192,7 @@ describe('ViewerManagement', () => {
 			customData: '{"x":1}',
 			tags: ['常連', '攻略'],
 		});
-		expect(setViewerReading).toHaveBeenCalledWith('UC_A', 'UC_v1', 'よふかしけんきゅうかい');
+		expect(setViewerInfo).toHaveBeenCalledWith('UC_A', 'UC_v1', { reading: 'よふかしけんきゅうかい', notes: 'ホラーが苦手' });
 	});
 
 	it('空にした読み仮名・メモは消す (null で保存する)', async () => {

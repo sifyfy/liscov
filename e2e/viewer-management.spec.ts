@@ -122,6 +122,11 @@ test.describe.serial('視聴者のタブ (06_viewer.md)', () => {
     await openEditor(VIEWERS.bob.author);
     await expect(row(VIEWERS.bob.author).getByLabel(/タグ/)).toHaveValue('常連、攻略、注意');
     await row(VIEWERS.bob.author).getByRole('button', { name: 'やめる' }).click();
+
+    // タブで保存したメモは、チャットの画面の同じ視聴者の行の本文の下にもすぐ出る (06_viewer.md「視聴者のタブ」)
+    await navigateToTab(mainPage, 'Chat');
+    await expect(chatRow(mainPage, VIEWERS.bob.content).getByTestId('author-notes')).toContainText('ネタバレしがち', { timeout: 5000 });
+    await navigateToTab(mainPage, 'Viewers');
   });
 
   test('「読み仮名なしだけ」で読み仮名の無い人だけになる', async () => {

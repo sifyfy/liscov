@@ -5,7 +5,7 @@
    * 配信の後や準備のときに、視聴者の読み仮名・メモ・タグを続けて整理する画面。試作 src/routes/design-proto/viewers の C。
    * - 配信者は主の配信の配信者 (props)。接続していないか、その配信者の記録がまだなければ記録のある最初の配信者
    * - 探す欄は打ち終えて 300ms で絞る。「読み仮名なしだけ」はすぐ絞る。どちらも最初のページに戻る (viewerStore.setFilter)
-   * - 編集で保存した読み仮名は、チャットの画面の同じ視聴者の行にもすぐ出す (chatStore.setViewerReading)
+   * - 編集で保存した読み仮名とメモは、チャットの画面の同じ視聴者の行にもすぐ出す (chatStore.setViewerInfo)
    */
   import { onDestroy, onMount, untrack } from 'svelte';
   import { chatStore, viewerStore } from '$lib/stores';
@@ -70,7 +70,7 @@
 
   async function handleSave(viewer: ViewerWithCustomInfo, values: { reading: string; notes: string; tags: string[] }) {
     await viewerStore.updateViewerInfo(viewer.id, values.reading || null, values.notes || null, viewer.custom_data, values.tags);
-    chatStore.setViewerReading(viewer.broadcaster_channel_id, viewer.channel_id, values.reading);
+    chatStore.setViewerInfo(viewer.broadcaster_channel_id, viewer.channel_id, { reading: values.reading, notes: values.notes });
   }
 
   async function handleDelete(viewer: ViewerWithCustomInfo) {

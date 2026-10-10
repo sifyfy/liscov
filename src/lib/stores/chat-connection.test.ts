@@ -446,10 +446,10 @@ describe('chatStore 接続管理', () => {
 	});
 
 	// =====================================================================
-	// readingOf / setViewerReading（パネルで保存した読み仮名を行に出す）
-	// spec: 02_chat.md「配信中の画面」の「1 行の形」（読み仮名）
+	// infoOf / setViewerInfo（パネル・視聴者のタブで保存した読み仮名とメモを行に出す）
+	// spec: 02_chat.md「配信中の画面」の「1 行の形」（読み仮名・メモ）
 	// =====================================================================
-	describe('readingOf', () => {
+	describe('infoOf', () => {
 		function messageFrom(connectionId: number, channelId = 'UCxxx'): ChatMessage {
 			return { id: 'm1', channel_id: channelId, connection_id: BigInt(connectionId) } as ChatMessage;
 		}
@@ -463,27 +463,27 @@ describe('chatStore 接続管理', () => {
 			await chatStore.connect('https://example.com/b');
 		}
 
-		it('パネルで保存していなければ undefined（届いたときの読み仮名を使う）', async () => {
+		it('保存していなければ undefined（届いたときの読み仮名・メモを使う）', async () => {
 			await connectAandB();
-			expect(chatStore.readingOf(messageFrom(1))).toBeUndefined();
+			expect(chatStore.infoOf(messageFrom(1))).toBeUndefined();
 		});
 
-		it('配信者 B のもとで保存した読み仮名は、B の接続に届いた同じ視聴者のコメントに出る', async () => {
+		it('配信者 B のもとで保存した読み仮名・メモは、B の接続に届いた同じ視聴者のコメントに出る', async () => {
 			await connectAandB();
-			chatStore.setViewerReading('UCbbb', 'UCxxx', 'タナカ');
-			expect(chatStore.readingOf(messageFrom(2))).toBe('タナカ');
+			chatStore.setViewerInfo('UCbbb', 'UCxxx', { reading: 'タナカ', notes: '赤スパの人' });
+			expect(chatStore.infoOf(messageFrom(2))).toEqual({ reading: 'タナカ', notes: '赤スパの人' });
 		});
 
-		it('配信者 B のもとで保存した読み仮名は、A の接続のコメントには使わない（配信者ごと）', async () => {
+		it('配信者 B のもとで保存した読み仮名・メモは、A の接続のコメントには使わない（配信者ごと）', async () => {
 			await connectAandB();
-			chatStore.setViewerReading('UCbbb', 'UCxxx', 'タナカ');
-			expect(chatStore.readingOf(messageFrom(1))).toBeUndefined();
+			chatStore.setViewerInfo('UCbbb', 'UCxxx', { reading: 'タナカ', notes: '赤スパの人' });
+			expect(chatStore.infoOf(messageFrom(1))).toBeUndefined();
 		});
 
-		it('空にして保存したら空文字（読み仮名を出さない）', async () => {
+		it('空にして保存したら空文字（読み仮名・メモを出さない）', async () => {
 			await connectAandB();
-			chatStore.setViewerReading('UCaaa', 'UCxxx', '');
-			expect(chatStore.readingOf(messageFrom(1))).toBe('');
+			chatStore.setViewerInfo('UCaaa', 'UCxxx', { reading: '', notes: '' });
+			expect(chatStore.infoOf(messageFrom(1))).toEqual({ reading: '', notes: '' });
 		});
 	});
 
@@ -1516,6 +1516,7 @@ describe('chatStore ジュエル数を取れない接続の注記', () => {
 			platform: 'youtube',
 			broadcaster_name: 'Alice',
 			author_reading: null,
+			author_notes: null,
 		};
 	}
 

@@ -26,6 +26,7 @@ function message(id: string, overrides: Partial<ChatMessage> = {}): ChatMessage 
     platform: 'youtube',
     broadcaster_name: '配信者',
     author_reading: null,
+    author_notes: null,
     ...overrides,
   };
 }
@@ -52,7 +53,7 @@ const superchat = (id: string, amount: string) =>
 
 const renderSection = (label: string, items: readonly ChatMessage[]) =>
   render(FlowedSection, {
-    props: { label, items, fontSize: 13, showTimestamps: true, originOf: () => 'primary' as const, readingOf: () => undefined },
+    props: { label, items, fontSize: 13, showTimestamps: true, originOf: () => 'primary' as const, infoOf: () => undefined },
   });
 
 describe('FlowedSection', () => {

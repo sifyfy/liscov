@@ -24,6 +24,7 @@ function createMessage(overrides: Partial<ChatMessageType> = {}): ChatMessageTyp
 		platform: 'youtube',
 		broadcaster_name: 'TestBroadcaster',
 		author_reading: null,
+		author_notes: null,
 		...overrides,
 	};
 }
@@ -86,6 +87,48 @@ describe('ChatMessage', () => {
 		it('パネルで読み仮名を空にしたら (reading が空文字) 出さない', () => {
 			const { container } = renderRow(createMessage({ author: '@田中-abc', author_reading: 'たなか' }), { reading: '' });
 			expect(root(container).textContent).not.toContain('たなか');
+		});
+
+		// 02_chat.md「1 行の形」: メモが登録されている視聴者は、本文の下に「メモ」の札と全文を毎回出す
+		describe('メモ', () => {
+			const notesOf = (container: HTMLElement) => root(container).querySelector('[data-testid="author-notes"]');
+
+			it('本文の下に「メモ」の札とメモを出す (名前と本文の段落とは別の行)', () => {
+				const { container } = renderRow(
+					createMessage({ author: 'しおこんぶ', content: 'いったん回復しよう', runs: [{ type: 'Text', content: 'いったん回復しよう' }], author_notes: 'ネタバレしがち。注意' }),
+				);
+				const notes = notesOf(container)!;
+				expect(notes.textContent?.replace(/\s+/g, ' ').trim()).toBe('メモ ネタバレしがち。注意');
+				const paragraph = root(container).querySelector('p') as HTMLElement;
+				expect(paragraph.textContent).toContain('いったん回復しよう');
+				expect(paragraph.contains(notes)).toBe(false);
+			});
+
+			it('メモが無ければ出さない', () => {
+				const { container } = renderRow(createMessage());
+				expect(notesOf(container)).toBeNull();
+			});
+
+			it('パネル・視聴者のタブで保存し直したメモ (notes) は、届いたときのメモより優先する。空にしたら出さない', () => {
+				const changed = renderRow(createMessage({ author_notes: '古いメモ' }), { notes: '新しいメモ' });
+				expect(notesOf(changed.container)?.textContent).toContain('新しいメモ');
+				expect(root(changed.container).textContent).not.toContain('古いメモ');
+				const cleared = renderRow(createMessage({ author_notes: '古いメモ' }), { notes: '' });
+				expect(notesOf(cleared.container)).toBeNull();
+			});
+
+			it('スパチャの面では面の中の本文の下に出す', () => {
+				const { container } = renderRow(superchat({ author_notes: '赤スパの人' }));
+				const notes = notesOf(container)!;
+				expect(notes.textContent).toContain('赤スパの人');
+				const body = container.querySelector('[data-testid="paid-body"]') as HTMLElement;
+				expect(body.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+			});
+
+			it('詰めた 1 行 (流れたものの欄・お礼の一覧) にも出す', () => {
+				const { container } = renderRow(superchat({ author_notes: 'イラストのお礼を言う' }), { compact: true });
+				expect(notesOf(container)?.textContent).toContain('イラストのお礼を言う');
+			});
 		});
 
 		it('時刻は表示の設定で消せる', () => {
