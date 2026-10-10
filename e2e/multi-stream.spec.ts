@@ -103,6 +103,29 @@ test.describe('Multi-Stream Connection', () => {
       const disconnectBtns = mainPage.locator('[data-testid="connection-chip"] button');
       await expect(disconnectBtns).toHaveCount(2);
     });
+
+    test('札が上の行に収まらないとき、ホイールの上下で札の列が横にスクロールする', async () => {
+      await connectStream(mainPage, 'test_video_123', 'Mock Live');
+      await connectStream(mainPage, 'test_video_456', 'Mock Live 2');
+
+      const strip = mainPage.locator('[data-testid="connection-strip"]');
+      const scrollLeft = () => strip.evaluate((el) => el.scrollLeft);
+      const [width, height] = await mainPage.evaluate(() => [window.innerWidth, window.innerHeight]);
+      try {
+        // 札 2 つが入らない幅に縮める (最小幅 540 より狭いが、札の列があふれる状態を作るため)
+        await mainPage.setViewportSize({ width: 300, height });
+        await expect.poll(() => strip.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+        expect(await scrollLeft()).toBe(0);
+
+        const box = await strip.boundingBox();
+        if (!box) throw new Error('札の列が見つからない');
+        await mainPage.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await mainPage.mouse.wheel(0, 100);
+        await expect.poll(scrollLeft).toBeGreaterThan(0);
+      } finally {
+        await mainPage.setViewportSize({ width, height });
+      }
+    });
   });
 
   test.describe('メッセージ表示', () => {

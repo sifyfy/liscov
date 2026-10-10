@@ -47,6 +47,16 @@ describe('TopBar', () => {
     expect(tabs.map((t) => t.getAttribute('aria-label'))).toEqual(['チャット', '視聴者', '設定']);
   });
 
+  it('接続の札が収まらないとき、ホイールの上下で札の列を横にスクロールする', async () => {
+    setup();
+    const strip = screen.getByTestId('connection-strip');
+    // jsdom は幅を測れないので与える (幅 200px に 600px の札)
+    Object.defineProperty(strip, 'clientWidth', { value: 200 });
+    Object.defineProperty(strip, 'scrollWidth', { value: 600 });
+    await fireEvent.wheel(strip, { deltaY: 120 });
+    expect(strip.scrollLeft).toBe(120);
+  });
+
   it('画面のタブはアイコン。名前はヒントと読み上げ用の名前で出し、押すと切り替える', async () => {
     const props = setup();
     const viewers = screen.getByRole('button', { name: '視聴者' });

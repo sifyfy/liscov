@@ -12,6 +12,7 @@
   import Icon from '$lib/components/ui/Icon.svelte';
   import type { IconName } from '$lib/components/ui/Icon.svelte';
   import type { FrontendConnectionState } from '$lib/types';
+  import { wheelScrollsHorizontally } from '$lib/utils/wheel-scroll';
 
   interface Props {
     activeTab: AppTab;
@@ -55,8 +56,8 @@
   </nav>
   <span class="h-5 w-px shrink-0 bg-outline-variant" aria-hidden="true"></span>
 
-  <!-- 接続の札。多いときは横にスクロールする (1 行に保つ) -->
-  <div class="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
+  <!-- 接続の札。多いときは横にスクロールする (1 行に保つ)。ホイールの上下でも横に動く -->
+  <div data-testid="connection-strip" class="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto" {@attach wheelScrollsHorizontally}>
     {#each connections as conn (conn.id)}
       <span
         data-testid="connection-chip"
