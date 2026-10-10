@@ -8,6 +8,7 @@
    * - 文字の大きさは表示の設定 (fontSize) を行の font-size にし、中の文字は em の段階 (text-chat-*) で決める
    * - 試作は src/routes/design-proto/Row.svelte
    */
+  import type { Snippet } from 'svelte';
   import type { ChatMessage } from '$lib/types';
   import { formatTimestamp } from '$lib/utils/format';
   import { messagePriority, type MessageOrigin } from '$lib/design/priority';
@@ -25,6 +26,10 @@
     reading?: string;
     /** 詰めた形 (流れたものの欄・お礼の一覧)。アイコンを出さず、優先順位 1 を面にせず 1 行にする */
     compact?: boolean;
+    /** 名前 (読み仮名) のすぐ後ろに足すもの。メモの出し方の試作 (src/routes/design-proto/memo) で使う */
+    afterName?: Snippet<[ChatMessage]>;
+    /** 本文の下に足すもの。メモの出し方の試作で使う */
+    below?: Snippet<[ChatMessage]>;
   }
 
   let {
@@ -36,6 +41,8 @@
     origin = 'primary',
     reading,
     compact = false,
+    afterName,
+    below,
   }: Props = $props();
 
   let priority = $derived(messagePriority(message, origin));
@@ -140,6 +147,7 @@
   {#if authorReading}
     <span class="ml-1 text-chat-meta text-fg-2">({authorReading})</span>
   {/if}
+  {@render afterName?.(message)}
 {/snippet}
 
 <div
@@ -166,12 +174,15 @@
             : 'border border-outline'}"
         style={colors ? `background-color: ${colors.header_background}; color: ${colors.header_text};` : undefined}>{paidLabel}</span
       >
-      <p class="min-w-0 break-words">
-        {@render name()}
-        {#if isGift}{#if jewelCount != null}<span class="ml-1.5">{giftName} を送りました</span>{/if}{:else if hasBody}<span
-            class="ml-1.5">{@render runs()}</span
-          >{/if}
-      </p>
+      <div class="min-w-0">
+        <p class="break-words">
+          {@render name()}
+          {#if isGift}{#if jewelCount != null}<span class="ml-1.5">{giftName} を送りました</span>{/if}{:else if hasBody}<span
+              class="ml-1.5">{@render runs()}</span
+            >{/if}
+        </p>
+        {@render below?.(message)}
+      </div>
     </div>
   {:else if surface === 'tier' && colors}
     <!-- スパチャ・ステッカー: YouTube のティアの色の面 (浮いて見える理由がある数少ない要素なので角丸) -->
@@ -179,7 +190,7 @@
       <div class="flex items-center gap-2 px-3 py-1.5" style="background: {colors.header_background}; color: {colors.header_text};">
         {@render face('bg-surface/30')}
         <span class="min-w-0 font-bold break-words"
-          >{message.author}{#if authorReading}<span class="ml-1 text-chat-meta font-normal">({authorReading})</span>{/if}</span
+          >{message.author}{#if authorReading}<span class="ml-1 text-chat-meta font-normal">({authorReading})</span>{/if}{@render afterName?.(message)}</span
         >
         <span class="shrink-0 font-normal">{@render meta('')}</span>
         <span class="ml-auto shrink-0 text-chat-amount tabular-nums">{paidLabel}</span>
@@ -187,6 +198,7 @@
       {#if hasBody}
         <p data-testid="paid-body" class="px-3 pt-1 pb-2 break-words" style="color: {colors.body_text};">{@render runs()}</p>
       {/if}
+      {#if below}<div class="px-3 pb-2" style="color: {colors.body_text};">{@render below(message)}</div>{/if}
     </div>
   {:else if surface === 'member' || surface === 'plain'}
     <!-- メンバーシップ・メンバーシップギフト・マイルストーン (member の面)。色の無いスパチャは中立の面 -->
@@ -198,7 +210,7 @@
       <div class="flex items-center gap-2 px-3 py-1.5">
         {@render face('bg-surface/30')}
         <span class="min-w-0 font-bold break-words"
-          >{message.author}{#if authorReading}<span class="ml-1 text-chat-meta font-normal">({authorReading})</span>{/if}</span
+          >{message.author}{#if authorReading}<span class="ml-1 text-chat-meta font-normal">({authorReading})</span>{/if}{@render afterName?.(message)}</span
         >
         <span class="shrink-0 font-normal">{@render meta('')}</span>
         <span class="ml-auto shrink-0 font-bold {surface === 'member' ? 'text-chat-meta' : 'text-chat-amount tabular-nums'}">{paidLabel}</span>
@@ -206,6 +218,7 @@
       {#if hasBody}
         <p data-testid="paid-body" class="px-3 pt-0 pb-2 break-words">{@render runs()}</p>
       {/if}
+      {#if below}<div class="px-3 pb-2">{@render below(message)}</div>{/if}
     </div>
   {:else if surface === 'gift'}
     <!-- ギフト (ジュエル) -->
@@ -232,29 +245,32 @@
     <!-- 優先順位 2〜5: 名前と本文を同じ段落に続ける -->
     <div class="flex items-start gap-2 px-3 py-1.5 hover:bg-fg-1/8 {priority === 2 ? 'bg-highlight/20' : ''}">
       {@render face('bg-surface-highest text-fg-2')}
-      <p class="min-w-0 break-words">
-        {#if partner}
-          <span data-testid="source-label" class="mr-1 rounded-control bg-surface-highest px-1 text-chat-meta whitespace-nowrap text-fg-2"
-            >{message.broadcaster_name}</span
-          >
-        {/if}
-        {#if priority === 2}
-          <span class="mr-1 rounded-control bg-highlight px-1 text-chat-meta font-bold text-surface">初見</span>
-        {:else if priority === 3}
-          <span class="mr-1 rounded-control border border-highlight px-1 text-chat-meta text-highlight">初見</span>
-        {:else if priority === 4}
-          <span class="mr-0.5 text-chat-meta text-highlight" aria-label="配信内で初めてのコメント">●</span>
-        {/if}
-        {@render name()}
-        {@render badges()}
-        {#if paidLabel}
-          <span data-testid="paid-label" class="ml-1 rounded-control border border-outline px-1 text-chat-meta whitespace-nowrap tabular-nums"
-            >{paidLabel}</span
-          >
-        {/if}
-        {#if hasBody}<span class="ml-1.5">{@render runs()}</span>{/if}
-        {@render meta(priority === 2 ? 'text-fg-2' : 'text-fg-3')}
-      </p>
+      <div class="min-w-0">
+        <p class="break-words">
+          {#if partner}
+            <span data-testid="source-label" class="mr-1 rounded-control bg-surface-highest px-1 text-chat-meta whitespace-nowrap text-fg-2"
+              >{message.broadcaster_name}</span
+            >
+          {/if}
+          {#if priority === 2}
+            <span class="mr-1 rounded-control bg-highlight px-1 text-chat-meta font-bold text-surface">初見</span>
+          {:else if priority === 3}
+            <span class="mr-1 rounded-control border border-highlight px-1 text-chat-meta text-highlight">初見</span>
+          {:else if priority === 4}
+            <span class="mr-0.5 text-chat-meta text-highlight" aria-label="配信内で初めてのコメント">●</span>
+          {/if}
+          {@render name()}
+          {@render badges()}
+          {#if paidLabel}
+            <span data-testid="paid-label" class="ml-1 rounded-control border border-outline px-1 text-chat-meta whitespace-nowrap tabular-nums"
+              >{paidLabel}</span
+            >
+          {/if}
+          {#if hasBody}<span class="ml-1.5">{@render runs()}</span>{/if}
+          {@render meta(priority === 2 ? 'text-fg-2' : 'text-fg-3')}
+        </p>
+        {@render below?.(message)}
+      </div>
     </div>
   {/if}
 </div>

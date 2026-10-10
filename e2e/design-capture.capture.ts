@@ -255,6 +255,16 @@ test.describe('Design capture', () => {
     }
   });
 
+  // メモをコメントの行に出す方法の試作。A 名前の横 / B 本文の下 / C 最初だけ
+  test('メモの試作', async () => {
+    test.setTimeout(300000);
+    for (const v of ['a', 'b', 'c'] as const) {
+      await page.evaluate((p) => location.assign(p), `/design-proto/memo?v=${v}`);
+      await expect(page.locator('[data-message-id]').first()).toBeVisible({ timeout: 15000 });
+      await captureAll(`memo-${v}`);
+    }
+  });
+
   // 方向性の試作 (src/routes/design-proto)。架空のデータを持っているので、モックサーバーは使わない。
   // 場面 (docs/design/brief.md §1) ごとに撮る: 通常・コラボ・配信の最後のお礼・参加型
   test('方向性の試作', async () => {
