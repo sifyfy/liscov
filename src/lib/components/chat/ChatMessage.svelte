@@ -3,7 +3,9 @@
    * コメントの 1 行 (docs/specs/02_chat.md「配信中の画面」「メッセージ表示仕様」、見た目の値は docs/design/tokens.md)
    *
    * - 強調は優先順位 (src/lib/design/priority.ts) で決める。1: 面 / 2: 薄い背景 + 塗りの印 / 3: 枠の印 / 4: 点 / 5: 印なし
-   * - 名前と本文を 1 つの段落に続け、省略せず折り返す (省略された文字を読むには操作が要る)
+   * - 優先順位 2〜5 は 2 段: 1 段目に名前・#N・時刻を小さく、2 段目に本文 (本文の頭がどの行もそろい、斜め読みで視線が横に振られない。
+   *   試作 src/routes/design-proto/scan の A)。どの段も省略せず折り返す (省略された文字を読むには操作が要る)
+   * - text-chat-meta の中に text-chat-meta を重ねない (em が二重にかかって縮む)
    * - 相手の配信のコメントは、強さを変えずに配信者名の札で見分ける
    * - メモが登録されている視聴者は、本文の下に「メモ」の札とメモを毎回出す (試作 src/routes/design-proto/memo の B)
    * - 文字の大きさは表示の設定 (fontSize) を行の font-size にし、中の文字は em の段階 (text-chat-*) で決める
@@ -140,8 +142,9 @@
   {/if}
 {/snippet}
 
-{#snippet name()}
-  <span data-testid="author-name" class="font-bold break-words {nameClass}">{message.author}</span>
+<!-- 名前 (読み仮名)。size は名前の大きさ (2 段の行では text-chat-meta。読み仮名は兄弟にして em を重ねない) -->
+{#snippet name(size = '')}
+  <span data-testid="author-name" class="font-bold break-words {size} {nameClass}">{message.author}</span>
   {#if authorReading}
     <span class="ml-1 text-chat-meta text-fg-2">({authorReading})</span>
   {/if}
@@ -247,11 +250,11 @@
   {:else if isSystem}
     <p class="px-3 py-1.5 break-words text-fg-2">{@render runs()}</p>
   {:else}
-    <!-- 優先順位 2〜5: 名前と本文を同じ段落に続ける -->
-    <div class="flex items-start gap-2 px-3 py-1.5 hover:bg-fg-1/8 {priority === 2 ? 'bg-highlight/20' : ''}">
+    <!-- 優先順位 2〜5: 1 段目に名前の行、2 段目に本文。本文の頭はアイコンの右でそろう -->
+    <div class="flex items-start gap-2 px-3 py-1 hover:bg-fg-1/8 {priority === 2 ? 'bg-highlight/20' : ''}">
       {@render face('bg-surface-highest text-fg-2')}
-      <div class="min-w-0">
-        <p class="break-words">
+      <div class="min-w-0 flex-1">
+        <p data-testid="name-line" class="break-words">
           {#if partner}
             <span data-testid="source-label" class="mr-1 rounded-control bg-surface-highest px-1 text-chat-meta whitespace-nowrap text-fg-2"
               >{message.broadcaster_name}</span
@@ -264,16 +267,16 @@
           {:else if priority === 4}
             <span class="mr-0.5 text-chat-meta text-highlight" aria-label="配信内で初めてのコメント">●</span>
           {/if}
-          {@render name()}
+          {@render name('text-chat-meta')}
           {@render badges()}
           {#if paidLabel}
             <span data-testid="paid-label" class="ml-1 rounded-control border border-outline px-1 text-chat-meta whitespace-nowrap tabular-nums"
               >{paidLabel}</span
             >
           {/if}
-          {#if hasBody}<span class="ml-1.5">{@render runs()}</span>{/if}
           {@render meta(priority === 2 ? 'text-fg-2' : 'text-fg-3')}
         </p>
+        {#if hasBody}<p data-testid="message-body" class="break-words">{@render runs()}</p>{/if}
         {#if authorNotes}{@render notesLine('mt-0.5 text-fg-2')}{/if}
       </div>
     </div>

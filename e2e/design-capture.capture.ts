@@ -304,25 +304,20 @@ test.describe('Design capture', () => {
     await captureAll('memo');
   });
 
-  // 斜め読みしやすい行の試作 (A 名前の行 + 本文 / B 名前の列 / C 今の 1 行 / D 名前の列 (右寄せ))。撮影に加えて、
-  // 画面に見えている普通のコメント (優先順位 2〜5) の本文の書き出しの位置 (x) を測り、scan-<場面>-<案>.metrics.json に残す
+  // 斜め読みしやすい行 (A 名前の行 + 本文 / B 名前の列 / C 1 行 / D 名前の列 (右寄せ) のうち A を選んだ。本体の部品で撮る)。撮影に加えて、
+  // 画面に見えている普通のコメント (優先順位 2〜5) の本文の書き出しの位置 (x) を測り、scan.metrics.json に残す
   test('斜め読みの試作', async () => {
-    test.setTimeout(900000);
-    // コメントが速い場面は、最新の付近が通常と同じデータになるので通常だけを撮る
-    for (const scene of ['normal'] as const) {
-      for (const v of ['a', 'b', 'c', 'd'] as const) {
-        await page.evaluate((p) => location.assign(p), `/design-proto/scan?v=${v}&scene=${scene}`);
-        await expect(page.locator('[data-scan-list]')).toBeVisible({ timeout: 15000 });
-        await captureAll(`scan-${scene}-${v}`);
-        const metrics: Record<string, unknown> = {};
-        for (const { width, height } of SIZES) {
-          await page.setViewportSize({ width, height });
-          await page.waitForTimeout(300);
-          metrics[width] = await page.evaluate(measureScan);
-        }
-        fs.writeFileSync(path.join(OUT_DIR, `scan-${scene}-${v}.metrics.json`), JSON.stringify(metrics, null, 2));
-      }
+    test.setTimeout(300000);
+    await page.evaluate((p) => location.assign(p), '/design-proto/scan');
+    await expect(page.locator('[data-scan-list]')).toBeVisible({ timeout: 15000 });
+    await captureAll('scan');
+    const metrics: Record<string, unknown> = {};
+    for (const { width, height } of SIZES) {
+      await page.setViewportSize({ width, height });
+      await page.waitForTimeout(300);
+      metrics[width] = await page.evaluate(measureScan);
     }
+    fs.writeFileSync(path.join(OUT_DIR, 'scan.metrics.json'), JSON.stringify(metrics, null, 2));
   });
 
   // 方向性の試作 (src/routes/design-proto)。架空のデータを持っているので、モックサーバーは使わない。

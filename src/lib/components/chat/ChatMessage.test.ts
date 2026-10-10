@@ -58,13 +58,47 @@ describe('ChatMessage', () => {
 		});
 
 	describe('1 行の形', () => {
-		it('名前と本文を同じ段落に続ける', () => {
+		// 02_chat.md「1 行の形」: 2 段にする。1 段目に名前・#N・時刻、2 段目に本文 (本文の頭がどの行もそろう)
+		it('1 段目 (名前の行) に名前・#N・時刻、2 段目に本文', () => {
 			const { container } = renderRow(
-				createMessage({ author: 'しおこんぶ', content: 'このボス強すぎない？', runs: [{ type: 'Text', content: 'このボス強すぎない？' }] }),
+				createMessage({
+					author: 'しおこんぶ',
+					content: 'いったん回復しよう',
+					runs: [{ type: 'Text', content: 'いったん回復しよう' }],
+					in_stream_comment_count: 8,
+					timestamp: '21:26',
+				}),
+				{ showTimestamps: true },
 			);
-			const paragraph = root(container).querySelector('p') as HTMLElement;
-			expect(paragraph.textContent).toContain('しおこんぶ');
-			expect(paragraph.textContent).toContain('このボス強すぎない？');
+			const nameLine = root(container).querySelector('[data-testid="name-line"]') as HTMLElement;
+			const body = root(container).querySelector('[data-testid="message-body"]') as HTMLElement;
+			expect(nameLine.textContent?.replace(/\s+/g, ' ').trim()).toBe('しおこんぶ #8 21:26');
+			expect(body.textContent?.trim()).toBe('いったん回復しよう');
+			expect(nameLine.contains(body)).toBe(false);
+			expect(nameLine.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+		});
+
+		it('本文の頭は名前の長さによらず同じ入れ物の頭から始まる (名前の後ろに続けない)', () => {
+			for (const author of ['Rin', 'とても長い名前のチャンネルでございます公式']) {
+				const { container } = renderRow(createMessage({ author }));
+				const body = root(container).querySelector('[data-testid="message-body"]') as HTMLElement;
+				expect(body.textContent?.trim()).toBe('テストメッセージ');
+				expect(body.textContent).not.toContain(author);
+			}
+		});
+
+		it('小さい文字 (text-chat-meta) の中に小さい文字を重ねない (em が二重にかかって縮むため)', () => {
+			const rows = [
+				createMessage({ author_reading: 'てすと', author_notes: 'メモ', in_stream_comment_count: 1, is_first_time_viewer: true, is_member: true }),
+				createMessage({ in_stream_comment_count: 3 }),
+				superchat({ author_reading: 'てすと', author_notes: 'メモ' }),
+			];
+			for (const message of rows) {
+				for (const compact of [false, true]) {
+					const { container } = renderRow(message, { compact, showTimestamps: true });
+					expect(container.querySelectorAll('.text-chat-meta .text-chat-meta')).toHaveLength(0);
+				}
+			}
 		});
 
 		it('長い名前・本文を省略しない (truncate・text-overflow を使わない)', () => {
@@ -99,9 +133,10 @@ describe('ChatMessage', () => {
 				);
 				const notes = notesOf(container)!;
 				expect(notes.textContent?.replace(/\s+/g, ' ').trim()).toBe('メモ ネタバレしがち。注意');
-				const paragraph = root(container).querySelector('p') as HTMLElement;
-				expect(paragraph.textContent).toContain('いったん回復しよう');
-				expect(paragraph.contains(notes)).toBe(false);
+				const body = root(container).querySelector('[data-testid="message-body"]') as HTMLElement;
+				expect(body.textContent).toContain('いったん回復しよう');
+				expect(body.contains(notes)).toBe(false);
+				expect(body.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 			});
 
 			it('メモが無ければ出さない', () => {
