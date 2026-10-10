@@ -1,9 +1,4 @@
 {
-  "src/lib/components/auth/AuthIndicator.svelte": {
-    "better-tailwindcss/no-restricted-classes": {
-      "count": 4
-    }
-  },
   "src/lib/components/auth/StorageErrorDialog.svelte": {
     "better-tailwindcss/no-restricted-classes": {
       "count": 25

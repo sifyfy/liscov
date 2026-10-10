@@ -6,19 +6,21 @@
    * 未接続でコメントも無いときは、流れの場所に配信に接続する欄を出す (配信の準備なので操作してよい)
    */
   import { ChatDisplay, ConnectForm, ControlPanel, StatusLine } from '$lib/components/chat';
-  import { chatStore } from '$lib/stores';
+  import { authStore, chatStore, websocketStore } from '$lib/stores';
   import ErrorBoundary from '$lib/components/ui/ErrorBoundary.svelte';
   import { countRecentMessages, shownCountLabel } from '$lib/utils/chat-stats';
   import { emptyReactions, reactionsLabel, statusReactions } from '$lib/utils/reactions';
+  import { statusAlerts, type StatusAlert } from '$lib/utils/status-alerts';
 
   interface Props {
     panelOpen: boolean;
     /** 接続が成立したとき (接続したら操作パネルを隠す) */
     onConnected: () => void;
     onOpenAuthSettings: () => void;
+    onOpenControlPanel: () => void;
   }
 
-  let { panelOpen, onConnected, onOpenAuthSettings }: Props = $props();
+  let { panelOpen, onConnected, onOpenAuthSettings, onOpenControlPanel }: Props = $props();
 
   // 成立した接続も、表示するコメントも無い (接続の途中は欄を出したまま。失敗したら入力をそのまま直せる)
   let showConnectInFlow = $derived(
@@ -38,6 +40,13 @@
   let shownLabel = $derived(shownCountLabel(chatStore.displayedMessages.length, chatStore.messages.length));
   // リアクションは主の配信のものだけ (02_chat.md「状態の行のリアクション」)
   let primaryReactions = $derived(chatStore.primaryConnection?.reactions ?? emptyReactions);
+  // 操作パネルを閉じていても出す異常 (02_chat.md「状態 (異常のときだけ目立つ)」)。
+  // ログインは設定のログインを、WebSocket は操作パネルの状態を開く
+  let alerts = $derived(statusAlerts(authStore.indicatorState, websocketStore));
+  function openAlert(alert: StatusAlert) {
+    if (alert === 'websocket_stopped') onOpenControlPanel();
+    else onOpenAuthSettings();
+  }
 </script>
 
 <div class="flex h-full min-h-0 flex-col overflow-hidden bg-surface">
@@ -69,5 +78,7 @@
     reactionsLabel={reactionsLabel(primaryReactions)}
     error={chatStore.error}
     onDismissError={() => chatStore.dismissError()}
+    {alerts}
+    onAlert={openAlert}
   />
 </div>

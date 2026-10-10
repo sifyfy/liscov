@@ -78,7 +78,12 @@
     <!-- Chatタブ: VList の再マウントコストを避けるため display:none で維持 -->
     <div style:display={activeTab === 'chat' ? 'flex' : 'none'} class="flex min-h-0 flex-1 flex-col overflow-hidden">
       <ErrorBoundary name="チャットタブ">
-        <ChatTab {panelOpen} onConnected={handleConnected} onOpenAuthSettings={openAuthSettings} />
+        <ChatTab
+          {panelOpen}
+          onConnected={handleConnected}
+          onOpenAuthSettings={openAuthSettings}
+          onOpenControlPanel={() => (panelOpen = true)}
+        />
       </ErrorBoundary>
     </div>
     {#if activeTab === 'viewers'}

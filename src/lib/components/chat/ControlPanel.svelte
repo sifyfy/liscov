@@ -5,7 +5,7 @@
    * 準備・合間・配信後の操作をまとめる。配信中は閉じておける (配信中は操作ゼロが前提)。
    * 接続の一覧・配信に接続・表示の設定・ログインと WebSocket の状態・「接続したら操作パネルを隠す」
    */
-  import { chatStore, configStore, websocketStore } from '$lib/stores';
+  import { authStore, chatStore, configStore, websocketStore } from '$lib/stores';
   import { AuthIndicator } from '$lib/components/auth';
   import Icon from '$lib/components/ui/Icon.svelte';
   import ConnectionList from './ConnectionList.svelte';
@@ -81,9 +81,6 @@
         class="rounded-control border border-outline bg-surface px-1.5 py-1 text-label text-fg-1"
       >
         <option value="unlimited">無制限</option>
-        <option value="50">50件</option>
-        <option value="100">100件</option>
-        <option value="200">200件</option>
         <option value="500">500件</option>
       </select>
     </label>
@@ -136,7 +133,7 @@
 
   <!-- ログイン・WebSocket・操作パネルの設定 -->
   <div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-caption text-fg-2">
-    <AuthIndicator onclick={onOpenAuthSettings} />
+    <AuthIndicator state={authStore.indicatorState} onclick={onOpenAuthSettings} />
     <span data-testid="websocket-status" class="flex items-center gap-1.5 whitespace-nowrap">
       <span class="size-1.5 rounded-full {websocketStore.isRunning ? 'bg-success' : 'bg-fg-3'}" aria-hidden="true"></span>
       {#if websocketStore.isRunning}

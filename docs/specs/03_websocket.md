@@ -12,7 +12,17 @@ OBSオーバーレイ、カスタムボット、外部分析ツールなど、�
 |---------|------|
 | アプリ起動 | WebSocketサーバーがポート8765で自動起動。使用中の場合は8766〜8774を順に試行 |
 | 全ポート使用中 | エラーログ出力。アプリは正常起動を継続（WebSocket機能のみ無効） |
+| 起動した後に、接続の受け付けが止まった（受け付けのタスクが異常終了した） | `websocket_get_status` は `is_running: false` を返す（状態の旗だけでなく、受け付けのタスクが終わっていないかも見る） |
 | アプリ終了 | サーバーも自動終了 |
+
+### 画面の表示
+
+| 状況 | 結果 |
+|------|------|
+| 動いている | 操作パネルの下段に `WebSocket: ポート 8765・2 件の接続` |
+| 止まっている（起動に失敗した・途中で止まった） | 操作パネルの下段に `WebSocket: 止まっています`。操作パネルを閉じていても、チャットの状態の行に異常として出す（02_chat.md「状態 (異常のときだけ目立つ)」） |
+| 起動を待っている（最大 10 秒） | 状態の行には出さない |
+| 起動を待ち終えた後 | 30 秒ごとに `websocket_get_status` で状態を取り直す（途中で止まったことに気づくため。負荷を下げるため間隔は長めにしている。接続数はイベントでも数える） |
 
 ### クライアント接続
 
@@ -378,14 +388,13 @@ Chat Service
 
 ### UI要素
 
+振る舞いは「画面の表示」が正。
+
 | 要素 | 説明 |
 |-----|------|
-| ステータス表示 | ヘッダーに `WS:ポート番号(接続数)` 形式で表示 |
-
-### 表示例
-
-- 稼働中: `WS:8765(2)` （ポート8765で2クライアント接続中）
-- 停止中: 非表示
+| 操作パネルの状態 | `ControlPanel.svelte` の下段（`data-testid="websocket-status"`） |
+| 状態の行の異常 | `ChatTab.svelte` が `src/lib/utils/status-alerts.ts` の `statusAlerts` で求める（02_chat.md「フロントエンド」） |
+| 定期の確認 | `websocketStore.init()` が起動を待ち終えた後、30 秒ごとに `refreshStatus()` を呼ぶ（`STATUS_POLL_MS`） |
 
 ### Store状態
 
@@ -394,6 +403,8 @@ interface WebSocketStore {
     isRunning: boolean;
     actualPort: number | null;
     connectedClients: number;
+    error: string | null;   // 状態を取れなかったときの理由
+    initialized: boolean;   // 起動を待ち終えたか
 }
 ```
 

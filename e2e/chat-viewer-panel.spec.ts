@@ -453,69 +453,61 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
     });
   });
 
-  test.describe('Display Limit (displayLimit)', () => {
-    test('should limit displayed messages when displayLimit is set', async () => {
-      // Connect to stream
-      const urlInput = (await openUrlInput(mainPage));
+  // spec: docs/specs/02_chat.md「表示件数制限」・「状態の行の統計（StatusLine）」の「表示中の件数」
+  test.describe('表示件数 (無制限 / 500件)', () => {
+    async function connect() {
+      const urlInput = await openUrlInput(mainPage);
       await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
+    }
 
-      // Add 80 messages
-      const addPromises = [];
-      for (let i = 1; i <= 80; i++) {
-        addPromises.push(addMockMessage({
-          message_type: 'text',
-          author: `LimitUser${i}`,
-          content: `LimitMsg_${String(i).padStart(3, '0')}`,
-        }));
+    test('500件を選び、全 800 件 → 新しい 500 件を出し、状態の行に「表示中 500 / 全 800 件」', async () => {
+      await connect();
+
+      // 並列のバッチの中の到着順は決まらないので、最後の 1 件は順に送る
+      for (let batch = 0; batch < 8; batch++) {
+        const count = batch === 7 ? 99 : 100;
+        await Promise.all(
+          Array.from({ length: count }, (_, i) =>
+            addMockMessage({
+              message_type: 'text',
+              author: `LimitUser${batch * 100 + i + 1}`,
+              content: `LimitMsg_${String(batch * 100 + i + 1).padStart(3, '0')}`,
+            }),
+          ),
+        );
       }
-      await Promise.all(addPromises);
+      await addMockMessage({ message_type: 'text', author: 'LimitUser800', content: 'LimitMsg_800' });
+      await expect(mainPage.getByText('800 件', { exact: true })).toBeVisible({ timeout: 20000 });
 
-      // Verify all messages received (状態の行の件数)
-      await expect(mainPage.getByText('80 件', { exact: true })).toBeVisible({ timeout: 10000 });
-
-      // Set displayLimit to 50 via select
+      // 起動したら無制限
       await openControlPanel(mainPage);
       const displayLimitSelect = mainPage.getByRole('combobox', { name: '表示件数' });
-      await displayLimitSelect.selectOption('50');
+      await expect(displayLimitSelect).toHaveValue('unlimited');
+      await displayLimitSelect.selectOption('500');
       // 選んだ件数が選択欄に出たまま (以前の不具合: 数値と選択肢の文字列が合わず空欄になっていた)
-      await expect(displayLimitSelect).toHaveValue('50');
+      await expect(displayLimitSelect).toHaveValue('500');
+      await expect(mainPage.getByText('表示中 500 / 全 800 件')).toBeVisible({ timeout: 3000 });
 
-      // 状態の行に「表示中 50 / 全 80 件」が出る (全 80 件のうち 50 件だけ表示)
-      await expect(mainPage.getByText('表示中 50 / 全 80 件')).toBeVisible({ timeout: 3000 });
-
-      // Scroll VList to bottom to ensure latest message is rendered in DOM
+      // 新しい 500 件だけ。最新は出て、いちばん古いものは一覧から外れる
       const vlistContainer = mainPage.locator('[style*="overflow-y"]').filter({ has: mainPage.locator('[data-message-id]') }).first();
-      await vlistContainer.evaluate(el => { el.scrollTop = el.scrollHeight; });
+      await vlistContainer.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+      await expect(mainPage.locator('text=LimitMsg_800')).toBeVisible({ timeout: 5000 });
+      await vlistContainer.hover();
+      await mainPage.mouse.wheel(0, -200000);
+      await expect(mainPage.locator('text=LimitMsg_301')).toBeVisible({ timeout: 5000 });
+      await expect(mainPage.locator('text=LimitMsg_001')).toHaveCount(0);
 
-      // Latest message should be visible (displayedMessages slices from end)
-      await expect(mainPage.locator('text=LimitMsg_080')).toBeVisible({ timeout: 5000 });
-
-      // Scroll to top to verify early messages are excluded
-      await vlistContainer.evaluate(el => { el.scrollTop = 0; });
-
-      // Early messages should NOT be in the DOM (excluded by displayLimit)
-      await expect(mainPage.locator('text=LimitMsg_001')).not.toBeVisible();
-
-      // Reset to unlimited
+      // 無制限に戻すと、隠しているものが無くなり「表示中」は消える
       await displayLimitSelect.selectOption('unlimited');
-
-      // 隠しているものが無くなるので「表示中」は消える
       await expect(mainPage.getByText(/表示中/)).toHaveCount(0, { timeout: 3000 });
 
-      // Disconnect
       await disconnectAndInitialize(mainPage);
     });
 
-    test('should update status bar counts when displayLimit changes', async () => {
-      // Connect to stream
-      const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
-      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
-      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
-
-      // Add 30 messages sequentially (preserves order for VList scroll verification)
+    test('全 30 件で、表示件数 500 → 隠しているものが無いので「表示中」は出さない', async () => {
+      await connect();
       for (let i = 1; i <= 30; i++) {
         await addMockMessage({
           message_type: 'text',
@@ -523,79 +515,13 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
           content: `StatusMsg_${String(i).padStart(3, '0')}`,
         });
       }
-
-      // Verify initial state: unlimited (隠しているものが無いので「表示中」は出ない)
       await expect(mainPage.getByText('30 件', { exact: true })).toBeVisible({ timeout: 10000 });
-      await expect(mainPage.getByText(/表示中/)).toHaveCount(0);
 
-      // Switch to 50 (all 30 should still display since 30 < 50)
       await openControlPanel(mainPage);
-      const displayLimitSelect = mainPage.getByRole('combobox', { name: '表示件数' });
-      await displayLimitSelect.selectOption('50');
-
-      // 30 件は 50 件の枠に収まるので、隠しているものが無く「表示中」は出ないまま
+      await mainPage.getByRole('combobox', { name: '表示件数' }).selectOption('500');
       await expect(mainPage.getByText('30 件', { exact: true })).toBeVisible();
       await expect(mainPage.getByText(/表示中/)).toHaveCount(0);
 
-      // All messages should still be in displayedMessages (30 < 50)
-      // VList virtualizes rendering, so scroll to check specific items
-      const vlistContainer = mainPage.locator('[style*="overflow-y"]').filter({ has: mainPage.locator('[data-message-id]') }).first();
-
-      // 手でいちばん上までスクロールして最初のコメントを確かめる
-      // (最新を追っている間にプログラムで scrollTop を変えると、最新への合わせ直しで戻される。手でのスクロールなら追うのが止まる)
-      await vlistContainer.hover();
-      await mainPage.mouse.wheel(0, -20000);
-      await expect(mainPage.locator('text=StatusMsg_001')).toBeVisible({ timeout: 5000 });
-
-      // Scroll to bottom to verify last message
-      await vlistContainer.evaluate(el => { el.scrollTop = el.scrollHeight; });
-      await expect(mainPage.locator('text=StatusMsg_030')).toBeVisible({ timeout: 5000 });
-
-      // Disconnect
-      await disconnectAndInitialize(mainPage);
-    });
-
-    test('should restrict display to displayLimit with large message count', async () => {
-      // Connect to stream
-      const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
-      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
-      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
-
-      // Set displayLimit to 100 before adding messages
-      await openControlPanel(mainPage);
-      const displayLimitSelect = mainPage.getByRole('combobox', { name: '表示件数' });
-      await displayLimitSelect.selectOption('100');
-      // 効いたことは、下で件数を受けたあとの「表示中 100 / 全 150 件」で確かめる
-
-      // Add 150 messages in parallel batches for speed
-      // 並列バッチ内の到着順は非決定的なので、最終メッセージは順次送信で保証
-      for (let batch = 0; batch < 3; batch++) {
-        const addPromises = [];
-        for (let i = 1; i <= 50; i++) {
-          const num = batch * 50 + i;
-          addPromises.push(addMockMessage({
-            message_type: 'text',
-            author: `BulkUser${num}`,
-            content: `BulkMsg_${String(num).padStart(3, '0')}`,
-          }));
-        }
-        await Promise.all(addPromises);
-      }
-
-      // 状態の行: 150 件を受けたが、表示は 100 件に絞られる
-      await expect(mainPage.getByText('150 件', { exact: true })).toBeVisible({ timeout: 5000 });
-      await expect(mainPage.getByText('表示中 100 / 全 150 件')).toBeVisible();
-
-      // Scroll to top to check early messages are trimmed
-      const vlistContainer = mainPage.locator('[style*="overflow-y"]').filter({ has: mainPage.locator('[data-message-id]') }).first();
-      await vlistContainer.evaluate(el => { el.scrollTop = 0; });
-
-      // Early messages (within first 50) should NOT be visible
-      // displayedMessages = filteredMessages.slice(-100), so only messages 1-50 are trimmed
-      await expect(mainPage.locator('text=BulkMsg_001')).not.toBeVisible();
-
-      // Disconnect
       await disconnectAndInitialize(mainPage);
     });
   });

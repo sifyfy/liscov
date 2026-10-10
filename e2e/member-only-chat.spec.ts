@@ -93,7 +93,7 @@ test.describe('Member-Only Stream Chat Access', () => {
     await navigateToTab(mainPage, 'Chat');
     await openControlPanel(mainPage);
     const authIndicator = mainPage.getByRole('region', { name: '操作パネル' }).getByTestId('auth-indicator');
-    await expect(authIndicator).toContainText('認証済み', { timeout: 15000 });
+    await expect(authIndicator).toHaveText('ログイン中', { timeout: 15000 });
 
     log.info('Login completed, ready for member-only stream tests');
   });

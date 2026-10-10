@@ -23,6 +23,7 @@ export const DESIGN_MIGRATED = [
 	'src/lib/components/chat/ConnectForm.svelte',
 	'src/lib/components/chat/ConnectionList.svelte',
 	'src/lib/components/chat/ControlPanel.svelte',
+	'src/lib/components/auth/AuthIndicator.svelte',
 	'src/lib/components/layout/TopBar.svelte',
 	'src/lib/components/layout/AppShell.svelte',
 	'src/lib/components/tabs/ChatTab.svelte',

@@ -10,6 +10,10 @@
   import ChatMessage from '$lib/components/chat/ChatMessage.svelte';
   import FlowedSection from '$lib/components/chat/FlowedSection.svelte';
   import ThanksList from '$lib/components/chat/ThanksList.svelte';
+  import StatusLine from '$lib/components/chat/StatusLine.svelte';
+  import AuthIndicator from '$lib/components/auth/AuthIndicator.svelte';
+  import type { AuthIndicatorState } from '$lib/types';
+  import type { StatusAlert } from '$lib/utils/status-alerts';
   import { ROW_SAMPLES, feedOf, newcomersOf, originOf, supportersOf } from '../design-proto/data';
 
   // 流れたものの欄とお礼の一覧の見本 (試作の通常の場面のデータ)
@@ -18,6 +22,27 @@
   const flowedSupporters = [...supporters].reverse();
   const flowedNewcomers = newcomersOf(feed);
   const noInfo = () => undefined;
+
+  // 状態の行の見本 (02_chat.md「状態 (異常のときだけ目立つ)」)。統計とリアクションは配信中のありがちな値
+  const REACTIONS = [
+    ['❤', 430],
+    ['🎉', 418],
+    ['😄', 94],
+  ] as const;
+  const STATUS_SAMPLES: readonly { label: string; alerts: readonly StatusAlert[]; error: string | null }[] = [
+    { label: 'ふだん', alerts: [], error: null },
+    { label: 'セッション切れ', alerts: ['session_expired'], error: null },
+    { label: 'セッション切れと WebSocket の停止', alerts: ['session_expired', 'websocket_stopped'], error: null },
+    { label: '接続のエラー', alerts: [], error: 'チャットの取得に15回続けて失敗したため切断しました' },
+  ];
+  const AUTH_STATES: readonly AuthIndicatorState[] = [
+    'unauthenticated',
+    'authenticated_valid',
+    'authenticated_checking',
+    'authenticated_invalid',
+    'authenticated_error',
+    'storage_error',
+  ];
 
   const SAMPLE = '初見です！よろしくお願いします 0123456789 ¥10,000 さっきの謎解き、本棚の順番は左から赤・青・緑';
 
@@ -122,6 +147,39 @@
       <ThanksList items={supporters} fontSize={13} showTimestamps {originOf} infoOf={noInfo} onClose={() => {}} />
       <FlowedSection label="流れた新規さん" items={flowedNewcomers} fontSize={13} showTimestamps {originOf} infoOf={noInfo} />
       <FlowedSection label="流れたスパチャ等" items={flowedSupporters} fontSize={13} showTimestamps {originOf} infoOf={noInfo} />
+    </div>
+  </section>
+
+  <!-- 状態の行とログインの状態 (本物のコンポーネント) -->
+  <section class="mt-8">
+    <h2 class="text-label text-fg-2">状態の行 (異常のときだけ目立つ)</h2>
+    <div data-testid="status-samples" class="mt-3 flex max-w-lg flex-col gap-3">
+      {#each STATUS_SAMPLES as sample (sample.label)}
+        <div>
+          <p class="text-caption text-fg-3">{sample.label}</p>
+          <div class="bg-surface">
+            <StatusLine
+              connected
+              count={1820}
+              perMinute={48}
+              viewers={312}
+              shownLabel={null}
+              reactions={REACTIONS}
+              reactionsLabel="リアクション"
+              error={sample.error}
+              onDismissError={() => {}}
+              alerts={sample.alerts}
+              onAlert={() => {}}
+            />
+          </div>
+        </div>
+      {/each}
+    </div>
+    <h2 class="mt-6 text-label text-fg-2">ログインの状態 (操作パネルの下段)</h2>
+    <div data-testid="auth-samples" class="mt-3 flex max-w-lg flex-col items-start gap-2 bg-surface-low px-3 py-2 text-caption text-fg-2">
+      {#each AUTH_STATES as state (state)}
+        <AuthIndicator {state} onclick={() => {}} />
+      {/each}
     </div>
   </section>
 </main>

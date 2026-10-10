@@ -33,8 +33,8 @@ describe('shownCountLabel', () => {
 		expect(shownCountLabel(30, 30)).toBeNull();
 	});
 
-	it('全 80 件で、表示件数を 50 にした → 表示中 50 / 全 80 件', () => {
-		expect(shownCountLabel(50, 80)).toBe('表示中 50 / 全 80 件');
+	it('全 800 件で、表示件数を 500 にした → 表示中 500 / 全 800 件', () => {
+		expect(shownCountLabel(500, 800)).toBe('表示中 500 / 全 800 件');
 	});
 
 	it('全 80 件で、検索で 12 件に絞った → 表示中 12 / 全 80 件', () => {

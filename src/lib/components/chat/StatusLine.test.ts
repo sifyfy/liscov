@@ -14,6 +14,8 @@ const base = {
   reactionsLabel: '',
   error: null,
   onDismissError: () => {},
+  alerts: [],
+  onAlert: () => {},
 };
 
 describe('StatusLine', () => {
@@ -65,5 +67,32 @@ describe('StatusLine', () => {
     expect(line.className).toContain('bg-error');
     await fireEvent.click(screen.getByRole('button', { name: '閉じる' }));
     expect(onDismissError).toHaveBeenCalledOnce();
+  });
+
+  it('異常がなければ出さない', () => {
+    render(StatusLine, { props: base });
+    expect(screen.queryByTestId('status-alert')).toBeNull();
+  });
+
+  it('セッション切れ・WebSocket の停止: error の色の文字で出し、押すとその異常を知らせる。行は error の面にしない', async () => {
+    const onAlert = vi.fn();
+    const { container } = render(StatusLine, {
+      props: { ...base, alerts: ['session_expired', 'websocket_stopped'], onAlert },
+    });
+    const alerts = screen.getAllByTestId('status-alert');
+    expect(alerts.map((a) => a.textContent?.trim())).toEqual(['ログイン: セッション切れ', 'WebSocket: 止まっています']);
+    expect(alerts.every((a) => a.className.includes('text-error'))).toBe(true);
+    expect(container.querySelector('.bg-error')).toBeNull();
+    // 直るまで出したまま (閉じるボタンは無い)
+    expect(screen.queryByRole('button', { name: '閉じる' })).toBeNull();
+    await fireEvent.click(alerts[0]);
+    expect(onAlert).toHaveBeenCalledWith('session_expired');
+    await fireEvent.click(alerts[1]);
+    expect(onAlert).toHaveBeenCalledWith('websocket_stopped');
+  });
+
+  it('未接続でも異常は出す', () => {
+    render(StatusLine, { props: { ...base, connected: false, alerts: ['storage_error'] } });
+    expect(screen.getByTestId('status-alert').textContent?.trim()).toBe('ストレージエラー');
   });
 });

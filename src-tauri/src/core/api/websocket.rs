@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{RwLock, broadcast};
+use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::Message;
 
 type ClientId = u64;
@@ -72,6 +73,8 @@ pub struct WebSocketServer {
     client_event_tx: broadcast::Sender<ClientEvent>,
     next_client_id: Arc<AtomicU64>,
     shutdown: Arc<AtomicBool>,
+    /// 接続を受け付けるタスク。異常終了すると状態の旗は Running のまま残るので、終わっていないかも見る
+    accept_task: std::sync::Mutex<Option<JoinHandle<()>>>,
 }
 
 impl WebSocketServer {
@@ -87,6 +90,7 @@ impl WebSocketServer {
             client_event_tx,
             next_client_id: Arc::new(AtomicU64::new(1)),
             shutdown: Arc::new(AtomicBool::new(false)),
+            accept_task: std::sync::Mutex::new(None),
         }
     }
 
@@ -134,7 +138,7 @@ impl WebSocketServer {
         let shutdown = Arc::clone(&self.shutdown);
         let state = Arc::clone(&self.state);
 
-        tokio::spawn(async move {
+        let accept_task = tokio::spawn(async move {
             while !shutdown.load(Ordering::SeqCst) {
                 tokio::select! {
                     result = listener.accept() => {
@@ -163,6 +167,10 @@ impl WebSocketServer {
             let mut state_guard = state.write().await;
             *state_guard = ServerState::Stopped;
         });
+        *self
+            .accept_task
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(accept_task);
 
         Ok(bound_port)
     }
@@ -227,8 +235,31 @@ impl WebSocketServer {
         self.state.read().await.clone()
     }
 
+    /// 動いているか (03_websocket.md「サーバーライフサイクル」)。
+    /// 状態の旗が Running でも、受け付けのタスクが終わっていたら (異常終了) 動いていない
     pub async fn is_running(&self) -> bool {
-        *self.state.read().await == ServerState::Running
+        let accepting = self
+            .accept_task
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .is_some_and(|task| !task.is_finished());
+        accepting && *self.state.read().await == ServerState::Running
+    }
+
+    /// テスト用: 受け付けのタスクを、状態の旗を戻さずに終わらせる (異常終了の代わり)
+    #[cfg(test)]
+    async fn abort_accept_task(&self) {
+        let finished = || {
+            let guard = self.accept_task.lock().unwrap();
+            let task = guard.as_ref().expect("起動している");
+            task.abort();
+            task.is_finished()
+        };
+        // 取り消しはランタイムが進めるので、制御を返しながら待つ (ロックは await をまたがない)
+        while !finished() {
+            tokio::task::yield_now().await;
+        }
     }
 
     pub async fn actual_port(&self) -> Option<u16> {
@@ -324,4 +355,30 @@ async fn handle_connection(
     tracing::info!("Client {} disconnected", client_id);
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // 03_websocket.md「サーバーライフサイクル」: 起動した後に受け付けが止まったら、動いていないと返す
+    #[tokio::test]
+    async fn 受け付けのタスクが状態を戻さずに終わったら動いていないと返す() {
+        let server = WebSocketServer::new(0);
+        server.start().await.unwrap();
+        assert!(server.is_running().await);
+
+        // 異常終了 (panic) の代わりに、受け付けのタスクを外から止める。どちらも状態の旗は Running のまま残る
+        server.abort_accept_task().await;
+
+        assert!(!server.is_running().await);
+    }
+
+    #[tokio::test]
+    async fn 止めたら動いていないと返す() {
+        let server = WebSocketServer::new(0);
+        server.start().await.unwrap();
+        server.stop().await;
+        assert!(!server.is_running().await);
+    }
 }
