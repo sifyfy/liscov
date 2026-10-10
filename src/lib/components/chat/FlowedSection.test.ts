@@ -1,11 +1,13 @@
-import { describe, it, expect } from 'vitest';
-import { render } from '@testing-library/svelte';
+import { describe, it, expect, vi } from 'vitest';
+import { render, fireEvent } from '@testing-library/svelte';
 import FlowedSection from './FlowedSection.svelte';
 import type { ChatMessage } from '$lib/types';
 
 // spec: docs/specs/02_chat.md「配信中の画面」の「流れたもの」
 // - 欄の中の並び: 新しいものが上。新しい 2 件は全文の行、それより前は「● 金額 名前」(新規さんは「初見 名前」) の短い札
 // - あるときだけ出す
+// - 欄の上の境目をドラッグすると高さの上限が変わる。ダブルクリックで既定 (1/8)、↑↓ は高さの 1/50 ずつ。離したときに保存する
+// - 例: 流れの部分が 800px、中身が 300px、既定の 100px から 60px 上へ引くと 0.2 (160px)
 function message(id: string, overrides: Partial<ChatMessage> = {}): ChatMessage {
   return {
     id,
@@ -84,5 +86,62 @@ describe('FlowedSection', () => {
     const { container } = renderSection('流れた新規さん', items);
     const chips = [...container.querySelectorAll('[data-testid="flowed-chip"]')].map((el) => el.textContent?.replace(/\s+/g, ' ').trim());
     expect(chips).toEqual(['初見 name-c']);
+  });
+
+  describe('欄の高さ', () => {
+    const renderResizable = (heightRatio = 0.125) => {
+      const onHeightChange = vi.fn();
+      const view = render(FlowedSection, {
+        props: {
+          label: '流れた新規さん',
+          items: [message('a'), message('b')],
+          fontSize: 13,
+          showTimestamps: true,
+          originOf: () => 'primary' as const,
+          infoOf: () => undefined,
+          heightRatio,
+          onHeightChange,
+        },
+      });
+      const section = view.container.querySelector('section') as HTMLElement;
+      // 例: 流れの部分 800px、見えている欄 100px、中身 300px (jsdom は測れないので与える)
+      Object.defineProperty(section.parentElement, 'clientHeight', { configurable: true, value: 800 });
+      Object.defineProperty(section, 'offsetHeight', { configurable: true, value: 100 });
+      Object.defineProperty(section, 'scrollHeight', { configurable: true, value: 300 });
+      const handle = view.getByRole('separator', { name: '流れた新規さんの高さ' });
+      return { ...view, section, handle, onHeightChange };
+    };
+
+    it('境目に今の割合 (%) を出し、欄の高さの上限を割合で決める', () => {
+      const { section, handle } = renderResizable(0.2);
+      expect(handle.getAttribute('aria-valuenow')).toBe('20');
+      expect(handle.getAttribute('aria-orientation')).toBe('horizontal');
+      expect(section.style.maxHeight).toContain('20%');
+    });
+
+    it('境目を 60px 上へ引いて離すと 0.2 を保存する (動かしている間も欄の高さが変わる)', async () => {
+      const { section, handle, onHeightChange } = renderResizable();
+      await fireEvent.pointerDown(handle, { clientY: 500, pointerId: 1 });
+      await fireEvent.pointerMove(handle, { clientY: 440, pointerId: 1 });
+      expect(section.style.maxHeight).toContain('20%');
+      expect(onHeightChange).not.toHaveBeenCalled();
+      await fireEvent.pointerUp(handle, { clientY: 440, pointerId: 1 });
+      expect(onHeightChange).toHaveBeenCalledTimes(1);
+      expect(onHeightChange.mock.calls[0][0]).toBeCloseTo(0.2);
+    });
+
+    it('ダブルクリックで既定 (1/8) に戻して保存する', async () => {
+      const { handle, onHeightChange } = renderResizable(0.3);
+      await fireEvent.dblClick(handle);
+      expect(onHeightChange).toHaveBeenCalledWith(0.125);
+    });
+
+    it('↑ で高さの 1/50 (16px) 高くして保存する、↓ で低くする', async () => {
+      const { handle, onHeightChange } = renderResizable();
+      await fireEvent.keyDown(handle, { key: 'ArrowUp' });
+      expect(onHeightChange.mock.calls[0][0]).toBeCloseTo(0.145);
+      await fireEvent.keyDown(handle, { key: 'ArrowDown' });
+      expect(onHeightChange.mock.calls[1][0]).toBeCloseTo(0.105);
+    });
   });
 });

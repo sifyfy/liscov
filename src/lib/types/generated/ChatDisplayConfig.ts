@@ -8,4 +8,12 @@ export type ChatDisplayConfig = { message_font_size: number, show_timestamps: bo
 /**
  * 配信に接続したら操作パネルを隠す (02_chat.md「上の行と操作パネル」)
  */
-hide_panel_on_connect: boolean, chat_mode: ChatModeSetting, };
+hide_panel_on_connect: boolean, chat_mode: ChatModeSetting, 
+/**
+ * 「流れた新規さん」の欄の高さの上限 (コメントの流れの部分の高さに対する割合。02_chat.md「流れたもの」)
+ */
+flowed_newcomers_height_ratio: number, 
+/**
+ * 「流れたスパチャ等」の欄の高さの上限 (同上)
+ */
+flowed_supporters_height_ratio: number, };

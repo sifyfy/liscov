@@ -4,6 +4,13 @@ import { DEFAULT_CONFIG } from '$lib/types';
 import { normalizeError } from '$lib/tauri/errors';
 import * as configApi from '$lib/tauri/config';
 
+/** 高さを変えられる流れたものの欄 (02_chat.md「流れたもの」) */
+export type FlowedSectionKind = 'newcomers' | 'supporters';
+const FLOWED_HEIGHT_KEYS = {
+  newcomers: 'flowed_newcomers_height_ratio',
+  supporters: 'flowed_supporters_height_ratio',
+} as const satisfies Record<FlowedSectionKind, keyof Config['chat_display']>;
+
 // ファクトリ関数：テスト時に独立したストアインスタンスを生成できる
 function createConfigStore() {
   // リアクティブ状態（ストアは config をミューテートするため、共有定数は deep copy して使う）
@@ -81,6 +88,18 @@ function createConfigStore() {
     }
   }
 
+  // 流れたものの欄の高さの上限 (09_config.md、02_chat.md「流れたもの」)。範囲は呼ぶ側 (flowed-height.ts) で収めてある
+  async function setFlowedHeightRatio(section: FlowedSectionKind, ratio: number): Promise<void> {
+    const key = FLOWED_HEIGHT_KEYS[section];
+    config.chat_display[key] = ratio;
+    try {
+      await configApi.configSetValue('chat_display', key, ratio);
+      error = null;
+    } catch (e) {
+      error = normalizeError(e).message;
+    }
+  }
+
   async function setChatMode(mode: ChatModeSetting): Promise<void> {
     config.chat_display.chat_mode = mode;
     try {
@@ -125,6 +144,12 @@ function createConfigStore() {
     get hidePanelOnConnect() {
       return config.chat_display.hide_panel_on_connect;
     },
+    get flowedNewcomersHeightRatio() {
+      return config.chat_display.flowed_newcomers_height_ratio;
+    },
+    get flowedSupportersHeightRatio() {
+      return config.chat_display.flowed_supporters_height_ratio;
+    },
     get chatMode() {
       return config.chat_display.chat_mode;
     },
@@ -145,6 +170,7 @@ function createConfigStore() {
     setMessageFontSize,
     setShowTimestamps,
     setHidePanelOnConnect,
+    setFlowedHeightRatio,
     setChatMode,
     setTheme
   };

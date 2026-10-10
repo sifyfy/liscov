@@ -61,6 +61,8 @@ message_font_size = 13
 show_timestamps = true
 hide_panel_on_connect = true
 chat_mode = "top"  # "top" or "all"
+flowed_newcomers_height_ratio = 0.125
+flowed_supporters_height_ratio = 0.125
 
 [ui]
 theme = "dark"  # "dark" or "light"
@@ -93,6 +95,10 @@ max_backup_files = 5
 | `show_timestamps` | boolean | `true` | - | タイムスタンプ表示 |
 | `hide_panel_on_connect` | boolean | `true` | - | 配信に接続したら操作パネルを隠す (02_chat.md「上の行と操作パネル」) |
 | `chat_mode` | string | `"top"` | `top` / `all` | チャットモード（トップ / 全て）。最後に選んだモードを覚えておき、次の起動でもそのモードで接続する |
+| `flowed_newcomers_height_ratio` | float | `0.125` | 0.05〜1/3 | 「流れた新規さん」の欄の高さの上限 (コメントの流れの部分の高さに対する割合)。欄の境目のドラッグで変わる (02_chat.md「流れたもの」) |
+| `flowed_supporters_height_ratio` | float | `0.125` | 0.05〜1/3 | 「流れたスパチャ等」の欄の高さの上限。同上 |
+
+`flowed_*_height_ratio` を `config_set_value` で範囲外 (または数でない値) にしようとするとエラーにする。ファイルに範囲外の値が書かれていても読み込みは失敗させず、画面が表示のときに範囲に収める。
 
 `auto_scroll_enabled` は 2026-10 に外した (自動スクロールは止めたままにできなくなった。02_chat.md「自動スクロール」)。古い config.toml に残っていても、未知のキーとして無視する。
 
@@ -134,8 +140,10 @@ pub struct StorageConfig {
 pub struct ChatDisplayConfig {
     pub message_font_size: u32,
     pub show_timestamps: bool,
-    pub auto_scroll_enabled: bool,
+    pub hide_panel_on_connect: bool,
     pub chat_mode: ChatModeSetting,
+    pub flowed_newcomers_height_ratio: f64,
+    pub flowed_supporters_height_ratio: f64,
 }
 
 pub enum ChatModeSetting {

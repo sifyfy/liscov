@@ -11,7 +11,7 @@
    *   閉じたら、開く前に最新を追っていれば最新に戻る
    */
   import { tick as nextTick, untrack } from 'svelte';
-  import { chatStore } from '$lib/stores';
+  import { chatStore, configStore } from '$lib/stores';
   import { VList, type VListHandle } from 'virtua/svelte';
   import ChatMessageComponent from './ChatMessage.svelte';
   import FlowedSection from './FlowedSection.svelte';
@@ -377,6 +377,8 @@
   <FlowedSection
     label="流れた新規さん"
     items={flowedNewcomers}
+    heightRatio={configStore.flowedNewcomersHeightRatio}
+    onHeightChange={(ratio) => configStore.setFlowedHeightRatio('newcomers', ratio)}
     {fontSize}
     {showTimestamps}
     originOf={chatStore.originOf}
@@ -388,6 +390,8 @@
   <FlowedSection
     label="流れたスパチャ等"
     items={flowedSupporters}
+    heightRatio={configStore.flowedSupportersHeightRatio}
+    onHeightChange={(ratio) => configStore.setFlowedHeightRatio('supporters', ratio)}
     {fontSize}
     {showTimestamps}
     originOf={chatStore.originOf}

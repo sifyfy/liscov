@@ -82,7 +82,15 @@ pub struct ChatDisplayConfig {
     /// 配信に接続したら操作パネルを隠す (02_chat.md「上の行と操作パネル」)
     pub hide_panel_on_connect: bool,
     pub chat_mode: ChatModeSetting,
+    /// 「流れた新規さん」の欄の高さの上限 (コメントの流れの部分の高さに対する割合。02_chat.md「流れたもの」)
+    pub flowed_newcomers_height_ratio: f64,
+    /// 「流れたスパチャ等」の欄の高さの上限 (同上)
+    pub flowed_supporters_height_ratio: f64,
 }
+
+/// 流れたものの欄の高さの割合の範囲 (09_config.md)。ファイルの値は検査せず、config_set_value でだけ検査する
+const FLOWED_HEIGHT_RATIO_RANGE: std::ops::RangeInclusive<f64> = 0.05..=(1.0 / 3.0);
+const FLOWED_HEIGHT_RATIO_DEFAULT: f64 = 0.125;
 
 impl Default for ChatDisplayConfig {
     fn default() -> Self {
@@ -91,6 +99,8 @@ impl Default for ChatDisplayConfig {
             show_timestamps: true,
             hide_panel_on_connect: true,
             chat_mode: ChatModeSetting::Top,
+            flowed_newcomers_height_ratio: FLOWED_HEIGHT_RATIO_DEFAULT,
+            flowed_supporters_height_ratio: FLOWED_HEIGHT_RATIO_DEFAULT,
         }
     }
 }
@@ -283,6 +293,12 @@ pub(crate) fn config_lookup(config: &Config, section: &str, key: &str) -> Option
                 Some(serde_json::to_value(config.chat_display.hide_panel_on_connect).unwrap())
             }
             "chat_mode" => Some(serde_json::to_value(config.chat_display.chat_mode).unwrap()),
+            "flowed_newcomers_height_ratio" => Some(serde_json::json!(
+                config.chat_display.flowed_newcomers_height_ratio
+            )),
+            "flowed_supporters_height_ratio" => Some(serde_json::json!(
+                config.chat_display.flowed_supporters_height_ratio
+            )),
             _ => None,
         },
         "ui" => match key {
@@ -302,6 +318,22 @@ pub async fn config_get_value(
 ) -> Result<Option<Value>, CommandError> {
     let config = state.get();
     Ok(config_lookup(&config, &section, &key))
+}
+
+/// 流れたものの欄の高さの割合を検査して取り出す (数で、範囲の中だけ)
+fn parse_flowed_height_ratio(key: &str, value: Value) -> Result<f64, CommandError> {
+    let ratio: f64 = serde_json::from_value(value)
+        .map_err(|e| CommandError::InvalidInput(format!("Invalid {} value: {}", key, e)))?;
+    if !FLOWED_HEIGHT_RATIO_RANGE.contains(&ratio) {
+        return Err(CommandError::InvalidInput(format!(
+            "{} must be between {} and {}, got {}",
+            key,
+            FLOWED_HEIGHT_RATIO_RANGE.start(),
+            FLOWED_HEIGHT_RATIO_RANGE.end(),
+            ratio
+        )));
+    }
+    Ok(ratio)
 }
 
 /// Config構造体に section/key/value を適用する純粋関数
@@ -361,6 +393,14 @@ pub(crate) fn config_apply_value(
                 new_config.chat_display.chat_mode = serde_json::from_value(value).map_err(|e| {
                     CommandError::InvalidInput(format!("Invalid chat_mode value: {}", e))
                 })?;
+            }
+            "flowed_newcomers_height_ratio" => {
+                new_config.chat_display.flowed_newcomers_height_ratio =
+                    parse_flowed_height_ratio(key, value)?;
+            }
+            "flowed_supporters_height_ratio" => {
+                new_config.chat_display.flowed_supporters_height_ratio =
+                    parse_flowed_height_ratio(key, value)?;
             }
             _ => {
                 return Err(CommandError::InvalidInput(format!(
@@ -662,6 +702,83 @@ auto_scroll_enabled = false
             config_lookup(&config, "chat_display", "auto_scroll_enabled"),
             None
         );
+    }
+
+    #[test]
+    fn flowed_height_ratios_default_to_one_eighth() {
+        // 09_config.md: flowed_*_height_ratio の既定は 0.125 (02_chat.md「流れたもの」の既定 1/8)
+        let config = Config::default();
+        for key in [
+            "flowed_newcomers_height_ratio",
+            "flowed_supporters_height_ratio",
+        ] {
+            assert_eq!(
+                config_lookup(&config, "chat_display", key),
+                Some(serde_json::json!(0.125))
+            );
+        }
+    }
+
+    #[test]
+    fn flowed_height_ratios_missing_in_old_toml_use_default() {
+        // 09_config.md: 存在しないキーはデフォルト値で補完する (キーを足す前の config.toml)
+        let old_toml = "[chat_display]\nmessage_font_size = 18\n";
+        let config: Config = toml::from_str(old_toml).unwrap();
+        assert_eq!(config.chat_display.flowed_newcomers_height_ratio, 0.125);
+        assert_eq!(config.chat_display.flowed_supporters_height_ratio, 0.125);
+    }
+
+    #[test]
+    fn flowed_height_ratio_out_of_range_in_file_is_kept() {
+        // 09_config.md: ファイルに範囲外の値が書かれていても読み込みは失敗させない (画面が範囲に収める)
+        let toml_str = "[chat_display]\nflowed_newcomers_height_ratio = 0.9\n";
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.chat_display.flowed_newcomers_height_ratio, 0.9);
+    }
+
+    #[test]
+    fn config_apply_value_flowed_height_ratio_in_range() {
+        // 02_chat.md の例: 境目を引いて 0.2 を覚える。範囲の端 (0.05・1/3) も受け付ける
+        let config = Config::default();
+        let new_config = config_apply_value(
+            &config,
+            "chat_display",
+            "flowed_newcomers_height_ratio",
+            serde_json::json!(0.2),
+        )
+        .unwrap();
+        assert_eq!(new_config.chat_display.flowed_newcomers_height_ratio, 0.2);
+        assert_eq!(new_config.chat_display.flowed_supporters_height_ratio, 0.125);
+
+        for ratio in [0.05, 1.0 / 3.0] {
+            let new_config = config_apply_value(
+                &config,
+                "chat_display",
+                "flowed_supporters_height_ratio",
+                serde_json::json!(ratio),
+            )
+            .unwrap();
+            assert_eq!(new_config.chat_display.flowed_supporters_height_ratio, ratio);
+        }
+    }
+
+    #[test]
+    fn config_apply_value_flowed_height_ratio_rejects_out_of_range_or_non_number() {
+        // 09_config.md: config_set_value で範囲外 (または数でない値) にしようとするとエラー
+        let config = Config::default();
+        for value in [
+            serde_json::json!(0.04),
+            serde_json::json!(0.34),
+            serde_json::json!("0.2"),
+        ] {
+            let result = config_apply_value(
+                &config,
+                "chat_display",
+                "flowed_newcomers_height_ratio",
+                value,
+            );
+            assert!(result.is_err());
+        }
     }
 
     #[test]
