@@ -430,6 +430,28 @@ async fn test_server_reports_actual_port() {
     assert!(server.actual_port().await.is_none());
 }
 
+#[tokio::test]
+#[serial]
+async fn test_start_port_zero_uses_os_chosen_port() {
+    // Spec: 開始ポートの上書き — `0` は OS が選ぶ空きポート。actual_port は実際に選ばれた番号
+    let server = WebSocketServer::new(0);
+
+    let actual_port = server.start().await.expect("Failed to start server");
+
+    assert_ne!(actual_port, 0);
+    assert_eq!(server.actual_port().await, Some(actual_port));
+    // 選ばれたポートで実際に受け付けている
+    let (_write, mut read) = connect_client(actual_port).await;
+    let msg = timeout(Duration::from_secs(5), read.next())
+        .await
+        .expect("Timeout")
+        .expect("Stream ended")
+        .expect("Error");
+    assert_eq!(parse_server_message(&msg).unwrap()["type"], "Connected");
+
+    server.stop().await;
+}
+
 // ============================================================================
 // Server State Tests
 // ============================================================================

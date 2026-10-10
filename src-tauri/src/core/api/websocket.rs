@@ -106,8 +106,12 @@ impl WebSocketServer {
 
         self.shutdown.store(false, Ordering::SeqCst);
 
-        // Try to bind to ports (spec: 8765-8774, 10 ports)
-        let port_range_end = self.preferred_port.saturating_add(9);
+        // 開始ポートから 10 ポートを試す (spec: 8765-8774)。0 は OS に選ばせるので 1 回だけ
+        let port_range_end = if self.preferred_port == 0 {
+            0
+        } else {
+            self.preferred_port.saturating_add(9)
+        };
         let (listener, bound_port) = self
             .try_bind_ports(self.preferred_port, port_range_end)
             .await?;
@@ -174,10 +178,12 @@ impl WebSocketServer {
     ) -> anyhow::Result<(TcpListener, u16)> {
         for port in start_port..=end_port {
             let addr = format!("127.0.0.1:{}", port);
-            match TcpListener::bind(&addr).await {
-                Ok(listener) => return Ok((listener, port)),
-                Err(_) => continue,
-            }
+            let Ok(listener) = TcpListener::bind(&addr).await else {
+                continue;
+            };
+            // ポート 0 では OS が選んだ番号になるので、bind した結果から読む
+            let bound_port = listener.local_addr()?.port();
+            return Ok((listener, bound_port));
         }
         Err(anyhow::anyhow!(
             "No available ports in range {}-{}",
