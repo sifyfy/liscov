@@ -3,7 +3,7 @@ import ts from 'typescript-eslint';
 import svelte from 'eslint-plugin-svelte';
 import globals from 'globals';
 import betterTailwindcss from 'eslint-plugin-better-tailwindcss';
-import { DESIGN_MIGRATED, designRules } from './design-lint.config.js';
+import { designRules } from './design-lint.config.js';
 
 export default ts.config(
 	js.configs.recommended,
@@ -29,17 +29,13 @@ export default ts.config(
 			'prefer-const': 'off',
 		},
 	},
-	// デザイントークンの強制 (design-lint.config.js)。既存の違反は eslint-suppressions.json で抑えている
+	// デザイントークンの強制 (design-lint.config.js)
 	{
 		files: ['src/**/*.svelte', 'src/**/*.ts'],
 		ignores: ['src/**/*.test.ts', 'src/lib/test/**'],
 		plugins: { 'better-tailwindcss': betterTailwindcss },
 		settings: { 'better-tailwindcss': { entryPoint: 'src/app.css' } },
-		rules: designRules,
-	},
-	{
-		files: DESIGN_MIGRATED,
-		rules: { 'better-tailwindcss/no-unknown-classes': 'error' },
+		rules: { ...designRules, 'better-tailwindcss/no-unknown-classes': 'error' },
 	},
 	{
 		ignores: [

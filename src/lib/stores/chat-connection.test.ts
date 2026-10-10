@@ -890,7 +890,6 @@ describe('chatStore 接続管理', () => {
 	describe('restoreConnections 詳細', () => {
 		// spec: 復元された接続の全フィールドが正しく設定される
 		it('復元された接続のフィールドが正しく設定される', async () => {
-			const { getConnectionColor } = await import('$lib/utils/connection-colors');
 			vi.mocked(chatApi.getConnections).mockResolvedValue([makeConnectionInfo({
 				id: BigInt(5),
 				platform: 'youtube',
@@ -910,8 +909,6 @@ describe('chatStore 接続管理', () => {
 			expect(conn!.broadcasterChannelId).toBe('UC_bob');
 			expect(conn!.platform).toBe('youtube');
 			expect(conn!.connectionState).toBe('connected');
-			// spec: color は broadcaster_channel_id ベースで計算される
-			expect(conn!.color).toBe(getConnectionColor('UC_bob'));
 		});
 
 		// spec: is_monitoring=false の接続は disconnecting 状態で復元される
@@ -947,21 +944,6 @@ describe('chatStore 接続管理', () => {
 			// 元のタイトルが保持される（上書きされない）
 			const conn = chatStore.connections.get(1);
 			expect(conn!.streamTitle).toBe('Original');
-		});
-
-		// spec: broadcaster_channel_id が空文字の場合 String(connId) でcolor計算される
-		it('broadcaster_channel_id が空文字の場合 color が String(connId) ベースで計算される', async () => {
-			const { getConnectionColor } = await import('$lib/utils/connection-colors');
-			vi.mocked(chatApi.getConnections).mockResolvedValue([makeConnectionInfo({
-				id: BigInt(7),
-				broadcaster_channel_id: '',
-			})]);
-
-			await chatStore.restoreConnections();
-
-			const conn = chatStore.connections.get(7);
-			// spec: 空文字はfalsyなので String(connId) がcolor計算に使われる
-			expect(conn!.color).toBe(getConnectionColor('7'));
 		});
 
 		// spec: 複数の接続が一度に復元される
@@ -1338,49 +1320,6 @@ describe('chatStore 追加補強テスト', () => {
 		store.cleanup();
 		expect(unlistenMessage).toHaveBeenCalledTimes(1);
 		expect(unlistenConnection).toHaveBeenCalledTimes(1);
-	});
-
-	// =====================================================================
-	// 10. connect() 成功時の color 計算（broadcaster_channel_id=null 時は connection_id を使う）
-	// spec: broadcaster_channel_id が null のとき getConnectionColor(String(connId)) が使われる
-	// spec: broadcaster_channel_id が非null のとき getConnectionColor(broadcaster_channel_id) が使われる
-	// =====================================================================
-	it('broadcaster_channel_id=null のとき color が String(connId) ベースで計算される', async () => {
-		const { getConnectionColor } = await import('$lib/utils/connection-colors');
-		const { connectToStream } = await import('$lib/tauri/chat');
-		vi.mocked(connectToStream).mockResolvedValue(
-			makeSuccessResult({ connection_id: BigInt(5), broadcaster_channel_id: null })
-		);
-
-		await chatStore.connect('https://example.com');
-
-		const conn = chatStore.connections.get(5);
-		// spec: color が non-null
-		expect(conn?.color).not.toBeNull();
-		// spec: color が getConnectionColor(String(5)) と一致
-		expect(conn?.color).toBe(getConnectionColor('5'));
-	});
-
-	it('broadcaster_channel_id が非null のとき color が getConnectionColor(broadcaster_channel_id) になる', async () => {
-		const { getConnectionColor } = await import('$lib/utils/connection-colors');
-		const { connectToStream } = await import('$lib/tauri/chat');
-		vi.mocked(connectToStream).mockResolvedValue(
-			makeSuccessResult({ connection_id: BigInt(5), broadcaster_channel_id: 'UC_alice' })
-		);
-
-		await chatStore.connect('https://example.com');
-
-		const conn = chatStore.connections.get(5);
-		// spec: color が getConnectionColor('UC_alice') と一致
-		expect(conn?.color).toBe(getConnectionColor('UC_alice'));
-	});
-
-	it('broadcaster_channel_id=null の color と非null の color は異なる値になる', async () => {
-		const { getConnectionColor } = await import('$lib/utils/connection-colors');
-		const colorWithNull = getConnectionColor('5');
-		const colorWithId = getConnectionColor('UC_alice');
-		// spec: 両ケースで color が異なる（パレットの多様性の確認）
-		expect(colorWithNull).not.toBe(colorWithId);
 	});
 
 	// =====================================================================

@@ -165,9 +165,9 @@ Material 3 の surface container の考え方。面の段階で入れ子と浮�
 - 画面のコードは `--sys-*` (と Tailwind に登録した名前) だけを使う。生の色値と Tailwind の任意値は lint で止める
 - 仕組みは [design-lint.config.js](../../design-lint.config.js)。任意値・Tailwind の既定の値 (文字サイズ・角丸・影・色・書体・太さ・行間・字間)・
   生の色値 (JS の文字列、style 属性、`<style>`) をエラーにする
-- 既存の画面は M5 (方向性 3 案からの作り直し) で書き直すので、一度に全部を直さない。既存の違反は ESLint の bulk suppressions で
-  `eslint-suppressions.json` に記録して抑える (2026-10-08 時点で 27 ファイル・1,099 件)。記録はファイルごと・規則ごとの件数で、
-  それを超える新しい違反はエラーになる。直して減ったら `pnpm lint:prune` で記録を減らす
-- 移し終えたファイルは `DESIGN_MIGRATED` に足す。Tailwind に登録されていないクラスもエラーになる
-- すべて移したら `eslint-suppressions.json` を消し、Tailwind の既定のテーマを消す (`@theme { --*: initial }`)
+- Tailwind に登録されていないクラスもエラーにする (`no-unknown-classes`)。app.css で Tailwind の既定のテーマを消している
+  (`@theme { --*: initial }`) ので、既定の段階 (色・文字の大きさ・角丸・影など) に頼ったクラスはここで見つかる。
+  既定のうち使うもの (余白の基準 4px・太さ 400/700・最大幅・画面幅の区切り・transition の既定) は app.css で登録し直している
+- 経緯: 既存の画面は M5 で書き直すまで、違反を ESLint の bulk suppressions (`eslint-suppressions.json`、2026-10-08 時点で
+  27 ファイル・1,099 件) で抑え、移し終えたファイルを `DESIGN_MIGRATED` に足していた。2026-10-10 にすべて移し終え、記録と一覧を消した
 - コントラストは `src/lib/design/tokens.test.ts` で検査する

@@ -52,6 +52,7 @@
   {/if}
   {#key deadline}
     {#if deadline !== null}
+      <!-- eslint-disable better-tailwindcss/no-unknown-classes -- latest-bar は下の <style> で定義した縮む動き -->
       <span
         data-testid="latest-bar"
         class="latest-bar absolute bottom-0 left-0 h-0.5 w-full origin-left bg-accent motion-reduce:hidden"
@@ -59,6 +60,7 @@
         style:animation-duration="{barMs}ms"
         aria-hidden="true"
       ></span>
+      <!-- eslint-enable better-tailwindcss/no-unknown-classes -->
     {/if}
   {/key}
 </button>

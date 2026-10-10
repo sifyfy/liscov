@@ -15,7 +15,6 @@ function conn(id: number, name: string, state: FrontendConnectionState['connecti
     broadcasterName: name,
     broadcasterChannelId: `UC${id}`,
     connectionState: state,
-    color: '#888888',
     jewelCountUnavailable: false,
     reactions: emptyReactions,
   };

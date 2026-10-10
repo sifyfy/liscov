@@ -112,120 +112,81 @@
   }
 </script>
 
-<div class="p-6">
-  <h2 class="text-xl font-bold text-[var(--text-primary)] mb-6" style="font-family: var(--font-heading);">
-    生レスポンス保存設定
-  </h2>
+<div class="flex flex-col gap-4 p-4 text-fg-1">
+  <h2 class="text-title">生レスポンス保存設定</h2>
 
   {#if isLoading}
-    <div class="text-[var(--text-secondary)]">読み込み中...</div>
+    <p class="text-body text-fg-2">読み込み中...</p>
   {:else}
-    <div class="space-y-6">
-      <!-- Enable/Disable Toggle -->
-      <div class="bg-[var(--bg-surface-2)] rounded-lg border border-[var(--border-default)] p-4">
-        <label class="flex items-center gap-3 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={config.enabled}
-            onchange={handleEnabledChange}
-            class="w-5 h-5 rounded border-[var(--border-default)] text-[var(--accent)] focus:ring-[var(--accent)]"
-          />
-          <span class="text-[var(--text-primary)] font-medium">
-            生レスポンス保存を有効化
-          </span>
-        </label>
-        <p class="mt-2 text-sm text-[var(--text-muted)] ml-8">
-          YouTube InnerTube APIからの生レスポンスをndjson形式で保存します
-        </p>
-      </div>
-
-      {#if config.enabled}
-        <!-- File Path -->
-        <div class="bg-[var(--bg-surface-2)] rounded-lg border border-[var(--border-default)] p-4">
-          <label class="block">
-            <span class="text-[var(--text-primary)] font-medium">保存ファイルパス</span>
-            <div class="flex gap-2 mt-2">
-              <input
-                type="text"
-                value={config.file_path}
-                oninput={handleFilePathChange}
-                onblur={handleFilePathBlur}
-                placeholder="例: C:\Users\Username\Documents\raw_responses.ndjson"
-                class="flex-1 px-3 py-2 border border-[var(--border-default)] rounded-lg text-[var(--text-primary)] bg-[var(--bg-surface-2)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/50"
-              />
-              <button
-                type="button"
-                onclick={browseFile}
-                class="px-4 py-2 text-[var(--text-inverse)] rounded-lg transition-colors"
-                style="background: var(--accent);"
-              >
-                参照
-              </button>
-            </div>
-          </label>
-        </div>
-
-        <!-- Resolved Path Display -->
-        <div class="bg-[var(--bg-surface-3)] rounded-lg border border-[var(--border-default)] p-4">
-          <div class="flex items-start gap-2">
-            <span class="text-[var(--text-muted)] text-sm">実際の保存先:</span>
-            <code class="text-sm text-[var(--text-primary)] bg-[var(--bg-surface-2)] px-2 py-1 rounded border border-[var(--border-default)] break-all">
-              {resolvedPath}
-            </code>
-          </div>
-        </div>
-
-        <!-- Max File Size -->
-        <div class="bg-[var(--bg-surface-2)] rounded-lg border border-[var(--border-default)] p-4">
-          <label class="block">
-            <span class="text-[var(--text-primary)] font-medium">最大ファイルサイズ (MB)</span>
-            <input
-              type="number"
-              value={config.max_file_size_mb}
-              onchange={handleMaxSizeChange}
-              min="1"
-              max="1000"
-              class="mt-2 w-32 px-3 py-2 border border-[var(--border-default)] rounded-lg text-[var(--text-primary)] bg-[var(--bg-surface-2)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/50"
-            />
-          </label>
-        </div>
-
-        <!-- File Rotation -->
-        <div class="bg-[var(--bg-surface-2)] rounded-lg border border-[var(--border-default)] p-4">
-          <label class="flex items-center gap-3 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={config.enable_rotation}
-              onchange={handleRotationChange}
-              class="w-5 h-5 rounded border-[var(--border-default)] text-[var(--accent)] focus:ring-[var(--accent)]"
-            />
-            <span class="text-[var(--text-primary)] font-medium">
-              ファイルローテーションを有効化
-            </span>
-          </label>
-          <p class="mt-2 text-sm text-[var(--text-muted)] ml-8">
-            サイズ上限に達すると自動で新しいファイルが作成されます
-          </p>
-        </div>
-
-        <!-- Info Box -->
-        <div class="bg-[var(--info-subtle)] border border-[var(--border-default)] rounded-lg p-4">
-          <h4 class="font-medium text-[var(--info)] mb-2">ヒント</h4>
-          <ul class="text-sm text-[var(--info)] space-y-1 list-disc list-inside">
-            <li>生レスポンスは将来のAPI変更に対応するために保存されます</li>
-            <li>ファイルはndjson形式で保存されます</li>
-            <li>ローテーション有効時、サイズ上限に達すると自動で新ファイルが作成されます</li>
-            <li>最大{config.max_backup_files}個のバックアップファイルが保持されます</li>
-          </ul>
-        </div>
-      {/if}
-
-      <!-- Save Message -->
-      {#if saveMessage}
-        <div class="text-sm text-[var(--success)] bg-[var(--success-subtle)] border border-[var(--border-default)] rounded-lg px-4 py-2">
-          {saveMessage}
-        </div>
-      {/if}
+    <div class="flex flex-col gap-1">
+      <label class="flex items-center gap-2 text-label">
+        <input type="checkbox" checked={config.enabled} onchange={handleEnabledChange} class="accent-accent" />
+        生レスポンス保存を有効化
+      </label>
+      <p class="pl-6 text-body text-fg-2">YouTube InnerTube APIからの生レスポンスをndjson形式で保存します</p>
     </div>
+
+    {#if config.enabled}
+      <section class="flex flex-col gap-2 border-t border-outline-variant pt-4">
+        <label for="raw-file-path" class="text-label">保存ファイルパス</label>
+        <div class="flex gap-2">
+          <input
+            id="raw-file-path"
+            type="text"
+            value={config.file_path}
+            oninput={handleFilePathChange}
+            onblur={handleFilePathBlur}
+            placeholder="例: C:\Users\Username\Documents\raw_responses.ndjson"
+            class="min-w-0 flex-1 rounded-control border border-outline bg-surface px-2 py-1.5 text-body text-fg-1 placeholder:text-fg-3 focus:border-accent"
+          />
+          <button
+            type="button"
+            onclick={browseFile}
+            class="shrink-0 rounded-control border border-outline px-3 py-1 text-label text-fg-2 hover:bg-fg-1/8"
+          >
+            参照
+          </button>
+        </div>
+        <p class="flex flex-wrap items-baseline gap-x-2 text-caption text-fg-2">
+          実際の保存先:
+          <code class="font-code break-all text-fg-1">{resolvedPath}</code>
+        </p>
+      </section>
+
+      <section class="flex flex-col gap-2 border-t border-outline-variant pt-4">
+        <label for="raw-max-size" class="text-label">最大ファイルサイズ (MB)</label>
+        <input
+          id="raw-max-size"
+          type="number"
+          value={config.max_file_size_mb}
+          onchange={handleMaxSizeChange}
+          min="1"
+          max="1000"
+          class="w-32 rounded-control border border-outline bg-surface px-2 py-1.5 text-body text-fg-1 placeholder:text-fg-3 focus:border-accent"
+        />
+      </section>
+
+      <section class="flex flex-col gap-2 border-t border-outline-variant pt-4">
+        <label class="flex items-center gap-2 text-label">
+          <input type="checkbox" checked={config.enable_rotation} onchange={handleRotationChange} class="accent-accent" />
+          ファイルローテーションを有効化
+        </label>
+        <p class="pl-6 text-body text-fg-2">サイズ上限に達すると自動で新しいファイルが作成されます</p>
+      </section>
+
+      <section class="flex flex-col gap-2 border-t border-outline-variant pt-4">
+        <h3 class="text-label">ヒント</h3>
+        <ul class="flex list-disc flex-col gap-1 pl-5 text-body text-fg-2">
+          <li>生レスポンスは将来のAPI変更に対応するために保存されます</li>
+          <li>ファイルはndjson形式で保存されます</li>
+          <li>ローテーション有効時、サイズ上限に達すると自動で新ファイルが作成されます</li>
+          <li>最大{config.max_backup_files}個のバックアップファイルが保持されます</li>
+        </ul>
+      </section>
+    {/if}
+
+    {#if saveMessage}
+      <p role="status" class="text-body {saveMessage.startsWith('保存に失敗') ? 'text-error' : 'text-success'}">{saveMessage}</p>
+    {/if}
   {/if}
 </div>

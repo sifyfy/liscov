@@ -1,38 +1,10 @@
 /**
  * デザイントークン (docs/design/tokens.md) を強制する lint の設定
  *
- * 規則は全体でエラーにする。既存の画面の違反は、ESLint の bulk suppressions で
- * eslint-suppressions.json にファイルごと・規則ごとの件数として記録し、それを超えた分だけエラーにする。
- * 既存の画面は M5 (方向性 3 案からの作り直し) で書き直すので、一度に全部を直さない。
- *
- * - 画面を直して違反が減ったら `pnpm lint:prune` で記録を減らす (減らさないと lint が失敗する)
- * - 移し終えたファイルは DESIGN_MIGRATED に足す。Tailwind に登録されていないクラスもエラーになる。
- *   DESIGN_MIGRATED のファイルは eslint-suppressions.json に載せない
- * - すべて移したら eslint-suppressions.json を消し、app.css で Tailwind の既定のテーマを消す (@theme { --*: initial })
+ * src のすべての画面に効く。任意値・Tailwind の既定の値・生の色値をエラーにし、
+ * Tailwind に登録していないクラスもエラーにする (app.css で Tailwind の既定のテーマを消しているので、
+ * 既定の段階に頼ったクラスはここで見つかる)
  */
-
-/** トークンに移し終えたファイル (リポジトリの直下からのパス) */
-export const DESIGN_MIGRATED = [
-	'src/routes/design-tokens/+page.svelte',
-	'src/routes/design-proto/**',
-	'src/lib/components/chat/ChatMessage.svelte',
-	'src/lib/components/chat/ChatDisplay.svelte',
-	'src/lib/components/chat/FlowedSection.svelte',
-	'src/lib/components/chat/ThanksList.svelte',
-	'src/lib/components/chat/StatusLine.svelte',
-	'src/lib/components/chat/ConnectForm.svelte',
-	'src/lib/components/chat/ConnectionList.svelte',
-	'src/lib/components/chat/ControlPanel.svelte',
-	'src/lib/components/auth/AuthIndicator.svelte',
-	'src/lib/components/layout/TopBar.svelte',
-	'src/lib/components/layout/AppShell.svelte',
-	'src/lib/components/tabs/ChatTab.svelte',
-	'src/lib/components/viewer/ViewerInfoPanel.svelte',
-	'src/lib/components/viewer/ViewerManagement.svelte',
-	'src/lib/components/viewer/ViewerList.svelte',
-	'src/lib/components/viewer/ViewerEditor.svelte',
-	'src/lib/components/viewer/DeleteConfirmDialog.svelte',
-];
 
 const DOC = 'docs/design/tokens.md';
 

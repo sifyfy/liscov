@@ -14,12 +14,6 @@ importers:
       '@fontsource/biz-udpgothic':
         specifier: ^5.3.0
         version: 5.3.0
-      '@fontsource/plus-jakarta-sans':
-        specifier: ^5.2.8
-        version: 5.2.8
-      '@fontsource/zen-kaku-gothic-new':
-        specifier: ^5.2.7
-        version: 5.2.7
       '@tauri-apps/api':
         specifier: ^2.11.0
         version: 2.11.0
@@ -550,12 +544,6 @@ packages:
 
   '@fontsource/biz-udpgothic@5.3.0':
     resolution: {integrity: sha512-uBcdaC2/Bg7GEhzWSb2REs8azL1ys+KpI8TmPnJa2xtaD8DVMgsRbtIcEss8xjN5KRtp8E0+LFbG43FhkWZdPw==}
-
-  '@fontsource/plus-jakarta-sans@5.2.8':
-    resolution: {integrity: sha512-P5qE49fqdeD+7DXH1KBxmMPlB17LTz1zvBhFH0tFzfnYTKVJVyb0pR6plh0ZGXxcB+Oayb54FZZw3V42/DawTw==}
-
-  '@fontsource/zen-kaku-gothic-new@5.2.7':
-    resolution: {integrity: sha512-tfGiyBqeeBjUURHm+RIuBJCxIKhZFp46/+LEc+zCxR4sLslKwlVpWda0ZOnX/mTvOHpfr4DYjiV/pVosRXHWaw==}
 
   '@humanfs/core@0.19.2':
     resolution: {integrity: sha512-UhXNm+CFMWcbChXywFwkmhqjs3PRCmcSa/hfBgLIb7oQ5HNb1wS0icWsGtSAUNgefHeI+eBrA8I1fxmbHsGdvA==}
@@ -2997,10 +2985,6 @@ snapshots:
   '@fontsource-variable/jetbrains-mono@5.2.8': {}
 
   '@fontsource/biz-udpgothic@5.3.0': {}
-
-  '@fontsource/plus-jakarta-sans@5.2.8': {}
-
-  '@fontsource/zen-kaku-gothic-new@5.2.7': {}
 
   '@humanfs/core@0.19.2':
     dependencies:

@@ -981,7 +981,7 @@ Connecting → (接続失敗) → (削除 + エラー通知)
 ## メッセージ表示仕様
 
 振る舞いは「配信中の画面」(1 行の形・優先順位と強調)。ここは実装の詳細。
-コンポーネントは `ChatMessage.svelte`、見た目の値は [docs/design/tokens.md](../design/tokens.md) のトークンだけを使う (`design-lint.config.js` の `DESIGN_MIGRATED`)。
+コンポーネントは `ChatMessage.svelte`、見た目の値は [docs/design/tokens.md](../design/tokens.md) のトークンだけを使う (`design-lint.config.js` が強制する)。
 試作は `src/routes/design-proto/Row.svelte`。
 
 ### 行の根

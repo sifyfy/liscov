@@ -13,7 +13,6 @@ import { SvelteMap } from 'svelte/reactivity';
 import type { MessageOrigin } from '$lib/design/priority';
 import { newcomersOf, supportersOf } from '$lib/design/flow';
 import * as chatApi from '$lib/tauri/chat';
-import { getConnectionColor } from '$lib/utils/connection-colors';
 import { applyReactionUpdate, emptyReactions, restoreReactions } from '$lib/utils/reactions';
 import { configStore } from './config.svelte';
 import { createMessageList } from './chat-messages.svelte';
@@ -115,7 +114,6 @@ function createChatStore() {
       broadcasterName: '',
       broadcasterChannelId: '',
       connectionState: 'connecting',
-      color: getConnectionColor(String(tempId)),
       jewelCountUnavailable: false,
       reactions: emptyReactions
     };
@@ -140,7 +138,6 @@ function createChatStore() {
           broadcasterName: result.broadcaster_name ?? '',
           broadcasterChannelId: result.broadcaster_channel_id ?? '',
           connectionState: 'connected',
-          color: getConnectionColor(result.broadcaster_channel_id ?? String(connId)),
           jewelCountUnavailable: false,
           reactions: emptyReactions
         });
@@ -331,7 +328,6 @@ function createChatStore() {
           broadcasterName: info.broadcaster_name,
           broadcasterChannelId: info.broadcaster_channel_id,
           connectionState: info.is_monitoring ? 'connected' : 'disconnecting',
-          color: getConnectionColor(info.broadcaster_channel_id || String(connId)),
           jewelCountUnavailable: false,
           reactions: emptyReactions
         });

@@ -1,6 +1,7 @@
 <script lang="ts">
   // バックエンドの自動起動設定（04_tts.md「TtsSettings.svelte」）。棒読みちゃん・VOICEVOX で同じ部品を使う
   import { ttsStore } from '$lib/stores';
+  import Switch from '$lib/components/ui/Switch.svelte';
 
   type LaunchBackend = 'bouyomichan' | 'voicevox';
 
@@ -57,27 +58,19 @@
 </script>
 
 {#snippet toggle(label: string, pressed: boolean, testId: string, onclick: () => void)}
-  <div class="flex items-center justify-between">
-    <span class="text-sm text-[var(--text-primary)]">{label}</span>
-    <button
-      {onclick}
-      data-testid={testId}
-      aria-label={label}
-      aria-pressed={pressed}
-      class="{pressed ? 'bg-[var(--success)]' : 'bg-[var(--bg-surface-3)]'} relative inline-flex h-5 w-9 items-center rounded-full transition-colors"
-    >
-      <span class="{pressed ? 'translate-x-5' : 'translate-x-1'} inline-block h-3 w-3 transform rounded-full bg-white transition-transform shadow"></span>
-    </button>
+  <div class="flex items-center justify-between gap-3">
+    <span class="text-body">{label}</span>
+    <Switch {pressed} {label} {testId} {onclick} />
   </div>
 {/snippet}
 
-<div class="pt-3 mt-3 border-t border-[var(--border-default)] space-y-3">
-  <h5 class="text-xs text-[var(--text-secondary)] font-medium">自動起動設定</h5>
+<div class="flex flex-col gap-3 border-t border-outline-variant pt-3">
+  <h5 class="text-label text-fg-2">自動起動設定</h5>
 
   {@render toggle('アプリ起動時に自動起動', autoLaunch, `${backend}-auto-launch-toggle`, onToggleAutoLaunch)}
 
-  <div>
-    <label for="{backend}-exe-path" class="block text-xs text-[var(--text-muted)] mb-1">実行ファイルパス</label>
+  <div class="flex flex-col gap-1">
+    <label for="{backend}-exe-path" class="text-caption text-fg-2">実行ファイルパス</label>
     <div class="flex gap-2">
       <input
         id="{backend}-exe-path"
@@ -85,19 +78,21 @@
         bind:value={exePath}
         oninput={onExePathChange}
         placeholder="自動検出または参照で指定"
-        class="flex-1 px-3 py-2 text-sm rounded-lg bg-[var(--bg-surface-3)] text-[var(--text-primary)] placeholder-[var(--text-muted)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+        class="min-w-0 flex-1 rounded-control border border-outline bg-surface px-2 py-1.5 text-body text-fg-1 placeholder:text-fg-3 focus:border-accent"
       />
       <button
+        type="button"
         onclick={discoverExe}
-        class="px-3 py-2 text-xs bg-[var(--bg-surface-3)] text-[var(--text-secondary)] rounded-lg border border-[var(--border-default)] hover:bg-[var(--bg-base)] transition-colors"
         title="自動検出"
+        class="shrink-0 rounded-control border border-outline px-3 py-1 text-label text-fg-2 hover:bg-fg-1/8"
       >
         検出
       </button>
       <button
+        type="button"
         onclick={browseExe}
-        class="px-3 py-2 text-xs bg-[var(--bg-surface-3)] text-[var(--text-secondary)] rounded-lg border border-[var(--border-default)] hover:bg-[var(--bg-base)] transition-colors"
         title="ファイル参照"
+        class="shrink-0 rounded-control border border-outline px-3 py-1 text-label text-fg-2 hover:bg-fg-1/8"
       >
         参照
       </button>
@@ -108,10 +103,13 @@
 
   <div class="flex items-center gap-3">
     <button
+      type="button"
       onclick={toggleLaunch}
       disabled={isLaunching}
       data-testid="{backend}-launch-button"
-      class="px-3 py-2 text-sm rounded-lg border transition-colors disabled:opacity-50 {isLaunched ? 'bg-[var(--error-subtle)] text-[var(--error)] border-[var(--border-default)] hover:opacity-80' : 'bg-[var(--success-subtle)] text-[var(--success)] border-[var(--border-default)] hover:opacity-80'}"
+      class="rounded-control border border-outline px-3 py-1 text-label hover:bg-fg-1/8 disabled:opacity-50 {isLaunched
+        ? 'text-error'
+        : 'text-fg-1'}"
     >
       {#if isLaunching}
         処理中...
@@ -121,7 +119,8 @@
         起動
       {/if}
     </button>
-    <span class="text-xs {isLaunched ? 'text-[var(--success)]' : 'text-[var(--text-muted)]'}">
+    <span class="flex items-center gap-1.5 text-caption text-fg-2">
+      <span class="size-1.5 rounded-full {isLaunched ? 'bg-success' : 'bg-fg-3'}" aria-hidden="true"></span>
       {isLaunched ? '起動中' : '停止中'}
     </span>
   </div>

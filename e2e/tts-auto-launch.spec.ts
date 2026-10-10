@@ -497,8 +497,8 @@ test.describe('TTS VOICEVOX Auto-Launch', () => {
       }
     });
 
-    // Verify error message is displayed (CSS variable-based theme classes)
-    const errorDisplay = mainPage.locator('div.rounded-lg p.text-sm').filter({ hasText: /not found|見つかりません|失敗|executable/i });
+    // エラーの文が出る (role="alert")
+    const errorDisplay = mainPage.getByRole('alert').filter({ hasText: /not found|見つかりません|失敗|executable/i });
     await expect(errorDisplay).toBeVisible({ timeout: 10000 });
   });
 });

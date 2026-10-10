@@ -3,6 +3,7 @@
   import type { TtsBackend, TtsConfig } from '$lib/types';
   import { onMount } from 'svelte';
   import TtsLaunchSettings from './TtsLaunchSettings.svelte';
+  import Switch from '$lib/components/ui/Switch.svelte';
 
   // Local state for editing
   let config = $state<TtsConfig | null>(null);
@@ -105,126 +106,74 @@
   }
 </script>
 
-<div class="p-6 space-y-6">
-  <div class="flex items-center justify-between">
-    <h2 class="text-xl font-semibold text-[var(--text-primary)]" style="font-family: var(--font-heading);">TTS設定</h2>
-    <div class="flex items-center gap-4">
-      <span class="text-sm text-[var(--text-muted)]">
-        キュー: {ttsStore.status.queue_size}件
-      </span>
+<div class="flex flex-col gap-4 p-4 text-fg-1">
+  <header class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+    <h2 class="text-title">TTS設定</h2>
+    <span class="flex items-center gap-3 text-caption text-fg-2 tabular-nums">
+      キュー: {ttsStore.status.queue_size}件
       {#if ttsStore.status.is_processing}
-        <span class="px-2 py-1 text-xs bg-[var(--success-subtle)] text-[var(--success)] rounded border border-[var(--border-default)]">処理中</span>
+        <span class="flex items-center gap-1.5">
+          <span class="size-1.5 rounded-full bg-success" aria-hidden="true"></span>
+          処理中
+        </span>
       {/if}
-    </div>
-  </div>
+    </span>
+  </header>
 
   {#if ttsStore.isLoading}
-    <div class="text-center text-[var(--text-muted)]">読み込み中...</div>
+    <p class="text-body text-fg-2">読み込み中...</p>
   {:else if config}
-    <!-- Enable/Disable Toggle -->
-    <div class="flex items-center justify-between p-4 bg-[var(--bg-surface-2)] rounded-lg border border-[var(--border-default)]">
-      <div>
-        <h3 class="text-[var(--text-primary)] font-medium">TTS読み上げ</h3>
-        <p class="text-sm text-[var(--text-secondary)]">チャットメッセージを音声で読み上げます</p>
+    <div class="flex items-center justify-between gap-3">
+      <div class="flex flex-col gap-1">
+        <h3 class="text-label">TTS読み上げ</h3>
+        <p class="text-body text-fg-2">チャットメッセージを音声で読み上げます</p>
       </div>
-      <button
-        onclick={toggleEnabled}
-        aria-label={config.enabled ? 'TTSを無効にする' : 'TTSを有効にする'}
-        class="{config.enabled ? 'bg-[var(--success)]' : 'bg-[var(--bg-surface-3)]'} relative inline-flex h-6 w-11 items-center rounded-full transition-colors"
-      >
-        <span
-          class="{config.enabled ? 'translate-x-6' : 'translate-x-1'} inline-block h-4 w-4 transform rounded-full bg-white transition-transform shadow"
-        ></span>
-      </button>
+      <Switch pressed={config.enabled} label={config.enabled ? 'TTSを無効にする' : 'TTSを有効にする'} onclick={toggleEnabled} />
     </div>
 
-    <!-- Backend Selection -->
-    <div class="p-4 bg-[var(--bg-surface-2)] rounded-lg border border-[var(--border-default)] space-y-4">
-      <h3 class="text-[var(--text-primary)] font-medium">バックエンド設定</h3>
-
-      <div>
-        <label for="backend" class="block text-sm text-[var(--text-secondary)] mb-1">使用するバックエンド</label>
-        <select
-          id="backend"
-          value={config.backend}
-          onchange={handleBackendChange}
-          class="w-full px-3 py-2 rounded-lg bg-[var(--bg-surface-3)] text-[var(--text-primary)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-        >
+    <section class="flex flex-col gap-3 border-t border-outline-variant pt-4">
+      <h3 class="text-label">バックエンド設定</h3>
+      <label class="flex flex-col gap-1 text-caption text-fg-2">
+        使用するバックエンド
+        <select id="backend" value={config.backend} onchange={handleBackendChange} class="w-full rounded-control border border-outline bg-surface px-2 py-1.5 text-body text-fg-1 placeholder:text-fg-3 focus:border-accent">
           <option value="none">なし</option>
           <option value="bouyomichan">棒読みちゃん</option>
           <option value="voicevox">VOICEVOX</option>
         </select>
-      </div>
+      </label>
 
       {#if config.backend === 'bouyomichan'}
-        <!-- Bouyomichan Settings -->
-        <div class="space-y-3 pt-2 border-t border-[var(--border-default)]">
-          <h4 class="text-sm text-[var(--text-secondary)] font-medium">棒読みちゃん設定</h4>
+        <div class="flex flex-col gap-3 border-t border-outline-variant pt-3">
+          <h4 class="text-label text-fg-2">棒読みちゃん設定</h4>
           <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label for="bouyomi-host" class="block text-xs text-[var(--text-muted)] mb-1">ホスト</label>
-              <input
-                id="bouyomi-host"
-                type="text"
-                bind:value={config.bouyomichan_host}
-                onchange={handleConfigChange}
-                class="w-full px-3 py-2 rounded-lg bg-[var(--bg-surface-3)] text-[var(--text-primary)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-              />
-            </div>
-            <div>
-              <label for="bouyomi-port" class="block text-xs text-[var(--text-muted)] mb-1">ポート</label>
-              <input
-                id="bouyomi-port"
-                type="number"
-                bind:value={config.bouyomichan_port}
-                onchange={handleConfigChange}
-                class="w-full px-3 py-2 rounded-lg bg-[var(--bg-surface-3)] text-[var(--text-primary)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-              />
-            </div>
+            <label class="flex flex-col gap-1 text-caption text-fg-2">
+              ホスト
+              <input id="bouyomi-host" type="text" bind:value={config.bouyomichan_host} onchange={handleConfigChange} class="w-full rounded-control border border-outline bg-surface px-2 py-1.5 text-body text-fg-1 placeholder:text-fg-3 focus:border-accent" />
+            </label>
+            <label class="flex flex-col gap-1 text-caption text-fg-2">
+              ポート
+              <input id="bouyomi-port" type="number" bind:value={config.bouyomichan_port} onchange={handleConfigChange} class="w-full rounded-control border border-outline bg-surface px-2 py-1.5 text-body text-fg-1 placeholder:text-fg-3 focus:border-accent" />
+            </label>
           </div>
           <div class="grid grid-cols-4 gap-3">
-            <div>
-              <label for="bouyomi-voice" class="block text-xs text-[var(--text-muted)] mb-1">声質</label>
-              <input
-                id="bouyomi-voice"
-                type="number"
-                bind:value={config.bouyomichan_voice}
-                onchange={handleConfigChange}
-                class="w-full px-3 py-2 rounded-lg bg-[var(--bg-surface-3)] text-[var(--text-primary)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-              />
-            </div>
-            <div>
-              <label for="bouyomi-volume" class="block text-xs text-[var(--text-muted)] mb-1">音量</label>
-              <input
-                id="bouyomi-volume"
-                type="number"
-                bind:value={config.bouyomichan_volume}
-                onchange={handleConfigChange}
-                class="w-full px-3 py-2 rounded-lg bg-[var(--bg-surface-3)] text-[var(--text-primary)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-              />
-            </div>
-            <div>
-              <label for="bouyomi-speed" class="block text-xs text-[var(--text-muted)] mb-1">速度</label>
-              <input
-                id="bouyomi-speed"
-                type="number"
-                bind:value={config.bouyomichan_speed}
-                onchange={handleConfigChange}
-                class="w-full px-3 py-2 rounded-lg bg-[var(--bg-surface-3)] text-[var(--text-primary)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-              />
-            </div>
-            <div>
-              <label for="bouyomi-tone" class="block text-xs text-[var(--text-muted)] mb-1">トーン</label>
-              <input
-                id="bouyomi-tone"
-                type="number"
-                bind:value={config.bouyomichan_tone}
-                onchange={handleConfigChange}
-                class="w-full px-3 py-2 rounded-lg bg-[var(--bg-surface-3)] text-[var(--text-primary)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-              />
-            </div>
+            <label class="flex flex-col gap-1 text-caption text-fg-2">
+              声質
+              <input id="bouyomi-voice" type="number" bind:value={config.bouyomichan_voice} onchange={handleConfigChange} class="w-full rounded-control border border-outline bg-surface px-2 py-1.5 text-body text-fg-1 placeholder:text-fg-3 focus:border-accent" />
+            </label>
+            <label class="flex flex-col gap-1 text-caption text-fg-2">
+              音量
+              <input id="bouyomi-volume" type="number" bind:value={config.bouyomichan_volume} onchange={handleConfigChange} class="w-full rounded-control border border-outline bg-surface px-2 py-1.5 text-body text-fg-1 placeholder:text-fg-3 focus:border-accent" />
+            </label>
+            <label class="flex flex-col gap-1 text-caption text-fg-2">
+              速度
+              <input id="bouyomi-speed" type="number" bind:value={config.bouyomichan_speed} onchange={handleConfigChange} class="w-full rounded-control border border-outline bg-surface px-2 py-1.5 text-body text-fg-1 placeholder:text-fg-3 focus:border-accent" />
+            </label>
+            <label class="flex flex-col gap-1 text-caption text-fg-2">
+              トーン
+              <input id="bouyomi-tone" type="number" bind:value={config.bouyomichan_tone} onchange={handleConfigChange} class="w-full rounded-control border border-outline bg-surface px-2 py-1.5 text-body text-fg-1 placeholder:text-fg-3 focus:border-accent" />
+            </label>
           </div>
-          <p class="text-xs text-[var(--text-muted)]">-1を指定すると棒読みちゃん側の設定が使用されます</p>
+          <p class="text-caption text-fg-2">-1を指定すると棒読みちゃん側の設定が使用されます</p>
 
           <TtsLaunchSettings
             backend="bouyomichan"
@@ -239,94 +188,39 @@
       {/if}
 
       {#if config.backend === 'voicevox'}
-        <!-- VOICEVOX Settings -->
-        <div class="space-y-3 pt-2 border-t border-[var(--border-default)]">
-          <h4 class="text-sm text-[var(--text-secondary)] font-medium">VOICEVOX設定</h4>
+        <div class="flex flex-col gap-3 border-t border-outline-variant pt-3">
+          <h4 class="text-label text-fg-2">VOICEVOX設定</h4>
           <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label for="voicevox-host" class="block text-xs text-[var(--text-muted)] mb-1">ホスト</label>
-              <input
-                id="voicevox-host"
-                type="text"
-                bind:value={config.voicevox_host}
-                onchange={handleConfigChange}
-                class="w-full px-3 py-2 rounded-lg bg-[var(--bg-surface-3)] text-[var(--text-primary)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-              />
-            </div>
-            <div>
-              <label for="voicevox-port" class="block text-xs text-[var(--text-muted)] mb-1">ポート</label>
-              <input
-                id="voicevox-port"
-                type="number"
-                bind:value={config.voicevox_port}
-                onchange={handleConfigChange}
-                class="w-full px-3 py-2 rounded-lg bg-[var(--bg-surface-3)] text-[var(--text-primary)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-              />
-            </div>
+            <label class="flex flex-col gap-1 text-caption text-fg-2">
+              ホスト
+              <input id="voicevox-host" type="text" bind:value={config.voicevox_host} onchange={handleConfigChange} class="w-full rounded-control border border-outline bg-surface px-2 py-1.5 text-body text-fg-1 placeholder:text-fg-3 focus:border-accent" />
+            </label>
+            <label class="flex flex-col gap-1 text-caption text-fg-2">
+              ポート
+              <input id="voicevox-port" type="number" bind:value={config.voicevox_port} onchange={handleConfigChange} class="w-full rounded-control border border-outline bg-surface px-2 py-1.5 text-body text-fg-1 placeholder:text-fg-3 focus:border-accent" />
+            </label>
           </div>
-          <div>
-            <label for="voicevox-speaker" class="block text-xs text-[var(--text-muted)] mb-1">話者ID</label>
-            <input
-              id="voicevox-speaker"
-              type="number"
-              bind:value={config.voicevox_speaker_id}
-              onchange={handleConfigChange}
-              class="w-full px-3 py-2 rounded-lg bg-[var(--bg-surface-3)] text-[var(--text-primary)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-            />
-          </div>
+          <label class="flex flex-col gap-1 text-caption text-fg-2">
+            話者ID
+            <input id="voicevox-speaker" type="number" bind:value={config.voicevox_speaker_id} onchange={handleConfigChange} class="w-full rounded-control border border-outline bg-surface px-2 py-1.5 text-body text-fg-1 placeholder:text-fg-3 focus:border-accent" />
+          </label>
           <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label for="voicevox-volume" class="block text-xs text-[var(--text-muted)] mb-1">音量 ({config.voicevox_volume_scale.toFixed(1)})</label>
-              <input
-                id="voicevox-volume"
-                type="range"
-                min="0"
-                max="2"
-                step="0.1"
-                bind:value={config.voicevox_volume_scale}
-                oninput={handleConfigChange}
-                class="w-full accent-[var(--accent)]"
-              />
-            </div>
-            <div>
-              <label for="voicevox-speed" class="block text-xs text-[var(--text-muted)] mb-1">速度 ({config.voicevox_speed_scale.toFixed(1)})</label>
-              <input
-                id="voicevox-speed"
-                type="range"
-                min="0.5"
-                max="2"
-                step="0.1"
-                bind:value={config.voicevox_speed_scale}
-                oninput={handleConfigChange}
-                class="w-full accent-[var(--accent)]"
-              />
-            </div>
-            <div>
-              <label for="voicevox-pitch" class="block text-xs text-[var(--text-muted)] mb-1">ピッチ ({config.voicevox_pitch_scale.toFixed(2)})</label>
-              <input
-                id="voicevox-pitch"
-                type="range"
-                min="-0.15"
-                max="0.15"
-                step="0.01"
-                bind:value={config.voicevox_pitch_scale}
-                oninput={handleConfigChange}
-                class="w-full accent-[var(--accent)]"
-              />
-            </div>
-            <div>
-              <label for="voicevox-intonation" class="block text-xs text-[var(--text-muted)] mb-1">抑揚 ({config.voicevox_intonation_scale.toFixed(1)})</label>
-              <input
-                id="voicevox-intonation"
-                type="range"
-                min="0"
-                max="2"
-                step="0.1"
-                bind:value={config.voicevox_intonation_scale}
-                oninput={handleConfigChange}
-                class="w-full accent-[var(--accent)]"
-              />
-            </div>
+            <label class="flex flex-col gap-1 text-caption text-fg-2">
+              音量 ({config.voicevox_volume_scale.toFixed(1)})
+              <input id="voicevox-volume" type="range" min="0" max="2" step="0.1" bind:value={config.voicevox_volume_scale} oninput={handleConfigChange} class="w-full accent-accent" />
+            </label>
+            <label class="flex flex-col gap-1 text-caption text-fg-2">
+              速度 ({config.voicevox_speed_scale.toFixed(1)})
+              <input id="voicevox-speed" type="range" min="0.5" max="2" step="0.1" bind:value={config.voicevox_speed_scale} oninput={handleConfigChange} class="w-full accent-accent" />
+            </label>
+            <label class="flex flex-col gap-1 text-caption text-fg-2">
+              ピッチ ({config.voicevox_pitch_scale.toFixed(2)})
+              <input id="voicevox-pitch" type="range" min="-0.15" max="0.15" step="0.01" bind:value={config.voicevox_pitch_scale} oninput={handleConfigChange} class="w-full accent-accent" />
+            </label>
+            <label class="flex flex-col gap-1 text-caption text-fg-2">
+              抑揚 ({config.voicevox_intonation_scale.toFixed(1)})
+              <input id="voicevox-intonation" type="range" min="0" max="2" step="0.1" bind:value={config.voicevox_intonation_scale} oninput={handleConfigChange} class="w-full accent-accent" />
+            </label>
           </div>
 
           <TtsLaunchSettings
@@ -341,106 +235,77 @@
         </div>
       {/if}
 
-      <!-- Connection Test -->
       {#if config.backend !== 'none'}
-        <div class="flex items-center gap-4">
+        <div class="flex items-center gap-3">
           <button
+            type="button"
             onclick={testConnection}
             disabled={ttsStore.testingBackend !== null}
-            class="px-4 py-2 text-[var(--text-inverse)] rounded-lg transition-colors disabled:opacity-50"
-            style="background: var(--accent);"
+            class="rounded-control border border-outline px-3 py-1 text-label text-fg-1 hover:bg-fg-1/8 disabled:opacity-50"
           >
             {ttsStore.testingBackend ? '接続テスト中...' : '接続テスト'}
           </button>
           {#if ttsStore.connectionTestResult !== null}
             {#if ttsStore.connectionTestResult}
-              <span class="text-[var(--success)]">接続成功</span>
+              <span class="text-body text-success">接続成功</span>
             {:else}
-              <span class="text-[var(--error)]">接続失敗</span>
+              <span class="text-body text-error">接続失敗</span>
             {/if}
           {/if}
         </div>
       {/if}
-    </div>
+    </section>
 
-    <!-- Reading Options -->
-    <div class="p-4 bg-[var(--bg-surface-2)] rounded-lg border border-[var(--border-default)] space-y-4">
-      <h3 class="text-[var(--text-primary)] font-medium">読み上げオプション</h3>
-
-      <div class="space-y-2">
-        <label class="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            bind:checked={config.read_author_name}
-            onchange={handleConfigChange}
-            class="rounded text-[var(--accent)] focus:ring-[var(--accent)]"
-          />
-          <span class="text-[var(--text-primary)] text-sm">投稿者名を読み上げる</span>
+    <section class="flex flex-col gap-3 border-t border-outline-variant pt-4">
+      <h3 class="text-label">読み上げオプション</h3>
+      <div class="flex flex-col gap-2">
+        <label class="flex items-center gap-2 text-body">
+          <input type="checkbox" bind:checked={config.read_author_name} onchange={handleConfigChange} class="accent-accent" />
+          投稿者名を読み上げる
         </label>
-
         {#if config.read_author_name}
-          <div class="ml-6 space-y-2">
-            <label class="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                bind:checked={config.add_honorific}
-                onchange={handleConfigChange}
-                class="rounded text-[var(--accent)] focus:ring-[var(--accent)]"
-              />
-              <span class="text-[var(--text-primary)] text-sm">「さん」を付ける</span>
+          <div class="flex flex-col gap-2 pl-6">
+            <label class="flex items-center gap-2 text-body">
+              <input type="checkbox" bind:checked={config.add_honorific} onchange={handleConfigChange} class="accent-accent" />
+              「さん」を付ける
             </label>
-            <label class="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                bind:checked={config.strip_at_prefix}
-                onchange={handleConfigChange}
-                class="rounded text-[var(--accent)] focus:ring-[var(--accent)]"
-              />
-              <span class="text-[var(--text-primary)] text-sm">@プレフィックスを除去</span>
+            <label class="flex items-center gap-2 text-body">
+              <input type="checkbox" bind:checked={config.strip_at_prefix} onchange={handleConfigChange} class="accent-accent" />
+              @プレフィックスを除去
             </label>
-            <label class="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                bind:checked={config.strip_handle_suffix}
-                onchange={handleConfigChange}
-                class="rounded text-[var(--accent)] focus:ring-[var(--accent)]"
-              />
-              <span class="text-[var(--text-primary)] text-sm">ハンドルサフィックスを除去</span>
+            <label class="flex items-center gap-2 text-body">
+              <input type="checkbox" bind:checked={config.strip_handle_suffix} onchange={handleConfigChange} class="accent-accent" />
+              ハンドルサフィックスを除去
             </label>
           </div>
         {/if}
-
-        <label class="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            bind:checked={config.read_superchat_amount}
-            onchange={handleConfigChange}
-            class="rounded text-[var(--accent)] focus:ring-[var(--accent)]"
-          />
-          <span class="text-[var(--text-primary)] text-sm">スーパーチャット金額を読み上げる</span>
+        <label class="flex items-center gap-2 text-body">
+          <input type="checkbox" bind:checked={config.read_superchat_amount} onchange={handleConfigChange} class="accent-accent" />
+          スーパーチャット金額を読み上げる
         </label>
       </div>
 
-      <!-- 初回コメント設定 -->
-      <div class="pt-3 mt-3 border-t border-[var(--border-default)] space-y-3">
-        <div class="flex items-center justify-between">
-          <div>
-            <span class="text-[var(--text-primary)] text-sm">初回コメントにプレフィックスを付ける</span>
-            <p class="text-xs text-[var(--text-muted)]">配信内で初めてコメントした視聴者のメッセージに文言を付加</p>
+      <div class="flex flex-col gap-3 border-t border-outline-variant pt-3">
+        <div class="flex items-center justify-between gap-3">
+          <div class="flex flex-col">
+            <span class="text-body">初回コメントにプレフィックスを付ける</span>
+            <span class="text-caption text-fg-2">配信内で初めてコメントした視聴者のメッセージに文言を付加</span>
           </div>
-          <button
-            onclick={() => { if (config) { config.first_comment_prefix_enabled = !config.first_comment_prefix_enabled; handleConfigChange(); } }}
-            data-testid="first-comment-prefix-toggle"
-            aria-pressed={config.first_comment_prefix_enabled}
-            class="{config.first_comment_prefix_enabled ? 'bg-[var(--success)]' : 'bg-[var(--bg-surface-3)]'} relative inline-flex h-5 w-9 items-center rounded-full transition-colors"
-          >
-            <span class="{config.first_comment_prefix_enabled ? 'translate-x-5' : 'translate-x-1'} inline-block h-3 w-3 transform rounded-full bg-white transition-transform shadow"></span>
-          </button>
+          <Switch
+            pressed={config.first_comment_prefix_enabled}
+            label="初回コメントにプレフィックスを付ける"
+            testId="first-comment-prefix-toggle"
+            onclick={() => {
+              if (config) {
+                config.first_comment_prefix_enabled = !config.first_comment_prefix_enabled;
+                handleConfigChange();
+              }
+            }}
+          />
         </div>
-
         {#if config.first_comment_prefix_enabled}
-          <div class="ml-6">
-            <label for="first-comment-prefix" class="block text-xs text-[var(--text-muted)] mb-1">プレフィックス文言</label>
+          <label class="flex flex-col gap-1 text-caption text-fg-2 pl-6">
+            プレフィックス文言
             <input
               id="first-comment-prefix"
               type="text"
@@ -448,108 +313,79 @@
               oninput={handleConfigChange}
               placeholder="1回目のコメント。"
               data-testid="first-comment-prefix-input"
-              class="w-full px-3 py-2 rounded-lg bg-[var(--bg-surface-3)] text-[var(--text-primary)] placeholder-[var(--text-muted)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+              class="w-full rounded-control border border-outline bg-surface px-2 py-1.5 text-body text-fg-1 placeholder:text-fg-3 focus:border-accent"
             />
-          </div>
+          </label>
         {/if}
-
-        <div class="flex items-center justify-between">
-          <div>
-            <span class="text-[var(--text-primary)] text-sm">初回コメントのみ読み上げる</span>
-            <p class="text-xs text-[var(--text-muted)]">各視聴者の配信内1回目のコメントだけを読み上げ</p>
+        <div class="flex items-center justify-between gap-3">
+          <div class="flex flex-col">
+            <span class="text-body">初回コメントのみ読み上げる</span>
+            <span class="text-caption text-fg-2">各視聴者の配信内1回目のコメントだけを読み上げ</span>
           </div>
-          <button
-            onclick={() => { if (config) { config.first_comment_only = !config.first_comment_only; handleConfigChange(); } }}
-            data-testid="first-comment-only-toggle"
-            aria-pressed={config.first_comment_only}
-            class="{config.first_comment_only ? 'bg-[var(--success)]' : 'bg-[var(--bg-surface-3)]'} relative inline-flex h-5 w-9 items-center rounded-full transition-colors"
-          >
-            <span class="{config.first_comment_only ? 'translate-x-5' : 'translate-x-1'} inline-block h-3 w-3 transform rounded-full bg-white transition-transform shadow"></span>
-          </button>
-        </div>
-      </div>
-
-      <div class="grid grid-cols-2 gap-4">
-        <div>
-          <label for="max-length" class="block text-xs text-[var(--text-muted)] mb-1">最大文字数</label>
-          <input
-            id="max-length"
-            type="number"
-            min="50"
-            max="500"
-            bind:value={config.max_text_length}
-            onchange={handleConfigChange}
-            class="w-full px-3 py-2 rounded-lg bg-[var(--bg-surface-3)] text-[var(--text-primary)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-          />
-        </div>
-        <div>
-          <label for="queue-limit" class="block text-xs text-[var(--text-muted)] mb-1">キュー上限</label>
-          <input
-            id="queue-limit"
-            type="number"
-            min="10"
-            max="200"
-            bind:value={config.queue_size_limit}
-            onchange={handleConfigChange}
-            class="w-full px-3 py-2 rounded-lg bg-[var(--bg-surface-3)] text-[var(--text-primary)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+          <Switch
+            pressed={config.first_comment_only}
+            label="初回コメントのみ読み上げる"
+            testId="first-comment-only-toggle"
+            onclick={() => {
+              if (config) {
+                config.first_comment_only = !config.first_comment_only;
+                handleConfigChange();
+              }
+            }}
           />
         </div>
       </div>
-    </div>
 
-    <!-- Test Section -->
-    <div class="p-4 bg-[var(--bg-surface-2)] rounded-lg border border-[var(--border-default)] space-y-4">
-      <h3 class="text-[var(--text-primary)] font-medium">読み上げテスト</h3>
+      <div class="grid grid-cols-2 gap-3">
+        <label class="flex flex-col gap-1 text-caption text-fg-2">
+          最大文字数
+          <input id="max-length" type="number" min="50" max="500" bind:value={config.max_text_length} onchange={handleConfigChange} class="w-full rounded-control border border-outline bg-surface px-2 py-1.5 text-body text-fg-1 placeholder:text-fg-3 focus:border-accent" />
+        </label>
+        <label class="flex flex-col gap-1 text-caption text-fg-2">
+          キュー上限
+          <input id="queue-limit" type="number" min="10" max="200" bind:value={config.queue_size_limit} onchange={handleConfigChange} class="w-full rounded-control border border-outline bg-surface px-2 py-1.5 text-body text-fg-1 placeholder:text-fg-3 focus:border-accent" />
+        </label>
+      </div>
+    </section>
 
+    <section class="flex flex-col gap-3 border-t border-outline-variant pt-4">
+      <h3 class="text-label">読み上げテスト</h3>
       <div class="flex gap-2">
         <input
           type="text"
           bind:value={testText}
           placeholder="テスト文を入力"
-          class="flex-1 px-3 py-2 rounded-lg bg-[var(--bg-surface-3)] text-[var(--text-primary)] placeholder-[var(--text-muted)] border border-[var(--border-default)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+          aria-label="テスト文"
+          class="min-w-0 flex-1 rounded-control border border-outline bg-surface px-2 py-1.5 text-body text-fg-1 placeholder:text-fg-3 focus:border-accent"
         />
         <button
+          type="button"
           onclick={testSpeak}
           disabled={!testText || config.backend === 'none' || isSpeaking}
-          class="px-4 py-2 text-[var(--text-inverse)] rounded-lg transition-colors disabled:opacity-50 min-w-[100px]"
-          style="background: var(--accent);"
+          class="shrink-0 rounded-control bg-accent px-4 py-1.5 text-label text-surface hover:opacity-90 disabled:opacity-50"
         >
-          {#if isSpeaking}
-            <span class="flex items-center justify-center gap-2">
-              <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-            </span>
-          {:else}
-            読み上げ
-          {/if}
+          {isSpeaking ? '読み上げ中...' : '読み上げ'}
         </button>
       </div>
-    </div>
+    </section>
 
-    <!-- Queue Control -->
-    <div class="p-4 bg-[var(--bg-surface-2)] rounded-lg border border-[var(--border-default)]">
-      <div class="flex items-center justify-between">
-        <div>
-          <h3 class="text-[var(--text-primary)] font-medium">キュー管理</h3>
-          <p class="text-sm text-[var(--text-secondary)]">現在 {ttsStore.status.queue_size} 件のメッセージが待機中</p>
-        </div>
-        <button
-          onclick={() => ttsStore.clearQueue()}
-          disabled={ttsStore.status.queue_size === 0}
-          class="px-4 py-2 bg-[var(--error-subtle)] text-[var(--error)] rounded-lg border border-[var(--border-default)] hover:opacity-80 transition-colors disabled:opacity-50"
-        >
-          キューをクリア
-        </button>
+    <section class="flex items-center justify-between gap-3 border-t border-outline-variant pt-4">
+      <div class="flex flex-col gap-1">
+        <h3 class="text-label">キュー管理</h3>
+        <p class="text-body text-fg-2">現在 {ttsStore.status.queue_size} 件のメッセージが待機中</p>
       </div>
-    </div>
+      <button
+        type="button"
+        onclick={() => ttsStore.clearQueue()}
+        disabled={ttsStore.status.queue_size === 0}
+        class="shrink-0 rounded-control border border-outline px-3 py-1 text-label text-error hover:bg-fg-1/8 disabled:opacity-50"
+      >
+        キューをクリア
+      </button>
+    </section>
 
-    <!-- Error Display -->
     {#if ttsStore.error}
-      <div class="p-3 bg-[var(--error-subtle)] rounded-lg border border-[var(--border-default)]">
-        <p class="text-[var(--error)] text-sm">{ttsStore.error}</p>
-      </div>
+      <p role="alert" class="text-body text-error">{ttsStore.error}</p>
     {/if}
   {/if}
 </div>

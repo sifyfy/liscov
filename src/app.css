@@ -1,12 +1,6 @@
 @import 'tailwindcss';
 
 /* Fonts (locally bundled via fontsource) */
-@import '@fontsource/zen-kaku-gothic-new/400.css';
-@import '@fontsource/zen-kaku-gothic-new/500.css';
-@import '@fontsource/zen-kaku-gothic-new/700.css';
-@import '@fontsource/plus-jakarta-sans/500.css';
-@import '@fontsource/plus-jakarta-sans/600.css';
-@import '@fontsource/plus-jakarta-sans/700.css';
 @import '@fontsource-variable/jetbrains-mono';
 @import '@fontsource/biz-udpgothic/400.css';
 @import '@fontsource/biz-udpgothic/700.css';
@@ -15,7 +9,6 @@
  * === デザイントークン (docs/design/tokens.md) ===
  * 画面のコードは --sys-* と、下の @theme で Tailwind に登録した名前だけを使う。
  * 値の理由は tokens.md に書く。コントラストは src/lib/design/tokens.test.ts で検査する。
- * この節より下の旧い変数 (--bg-* など) は、M5 で画面を作り直し終えたら消す。
  */
 
 /* 値の層: 画面のコードからは使わない */
@@ -25,8 +18,9 @@
 	--ref-violet-light: #5f43cc;
 }
 
-/* 意味の層: ダーク (既定) */
-:root {
+/* 意味の層: ダーク (既定)。[data-theme='dark'] は、ライトの中にダークの見本を描くとき (テーマの設定) に使う */
+:root,
+[data-theme='dark'] {
 	--sys-surface: #131315;
 	--sys-surface-low: #18181b;
 	--sys-surface-mid: #1d1d21;
@@ -88,6 +82,11 @@
 	--sys-elevation-2: 0 8px 24px rgba(0, 0, 0, 0.16);
 }
 
+/* Tailwind の既定のテーマ (色・文字の大きさ・角丸・影など) は使わない。使う名前だけを下で登録する */
+@theme {
+	--*: initial;
+}
+
 /* Tailwind に登録する名前 (テーマで変わる値は inline で意味の層を参照する) */
 @theme inline {
 	--color-surface: var(--sys-surface);
@@ -112,6 +111,9 @@
 	--shadow-elevation-2: var(--sys-elevation-2);
 	--font-ui: var(--sys-font-ui);
 	--font-code: var(--sys-font-mono);
+	/* 書体を指定していない要素 (Tailwind の preflight) も UI の書体にする */
+	--default-font-family: var(--sys-font-ui);
+	--default-mono-font-family: var(--sys-font-mono);
 }
 
 /* Tailwind に登録する名前 (テーマで変わらない値) */
@@ -146,120 +148,40 @@
 	--spacing-chat-emoji: 1.3em; /* カスタム絵文字の高さ */
 	--spacing-chat-badge: 1em; /* YouTube のバッジの画像 */
 
+	/* 余白・大きさの基準 (4px。p-2 = 8px)。段階は tokens.md「余白」 */
+	--spacing: 4px;
+
+	/* 太さは 400 と 700 だけ (書体の制約) */
+	--font-weight-normal: 400;
+	--font-weight-bold: 700;
+
+	/* 中身の最大幅 (ダイアログ・見本・設定) */
+	--container-sm: 24rem;
+	--container-md: 28rem;
+	--container-lg: 32rem;
+	--container-2xl: 42rem;
+
+	/* 画面幅の区切り (視聴者のタブの列を出し分ける) */
+	--breakpoint-sm: 40rem;
+
 	/* 角丸 */
 	--radius-control: 4px;
 	--radius-popup: 8px;
 
 	/* 動き */
 	--ease-standard: cubic-bezier(0.2, 0, 0, 1);
-}
-
-/* === Dark Theme (Default) === */
-:root {
-	/* Font stacks */
-	--font-body: 'Zen Kaku Gothic New', system-ui, sans-serif;
-	--font-heading: 'Plus Jakarta Sans', 'Zen Kaku Gothic New', sans-serif;
-	--font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
-
-	/* Background layers — warm neutral, no blue tint */
-	--bg-base: #141414;
-	--bg-surface-1: #1a1a1a;
-	--bg-surface-2: #212121;
-	--bg-surface-3: #292929;
-	--bg-elevated: #303030;
-
-	/* Text — soft off-white, reduced glare */
-	--text-primary: #d4d4d4;
-	--text-secondary: #b5b5b5;
-	--text-muted: #9a9a9a;
-	--text-inverse: #141414;
-
-	/* Accent (muted sky blue — softer on dark backgrounds) */
-	--accent: #6fb8d9;
-	--accent-hover: #8ecae6;
-	--accent-subtle: rgba(111, 184, 217, 0.10);
-	--accent-muted: rgba(111, 184, 217, 0.05);
-
-	/* Border — warm white base */
-	--border-subtle: rgba(255, 255, 255, 0.05);
-	--border-default: rgba(255, 255, 255, 0.08);
-	--border-strong: rgba(255, 255, 255, 0.14);
-
-	/* Status — desaturated for reduced eye strain */
-	--success: #6ec9a0;
-	--success-subtle: rgba(110, 201, 160, 0.10);
-	--warning: #d4a944;
-	--warning-subtle: rgba(212, 169, 68, 0.10);
-	--error: #d97777;
-	--error-subtle: rgba(217, 119, 119, 0.10);
-	--info: #7ba8d4;
-	--info-subtle: rgba(123, 168, 212, 0.10);
-
-	/* Member — softer green */
-	--member-accent: #6ec98a;
-	--member-subtle: rgba(110, 201, 138, 0.08);
-
-	/* Shadows */
-	--shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
-	--shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35);
-	--shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.45);
-
-	/* Radius */
-	--radius-sm: 6px;
-	--radius-md: 8px;
-	--radius-lg: 12px;
-
-	/* Transition */
-	--transition-fast: 150ms ease;
-	--transition-normal: 250ms ease;
-}
-
-/* === Light Theme === */
-[data-theme='light'] {
-	--bg-base: #f0f2f5;
-	--bg-surface-1: #ffffff;
-	--bg-surface-2: #f8f9fb;
-	--bg-surface-3: #f1f3f5;
-	--bg-elevated: #ffffff;
-
-	--text-primary: #1a1d27;
-	--text-secondary: #4b5563;
-	--text-muted: #9ca3af;
-	--text-inverse: #ffffff;
-
-	--accent: #0284c7;
-	--accent-hover: #0369a1;
-	--accent-subtle: rgba(2, 132, 199, 0.08);
-	--accent-muted: rgba(2, 132, 199, 0.04);
-
-	--border-subtle: rgba(0, 0, 0, 0.04);
-	--border-default: rgba(0, 0, 0, 0.08);
-	--border-strong: rgba(0, 0, 0, 0.14);
-
-	--success: #059669;
-	--success-subtle: rgba(5, 150, 105, 0.08);
-	--warning: #d97706;
-	--warning-subtle: rgba(217, 119, 6, 0.08);
-	--error: #dc2626;
-	--error-subtle: rgba(220, 38, 38, 0.08);
-	--info: #2563eb;
-	--info-subtle: rgba(37, 99, 235, 0.08);
-
-	--member-accent: #16a34a;
-	--member-subtle: rgba(22, 163, 74, 0.06);
-
-	--shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-	--shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
-	--shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+	/* transition-* の既定 (tokens.md「動き」の duration-fast と easing) */
+	--default-transition-duration: 100ms;
+	--default-transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
 }
 
 body {
-	font-family: var(--font-body);
-	background: var(--bg-base);
-	color: var(--text-primary);
+	font-family: var(--sys-font-ui);
+	background: var(--sys-surface);
+	color: var(--sys-fg-1);
 }
 
-/* Scrollbar styling for dark theme */
+/* スクロールバー (細く、面に馴染ませる) */
 ::-webkit-scrollbar {
 	width: 6px;
 	height: 6px;
@@ -270,10 +192,10 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-	background: var(--border-strong);
+	background: var(--sys-outline);
 	border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-	background: var(--text-muted);
+	background: var(--sys-fg-3);
 }

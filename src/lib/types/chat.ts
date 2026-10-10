@@ -47,7 +47,6 @@ export interface FrontendConnectionState {
   broadcasterName: string;
   broadcasterChannelId: string;
   connectionState: 'connecting' | 'connected' | 'paused' | 'disconnecting' | 'error';
-  color: string;
   /** この接続で jewel_count の無いギフトを受けたら true（接続一覧に注記を出す。フロントエンドのみの状態） */
   jewelCountUnavailable: boolean;
   /** リアクションの累計（02_chat.md「状態の行のリアクション」） */

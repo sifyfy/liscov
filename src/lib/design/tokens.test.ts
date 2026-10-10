@@ -18,12 +18,13 @@ const css = readFileSync(resolve(__dirname, '../../app.css'), 'utf-8').replace(/
 type Theme = 'dark' | 'light';
 const THEME_SELECTORS = { dark: ':root', light: "[data-theme='light']" } as const satisfies Record<Theme, string>;
 
-/** セレクタがちょうど一致するブロックから、指定した層 (sys / ref) の宣言を集める */
+/** セレクタ (並びならそのどれか) がちょうど一致するブロックから、指定した層 (sys / ref) の宣言を集める */
 function tokensOf(selector: string, layer: 'sys' | 'ref'): ReadonlyMap<string, string> {
   const tokens = new Map<string, string>();
   for (const block of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
     // 直前の @import などの文が混ざらないよう、最後の ; より後ろをセレクタとみなす
-    if (block[1].split(';').at(-1)?.trim() !== selector) continue;
+    const selectors = (block[1].split(';').at(-1) ?? '').split(',').map((s) => s.trim());
+    if (!selectors.includes(selector)) continue;
     for (const decl of block[2].matchAll(new RegExp(`--${layer}-([\\w-]+)\\s*:\\s*([^;]+);`, 'g'))) {
       tokens.set(decl[1], decl[2].trim());
     }
