@@ -2,7 +2,7 @@ import { test, expect } from './utils/fixtures';
 import type { Page, Browser } from '@playwright/test';
 import { log } from './utils/logger';
 import {
-  MOCK_SERVER_URL,
+  mockServerUrl,
   setupTestEnvironment,
   teardownTestEnvironment,
   resetMockServer,
@@ -50,7 +50,7 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
     test('should display member names in member-text color and non-member names in fg-1 color', async () => {
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -157,7 +157,7 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
     test('should toggle timestamp display', async () => {
       // Connect to stream and add message
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -225,7 +225,7 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
     test('should display member name in member-text color without a green background or border', async () => {
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -273,7 +273,7 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
     test('should display author icon', async () => {
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -307,7 +307,7 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
 
       // Connect to stream with long title
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
 
       // 上の行の札は 1 行のまま (タイトルは札のヒント)、全文は操作パネルの接続の一覧に出る
@@ -344,7 +344,7 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
     test('should display a moderately long author name wider than the former 200px cap without truncation', async () => {
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -386,7 +386,7 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
     test('should wrap an over-long author name in full while keeping the member badge visible and the row from overflowing', async () => {
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 

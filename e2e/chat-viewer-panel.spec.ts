@@ -2,7 +2,7 @@ import { test, expect } from './utils/fixtures';
 import type { BrowserContext, Page, Browser } from '@playwright/test';
 import { log } from './utils/logger';
 import {
-  MOCK_SERVER_URL,
+  mockServerUrl,
   setupTestEnvironment,
   teardownTestEnvironment,
   resetMockServer,
@@ -52,7 +52,7 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
     test('should have data-message-id attribute on messages', async () => {
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -86,7 +86,7 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
 
     async function connect() {
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
     }
@@ -119,7 +119,7 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
 
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -457,7 +457,7 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
     test('should limit displayed messages when displayLimit is set', async () => {
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -511,7 +511,7 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
     test('should update status bar counts when displayLimit changes', async () => {
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -558,7 +558,7 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
     test('should restrict display to displayLimit with large message count', async () => {
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 

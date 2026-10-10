@@ -1,0 +1,75 @@
+# ADR-005: E2E をワークツリーごとに分離し、空きポートで動かす
+
+## ステータス
+
+承認
+
+関連仕様書: [docs/specs/01_auth.md](../specs/01_auth.md) の「E2Eテスト > テスト分離」、[e2e/README.md](../../e2e/README.md) の「並列実行と分離」
+
+## コンテキスト
+
+E2E は次の資源を固定値で使い、すべてのワークツリーで共有していた。
+
+| 資源 | 固定値 |
+|------|--------|
+| CDP (WebView2 のリモートデバッグ) | `127.0.0.1:9222` |
+| InnerTube のモックサーバー | `127.0.0.1:3456` |
+| フロントエンド (Tauri の `devUrl`) | `localhost:5173` |
+| アプリのデータ・キーリング | `LISCOV_APP_NAME` / `LISCOV_KEYRING_SERVICE` = `liscov-test` |
+| WebView2 のデータ | `%LOCALAPPDATA%\liscov-test\EBWebView` |
+
+別のワークツリーの E2E が同時に動いていると、`waitForCDP` や `/status` の確認は**相手のアプリやモックに黙って繋がって成功する**。
+2026-10-09 には他のセッションの E2E と重なり、`cleanupTestData` が相手の使用中のデータフォルダを消そうとして EPERM で落ちた。
+5173 は ADR なしの修正 (PR #10) で「使用中なら失敗する」にしたが、並列には走らせられないままだった。
+
+Claude Code のセッションはワークツリーごとに並行して動くので、E2E の衝突は今後も起こる。
+
+## 決定
+
+1. **ポートはすべて OS に選ばせる (ポート 0)。** 選ばれたポートは、自分が起動したものからしか読まない
+   - CDP: `--remote-debugging-port=0`。WebView2 が自分のデータフォルダに書く `EBWebView\DevToolsActivePort` から読む
+   - モック: `mock-server --port 0`。バインド後に標準出力へ書く `Mock server on http://127.0.0.1:<port>` から読む
+   - フロント: 静的サーバーを `127.0.0.1:0` で起動し、WebView2 に
+     `--host-resolver-rules="MAP localhost:5173 127.0.0.1:<port>"` を渡して `devUrl` の接続先だけを付け替える
+2. **繋がった相手が自分のものかを確かめる。** フロントは起動ごとの ID を `/__liscov_e2e_server_id` で返し、
+   アプリに接続した直後にページからこれを fetch して一致を確かめる。一致しなければ黙って続けずにエラーで止める
+3. **名前空間をワークツリーごとに分ける。** `liscov-test-<ワークツリー ID>` (プロジェクトのパスのハッシュ 8 桁) を
+   アプリ名・キーリングのサービス名・WebView2 のデータフォルダに使う
+4. **同じワークツリーでの二重実行はロックで検知して止める。** 名前空間が同じになり、互いのプロセスを止め合うため
+
+## 理由
+
+### 検討した選択肢
+
+| 選択肢 | メリット | デメリット |
+|-------|---------|-----------|
+| A: 空きポート + 相手の確認 + ワークツリーごとの名前空間 (採用) | 並列に走らせられる。「どこかに繋がった」でなく「自分が起動したものに繋がった」を確かめるので、黙った誤接続の経路がなくなる | spec の `MOCK_SERVER_URL` (約 170 箇所) を関数に置き換える。ワークツリーを消しても WebView2 のデータが残る |
+| B: 固定ポートのまま、使用中なら止める | 変更が小さい | 並列には走らせられない。確認してから起動するまでの隙間に取られる可能性が残る |
+| C: フロントを exe に埋め込む (`--features tauri/custom-protocol`) | 5173 自体が要らない。本番と同じ配信経路で検証できる | 機能フラグの切り替えで再ビルドが頻発しないよう、ワークツリーごとに別の target (数 GB、初回は数分) が要る。フロントを変えるたびに Rust の再コンパイルが走る。オリジンが変わり、ストレージや CSP の前提も変わる |
+| D: `devUrl` を差し替える (`TAURI_CONFIG`) | 付け替えの仕組みが要らない | `devUrl` は tauri-codegen がコンパイル時に焼き込む。環境変数で変えると `rerun-if-env-changed` で再ビルドになる |
+
+### 採用理由
+
+- 目的は「同時に走らせても干渉しない。干渉するなら黙らずに止まる」。B は後半しか満たさない
+- A の仕組みは 2026-10-09 に WebView2 で実測した
+  - `--remote-debugging-port=0` で、`<WEBVIEW2_USER_DATA_FOLDER>\EBWebView\DevToolsActivePort` に実際のポートが書かれた
+  - `--host-resolver-rules` の MAP で、URL は `http://localhost:5173/` のまま中身だけが付け替わった。オリジンが変わらないので、Tauri の IPC の許可 (capabilities) も変わらない
+- `--host-resolver-rules` が将来の WebView2 で効かなくなっても、ID の確認で必ず気づける
+- C はより本番に近い検証になるが、コストが大きいので今回は採らない。E2E の配信経路を本番に寄せたくなったときの候補として残す
+
+## 影響
+
+- `e2e/utils/test-helpers.ts`: 定数 `CDP_URL` と `MOCK_SERVER_URL` をやめ、起動後に値が決まる `mockServerUrl()` にする。起動前に呼ぶと例外を投げる
+- `e2e/utils/static-frontend-server.ts`: 127.0.0.1 と ::1 の両方で 5173 を listen する方式 (PR #10) を、`127.0.0.1:0` と ID の確認に置き換える
+- `crates/mock-server`: 実際にバインドしたアドレスを出力する (今は bind の前に引数のアドレスを出力している)
+- `e2e/playwright.config.ts`: 使われていない `connectOptions.wsEndpoint` (9222) を消す。
+  あわせて `testMatch` を `*.spec.ts` に絞る (PR #10 で入った `utils/*.test.ts` を Playwright が拾い、`pnpm test:e2e` が vitest の読み込みエラーで落ちていた)
+- `startTauriApp()` は、モックサーバーが起動していなければ起動する。以前はモックを使わない spec (font-size・window-state など) も
+  固定の `3456` をアプリに渡していたので、そこにいた別のワークツリーのモックへセッション確認が届きうる状態だった
+- ロックは起動だけでなく停止・データの削除の前にも取る。最初は起動の前だけで取っていたため、同じワークツリーの 2 つ目の実行が
+  ロックの確認より先に 1 つ目のアプリを exe のパスで止め、データを消そうとして EPERM で落ちた (実装中の確認で発見)
+- 残るもの:
+  - ワークツリーを消しても `%LOCALAPPDATA%\liscov-test-<ID>` (WebView2 のデータ) と `.window-state.liscov-test-<ID>.json` は残る。消し方は e2e/README.md に書く
+  - 以前の `liscov-test` のデータ・資格情報も手で消すまで残る
+- Rust のアプリ本体は変えない。アプリ名・キーリング・WebView2 のフォルダは、もともと環境変数で分けられる
+- 外部の資源を使う spec (`@external`: 実際の YouTube・VOICEVOX) は対象外。外部のアプリは共有のまま

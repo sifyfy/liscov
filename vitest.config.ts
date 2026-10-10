@@ -15,7 +15,8 @@ export default defineConfig({
 		conditions: ['browser'],
 	},
 	test: {
-		include: ['src/**/*.{test,spec}.{js,ts}'],
+		// e2e/utils は E2E 基盤の単体テスト (Playwright の *.spec.ts とは別。Node 環境で動かす)
+		include: ['src/**/*.{test,spec}.{js,ts}', 'e2e/utils/**/*.test.ts'],
 		environment: 'jsdom',
 		globals: true,
 		setupFiles: ['./src/lib/test/setup.ts'],

@@ -2,7 +2,7 @@ import { test, expect } from './utils/fixtures';
 import type { BrowserContext, Page, Browser } from '@playwright/test';
 import { log } from './utils/logger';
 import {
-  MOCK_SERVER_URL,
+  mockServerUrl,
   setupTestEnvironment,
   teardownTestEnvironment,
   resetMockServer,
@@ -29,7 +29,7 @@ import {
  */
 async function connectStream(page: Page, videoId: string, expectedTitle: string): Promise<void> {
   const urlInput = await openUrlInput(page);
-  await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=${videoId}`);
+  await urlInput.fill(`${mockServerUrl()}/watch?v=${videoId}`);
   await page.getByRole('button', { name: '接続', exact: true }).click();
   await expect(connectionChips(page, expectedTitle).first()).toBeVisible({ timeout: 10000 });
 }

@@ -2,7 +2,7 @@ import { test, expect } from './utils/fixtures';
 import type { BrowserContext, Page, Browser } from '@playwright/test';
 import { log } from './utils/logger';
 import {
-  MOCK_SERVER_URL,
+  mockServerUrl,
   setupTestEnvironment,
   teardownTestEnvironment,
   resetMockServer,
@@ -50,7 +50,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
     test('should display SuperChat with amount', async () => {
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -78,7 +78,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
     test('should display membership message', async () => {
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -106,7 +106,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
 
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -148,7 +148,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
 
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -181,7 +181,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
     test('should display SuperSticker with amount', async () => {
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -208,7 +208,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
 
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -234,7 +234,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
 
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -259,7 +259,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
   test.describe('バッジ (02_chat.md「バッジの種類」)', () => {
     test('モデレーターのコメントにモデレーターのバッジが表示される', async () => {
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -300,7 +300,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
 
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=hashtag_title_test`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=hashtag_title_test`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
 
       // Wait for connection
@@ -335,7 +335,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
 
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=special_title_test`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=special_title_test`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
 
       // Wait for connection
@@ -366,7 +366,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
     test('should display messages with hashtags correctly', async () => {
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -389,7 +389,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
     test('should display messages with various special characters', async () => {
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -411,7 +411,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
     test('should display messages with URLs', async () => {
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -432,7 +432,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
     test('should display long messages without breaking layout', async () => {
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -463,7 +463,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
     test('新規さんの初回コメントは優先順位 2 (塗りの印「初見」) で #1 が表示される', async () => {
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_first_time`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_first_time`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -491,7 +491,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
     test('新規さんの2回目は優先順位 3 (枠の印「初見」) で #2 が表示される', async () => {
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_repeat`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_repeat`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -532,7 +532,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
     test('異なるユーザーはそれぞれ優先順位 2 の「初見」と #1 が表示される', async () => {
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_multi_first`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_multi_first`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -580,7 +580,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
   test.describe('ギフト（ジュエル）', () => {
     async function connect(videoId: string) {
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=${videoId}`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=${videoId}`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
     }

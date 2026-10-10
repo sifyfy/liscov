@@ -12,7 +12,7 @@ import {
   addMockMessage,
   connectToApp,
   connectToMockStream,
-  MOCK_SERVER_URL,
+  mockServerUrl,
   TEST_APP_NAME,
   TEST_KEYRING_SERVICE,
 } from './utils/test-helpers';
@@ -53,9 +53,9 @@ test.describe('TTS 再送メッセージ (実 Tauri + モック棒読みちゃ�
     await startTauriAppWithEnv({
       LISCOV_APP_NAME: TEST_APP_NAME,
       LISCOV_KEYRING_SERVICE: TEST_KEYRING_SERVICE,
-      LISCOV_AUTH_URL: `${MOCK_SERVER_URL}/?auto_login=true`,
-      LISCOV_SESSION_CHECK_URL: `${MOCK_SERVER_URL}/youtubei/v1/account/account_menu`,
-      LISCOV_YOUTUBE_BASE_URL: MOCK_SERVER_URL,
+      LISCOV_AUTH_URL: `${mockServerUrl()}/?auto_login=true`,
+      LISCOV_SESSION_CHECK_URL: `${mockServerUrl()}/youtubei/v1/account/account_menu`,
+      LISCOV_YOUTUBE_BASE_URL: mockServerUrl(),
     });
 
     const conn = await connectToApp();

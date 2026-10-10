@@ -2,7 +2,7 @@ import { test, expect } from './utils/fixtures';
 import type { BrowserContext, Page, Browser } from '@playwright/test';
 import { log } from './utils/logger';
 import {
-  MOCK_SERVER_URL,
+  mockServerUrl,
   setupTestEnvironment,
   teardownTestEnvironment,
   resetMockServer,
@@ -79,7 +79,7 @@ test.describe('Timestamp Timezone Display', () => {
 
     // Connect to stream
     const urlInput = (await openUrlInput(mainPage));
-    await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+    await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
     await mainPage.getByRole('button', { name: '接続', exact: true }).click();
     await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -180,7 +180,7 @@ test.describe('Timestamp Timezone Display', () => {
 
     // Connect to stream
     const urlInput = (await openUrlInput(mainPage));
-    await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+    await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
     await mainPage.getByRole('button', { name: '接続', exact: true }).click();
     await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 

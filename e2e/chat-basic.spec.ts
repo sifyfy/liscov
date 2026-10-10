@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { log } from './utils/logger';
 import {
-  MOCK_SERVER_URL,
+  mockServerUrl,
   setupTestEnvironment,
   teardownTestEnvironment,
   resetMockServer,
@@ -37,7 +37,7 @@ function readConfigChatMode(): string | null {
 
 // Helper to get current chat mode from mock server
 async function getChatModeStatus(): Promise<string | null> {
-  const response = await fetch(`${MOCK_SERVER_URL}/chat_mode_status`);
+  const response = await fetch(`${mockServerUrl()}/chat_mode_status`);
   const data = await response.json();
   return data.chat_mode;
 }
@@ -55,7 +55,7 @@ interface TokenValidation {
 
 // Helper to get detailed token validation from mock server
 async function getTokenValidation(): Promise<TokenValidation> {
-  const response = await fetch(`${MOCK_SERVER_URL}/token_validation`);
+  const response = await fetch(`${mockServerUrl()}/token_validation`);
   return response.json();
 }
 
@@ -89,7 +89,7 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
       // Enter mock video URL
       const urlInput = (await openUrlInput(mainPage));
       await expect(urlInput).toBeVisible();
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
 
       // Click Connect button
       const connectButton = mainPage.getByRole('button', { name: '接続', exact: true });
@@ -105,7 +105,7 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
     test('should receive and display chat messages', async () => {
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -163,7 +163,7 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
 
       // Connect to stream (default is TopChat)
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -183,7 +183,7 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
 
       // Connect
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -202,7 +202,7 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
 
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -242,7 +242,7 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
       // It also validates that the token is properly formatted and parseable.
 
       // Reset mock server state and ensure TopChat is selected in the app
-      await fetch(`${MOCK_SERVER_URL}/reset`, { method: 'POST' });
+      await fetch(`${mockServerUrl()}/reset`, { method: 'POST' });
 
       // Ensure TopChat is selected before connecting
       // (previous test may have left it in a different state)
@@ -250,7 +250,7 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
 
       // Connect to stream (default is TopChat)
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -312,7 +312,7 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
 
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -323,7 +323,7 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
       await expect(await chatMode()).toBeChecked();
 
       // Reconnect
-      await (await openUrlInput(mainPage)).fill(`${MOCK_SERVER_URL}/watch?v=test_video_456`);
+      await (await openUrlInput(mainPage)).fill(`${mockServerUrl()}/watch?v=test_video_456`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       // 2 本目の配信はモックがタイトルを変える。タイトルが出れば接続が成立していて、操作パネルの自動で隠す動きも済む
       await expect(connectionChips(mainPage, 'Mock Live 2').first()).toBeVisible({ timeout: 10000 });
@@ -346,7 +346,7 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
 
       // 切り替えずに接続しても、最初のポーリングから全てで取得する
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_remember_mode`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_remember_mode`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
       await expect.poll(getChatModeStatus, { timeout: 15000 }).toBe('AllChat');
@@ -363,7 +363,7 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
     test('should clear all messages when clicking Clear button', async () => {
       // Connect and add messages
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -412,7 +412,7 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
 
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=member_only_video`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=member_only_video`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
 
       // Should connect successfully with auth
@@ -440,7 +440,7 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
     test('should filter messages by type - SuperChat only', async () => {
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -479,7 +479,7 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
     test('should filter messages by search query', async () => {
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -527,7 +527,7 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
     test('should properly disconnect and clear connection state', async () => {
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
@@ -547,7 +547,7 @@ test.describe('Chat Display — Basic (02_chat.md)', () => {
       // This test would need mock server to return isReplay: true
       // For now, we verify the UI element exists when not in replay mode
       const urlInput = (await openUrlInput(mainPage));
-      await urlInput.fill(`${MOCK_SERVER_URL}/watch?v=test_video_123`);
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
       await mainPage.getByRole('button', { name: '接続', exact: true }).click();
       await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 

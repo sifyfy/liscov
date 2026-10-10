@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { log } from './utils/logger';
 import {
-  MOCK_SERVER_URL,
+  mockServerUrl,
   TEST_APP_NAME,
   killTauriApp,
   cleanupTestData,
