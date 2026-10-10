@@ -246,6 +246,7 @@
 |------|------|
 | 自分の配信のスパチャ等が、流れの画面の外 (上) に出た | 「流れたスパチャ等」の欄の先頭に出る |
 | 新規さんの初回コメント (相手の配信のものを含む) が画面の外に出た | 「流れた新規さん」の欄の先頭に出る |
+| 欄の見出し | 流れとの境がちらっと見て分かるように、見出しを一段濃い帯にして名前と件数を太字で出し、帯の上端にアクセント色の線を引く (2026-10-11 の配信で、今の見出しでは境が分かりにくかった。シフィさんが案 B を選んだ) |
 | 欄の中の並び | 新しいものが上。新しい 2 件は全文の行 (時刻・金額・名前・本文)、それより前は「● 金額 名前」(新規さんは「初見 名前」) の短い札を折り返して並べる |
 | 手でスクロールして戻り、そのコメントがまた画面に見えた | 欄から外れる (見えているものを二重に出さない) |
 | 時間がたった | 消えない (最後のお礼のために残す) |
@@ -1068,7 +1069,7 @@ Connecting → (接続失敗) → (削除 + エラー通知)
 | 候補 | `chatStore.supporters` = 主の配信の優先順位 1、`chatStore.newcomers` = 優先順位 2 (相手の配信を含む)。届いた順。フィルタ・表示件数によらず、一覧にあるもの (`chatStore.messages`) すべてから取る (お礼の一覧はこのまま)。「コメントを消す」で消える |
 | 見えているいちばん上の行 | virtua の `findItemIndex(getScrollOffset())` で、表示中の一覧 (`displayedMessages`) の行を取る。一部だけ見えている行も見えているとみなす。スクロール・一覧の変化・流れの高さの変化のたびに測り直す |
 | 流れたもの | `flowedAbove(候補, chatStore.filteredMessages, 見えているいちばん上の行)`: フィルタ後の一覧でその行より前にある候補を、新しいものを先に。何も見えていなければ空 |
-| 欄 | `<section aria-label="流れた新規さん">`・`<section aria-label="流れたスパチャ等">`。見出し `h3` に名前と件数。新しい 2 件は詰めた形の行、それより前は短い札 (`data-testid="flowed-chip"`): 優先順位 1 は「(ティアの色または member の点) 札の文言 名前」、新規さんは「初見 名前」。高さの上限は `max-height: max(割合 %, 見出しと 1 行の高さ px)` (割合は親 `ChatDisplay` の高さに対して)、超えたら欄の中でスクロール |
+| 欄 | `<section aria-label="流れた新規さん">`・`<section aria-label="流れたスパチャ等">`。見出し `h3` に名前と件数 (`text-caption`・`font-bold`・`text-fg-1`、見出しの入れ物は `bg-surface-highest`)。欄の上端の線は `border-t-2 border-accent`。新しい 2 件は詰めた形の行、それより前は短い札 (`data-testid="flowed-chip"`): 優先順位 1 は「(ティアの色または member の点) 札の文言 名前」、新規さんは「初見 名前」。高さの上限は `max-height: max(割合 %, 見出しと 1 行の高さ px)` (割合は親 `ChatDisplay` の高さに対して)、超えたら欄の中でスクロール |
 | 欄の高さの変更 | 欄の上端に境目 (`role="separator"`・`aria-orientation="horizontal"`・`aria-label="{欄の名前}の高さ"`・`aria-valuenow` は割合の %、`tabindex=0`、`cursor-row-resize`)。pointerdown で pointer capture、動かしている間は欄の中だけで割合を変え、pointerup で `onHeightChange` (保存)。ダブルクリック・↑↓ でもすぐ保存。割合の計算 (範囲・中身の高さで止める・既定) は `src/lib/design/flowed-height.ts` の純粋な関数。保存は `configStore.setFlowedHeightRatio`。範囲外の値 (古い・手で書いた config.toml) は表示のときに範囲に収める |
 | 一覧を開くボタン | 「この配信のスパチャ等の一覧 N」。候補があり、一覧を閉じているときだけ |
 | 一覧 | `<section aria-label="この配信のスパチャ等">`。見出し `h2` に「N 件・時刻順」と「閉じる」。`max-h-1/2`、行は詰めた形 |

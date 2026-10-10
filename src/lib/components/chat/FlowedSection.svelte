@@ -114,11 +114,12 @@
 {#if items.length > 0}
   <section
     bind:this={section}
-    class="shrink-0 overflow-y-auto border-t border-outline bg-surface-low"
+    class="shrink-0 overflow-y-auto border-t-2 border-accent bg-surface-low"
     style="max-height: max({ratio * 100}%, {floorPx}px);"
     aria-label={label}
   >
-    <div bind:this={heading} class="sticky top-0 z-10 bg-surface-low">
+    <!-- 見出しは一段濃い帯 + 上端のアクセント色の線で、流れとの境を示す -->
+    <div bind:this={heading} class="sticky top-0 z-10 bg-surface-highest">
       <!-- 欄の高さを変える境目 (上へ引くと高く)。ダブルクリックで既定に戻す。
            フォーカスできる separator は ARIA では操作できる部品 (window splitter) だが、Svelte の検査は非対話の役割とみなすので抑える -->
       <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
@@ -139,7 +140,7 @@
         ondblclick={() => onHeightChange?.(FLOWED_HEIGHT.default)}
         onkeydown={handleKey}
       ></div>
-      <h3 class="px-3 text-caption text-fg-2">
+      <h3 class="px-3 py-0.5 text-caption font-bold text-fg-1">
         {label} <span class="tabular-nums">{items.length}</span>
       </h3>
     </div>
