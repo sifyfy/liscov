@@ -79,6 +79,11 @@ Windows ではパスの大文字・小文字を区別しない。
 | CDP | `--remote-debugging-port=0` | 起動前に消しておいた `<WebView2 のデータ>\EBWebView\DevToolsActivePort` が書かれるのを待って読む |
 | モックサーバー | `mock-server.exe --port 0` | 標準出力の `Mock server on http://127.0.0.1:<port>` を読む |
 | フロントエンド | 静的サーバーを `127.0.0.1:0` で listen | listen した結果から読む |
+| アプリの WebSocket サーバー | アプリに `LISCOV_WEBSOCKET_PORT=0` を渡す | 画面のステータス表示 `WS:<port>(<接続数>)` から読む |
+
+WebSocket サーバーは、環境変数を渡さないと本番と同じ 8765〜8774 を使う。本番の liscov が止まっていると E2E のアプリが 8765 を取り、
+本番向けに 8765 へつなぎに来る OBS のブラウザソースのオーバーレイがつながってしまう (接続数のテストが落ち、テストのコメントが配信画面に流れうる)。
+そのため `startTauriAppWithEnv()` で必ず渡す ([03_websocket.md](../docs/specs/03_websocket.md)「開始ポートの上書き」)。
 
 `DevToolsActivePort` の中身は 1 行目がポート、2 行目がブラウザのエンドポイントのパス。
 

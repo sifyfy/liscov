@@ -27,6 +27,25 @@ struct ClientEventPayload {
     client_id: u64,
 }
 
+/// 本番の開始ポート (8765〜8774 を試す)
+const DEFAULT_WEBSOCKET_PORT: u16 = 8765;
+
+/// 開始ポートを上書きする環境変数 (E2E テスト用。0 で OS に選ばせる)
+const WEBSOCKET_PORT_ENV: &str = "LISCOV_WEBSOCKET_PORT";
+
+/// `LISCOV_WEBSOCKET_PORT` の値から開始ポートを決める。未設定・不正なら本番の既定
+pub fn websocket_start_port(value: Option<&str>) -> u16 {
+    let Some(value) = value else {
+        return DEFAULT_WEBSOCKET_PORT;
+    };
+    value.parse().unwrap_or_else(|_| {
+        tracing::warn!(
+            "{WEBSOCKET_PORT_ENV}={value:?} はポート番号として読めないため、既定の {DEFAULT_WEBSOCKET_PORT} から試します"
+        );
+        DEFAULT_WEBSOCKET_PORT
+    })
+}
+
 /// Start the WebSocket server automatically on app launch
 ///
 /// This function is called from the setup hook, not exposed as a Tauri command.
@@ -34,7 +53,7 @@ pub async fn start_websocket_server_auto(
     app: AppHandle,
     websocket_server: Arc<RwLock<Option<WebSocketServer>>>,
 ) {
-    let preferred_port = 8765;
+    let preferred_port = websocket_start_port(std::env::var(WEBSOCKET_PORT_ENV).ok().as_deref());
 
     // Check if server is already running
     {
@@ -116,5 +135,35 @@ pub async fn websocket_get_status(
             actual_port: None,
             connected_clients: 0,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // 仕様: 03_websocket.md「開始ポートの上書き（E2E テスト用）」の表
+
+    #[test]
+    fn unset_uses_default_port() {
+        assert_eq!(websocket_start_port(None), 8765);
+    }
+
+    #[test]
+    fn zero_lets_os_choose() {
+        assert_eq!(websocket_start_port(Some("0")), 0);
+    }
+
+    #[test]
+    fn valid_port_is_used_as_start() {
+        assert_eq!(websocket_start_port(Some("9000")), 9000);
+        assert_eq!(websocket_start_port(Some("65530")), 65530);
+    }
+
+    #[test]
+    fn invalid_values_fall_back_to_default_port() {
+        for value in ["abc", "-1", "65536", ""] {
+            assert_eq!(websocket_start_port(Some(value)), 8765, "value: {value:?}");
+        }
     }
 }

@@ -393,6 +393,7 @@ E2Eテストは本番データと分離された専用の名前空間を使用�
 | `LISCOV_KEYRING_SERVICE` | `liscov` | `liscov-test-1a2b3c4d` | Windows資格情報マネージャーのサービス名 |
 | `LISCOV_AUTH_URL` | YouTube URL | mock server URL | 認証ウィンドウの初期URL |
 | `LISCOV_SESSION_CHECK_URL` | YouTube API | mock server URL | セッション検証エンドポイント |
+| `LISCOV_WEBSOCKET_PORT` | なし（8765〜8774） | `0`（OS が選ぶ空きポート） | WebSocket サーバーの開始ポート。本番の liscov 向けに 8765 へつなぎに来るオーバーレイが E2E のアプリにつながらないようにする（03_websocket.md「開始ポートの上書き」） |
 | `WEBVIEW2_USER_DATA_FOLDER` | なし（`%LOCALAPPDATA%/com.liscov-tauri.app/EBWebView`） | `%LOCALAPPDATA%/liscov-test-1a2b3c4d/EBWebView` | WebView2 のデータ（Cookie・キャッシュ）。WebView2 自体が読む環境変数で、`identifier` で決まる本番のフォルダと分ける。同じフォルダだと、先に起動したアプリ（本番や別のワークツリーの E2E）のブラウザプロセスを共有し、テスト用アプリが CDP を開けない |
 
 ### テストデータのパス
