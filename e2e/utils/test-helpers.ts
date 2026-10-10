@@ -727,10 +727,10 @@ export async function connectToMockStream(page: Page, videoId = 'test_video_123'
 }
 
 /** 上の行の画面のタブの名前 (読み上げ用の名前) */
-const TAB_LABELS: Record<string, string> = { Chat: 'チャット', Viewers: '視聴者', Analytics: '分析', Settings: '設定' };
+const TAB_LABELS: Record<string, string> = { Chat: 'チャット', Viewers: '視聴者', Settings: '設定' };
 
 /**
- * 上の行の画面のタブで指定タブに遷移する (Chat / Viewers / Analytics / Settings)
+ * 上の行の画面のタブで指定タブに遷移する (Chat / Viewers / Settings)
  */
 export async function navigateToTab(page: Page, tabName: string): Promise<void> {
   await page.locator(`nav[aria-label="画面"] button[aria-label="${TAB_LABELS[tabName] ?? tabName}"]`).click();

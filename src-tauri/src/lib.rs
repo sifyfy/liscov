@@ -43,13 +43,8 @@ use commands::{
     connect_to_stream,
     disconnect_all_streams,
     disconnect_stream,
-    export_current_messages,
-    export_session_data,
     get_connection_reactions,
     get_connections,
-    // Analytics (spec: 07_revenue.md)
-    get_revenue_analytics,
-    get_session_analytics,
     get_session_messages,
     // Database (spec: 08_database.md)
     get_sessions,
@@ -265,11 +260,6 @@ pub fn run() {
             get_sessions,
             get_session_messages,
             viewer_update_info,
-            // Analytics (spec: 07_revenue.md)
-            get_revenue_analytics,
-            get_session_analytics,
-            export_session_data,
-            export_current_messages,
             // TTS (spec: 04_tts.md)
             tts_speak,
             tts_speak_direct,

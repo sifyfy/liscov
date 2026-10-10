@@ -3,7 +3,7 @@
   import { chatStore, authStore, configStore } from '$lib/stores';
   import { StorageErrorDialog } from '$lib/components/auth';
   import { ViewerManagement } from '$lib/components/viewer';
-  import { ChatTab, AnalyticsTab, SettingsTab } from '$lib/components/tabs';
+  import { ChatTab, SettingsTab } from '$lib/components/tabs';
   import ErrorBoundary from '$lib/components/ui/ErrorBoundary.svelte';
   import TopBar, { type AppTab } from './TopBar.svelte';
 
@@ -88,10 +88,6 @@
           <ViewerManagement broadcasterId={broadcasterId || undefined} />
         </ErrorBoundary>
       </div>
-    {:else if activeTab === 'analytics'}
-      <ErrorBoundary name="分析タブ">
-        <AnalyticsTab />
-      </ErrorBoundary>
     {:else if activeTab === 'settings'}
       <ErrorBoundary name="設定タブ">
         <SettingsTab initialTab={activeSettingsSubTab} />

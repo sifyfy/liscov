@@ -1,14 +1,4 @@
 {
-  "src/lib/components/analytics/ExportPanel.svelte": {
-    "better-tailwindcss/no-restricted-classes": {
-      "count": 45
-    }
-  },
-  "src/lib/components/analytics/RevenueDashboard.svelte": {
-    "better-tailwindcss/no-restricted-classes": {
-      "count": 105
-    }
-  },
   "src/lib/components/auth/AuthIndicator.svelte": {
     "better-tailwindcss/no-restricted-classes": {
       "count": 4
@@ -45,11 +35,6 @@
   "src/lib/components/settings/TtsSettings.svelte": {
     "better-tailwindcss/no-restricted-classes": {
       "count": 222
-    }
-  },
-  "src/lib/components/tabs/AnalyticsTab.svelte": {
-    "better-tailwindcss/no-restricted-classes": {
-      "count": 1
     }
   },
   "src/lib/components/tabs/SettingsTab.svelte": {

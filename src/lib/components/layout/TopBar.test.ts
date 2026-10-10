@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/svelte';
+import { render, screen, fireEvent, within } from '@testing-library/svelte';
 import type { ComponentProps } from 'svelte';
 import TopBar, { type AppTab } from './TopBar.svelte';
 import { emptyReactions } from '$lib/utils/reactions';
@@ -42,6 +42,12 @@ function setup(overrides: Partial<ComponentProps<typeof TopBar>> = {}) {
 }
 
 describe('TopBar', () => {
+  it('画面のタブはチャット・視聴者・設定の 3 つ (分析は外した。07_revenue.md)', () => {
+    setup();
+    const tabs = within(screen.getByRole('navigation', { name: '画面' })).getAllByRole('button');
+    expect(tabs.map((t) => t.getAttribute('aria-label'))).toEqual(['チャット', '視聴者', '設定']);
+  });
+
   it('画面のタブはアイコン。名前はヒントと読み上げ用の名前で出し、押すと切り替える', async () => {
     const props = setup();
     const viewers = screen.getByRole('button', { name: '視聴者' });

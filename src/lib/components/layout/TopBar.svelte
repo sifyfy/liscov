@@ -1,5 +1,5 @@
 <script module lang="ts">
-  export type AppTab = 'chat' | 'viewers' | 'analytics' | 'settings';
+  export type AppTab = 'chat' | 'viewers' | 'settings';
 </script>
 
 <script lang="ts">
@@ -32,7 +32,6 @@
   const TABS = [
     { id: 'chat', icon: 'chat', label: 'チャット' },
     { id: 'viewers', icon: 'users', label: '視聴者' },
-    { id: 'analytics', icon: 'chart', label: '分析' },
     { id: 'settings', icon: 'settings', label: '設定' },
   ] as const satisfies readonly { id: AppTab; icon: IconName; label: string }[];
 </script>

@@ -228,9 +228,6 @@ test.describe('Design capture', () => {
     await page.keyboard.press('Escape');
     await reading.press('Escape');
 
-    await navigateToTab(page, 'Analytics');
-    await captureAll('analytics');
-
     await navigateToTab(page, 'Settings');
     for (const [label, name] of [
       ['YouTube認証', 'settings-auth'],

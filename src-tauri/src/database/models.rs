@@ -121,7 +121,7 @@ pub struct ViewerWithCustomInfo {
     pub custom_data: Option<String>,
 }
 
-/// Contributor stats for analytics
+/// セッション内の貢献額上位の視聴者 (06_viewer.md `get_top_contributors`)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContributorStats {
     pub channel_id: String,

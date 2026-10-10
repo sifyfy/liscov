@@ -1,6 +1,5 @@
 //! Tauri commands for liscov
 
-pub mod analytics;
 pub mod auth;
 pub mod auth_window;
 pub mod chat;
@@ -12,7 +11,6 @@ pub mod viewer;
 pub mod websocket;
 
 // Re-export all commands for easy registration
-pub use analytics::*;
 pub use auth::*;
 pub use chat::*;
 pub use config::*;
