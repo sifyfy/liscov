@@ -3,11 +3,17 @@
 # 開発に必要なツール・言語ランタイムの定義 (mise install で揃う)
 # SSoT 設計: 実コマンドは各言語標準ランナーに置き、Makefile が薄く束ねる
 
+[settings]
+# Rust のバージョンは rust-toolchain.toml から読む (ここの [tools] には書かない)。
+# 理由: mise は rust を RUSTUP_TOOLCHAIN で固定し、これが rust-toolchain.toml より優先される。
+# 両方に書くと、片方だけ上げたときに mise が効いているシェルと効いていないシェルで rustc が分かれ、
+# 同じ target に 2 組の成果物ができる (2026-10 に起きた)。読む元を 1 つにすれば分かれない。
+# mise がこのファイルを読まなくなっても、rustup が同じファイルを読むのでバージョンは揃ったまま
+idiomatic_version_file_enable_tools = ["rust"]
+
 [tools]
 # ---- 言語ランタイム ----
-# Rust: stable。MSRV (Cargo.toml の rust-version) との互換性は維持
-# components: clippy / rustfmt は make lint / make fmt で利用
-rust = { version = "1.95", components = "clippy,rustfmt" }
+# Rust: rust-toolchain.toml が正本 (上の [settings] を参照)。mise install でも入る
 # Node.js: LTS Krypton
 node = "24"
 # pnpm: Node.js のパッケージマネージャ (npm より高速・ディスク効率良)

@@ -1,0 +1,12 @@
+# Rust のツールチェーンの正本 (ここだけに書く)
+# rustup はどのシェルからでもこのファイルを読む。mise も .mise.toml の設定でここからバージョンを読むので、
+# mise が効いているシェルでも効いていないシェル (信頼していないワークツリー、エディタの rust-analyzer など) でも
+# 同じ rustc でビルドされる。
+# 経緯: 以前は .mise.toml の rust だけで固定していて、mise が効いていないシェルでは rustup の既定の stable が使われた。
+# 2 つの rustc が同じ target に別々の成果物を作って肥大化した (2026-10)。
+# MSRV (Cargo.toml の rust-version) との互換性は維持する
+[toolchain]
+channel = "1.95.0"
+# clippy / rustfmt は make lint / make fmt で使う
+components = ["clippy", "rustfmt"]
+profile = "minimal"
