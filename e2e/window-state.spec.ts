@@ -207,6 +207,30 @@ test.describe('Window State Persistence', () => {
     await browser2.close();
   });
 
+  // 仕様: 保存サイズが最小サイズ（540x600）未満 → 最小サイズを適用 (10_window_state.md)
+  test('保存サイズが最小サイズ未満なら 540x600 で開く', async () => {
+    // 前のテストのアプリが終わるときに状態を保存して、書いたファイルを上書きしないよう先に止める
+    await killTauriApp();
+    const file = getWindowStateFilePath();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const state = { main: { x: 100, y: 100, width: 400, height: 500, prev_x: 100, prev_y: 100, maximized: false, visible: true, decorated: true, fullscreen: false } };
+    fs.writeFileSync(file, JSON.stringify(state));
+
+    await startTauriApp();
+    const { browser, page } = await connectToApp();
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(2000);
+
+    const bounds = await getWindowBounds(page);
+    // @ts-ignore - Tauri internal global
+    const scale: number = await page.evaluate(() => window.__TAURI_INTERNALS__.invoke('plugin:window|scale_factor', { label: 'main' }));
+    log.debug('Bounds with too-small saved size:', { bounds, scale });
+    expect({ width: Math.round(bounds.width / scale), height: Math.round(bounds.height / scale) }).toEqual({ width: 540, height: 600 });
+
+    await closeTauriAppGracefully(page);
+    await browser.close();
+  });
+
   test('ウィンドウ位置が再起動後も維持される', async () => {
     // Clean slate
     await killTauriApp();

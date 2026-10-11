@@ -537,26 +537,40 @@ pub fn get_viewer_custom_info(
     Ok(info)
 }
 
-/// 配信者のもとで視聴者に登録した読み仮名を引く（04_tts.md「視聴者カスタム読み仮名」）
+/// 配信者のもとで視聴者に登録した読み仮名とメモ
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ViewerAnnotation {
+    /// 読み上げと名前の横に使う（04_tts.md「視聴者カスタム読み仮名」）
+    pub reading: Option<String>,
+    /// コメントの本文の下に出す（02_chat.md「1 行の形」）。読み上げには使わない
+    pub notes: Option<String>,
+}
+
+/// 配信者のもとで視聴者に登録した読み仮名とメモを引く
 ///
-/// プロフィールやカスタム情報が無い、または読み仮名が None なら None。
-pub fn get_viewer_reading(
+/// プロフィールやカスタム情報が無ければ、どちらも None。
+pub fn get_viewer_annotation(
     conn: &Connection,
     broadcaster_channel_id: &str,
     channel_id: &str,
-) -> Result<Option<String>> {
-    let reading = conn
+) -> Result<ViewerAnnotation> {
+    let annotation = conn
         .query_row(
-            "SELECT vci.reading
+            "SELECT vci.reading, vci.notes
              FROM viewer_profiles vp
              JOIN viewer_custom_info vci ON vci.viewer_profile_id = vp.id
              WHERE vp.broadcaster_channel_id = ?1 AND vp.channel_id = ?2",
             params![broadcaster_channel_id, channel_id],
-            |row| row.get::<_, Option<String>>(0),
+            |row| {
+                Ok(ViewerAnnotation {
+                    reading: row.get(0)?,
+                    notes: row.get(1)?,
+                })
+            },
         )
         .optional()?;
 
-    Ok(reading.flatten())
+    Ok(annotation.unwrap_or_default())
 }
 
 /// Upsert viewer custom info
@@ -637,15 +651,25 @@ pub fn delete_viewer_profile(conn: &Connection, viewer_profile_id: i64) -> Resul
 // Viewer Management Operations
 // ============================================================================
 
-/// Get viewers for a broadcaster with optional search and pagination
+/// 視聴者の一覧の絞り込み (06_viewer.md「視聴者のタブ」「検索機能」)
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ViewerFilter<'a> {
+    /// 表示名・読み仮名・メモの部分一致。None なら絞らない
+    pub search: Option<&'a str>,
+    /// 読み仮名が登録されていない (空を含む) 人だけ
+    pub without_reading: bool,
+}
+
+/// 配信者のもとの視聴者を、最終確認の新しい順に絞り込んで取る
 pub fn get_viewers_for_broadcaster(
     conn: &Connection,
     broadcaster_channel_id: &str,
-    search_query: Option<&str>,
+    filter: &ViewerFilter,
     limit: usize,
     offset: usize,
 ) -> Result<Vec<ViewerWithCustomInfo>> {
-    let query = if search_query.is_some() {
+    // ?2 が NULL なら探さない。?5 が 1 なら読み仮名の無い人だけ
+    let mut stmt = conn.prepare(
         "SELECT vp.id, vp.broadcaster_channel_id, vp.channel_id, vp.display_name,
                 vp.first_seen, vp.last_seen, vp.message_count, vp.total_contribution,
                 vp.membership_level, vp.tags,
@@ -653,36 +677,23 @@ pub fn get_viewers_for_broadcaster(
          FROM viewer_profiles vp
          LEFT JOIN viewer_custom_info vci ON vp.id = vci.viewer_profile_id
          WHERE vp.broadcaster_channel_id = ?1
-           AND (vp.display_name LIKE ?2 ESCAPE '\\' OR vci.reading LIKE ?2 ESCAPE '\\' OR vci.notes LIKE ?2 ESCAPE '\\')
+           AND (?2 IS NULL OR vp.display_name LIKE ?2 ESCAPE '\\' OR vci.reading LIKE ?2 ESCAPE '\\' OR vci.notes LIKE ?2 ESCAPE '\\')
+           AND (?5 = 0 OR vci.reading IS NULL OR vci.reading = '')
          ORDER BY vp.last_seen DESC
-         LIMIT ?3 OFFSET ?4"
-    } else {
-        "SELECT vp.id, vp.broadcaster_channel_id, vp.channel_id, vp.display_name,
-                vp.first_seen, vp.last_seen, vp.message_count, vp.total_contribution,
-                vp.membership_level, vp.tags,
-                vci.reading, vci.notes, vci.custom_data
-         FROM viewer_profiles vp
-         LEFT JOIN viewer_custom_info vci ON vp.id = vci.viewer_profile_id
-         WHERE vp.broadcaster_channel_id = ?1
-         ORDER BY vp.last_seen DESC
-         LIMIT ?3 OFFSET ?4"
-    };
+         LIMIT ?3 OFFSET ?4",
+    )?;
 
-    let mut stmt = conn.prepare(query)?;
-
-    let search_pattern = search_query.map(like_contains_pattern);
-
-    let viewers = if let Some(pattern) = &search_pattern {
-        stmt.query_map(
-            params![broadcaster_channel_id, pattern, limit, offset],
-            row_to_viewer,
-        )?
-    } else {
-        stmt.query_map(
-            params![broadcaster_channel_id, "", limit, offset],
-            row_to_viewer,
-        )?
-    };
+    let search_pattern = filter.search.map(like_contains_pattern);
+    let viewers = stmt.query_map(
+        params![
+            broadcaster_channel_id,
+            search_pattern,
+            limit,
+            offset,
+            filter.without_reading
+        ],
+        row_to_viewer,
+    )?;
 
     viewers.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
@@ -1224,17 +1235,36 @@ mod tests {
         register_reading(&conn, "UCaaa", "UCxxx", Some("たなか"));
         register_reading(&conn, "UCbbb", "UCxxx", Some("タナカ"));
 
+        assert_eq!(reading_of(&conn, "UCaaa", "UCxxx").as_deref(), Some("たなか"));
+        assert_eq!(reading_of(&conn, "UCbbb", "UCxxx").as_deref(), Some("タナカ"));
+    }
+
+    fn reading_of(conn: &Connection, broadcaster: &str, viewer: &str) -> Option<String> {
+        get_viewer_annotation(conn, broadcaster, viewer).unwrap().reading
+    }
+
+    // 02_chat.md「1 行の形」: メモも配信者ごと。読み仮名と一緒に引く
+    #[tokio::test]
+    async fn viewer_notes_are_scoped_by_broadcaster() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let id = upsert_viewer_profile(&conn, "UCaaa", "UCxxx", "@田中-abc", None).unwrap();
+        let info = ViewerCustomInfo::new(id)
+            .with_reading("たなか")
+            .with_notes("ネタバレしがち。注意");
+        upsert_viewer_custom_info(&conn, &info).unwrap();
+        upsert_viewer_profile(&conn, "UCbbb", "UCxxx", "@田中-abc", None).unwrap();
+
         assert_eq!(
-            get_viewer_reading(&conn, "UCaaa", "UCxxx")
-                .unwrap()
-                .as_deref(),
-            Some("たなか")
+            get_viewer_annotation(&conn, "UCaaa", "UCxxx").unwrap(),
+            ViewerAnnotation {
+                reading: Some("たなか".to_string()),
+                notes: Some("ネタバレしがち。注意".to_string()),
+            }
         );
         assert_eq!(
-            get_viewer_reading(&conn, "UCbbb", "UCxxx")
-                .unwrap()
-                .as_deref(),
-            Some("タナカ")
+            get_viewer_annotation(&conn, "UCbbb", "UCxxx").unwrap(),
+            ViewerAnnotation::default()
         );
     }
 
@@ -1246,7 +1276,7 @@ mod tests {
         register_reading(&conn, "UCaaa", "UCxxx", Some("たなか"));
         upsert_viewer_profile(&conn, "UCbbb", "UCxxx", "@田中-abc", None).unwrap();
 
-        assert_eq!(get_viewer_reading(&conn, "UCbbb", "UCxxx").unwrap(), None);
+        assert_eq!(reading_of(&conn, "UCbbb", "UCxxx"), None);
     }
 
     #[tokio::test]
@@ -1257,7 +1287,7 @@ mod tests {
         register_reading(&conn, "UCaaa", "UCxxx", Some("たなか"));
         register_reading(&conn, "UCaaa", "UCxxx", None);
 
-        assert_eq!(get_viewer_reading(&conn, "UCaaa", "UCxxx").unwrap(), None);
+        assert_eq!(reading_of(&conn, "UCaaa", "UCxxx"), None);
     }
 
     #[tokio::test]
@@ -1265,7 +1295,7 @@ mod tests {
         let db = setup_db();
         let conn = db.connection().await;
 
-        assert_eq!(get_viewer_reading(&conn, "UCaaa", "UCxxx").unwrap(), None);
+        assert_eq!(reading_of(&conn, "UCaaa", "UCxxx"), None);
     }
 
     #[tokio::test]
@@ -2107,20 +2137,96 @@ mod tests {
         )
         .unwrap();
 
-        let viewers = get_viewers_for_broadcaster(&conn, "UC_bc", None, 100, 0).unwrap();
+        let viewers = get_viewers_for_broadcaster(&conn, "UC_bc", &ViewerFilter::default(), 100, 0).unwrap();
         assert!(!viewers.is_empty());
         assert_eq!(viewers[0].channel_id, "UC_v1");
     }
 
-    fn search_names(conn: &Connection, query: &str) -> Vec<String> {
-        let mut names: Vec<String> =
-            get_viewers_for_broadcaster(conn, "UC_bc", Some(query), 100, 0)
-                .unwrap()
-                .into_iter()
-                .map(|v| v.display_name)
-                .collect();
+    fn filtered_names(conn: &Connection, filter: &ViewerFilter) -> Vec<String> {
+        let mut names: Vec<String> = get_viewers_for_broadcaster(conn, "UC_bc", filter, 100, 0)
+            .unwrap()
+            .into_iter()
+            .map(|v| v.display_name)
+            .collect();
         names.sort();
         names
+    }
+
+    fn search_names(conn: &Connection, query: &str) -> Vec<String> {
+        filtered_names(
+            conn,
+            &ViewerFilter {
+                search: Some(query),
+                ..ViewerFilter::default()
+            },
+        )
+    }
+
+    /// 視聴者 (名前, 読み仮名, メモ) を登録する。読み仮名・メモが両方 None ならカスタム情報を作らない
+    fn add_viewers(conn: &Connection, viewers: &[(&str, Option<&str>, Option<&str>)]) {
+        let session_id = create_session(conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+        for (i, (name, reading, notes)) in viewers.iter().enumerate() {
+            let msg = make_text_message(&format!("m{i}"), name, &format!("UC_v{i}"), "hi");
+            save_message(conn, &session_id, Some("UC_bc"), &msg, None).unwrap();
+            if reading.is_none() && notes.is_none() {
+                continue;
+            }
+            let profile = get_viewer_profile(conn, "UC_bc", &format!("UC_v{i}"))
+                .unwrap()
+                .unwrap();
+            let info = ViewerCustomInfo {
+                viewer_profile_id: profile.id,
+                reading: reading.map(str::to_string),
+                notes: notes.map(str::to_string),
+                custom_data: None,
+                created_at: None,
+                updated_at: None,
+            };
+            upsert_viewer_custom_info(conn, &info).unwrap();
+        }
+    }
+
+    // 06_viewer.md「視聴者のタブ」: 「読み仮名なしだけ」は読み仮名が登録されていない (空を含む) 人だけ
+    #[tokio::test]
+    async fn without_reading_returns_only_viewers_without_reading() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        add_viewers(
+            &conn,
+            &[
+                ("記録だけ", None, None),
+                ("読みあり", Some("よみあり"), None),
+                ("読みが空", Some(""), None),
+                ("メモだけ", None, Some("常連")),
+            ],
+        );
+
+        let filter = ViewerFilter {
+            without_reading: true,
+            ..ViewerFilter::default()
+        };
+        assert_eq!(filtered_names(&conn, &filter), ["メモだけ", "記録だけ", "読みが空"]);
+    }
+
+    // 06_viewer.md「視聴者のタブ」: 「読み仮名なしだけ」は探す欄と組み合わせられる
+    #[tokio::test]
+    async fn without_reading_combines_with_search() {
+        let db = setup_db();
+        let conn = db.connection().await;
+        add_viewers(
+            &conn,
+            &[
+                ("常連A", None, Some("常連")),
+                ("常連B", Some("じょうれんびー"), Some("常連")),
+                ("一見さん", None, None),
+            ],
+        );
+
+        let filter = ViewerFilter {
+            search: Some("常連"),
+            without_reading: true,
+        };
+        assert_eq!(filtered_names(&conn, &filter), ["常連A"]);
     }
 
     // 06_viewer.md 検索方式: % _ \ は文字そのものとして探す（表の例）

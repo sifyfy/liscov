@@ -12,3 +12,6 @@ export type { GuiBroadcasterChannel as BroadcasterChannel } from './generated/Gu
 
 // Session（DB のセッション。database/models.rs）
 export type { Session } from './generated/Session';
+
+/** パネル・視聴者のタブで保存した読み仮名とメモ (空文字は「なし」)。画面にある行にすぐ出すために chatStore が持つ (02_chat.md「1 行の形」) */
+export type ViewerInfo = Readonly<{ reading: string; notes: string }>;

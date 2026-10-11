@@ -49,7 +49,7 @@ test.describe('バックエンドのログ (実 Tauri)', () => {
     const conn = await connectToApp();
     browser = conn.browser;
     mainPage = conn.page;
-    await expect(mainPage.locator('nav button:has-text("Chat")')).toBeVisible({
+    await expect(mainPage.locator('nav button[aria-label="チャット"]')).toBeVisible({
       timeout: 30000,
     });
   });

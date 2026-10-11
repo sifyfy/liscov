@@ -84,7 +84,7 @@ fn config_load_returns_defaults_when_no_file() {
     assert_eq!(config.storage.mode, StorageMode::Secure);
     assert_eq!(config.chat_display.message_font_size, 13);
     assert!(config.chat_display.show_timestamps);
-    assert!(config.chat_display.auto_scroll_enabled);
+    assert!(config.chat_display.hide_panel_on_connect);
     assert_eq!(config.ui.theme, Theme::Dark);
 }
 
@@ -106,7 +106,7 @@ mode = "fallback"
 [chat_display]
 message_font_size = 18
 show_timestamps = false
-auto_scroll_enabled = false
+hide_panel_on_connect = false
 
 [ui]
 theme = "light"
@@ -127,7 +127,7 @@ theme = "light"
     assert_eq!(config.storage.mode, StorageMode::Fallback);
     assert_eq!(config.chat_display.message_font_size, 18);
     assert!(!config.chat_display.show_timestamps);
-    assert!(!config.chat_display.auto_scroll_enabled);
+    assert!(!config.chat_display.hide_panel_on_connect);
     assert_eq!(config.ui.theme, Theme::Light);
 
     // クリーンアップ
@@ -156,7 +156,7 @@ fn config_save_updates_state_and_writes_file() {
             "chat_display": {
                 "message_font_size": 20,
                 "show_timestamps": false,
-                "auto_scroll_enabled": false
+                "hide_panel_on_connect": false
             },
             "ui": { "theme": "light" }
         }

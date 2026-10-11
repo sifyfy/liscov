@@ -2,7 +2,7 @@
  * E2Eテスト共通ヘルパー関数
  */
 
-import { chromium, BrowserContext, Page, Browser, expect } from '@playwright/test';
+import { chromium, BrowserContext, Page, Browser, Locator, expect } from '@playwright/test';
 import { execSync, spawn, ChildProcess } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -603,7 +603,7 @@ export async function setupTestEnvironment(): Promise<{ browser: Browser; contex
   // Svelteアプリが完全にマウントされるまで待機
   await connection.page.waitForLoadState('load');
   // Svelteレンダリング後にのみ表示される既知のUI要素を待機
-  await connection.page.getByRole('heading', { name: 'Chat Monitor' }).waitFor({ state: 'visible', timeout: 30000 });
+  await connection.page.locator(APP_READY).waitFor({ state: 'visible', timeout: 30000 });
 
   return connection;
 }
@@ -641,59 +641,137 @@ export async function teardownTestEnvironment(browser?: Browser): Promise<void> 
   }
 }
 
-/**
- * 全接続を切断し、蓄積されたメッセージをクリアしてアプリをアイドル状態に戻す。
- * 多接続リファクタリングで「初期化」ボタンが廃止されたため、
- * 切断後にFilterPanelの「クリア」ボタンでメッセージを消去する。
- */
-export async function disconnectAndInitialize(page: Page): Promise<void> {
-  // Step 1: 全接続を切断
-  const disconnectAllBtn = page.locator('button:has-text("全切断")');
-  if (await disconnectAllBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-    await disconnectAllBtn.click();
-    await expect(page.locator('.connection-item')).toHaveCount(0, { timeout: 10000 });
-  } else {
-    const disconnectBtn = page.locator('.connection-item .disconnect-btn').first();
-    if (await disconnectBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await disconnectBtn.click();
-      await expect(page.locator('.connection-item')).toHaveCount(0, { timeout: 10000 });
-    }
-  }
+/** Svelte の描画が終わったら出る、上の行の画面のタブ (アプリの準備ができた目印) */
+export const APP_READY = 'nav[aria-label="画面"]';
 
-  // Step 2: 蓄積メッセージをクリア（テスト間の状態分離のため）
-  // FilterPanelの「クリア」ボタン → 確認ダイアログ → 実行
-  const clearButton = page.locator('button:has-text("クリア")').first();
-  if (await clearButton.isEnabled({ timeout: 1000 }).catch(() => false)) {
-    await clearButton.click();
-    // 確認ダイアログ内のクリアボタン
-    const dialog = page.locator('.fixed.inset-0');
-    await expect(dialog).toBeVisible({ timeout: 3000 });
-    const confirmBtn = dialog.locator('button:has-text("クリア")');
-    await confirmBtn.click();
-    await expect(dialog).not.toBeVisible({ timeout: 3000 });
-  }
+/** 上の行の接続の札 (02_chat.md「上の行と操作パネル」)。title は配信タイトル */
+export function connectionChips(page: Page, streamTitle?: string): Locator {
+  return page.locator(streamTitle ? `[data-testid="connection-chip"][title="${streamTitle}"]` : '[data-testid="connection-chip"]');
+}
+
+/** 操作パネルを開く (開いていればそのまま) */
+export async function openControlPanel(page: Page): Promise<void> {
+  const open = page.getByRole('button', { name: '操作パネルを開く' });
+  if (await open.isVisible().catch(() => false)) await open.click();
+  await expect(page.getByRole('region', { name: '操作パネル' })).toBeVisible({ timeout: 5000 });
+}
+
+/** 操作パネルを閉じる (閉じていればそのまま) */
+export async function closeControlPanel(page: Page): Promise<void> {
+  const close = page.getByRole('button', { name: '操作パネルを閉じる' });
+  if (await close.isVisible().catch(() => false)) await close.click();
 }
 
 /**
- * モックサーバーのストリームに接続し、接続リストへの追加を待機する。
- * URLフォームは常に表示されているため、接続後も入力欄は残る。
- * @param videoId - 動画ID（省略時は "test_video_123"）
+ * 配信の URL の入力欄を出して返す。未接続でコメントも無ければ流れの場所に出ている。
+ * 出ていなければ上の行の「+」で操作パネルを開く
+ */
+export async function openUrlInput(page: Page): Promise<Locator> {
+  const input = page.locator('#connect-url');
+  if (!(await input.isVisible().catch(() => false))) {
+    await page.getByRole('button', { name: '配信に接続' }).click();
+  }
+  await expect(input).toBeVisible({ timeout: 5000 });
+  return input;
+}
+
+/**
+ * 「すべてのコメントを取る」のチェック (チャットモード「全て」)。配信に接続する欄にあるので、
+ * 欄が出ていなければ「+」で操作パネルを開いて返す
+ */
+export async function chatModeCheckbox(page: Page): Promise<Locator> {
+  await openUrlInput(page);
+  return page.getByRole('checkbox', { name: /すべてのコメントを取る/ });
+}
+
+/** 「接続」のボタン */
+export function connectButton(page: Page): Locator {
+  return page.getByRole('button', { name: '接続', exact: true });
+}
+
+/**
+ * 全接続を切断し、蓄積されたメッセージを消してアプリをアイドル状態に戻す。
+ * 切断は上の行の札の ×、コメントを消すのは操作パネルの「コメントを消す」。最後に操作パネルを閉じる
+ */
+export async function disconnectAndInitialize(page: Page): Promise<void> {
+  // Step 1: 全接続を切断 (切断できるものから順に)
+  const chips = connectionChips(page);
+  for (let i = 0; i < 40 && (await chips.count()) > 0; i++) {
+    const enabled = chips.locator('button:enabled').first();
+    if (await enabled.isVisible().catch(() => false)) {
+      await enabled.click();
+    }
+    await page.waitForTimeout(200);
+  }
+  await expect(chips).toHaveCount(0, { timeout: 10000 });
+
+  // Step 2: 蓄積メッセージを消す（テスト間の状態分離のため）
+  await openControlPanel(page);
+  const clearButton = page.getByRole('button', { name: 'コメントを消す' });
+  if (await clearButton.isEnabled({ timeout: 1000 }).catch(() => false)) {
+    await clearButton.click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible({ timeout: 3000 });
+    await dialog.getByRole('button', { name: '消す', exact: true }).click();
+    await expect(dialog).not.toBeVisible({ timeout: 3000 });
+  }
+  await closeControlPanel(page);
+}
+
+/**
+ * モックサーバーのストリームに接続し、上の行に札が出るのを待つ。
  * @param expectedTitle - 接続確認に使うストリームタイトル（省略時は "Mock Live"）
  */
 export async function connectToMockStream(page: Page, videoId = 'test_video_123', expectedTitle = 'Mock Live'): Promise<void> {
-  const urlInput = page.locator('input[placeholder*="youtube.com"]');
+  const urlInput = await openUrlInput(page);
   await urlInput.fill(`${mockServerUrl()}/watch?v=${videoId}`);
-  await page.locator('button:has-text("開始")').click();
-  // 接続リストにエントリが追加されるのを待つ
-  await expect(page.getByText(expectedTitle).first()).toBeVisible({ timeout: 10000 });
+  await connectButton(page).click();
+  await expect(connectionChips(page, expectedTitle).first()).toBeVisible({ timeout: 10000 });
 }
 
+/** 上の行の画面のタブの名前 (読み上げ用の名前) */
+const TAB_LABELS: Record<string, string> = { Chat: 'チャット', Viewers: '視聴者', Settings: '設定' };
+
 /**
- * ナビゲーションボタンから指定タブに遷移する
+ * 上の行の画面のタブで指定タブに遷移する (Chat / Viewers / Settings)
  */
 export async function navigateToTab(page: Page, tabName: string): Promise<void> {
-  const tab = page.locator(`nav button:has-text("${tabName}")`);
-  await tab.click();
+  await page.locator(`nav[aria-label="画面"] button[aria-label="${TAB_LABELS[tabName] ?? tabName}"]`).click();
+}
+
+/** 流れ・流れたものの欄 (スパチャ等の一覧の詳細を含む) の中で、text を含むコメントの行 (いちばん上のもの) */
+export function chatRow(page: Page, text: string): Locator {
+  return page.locator('[data-message-id]').filter({ hasText: text }).first();
+}
+
+/** 視聴者情報パネル (押した行のすぐ下に広がる。02_chat.md「視聴者の読み仮名・メモ」) */
+export function viewerPanel(page: Page): Locator {
+  return page.getByRole('region', { name: '視聴者情報' });
+}
+
+/** text を含むコメントを押して視聴者情報パネルを開き、読み込みが終わる (読み仮名の欄が押せる) まで待つ */
+export async function openViewerPanel(page: Page, text: string): Promise<Locator> {
+  await chatRow(page, text).click();
+  await expect(viewerPanel(page).getByLabel('読み仮名')).toBeEnabled({ timeout: 5000 });
+  return viewerPanel(page);
+}
+
+/** 視聴者のタブの配信者の選択 (06_viewer.md「視聴者のタブ」) */
+export function viewerTabBroadcasterSelect(page: Page): Locator {
+  return page.getByRole('combobox', { name: '配信者' });
+}
+
+/** 視聴者のタブの一覧で、name を含む 1 人の行 (押すと下に編集が広がる。広がった編集もこの行の中) */
+export function viewerTabRow(page: Page, name: string): Locator {
+  return page.getByRole('listitem').filter({ has: page.getByRole('button', { name }) }).first();
+}
+
+/** 開いている視聴者情報パネルで読み仮名を入れ、Enter で保存する (保存すると閉じる) */
+export async function saveReadingInPanel(page: Page, reading: string): Promise<void> {
+  const input = viewerPanel(page).getByLabel('読み仮名');
+  await input.fill(reading);
+  await input.press('Enter');
+  await expect(viewerPanel(page)).toHaveCount(0, { timeout: 5000 });
 }
 
 /**

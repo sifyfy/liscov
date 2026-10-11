@@ -1,89 +1,60 @@
 <script lang="ts">
   import { configStore } from '$lib/stores';
   import type { Theme } from '$lib/types';
+  import Icon from '$lib/components/ui/Icon.svelte';
 
   let currentTheme = $derived(configStore.theme);
 
   async function selectTheme(theme: Theme) {
     await configStore.setTheme(theme);
   }
+
+  // 見本は本物のトークンを data-theme で切り替えて描く (生の色値で描くと実際の色とずれる)
+  const THEMES = [
+    { id: 'dark', label: 'ダーク', description: '目に優しい暗いテーマ' },
+    { id: 'light', label: 'ライト', description: '明るく見やすいテーマ' },
+  ] as const satisfies readonly { id: Theme; label: string; description: string }[];
 </script>
 
-<div class="p-6 space-y-6">
-  <div>
-    <h2 class="text-xl font-semibold text-[var(--text-primary)]" style="font-family: var(--font-heading);">UIテーマ</h2>
-    <p class="text-sm text-[var(--text-secondary)] mt-1">アプリケーションの外観テーマを選択</p>
-  </div>
+<div class="flex flex-col gap-4 p-4 text-fg-1">
+  <header class="flex flex-col gap-1">
+    <h2 class="text-title">UIテーマ</h2>
+    <p class="text-body text-fg-2">アプリケーションの外観テーマを選択</p>
+  </header>
 
-  <div class="grid grid-cols-2 gap-4">
-    <!-- Dark Theme Card -->
-    <button
-      onclick={() => selectTheme('dark')}
-      class="p-4 rounded-lg border-2 transition-all text-left"
-      style="background: var(--bg-surface-2); border-color: {currentTheme === 'dark' ? 'var(--accent)' : 'var(--border-default)'};"
-    >
-      <!-- Mini preview -->
-      <div class="rounded-md overflow-hidden mb-3 border" style="border-color: var(--border-subtle);">
-        <div class="h-6" style="background: #161822; border-bottom: 1px solid rgba(255,255,255,0.1);">
-          <div class="flex items-center gap-1 px-2 h-full">
-            <div class="w-1.5 h-1.5 rounded-full" style="background: #38bdf8;"></div>
-            <div class="w-8 h-1.5 rounded" style="background: rgba(255,255,255,0.15);"></div>
+  <div class="grid grid-cols-2 gap-3">
+    {#each THEMES as theme (theme.id)}
+      {@const selected = currentTheme === theme.id}
+      <button
+        type="button"
+        onclick={() => selectTheme(theme.id)}
+        aria-pressed={selected}
+        class="flex flex-col gap-2 rounded-popup border-2 bg-surface-low p-3 text-left hover:bg-surface-high {selected
+          ? 'border-accent'
+          : 'border-outline-variant'}"
+      >
+        <!-- 見本: 上の行とコメントの行 -->
+        <div data-theme={theme.id} class="overflow-hidden rounded-control border border-outline-variant bg-surface" aria-hidden="true">
+          <div class="flex h-5 items-center gap-1 border-b border-outline-variant bg-surface-low px-2">
+            <span class="size-1.5 rounded-full bg-success"></span>
+            <span class="h-1.5 w-8 rounded-full bg-fg-3"></span>
+          </div>
+          <div class="flex flex-col gap-1 p-2">
+            <span class="h-1.5 w-3/4 rounded-full bg-fg-1"></span>
+            <span class="h-1.5 w-1/2 rounded-full bg-fg-2"></span>
+            <span class="h-1.5 w-2/3 rounded-full bg-highlight"></span>
           </div>
         </div>
-        <div class="p-2 space-y-1" style="background: #0f1117;">
-          <div class="h-2 w-3/4 rounded" style="background: #1c1f2e;"></div>
-          <div class="h-2 w-1/2 rounded" style="background: #1c1f2e;"></div>
-          <div class="h-2 w-2/3 rounded" style="background: #1c1f2e;"></div>
-        </div>
-      </div>
-      <div class="flex items-center justify-between">
-        <div>
-          <p class="font-medium text-[var(--text-primary)]">ダーク</p>
-          <p class="text-xs text-[var(--text-muted)]">目に優しい暗いテーマ</p>
-        </div>
-        {#if currentTheme === 'dark'}
-          <div class="w-5 h-5 rounded-full flex items-center justify-center" style="background: var(--accent);">
-            <svg class="w-3 h-3 text-[var(--text-inverse)]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="3">
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
-          </div>
-        {/if}
-      </div>
-    </button>
-
-    <!-- Light Theme Card -->
-    <button
-      onclick={() => selectTheme('light')}
-      class="p-4 rounded-lg border-2 transition-all text-left"
-      style="background: var(--bg-surface-2); border-color: {currentTheme === 'light' ? 'var(--accent)' : 'var(--border-default)'};"
-    >
-      <!-- Mini preview -->
-      <div class="rounded-md overflow-hidden mb-3 border" style="border-color: var(--border-subtle);">
-        <div class="h-6" style="background: #ffffff; border-bottom: 1px solid rgba(0,0,0,0.08);">
-          <div class="flex items-center gap-1 px-2 h-full">
-            <div class="w-1.5 h-1.5 rounded-full" style="background: #0284c7;"></div>
-            <div class="w-8 h-1.5 rounded" style="background: rgba(0,0,0,0.08);"></div>
-          </div>
-        </div>
-        <div class="p-2 space-y-1" style="background: #f0f2f5;">
-          <div class="h-2 w-3/4 rounded" style="background: #e2e8f0;"></div>
-          <div class="h-2 w-1/2 rounded" style="background: #e2e8f0;"></div>
-          <div class="h-2 w-2/3 rounded" style="background: #e2e8f0;"></div>
-        </div>
-      </div>
-      <div class="flex items-center justify-between">
-        <div>
-          <p class="font-medium text-[var(--text-primary)]">ライト</p>
-          <p class="text-xs text-[var(--text-muted)]">明るく見やすいテーマ</p>
-        </div>
-        {#if currentTheme === 'light'}
-          <div class="w-5 h-5 rounded-full flex items-center justify-center" style="background: var(--accent);">
-            <svg class="w-3 h-3 text-[var(--text-inverse)]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="3">
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
-          </div>
-        {/if}
-      </div>
-    </button>
+        <span class="flex items-center justify-between gap-2">
+          <span class="flex flex-col">
+            <span class="text-label">{theme.label}</span>
+            <span class="text-caption text-fg-2">{theme.description}</span>
+          </span>
+          {#if selected}
+            <Icon name="check" size={16} class="shrink-0 text-accent" />
+          {/if}
+        </span>
+      </button>
+    {/each}
   </div>
 </div>

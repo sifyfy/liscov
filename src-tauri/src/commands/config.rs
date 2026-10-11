@@ -79,17 +79,30 @@ pub enum ChatModeSetting {
 pub struct ChatDisplayConfig {
     pub message_font_size: u32,
     pub show_timestamps: bool,
-    pub auto_scroll_enabled: bool,
+    /// 配信に接続したら操作パネルを隠す (02_chat.md「上の行と操作パネル」)
+    pub hide_panel_on_connect: bool,
     pub chat_mode: ChatModeSetting,
+    /// 「流れた新規さん」の欄の高さの上限 (コメントの流れの部分の高さに対する割合。02_chat.md「流れたもの」)
+    pub flowed_newcomers_height_ratio: f64,
+    /// 「この配信のスパチャ等の一覧」の欄の高さの上限 (同上。概要と詳細で共通。キーの名前は統合前の「流れたスパチャ等」のまま)
+    pub flowed_supporters_height_ratio: f64,
 }
+
+/// 流れたものの欄の高さの割合の範囲 (09_config.md)。ファイルの値は検査せず、config_set_value でだけ検査する
+const FLOWED_NEWCOMERS_HEIGHT_RATIO_RANGE: std::ops::RangeInclusive<f64> = 0.05..=(1.0 / 3.0);
+/// 「この配信のスパチャ等の一覧」は詳細で全件を見るので 1/2 まで
+const FLOWED_SUPPORTERS_HEIGHT_RATIO_RANGE: std::ops::RangeInclusive<f64> = 0.05..=0.5;
+const FLOWED_HEIGHT_RATIO_DEFAULT: f64 = 0.125;
 
 impl Default for ChatDisplayConfig {
     fn default() -> Self {
         Self {
             message_font_size: 13,
             show_timestamps: true,
-            auto_scroll_enabled: true,
+            hide_panel_on_connect: true,
             chat_mode: ChatModeSetting::Top,
+            flowed_newcomers_height_ratio: FLOWED_HEIGHT_RATIO_DEFAULT,
+            flowed_supporters_height_ratio: FLOWED_HEIGHT_RATIO_DEFAULT,
         }
     }
 }
@@ -278,10 +291,16 @@ pub(crate) fn config_lookup(config: &Config, section: &str, key: &str) -> Option
             "show_timestamps" => {
                 Some(serde_json::to_value(config.chat_display.show_timestamps).unwrap())
             }
-            "auto_scroll_enabled" => {
-                Some(serde_json::to_value(config.chat_display.auto_scroll_enabled).unwrap())
+            "hide_panel_on_connect" => {
+                Some(serde_json::to_value(config.chat_display.hide_panel_on_connect).unwrap())
             }
             "chat_mode" => Some(serde_json::to_value(config.chat_display.chat_mode).unwrap()),
+            "flowed_newcomers_height_ratio" => Some(serde_json::json!(
+                config.chat_display.flowed_newcomers_height_ratio
+            )),
+            "flowed_supporters_height_ratio" => Some(serde_json::json!(
+                config.chat_display.flowed_supporters_height_ratio
+            )),
             _ => None,
         },
         "ui" => match key {
@@ -301,6 +320,26 @@ pub async fn config_get_value(
 ) -> Result<Option<Value>, CommandError> {
     let config = state.get();
     Ok(config_lookup(&config, &section, &key))
+}
+
+/// 流れたものの欄の高さの割合を検査して取り出す (数で、その欄の範囲の中だけ)
+fn parse_flowed_height_ratio(
+    key: &str,
+    value: Value,
+    range: &std::ops::RangeInclusive<f64>,
+) -> Result<f64, CommandError> {
+    let ratio: f64 = serde_json::from_value(value)
+        .map_err(|e| CommandError::InvalidInput(format!("Invalid {} value: {}", key, e)))?;
+    if !range.contains(&ratio) {
+        return Err(CommandError::InvalidInput(format!(
+            "{} must be between {} and {}, got {}",
+            key,
+            range.start(),
+            range.end(),
+            ratio
+        )));
+    }
+    Ok(ratio)
 }
 
 /// Config構造体に section/key/value を適用する純粋関数
@@ -347,11 +386,11 @@ pub(crate) fn config_apply_value(
                         CommandError::InvalidInput(format!("Invalid show_timestamps value: {}", e))
                     })?;
             }
-            "auto_scroll_enabled" => {
-                new_config.chat_display.auto_scroll_enabled = serde_json::from_value(value)
+            "hide_panel_on_connect" => {
+                new_config.chat_display.hide_panel_on_connect = serde_json::from_value(value)
                     .map_err(|e| {
                         CommandError::InvalidInput(format!(
-                            "Invalid auto_scroll_enabled value: {}",
+                            "Invalid hide_panel_on_connect value: {}",
                             e
                         ))
                     })?;
@@ -360,6 +399,14 @@ pub(crate) fn config_apply_value(
                 new_config.chat_display.chat_mode = serde_json::from_value(value).map_err(|e| {
                     CommandError::InvalidInput(format!("Invalid chat_mode value: {}", e))
                 })?;
+            }
+            "flowed_newcomers_height_ratio" => {
+                new_config.chat_display.flowed_newcomers_height_ratio =
+                    parse_flowed_height_ratio(key, value, &FLOWED_NEWCOMERS_HEIGHT_RATIO_RANGE)?;
+            }
+            "flowed_supporters_height_ratio" => {
+                new_config.chat_display.flowed_supporters_height_ratio =
+                    parse_flowed_height_ratio(key, value, &FLOWED_SUPPORTERS_HEIGHT_RATIO_RANGE)?;
             }
             _ => {
                 return Err(CommandError::InvalidInput(format!(
@@ -476,7 +523,7 @@ mod tests {
         assert_eq!(config.storage.mode, StorageMode::Secure);
         assert_eq!(config.chat_display.message_font_size, 13);
         assert!(config.chat_display.show_timestamps);
-        assert!(config.chat_display.auto_scroll_enabled);
+        assert!(config.chat_display.hide_panel_on_connect);
         assert_eq!(config.ui.theme, Theme::Dark);
     }
 
@@ -532,8 +579,8 @@ mod tests {
             config.chat_display.show_timestamps
         );
         assert_eq!(
-            parsed.chat_display.auto_scroll_enabled,
-            config.chat_display.auto_scroll_enabled
+            parsed.chat_display.hide_panel_on_connect,
+            config.chat_display.hide_panel_on_connect
         );
         assert_eq!(parsed.ui.theme, config.ui.theme);
     }
@@ -639,10 +686,122 @@ future_setting = true
     }
 
     #[test]
-    fn config_lookup_chat_display_auto_scroll_enabled_default() {
+    fn config_lookup_chat_display_hide_panel_on_connect_default() {
+        // 09_config.md: hide_panel_on_connect の既定は true (配信に接続したら操作パネルを隠す)
         let config = Config::default();
-        let val = config_lookup(&config, "chat_display", "auto_scroll_enabled");
+        let val = config_lookup(&config, "chat_display", "hide_panel_on_connect");
         assert_eq!(val, Some(serde_json::json!(true)));
+    }
+
+    #[test]
+    fn config_toml_removed_auto_scroll_enabled_is_ignored() {
+        // 09_config.md: auto_scroll_enabled は外した。古い config.toml に残っていても無視し、他の値は読める
+        let old_toml = r#"
+[chat_display]
+message_font_size = 18
+auto_scroll_enabled = false
+"#;
+        let config: Config = toml::from_str(old_toml).unwrap();
+        assert_eq!(config.chat_display.message_font_size, 18);
+        assert!(config.chat_display.hide_panel_on_connect);
+        assert_eq!(
+            config_lookup(&config, "chat_display", "auto_scroll_enabled"),
+            None
+        );
+    }
+
+    #[test]
+    fn flowed_height_ratios_default_to_one_eighth() {
+        // 09_config.md: flowed_*_height_ratio の既定は 0.125 (02_chat.md「流れたもの」の既定 1/8)
+        let config = Config::default();
+        for key in [
+            "flowed_newcomers_height_ratio",
+            "flowed_supporters_height_ratio",
+        ] {
+            assert_eq!(
+                config_lookup(&config, "chat_display", key),
+                Some(serde_json::json!(0.125))
+            );
+        }
+    }
+
+    #[test]
+    fn flowed_height_ratios_missing_in_old_toml_use_default() {
+        // 09_config.md: 存在しないキーはデフォルト値で補完する (キーを足す前の config.toml)
+        let old_toml = "[chat_display]\nmessage_font_size = 18\n";
+        let config: Config = toml::from_str(old_toml).unwrap();
+        assert_eq!(config.chat_display.flowed_newcomers_height_ratio, 0.125);
+        assert_eq!(config.chat_display.flowed_supporters_height_ratio, 0.125);
+    }
+
+    #[test]
+    fn flowed_height_ratio_out_of_range_in_file_is_kept() {
+        // 09_config.md: ファイルに範囲外の値が書かれていても読み込みは失敗させない (画面が範囲に収める)
+        let toml_str = "[chat_display]\nflowed_newcomers_height_ratio = 0.9\n";
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.chat_display.flowed_newcomers_height_ratio, 0.9);
+    }
+
+    #[test]
+    fn config_apply_value_flowed_height_ratio_in_range() {
+        // 02_chat.md の例: 境目を引いて 0.2 を覚える。範囲の端も受け付ける
+        // (流れた新規さんは 0.05〜1/3、この配信のスパチャ等の一覧は 0.05〜1/2)
+        let config = Config::default();
+        let new_config = config_apply_value(
+            &config,
+            "chat_display",
+            "flowed_newcomers_height_ratio",
+            serde_json::json!(0.2),
+        )
+        .unwrap();
+        assert_eq!(new_config.chat_display.flowed_newcomers_height_ratio, 0.2);
+        assert_eq!(
+            new_config.chat_display.flowed_supporters_height_ratio,
+            0.125
+        );
+
+        for ratio in [0.05, 1.0 / 3.0] {
+            let new_config = config_apply_value(
+                &config,
+                "chat_display",
+                "flowed_newcomers_height_ratio",
+                serde_json::json!(ratio),
+            )
+            .unwrap();
+            assert_eq!(new_config.chat_display.flowed_newcomers_height_ratio, ratio);
+        }
+        for ratio in [0.05, 0.45, 0.5] {
+            let new_config = config_apply_value(
+                &config,
+                "chat_display",
+                "flowed_supporters_height_ratio",
+                serde_json::json!(ratio),
+            )
+            .unwrap();
+            assert_eq!(
+                new_config.chat_display.flowed_supporters_height_ratio,
+                ratio
+            );
+        }
+    }
+
+    #[test]
+    fn config_apply_value_flowed_height_ratio_rejects_out_of_range_or_non_number() {
+        // 09_config.md: config_set_value で範囲外 (または数でない値) にしようとするとエラー
+        let config = Config::default();
+        let cases = [
+            ("flowed_newcomers_height_ratio", serde_json::json!(0.04)),
+            ("flowed_newcomers_height_ratio", serde_json::json!(0.34)),
+            ("flowed_newcomers_height_ratio", serde_json::json!(0.45)),
+            ("flowed_newcomers_height_ratio", serde_json::json!("0.2")),
+            ("flowed_supporters_height_ratio", serde_json::json!(0.04)),
+            ("flowed_supporters_height_ratio", serde_json::json!(0.51)),
+            ("flowed_supporters_height_ratio", serde_json::json!("0.2")),
+        ];
+        for (key, value) in cases {
+            let result = config_apply_value(&config, "chat_display", key, value.clone());
+            assert!(result.is_err(), "{key} = {value} は受け付けない");
+        }
     }
 
     #[test]
@@ -729,16 +888,17 @@ future_setting = true
     }
 
     #[test]
-    fn config_apply_value_auto_scroll_enabled_false() {
+    fn config_apply_value_hide_panel_on_connect_false() {
+        // 09_config.md: 「接続したら操作パネルを隠す」を無効にできる
         let config = Config::default();
         let new_config = config_apply_value(
             &config,
             "chat_display",
-            "auto_scroll_enabled",
+            "hide_panel_on_connect",
             serde_json::json!(false),
         )
         .unwrap();
-        assert!(!new_config.chat_display.auto_scroll_enabled);
+        assert!(!new_config.chat_display.hide_panel_on_connect);
     }
 
     #[test]
@@ -829,7 +989,7 @@ mode = "fallback"
 [chat_display]
 message_font_size = 18
 show_timestamps = false
-auto_scroll_enabled = false
+hide_panel_on_connect = false
 
 [ui]
 theme = "light"
@@ -840,7 +1000,7 @@ theme = "light"
         assert_eq!(config.storage.mode, StorageMode::Fallback);
         assert_eq!(config.chat_display.message_font_size, 18);
         assert!(!config.chat_display.show_timestamps);
-        assert!(!config.chat_display.auto_scroll_enabled);
+        assert!(!config.chat_display.hide_panel_on_connect);
         assert_eq!(config.ui.theme, Theme::Light);
 
         let _ = fs::remove_file(&path);

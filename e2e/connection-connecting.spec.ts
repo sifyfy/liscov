@@ -7,6 +7,7 @@ import {
   resetMockServer,
   connectToMockStream,
   disconnectAndInitialize,
+  openUrlInput,
 } from './utils/test-helpers';
 
 /**
@@ -37,8 +38,7 @@ test.describe('接続中の操作 (02_chat.md)', () => {
     await disconnectAndInitialize(mainPage);
   });
 
-  const items = () => mainPage.locator('.connection-item');
-  const urlInput = () => mainPage.locator('input[placeholder*="youtube.com"]');
+  const items = () => mainPage.locator('[data-testid="connection-chip"]');
 
   async function startConnecting(videoId: string) {
     await fetch(`${mockServerUrl()}/set_stream_state`, {
@@ -46,20 +46,20 @@ test.describe('接続中の操作 (02_chat.md)', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ watch_delay_ms: 3000 }),
     });
-    await urlInput().fill(`${mockServerUrl()}/watch?v=${videoId}`);
-    await mainPage.locator('button:has-text("開始")').click();
-    await expect(mainPage.locator('button:has-text("接続中...")')).toBeVisible();
+    await (await openUrlInput(mainPage)).fill(`${mockServerUrl()}/watch?v=${videoId}`);
+    await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+    await expect(mainPage.getByRole('button', { name: '接続中…' })).toBeVisible();
   }
 
   // 仕様: 接続中のエントリの切断ボタンは押せない。成立したら切断できる
   test('接続中は切断ボタンを押せず、成立したら切断できる', async () => {
     await startConnecting('test_video_connecting');
-    const disconnectBtn = items().first().locator('.disconnect-btn');
+    const disconnectBtn = items().first().locator('button');
     await expect(disconnectBtn).toBeDisabled();
 
-    await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+    await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
     await expect(disconnectBtn).toBeEnabled();
-    await expect(urlInput()).toHaveValue('');
+    await expect(await openUrlInput(mainPage)).toHaveValue('');
     await disconnectBtn.click();
     await expect(items()).toHaveCount(0);
   });
@@ -73,7 +73,7 @@ test.describe('接続中の操作 (02_chat.md)', () => {
     await mainPage.locator('button:has-text("全切断")').click();
     await expect(items()).toHaveCount(1);
 
-    await expect(items().first().locator('.disconnect-btn')).toBeEnabled({ timeout: 10000 });
+    await expect(items().first().locator('button')).toBeEnabled({ timeout: 10000 });
     const connections = await mainPage.evaluate(() =>
       (window as unknown as { __TAURI_INTERNALS__: { invoke: (cmd: string) => Promise<unknown[]> } })
         .__TAURI_INTERNALS__.invoke('get_connections')

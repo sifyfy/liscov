@@ -11,11 +11,12 @@
   <!-- 例外の中身は画面に出さない（配信に映ることがある）。コンソールにだけ出す -->
   <!-- eslint-disable-next-line @typescript-eslint/no-unused-vars -->
   {#snippet failed(_error, reset)}
-    <div class="flex-1 flex flex-col items-center justify-center gap-3 p-6 text-sm text-[var(--text-secondary)]">
+    <div class="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-body text-fg-2">
       <p>表示中にエラーが発生しました</p>
       <button
+        type="button"
         onclick={reset}
-        class="px-3 py-1.5 rounded-md bg-[var(--bg-surface-2)] text-[var(--text-primary)] border border-[var(--border-default)] hover:bg-[var(--bg-surface-3)]"
+        class="rounded-control border border-outline px-3 py-1 text-label text-fg-1 hover:bg-fg-1/8"
       >再表示</button>
     </div>
   {/snippet}

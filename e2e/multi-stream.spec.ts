@@ -9,25 +9,29 @@ import {
   addMockMessage,
   disconnectAndInitialize,
   setStreamState,
+  openUrlInput,
+  openControlPanel,
+  connectionChips,
+  openViewerPanel,
+  saveReadingInPanel,
 } from './utils/test-helpers';
 
 /**
  * E2E tests for Multi-Stream Connection.
  *
  * 複数の配信に同時接続し、メッセージを受信・表示できることを確認する。
- * 対応仕様: ConnectionList, 個別切断, 全切断, 配信元インジケーター
+ * 対応仕様: 上の行の接続の札, 操作パネルの接続の一覧, 個別切断, 全切断, 配信元インジケーター
  */
 
 /**
- * ストリームに接続し、接続リストにエントリが追加されるのを待つ
+ * ストリームに接続し、上の行に接続の札 (title は配信タイトル) が追加されるのを待つ
+ * 2 本目以降は「+」で操作パネルを開いて入力する (openUrlInput)
  */
 async function connectStream(page: Page, videoId: string, expectedTitle: string): Promise<void> {
-  const urlInput = page.locator('input[placeholder*="YouTube URL"], input[placeholder*="youtube.com"]');
-  // 入力欄をクリアしてから新しいURLを入力
+  const urlInput = await openUrlInput(page);
   await urlInput.fill(`${mockServerUrl()}/watch?v=${videoId}`);
-  await page.locator('button:has-text("開始")').click();
-  // 接続リストに該当タイトルが表示されるまで待機
-  await expect(page.getByText(expectedTitle).first()).toBeVisible({ timeout: 10000 });
+  await page.getByRole('button', { name: '接続', exact: true }).click();
+  await expect(connectionChips(page, expectedTitle).first()).toBeVisible({ timeout: 10000 });
 }
 
 test.describe('Multi-Stream Connection', () => {
@@ -61,17 +65,17 @@ test.describe('Multi-Stream Connection', () => {
       await connectStream(mainPage, 'test_video_123', 'Mock Live');
 
       // 接続リストに1件表示されている
-      await expect(mainPage.locator('.connection-item')).toHaveCount(1);
+      await expect(mainPage.locator('[data-testid="connection-chip"]')).toHaveCount(1);
 
       // Stream 2に接続（既存接続を切断しない）
       await connectStream(mainPage, 'test_video_456', 'Mock Live 2');
 
       // 接続リストに2件表示されている
-      await expect(mainPage.locator('.connection-item')).toHaveCount(2);
+      await expect(mainPage.locator('[data-testid="connection-chip"]')).toHaveCount(2);
 
       // 両方のストリーム情報が表示されている
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible();
-      await expect(mainPage.getByText('Mock Live 2').first()).toBeVisible();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live 2"]').first()).toBeVisible();
 
       log.debug('2つの同時接続が確認された');
     });
@@ -80,15 +84,15 @@ test.describe('Multi-Stream Connection', () => {
       await connectStream(mainPage, 'test_video_123', 'Mock Live');
       await connectStream(mainPage, 'test_video_456', 'Mock Live 2');
 
-      // 各接続アイテムにストリームタイトルが表示される
-      const items = mainPage.locator('.connection-item');
-      await expect(items).toHaveCount(2);
+      // 上の行の札は 2 つ
+      await expect(mainPage.locator('[data-testid="connection-chip"]')).toHaveCount(2);
 
-      // .stream-title または .broadcaster-name のいずれかに期待テキストが含まれる
-      const allText = await mainPage.locator('.connection-list').textContent();
-      log.debug(`Connection list text: "${allText}"`);
-      expect(allText).toContain('Mock Live');
-      expect(allText).toContain('Mock Live 2');
+      // 操作パネルの接続の一覧に、接続ごとに配信タイトルが出る
+      await openControlPanel(mainPage);
+      const items = mainPage.locator('[data-testid="connection-item"]');
+      await expect(items).toHaveCount(2);
+      await expect(items.nth(0).locator('[data-testid="stream-title"]')).toHaveText('Mock Live');
+      await expect(items.nth(1).locator('[data-testid="stream-title"]')).toHaveText('Mock Live 2');
     });
 
     test('各接続アイテムに個別切断ボタン（×）が表示される', async () => {
@@ -96,8 +100,31 @@ test.describe('Multi-Stream Connection', () => {
       await connectStream(mainPage, 'test_video_456', 'Mock Live 2');
 
       // 各接続アイテムに切断ボタンがある
-      const disconnectBtns = mainPage.locator('.connection-item .disconnect-btn');
+      const disconnectBtns = mainPage.locator('[data-testid="connection-chip"] button');
       await expect(disconnectBtns).toHaveCount(2);
+    });
+
+    test('札が上の行に収まらないとき、ホイールの上下で札の列が横にスクロールする', async () => {
+      await connectStream(mainPage, 'test_video_123', 'Mock Live');
+      await connectStream(mainPage, 'test_video_456', 'Mock Live 2');
+
+      const strip = mainPage.locator('[data-testid="connection-strip"]');
+      const scrollLeft = () => strip.evaluate((el) => el.scrollLeft);
+      const [width, height] = await mainPage.evaluate(() => [window.innerWidth, window.innerHeight]);
+      try {
+        // 札 2 つが入らない幅に縮める (最小幅 540 より狭いが、札の列があふれる状態を作るため)
+        await mainPage.setViewportSize({ width: 300, height });
+        await expect.poll(() => strip.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+        expect(await scrollLeft()).toBe(0);
+
+        const box = await strip.boundingBox();
+        if (!box) throw new Error('札の列が見つからない');
+        await mainPage.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await mainPage.mouse.wheel(0, 100);
+        await expect.poll(scrollLeft).toBeGreaterThan(0);
+      } finally {
+        await mainPage.setViewportSize({ width, height });
+      }
     });
   });
 
@@ -135,32 +162,48 @@ test.describe('Multi-Stream Connection', () => {
     });
 
     test('2接続時にメッセージの配信元インジケーターが表示される', async () => {
+      // 2 接続のポーリングの時刻が近いと接続2 にはほとんど届かないので、接続1 がポーリングした直後
+      // (同期用のメッセージが見えた時点) から周期の半分ほどずらして接続2 を接続する (「視聴者パネルの配信者」と同じ)
+      const syncContent = `IndicatorSync_${Date.now()}`;
       await connectStream(mainPage, 'test_video_123', 'Mock Live');
+      await addMockMessage({ message_type: 'text', author: 'IndicatorSync', content: syncContent, channel_id: 'UC_indicator_sync' });
+      await expect(mainPage.locator(`text=${syncContent}`)).toBeVisible({ timeout: 8000 });
+      await mainPage.waitForTimeout(700);
       await connectStream(mainPage, 'test_video_456', 'Mock Live 2');
 
-      // 接続が2件の場合、メッセージに配信元インジケーターが表示される
-      const msg1Content = `IndicatorTest_${Date.now()}`;
-      await addMockMessage({
-        message_type: 'text',
-        author: 'IndicatorUser',
-        content: msg1Content,
-        channel_id: 'UC_indicator_user',
-      });
+      // 仕様「1 行の形」: 相手の配信 (2 つ目以降の接続) のコメントには名前の行の上に配信者名の行が付き、
+      // 主の配信 (最初の接続) の行には付かない。
+      // モックのキューは全接続共通で、積んだあと最初にポーリングした接続に届く。どちらの接続に届くかは
+      // 決まらないので、積む時刻を 130ms ずつずらして周期を掃き、両方の行が見えるまで積む
+      const runId = Date.now();
+      let sawPartner = false;
+      let sawPrimary = false;
+      for (let i = 0; i < 16 && !(sawPartner && sawPrimary); i++) {
+        await mainPage.waitForTimeout(i * 130);
+        const content = `IndicatorTest_${runId}_${i}`;
+        await addMockMessage({
+          message_type: 'text',
+          author: 'IndicatorUser',
+          content,
+          channel_id: 'UC_indicator_user',
+        });
+        const messageEl = mainPage.locator('[data-message-id]').filter({ hasText: content }).first();
+        await expect(messageEl).toBeVisible({ timeout: 8000 });
 
-      await expect(mainPage.locator(`text=${msg1Content}`)).toBeVisible({ timeout: 8000 });
-
-      // 配信元インジケーター（色ライン or ラベル）が表示される
-      // 2接続時は .source-indicator が表示される
-      const messageEl = mainPage.locator('[data-message-id]').filter({
-        has: mainPage.locator(`text=${msg1Content}`),
-      }).first();
-      await expect(messageEl).toBeVisible();
-
-      // .source-indicator の存在を確認
-      const hasIndicator = await messageEl.locator('.source-indicator').count() > 0;
-      log.debug(`Source indicator found: ${hasIndicator}`);
-      // インジケーターが表示されることを確認（2接続時は必須）
-      expect(hasIndicator).toBe(true);
+        const origin = await messageEl.getAttribute('data-origin');
+        const label = messageEl.locator('[data-testid="source-label"]');
+        log.debug(`${content} の data-origin: ${origin}`);
+        if (origin === 'partner') {
+          await expect(label).toHaveText('MockBroadcaster2');
+          sawPartner = true;
+        } else {
+          expect(origin).toBe('primary');
+          await expect(label).toHaveCount(0);
+          sawPrimary = true;
+        }
+      }
+      expect(sawPartner, '2 つ目の接続の行 (配信者名の行つき) が見えた').toBe(true);
+      expect(sawPrimary, '最初の接続の行 (札なし) が見えた').toBe(true);
 
       log.debug('配信元インジケーターの表示が確認された');
     });
@@ -171,7 +214,7 @@ test.describe('Multi-Stream Connection', () => {
     test('2つ目の接続に届いたコメントの視聴者は、その接続の配信者のもとで読み仮名を保存できる', async () => {
       // モックのメッセージキューは全接続で共通で、積んだあと最初にポーリング（1,500ms 周期）した接続に届く。
       // 2 接続のポーリングの時刻が近いと接続2 にはほとんど届かないので、接続1 がポーリングした直後
-      // （同期用のメッセージが見えた時点）から周期の半分ほどずらして接続2 をつなぐ
+      // （同期用のメッセージが見えた時点）から周期の半分ほどずらして接続2 を接続する
       const runId = Date.now();
       await setStreamState({ channel_id: 'UC_panel_broadcaster_a' });
       await connectStream(mainPage, 'test_video_123', 'Mock Live');
@@ -193,28 +236,25 @@ test.describe('Multi-Stream Connection', () => {
         await addMockMessage({ message_type: 'text', author: `PanelViewer${i}`, content, channel_id: channelId });
         const messageEl = mainPage.locator('[data-message-id]').filter({ hasText: content }).first();
         await expect(messageEl).toBeVisible({ timeout: 8000 });
-        const source = await messageEl.locator('.source-label').textContent();
-        log.debug(`${content} は ${source} の接続に届いた`);
+        // 札があるのは相手の配信 (2 つ目の接続) の行だけ。主の配信の行には無い
+        const source = await messageEl.locator('[data-testid="source-label"]').textContent({ timeout: 500 }).catch(() => null);
+        log.debug(`${content} は ${source ?? '主の配信'} の接続に届いた`);
         if (source?.trim() === 'MockBroadcaster2') target = { content, channelId };
       }
       expect(target, '12 件とも接続1 に届いた').not.toBeNull();
       const { content, channelId } = target!;
 
-      // 接続2 の配信者 B のもとにはこの視聴者のプロフィールがある。最初の接続の配信者 A のもとには無い
-      await mainPage.locator('[data-message-id]').filter({ hasText: content }).first().click();
-      await expect(mainPage.getByText(channelId).first()).toBeVisible({ timeout: 5000 });
-      const readingInput = mainPage.locator('#viewer-reading');
-      await expect(readingInput).toBeEnabled({ timeout: 5000 });
-      await readingInput.fill('びーのしちょうしゃ');
-      await mainPage.locator('button:has-text("保存")').click();
-      await expect(mainPage.getByText('保存しました')).toBeVisible({ timeout: 5000 });
+      // 接続2 の配信者 B のもとにはこの視聴者のプロフィールがある。最初の接続の配信者 A のもとには無い。
+      // 接続が 2 つなので、保存先の配信者名をパネルに出す (02_chat.md「視聴者の読み仮名・メモ」)
+      const panel = await openViewerPanel(mainPage, content);
+      await expect(panel.getByTestId('viewer-broadcaster')).toHaveText('保存先 MockBroadcaster2');
+      await saveReadingInPanel(mainPage, 'びーのしちょうしゃ');
+      log.debug(`${channelId} を配信者 B のもとに保存した`);
 
       // 開き直すと、B のもとに保存した読み仮名が読み込まれる
-      await mainPage.locator('button:has-text("✕")').click();
-      await mainPage.locator('[data-message-id]').filter({ hasText: content }).first().click();
-      await expect(mainPage.locator('#viewer-reading')).toHaveValue('びーのしちょうしゃ', { timeout: 5000 });
-      // パネルは接続一覧の上に重なるので、次のテストの切断の前に閉じる
-      await mainPage.locator('button:has-text("✕")').click();
+      const reopened = await openViewerPanel(mainPage, content);
+      await expect(reopened.getByLabel('読み仮名')).toHaveValue('びーのしちょうしゃ', { timeout: 5000 });
+      await reopened.getByLabel('読み仮名').press('Escape');
     });
   });
 
@@ -223,16 +263,30 @@ test.describe('Multi-Stream Connection', () => {
       await connectStream(mainPage, 'test_video_123', 'Mock Live');
       await connectStream(mainPage, 'test_video_456', 'Mock Live 2');
 
-      await expect(mainPage.locator('.connection-item')).toHaveCount(2);
+      await expect(mainPage.locator('[data-testid="connection-chip"]')).toHaveCount(2);
 
       // 1つ目の接続の×ボタンをクリック
-      const firstDisconnectBtn = mainPage.locator('.connection-item .disconnect-btn').first();
+      const firstDisconnectBtn = mainPage.locator('[data-testid="connection-chip"] button').first();
       await firstDisconnectBtn.click();
 
       // 接続リストが1件になる
-      await expect(mainPage.locator('.connection-item')).toHaveCount(1, { timeout: 10000 });
+      await expect(mainPage.locator('[data-testid="connection-chip"]')).toHaveCount(1, { timeout: 10000 });
 
       log.debug('1件の個別切断が確認された');
+    });
+
+    test('操作パネルの「切断」ボタンでもその接続だけ切断される', async () => {
+      await connectStream(mainPage, 'test_video_123', 'Mock Live');
+      await connectStream(mainPage, 'test_video_456', 'Mock Live 2');
+
+      await openControlPanel(mainPage);
+      const items = mainPage.locator('[data-testid="connection-item"]');
+      await expect(items).toHaveCount(2);
+      await items.nth(1).getByRole('button', { name: '切断', exact: true }).click();
+
+      // 2つ目だけが切れ、1つ目の札が残る
+      await expect(mainPage.locator('[data-testid="connection-chip"]')).toHaveCount(1, { timeout: 10000 });
+      await expect(connectionChips(mainPage, 'Mock Live')).toBeVisible();
     });
 
     test('個別切断後も残りの接続が正常に機能する', async () => {
@@ -240,9 +294,9 @@ test.describe('Multi-Stream Connection', () => {
       await connectStream(mainPage, 'test_video_456', 'Mock Live 2');
 
       // 1つ目の接続を切断
-      const firstDisconnectBtn = mainPage.locator('.connection-item .disconnect-btn').first();
+      const firstDisconnectBtn = mainPage.locator('[data-testid="connection-chip"] button').first();
       await firstDisconnectBtn.click();
-      await expect(mainPage.locator('.connection-item')).toHaveCount(1, { timeout: 10000 });
+      await expect(mainPage.locator('[data-testid="connection-chip"]')).toHaveCount(1, { timeout: 10000 });
 
       // 残りの接続でメッセージを受信できる
       const remainingMsg = `RemainingStream_${Date.now()}`;
@@ -264,16 +318,17 @@ test.describe('Multi-Stream Connection', () => {
       await connectStream(mainPage, 'test_video_123', 'Mock Live');
       await connectStream(mainPage, 'test_video_456', 'Mock Live 2');
 
-      await expect(mainPage.locator('.connection-item')).toHaveCount(2);
+      await expect(mainPage.locator('[data-testid="connection-chip"]')).toHaveCount(2);
 
-      // 全切断ボタンは2件以上の接続時に表示される
-      const disconnectAllBtn = mainPage.locator('button:has-text("全切断")');
+      // 全切断ボタンは操作パネルにあり、2件以上の接続時に表示される
+      await openControlPanel(mainPage);
+      const disconnectAllBtn = mainPage.getByRole('button', { name: '全切断' });
       await expect(disconnectAllBtn).toBeVisible({ timeout: 5000 });
 
       await disconnectAllBtn.click();
 
       // 接続リストが空になる
-      await expect(mainPage.locator('.connection-item')).toHaveCount(0, { timeout: 10000 });
+      await expect(mainPage.locator('[data-testid="connection-chip"]')).toHaveCount(0, { timeout: 10000 });
 
       log.debug('全切断が確認された');
     });
@@ -281,11 +336,12 @@ test.describe('Multi-Stream Connection', () => {
     test('1件の接続時は全切断ボタンが表示されない', async () => {
       await connectStream(mainPage, 'test_video_123', 'Mock Live');
 
-      await expect(mainPage.locator('.connection-item')).toHaveCount(1);
+      await expect(mainPage.locator('[data-testid="connection-chip"]')).toHaveCount(1);
 
-      // 1件の場合は全切断ボタンは表示されない
-      const disconnectAllBtn = mainPage.locator('button:has-text("全切断")');
-      await expect(disconnectAllBtn).not.toBeVisible();
+      // 1件の場合は全切断ボタンは表示されない (操作パネルを開いて確かめる)
+      await openControlPanel(mainPage);
+      await expect(mainPage.locator('[data-testid="connection-item"]')).toHaveCount(1);
+      await expect(mainPage.getByRole('button', { name: '全切断' })).not.toBeVisible();
     });
   });
 
@@ -294,26 +350,26 @@ test.describe('Multi-Stream Connection', () => {
       await connectStream(mainPage, 'test_video_123', 'Mock Live');
       await connectStream(mainPage, 'test_video_456', 'Mock Live 2');
 
-      const disconnectAllBtn = mainPage.locator('button:has-text("全切断")');
-      await disconnectAllBtn.click();
-      await expect(mainPage.locator('.connection-item')).toHaveCount(0, { timeout: 10000 });
+      await openControlPanel(mainPage);
+      await mainPage.getByRole('button', { name: '全切断' }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"]')).toHaveCount(0, { timeout: 10000 });
 
       // 全切断後もURLフォームは表示される
-      await expect(mainPage.locator('input[placeholder*="YouTube URL"], input[placeholder*="youtube.com"]')).toBeVisible();
-      await expect(mainPage.locator('button:has-text("開始")')).toBeVisible();
+      await expect(mainPage.locator('#connect-url')).toBeVisible();
+      await expect(mainPage.getByRole('button', { name: '接続', exact: true })).toBeVisible();
     });
 
     test('全切断後に再度接続できる', async () => {
       await connectStream(mainPage, 'test_video_123', 'Mock Live');
       await connectStream(mainPage, 'test_video_456', 'Mock Live 2');
 
-      const disconnectAllBtn = mainPage.locator('button:has-text("全切断")');
-      await disconnectAllBtn.click();
-      await expect(mainPage.locator('.connection-item')).toHaveCount(0, { timeout: 10000 });
+      await openControlPanel(mainPage);
+      await mainPage.getByRole('button', { name: '全切断' }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"]')).toHaveCount(0, { timeout: 10000 });
 
       // 再接続
       await connectStream(mainPage, 'test_video_123', 'Mock Live');
-      await expect(mainPage.locator('.connection-item')).toHaveCount(1);
+      await expect(mainPage.locator('[data-testid="connection-chip"]')).toHaveCount(1);
     });
   });
 });

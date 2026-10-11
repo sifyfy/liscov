@@ -9,6 +9,9 @@ import {
   addMockMessage,
   disconnectAndInitialize,
   setStreamState,
+  openUrlInput,
+  openControlPanel,
+  connectionChips,
 } from './utils/test-helpers';
 
 /**
@@ -40,13 +43,16 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
     await resetMockServer();
   });
 
+  // 文字の大きさ・時刻・表示件数は操作パネルにある
+  const panelFontSize = () => mainPage.getByRole('region', { name: '操作パネル' }).getByText(/^\d+px$/);
+
   test.describe('Author Name Color Coding', () => {
-    test('should display member names in member-accent color and non-member names in accent color', async () => {
+    test('should display member names in member-text color and non-member names in fg-1 color', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Use unique identifiers to avoid text matching issues
       const nonMemberName = 'BlueViewer123';
@@ -66,16 +72,28 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
       // Wait for first message
       await expect(mainPage.getByText(nonMemberName).first()).toBeVisible({ timeout: 5000 });
 
-      // Check non-member color - should use var(--accent) CSS variable
-      // Dark theme: #6fb8d9 = rgb(111, 184, 217)
+      // 仕様 (tokens.md): 通常の名前は fg-1。ダークテーマ (E2E の既定) は #ededf0 = rgb(237, 237, 240)
       const nonMemberMessage = mainPage.locator('[data-message-id]').filter({
         has: mainPage.locator(`text=${nonMemberContent}`)
       }).first();
-      const nonMemberAuthor = nonMemberMessage.locator('span').filter({ hasText: nonMemberName }).first();
+      const nonMemberAuthor = nonMemberMessage.getByTestId('author-name');
       const nonMemberColor = await nonMemberAuthor.evaluate(el => getComputedStyle(el).color);
-      expect(nonMemberColor).toMatch(/rgb\(111,\s*184,\s*217\)/);
+      expect(nonMemberColor).toMatch(/rgb\(237,\s*237,\s*240\)/);
 
-      // Add member message
+      // メンバーのコメントを 2 回送る。仕様: 新規さんの初回の行 (優先順位 2) は薄い背景の上で緑が
+      // 読みにくいので名前は通常の色。2 回目以降 (優先順位 3) でメンバーの緑になる
+      await addMockMessage({
+        message_type: 'text',
+        author: memberName,
+        content: 'Member first comment',
+        channel_id: 'UC_green_viewer',
+        is_member: true,
+      });
+      const memberFirst = mainPage.locator('[data-message-id]').filter({ hasText: 'Member first comment' }).first();
+      await expect(memberFirst).toHaveAttribute('data-priority', '2', { timeout: 5000 });
+      const firstColor = await memberFirst.getByTestId('author-name').evaluate(el => getComputedStyle(el).color);
+      expect(firstColor).toMatch(/rgb\(237,\s*237,\s*240\)/);
+
       await addMockMessage({
         message_type: 'text',
         author: memberName,
@@ -84,18 +102,17 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
         is_member: true,
       });
 
-      // Wait for second message with longer timeout
-      await expect(mainPage.getByText(memberName).first()).toBeVisible({ timeout: 5000 });
+      await expect(mainPage.getByText(memberContent).first()).toBeVisible({ timeout: 5000 });
 
-      // Check member color - should use var(--member-accent) CSS variable
-      // Dark theme: #6ec98a = rgb(110, 201, 138)
+      // 仕様: メンバーの名前は member-text。ダークテーマは #4cc26a = rgb(76, 194, 106)
       const memberMessage = mainPage.locator('[data-message-id]').filter({
         has: mainPage.locator(`text=${memberContent}`)
       }).first();
-      const memberAuthor = memberMessage.locator('span').filter({ hasText: memberName }).first();
+      const memberAuthor = memberMessage.getByTestId('author-name');
+      await expect(memberAuthor).toHaveClass(/text-member-text/);
       const memberColor = await memberAuthor.evaluate(el => getComputedStyle(el).color);
 
-      expect(memberColor).toMatch(/rgb\(110,\s*201,\s*138\)/);
+      expect(memberColor).toMatch(/rgb\(76,\s*194,\s*106\)/);
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
@@ -103,14 +120,15 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
   });
 
   test.describe('Font Size and Display Settings', () => {
-    test('should increase font size when clicking A+ button', async () => {
+    test('should increase font size when clicking 文字を大きく button', async () => {
+      await openControlPanel(mainPage);
       // Get initial font size
-      const fontSizeDisplay = mainPage.locator('text=/\\d+px/').first();
+      const fontSizeDisplay = panelFontSize();
       const initialSize = await fontSizeDisplay.textContent();
       const initialNum = parseInt(initialSize?.replace('px', '') || '13');
 
       // Click increase button
-      const increaseButton = mainPage.locator('button[title="文字を大きく"]');
+      const increaseButton = mainPage.getByRole('button', { name: '文字を大きく' });
       await increaseButton.click();
 
       // Verify size increased
@@ -119,14 +137,15 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
       expect(newNum).toBe(initialNum + 1);
     });
 
-    test('should decrease font size when clicking A- button', async () => {
+    test('should decrease font size when clicking 文字を小さく button', async () => {
+      await openControlPanel(mainPage);
       // Get initial font size
-      const fontSizeDisplay = mainPage.locator('text=/\\d+px/').first();
+      const fontSizeDisplay = panelFontSize();
       const initialSize = await fontSizeDisplay.textContent();
       const initialNum = parseInt(initialSize?.replace('px', '') || '13');
 
       // Click decrease button
-      const decreaseButton = mainPage.locator('button[title="文字を小さく"]');
+      const decreaseButton = mainPage.getByRole('button', { name: '文字を小さく' });
       await decreaseButton.click();
 
       // Verify size decreased
@@ -137,10 +156,10 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
 
     test('should toggle timestamp display', async () => {
       // Connect to stream and add message
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       await addMockMessage({
         message_type: 'text',
@@ -151,23 +170,18 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
       // Wait for message to appear
       await expect(mainPage.locator('text=TimestampUser')).toBeVisible({ timeout: 5000 });
 
-      // Get timestamp toggle
-      const timestampToggle = mainPage.locator('label:has-text("タイムスタンプ") input[type="checkbox"]');
+      // 操作パネルの「時刻」
+      await openControlPanel(mainPage);
+      const timestampToggle = mainPage.getByRole('checkbox', { name: '時刻' });
 
-      // If checked, timestamps should be visible
-      const isChecked = await timestampToggle.isChecked();
+      // 付けると時刻 (HH:MM:SS) が出る
+      await timestampToggle.check();
+      const timestamp = mainPage.locator('[data-message-id]').getByText(/\d{2}:\d{2}:\d{2}/).first();
+      await expect(timestamp).toBeVisible();
 
-      if (isChecked) {
-        // Timestamp should be visible (HH:MM:SS format)
-        const timestamp = mainPage.locator('text=/\\d{2}:\\d{2}:\\d{2}/').first();
-        await expect(timestamp).toBeVisible();
-
-        // Uncheck and verify timestamp is hidden
-        await timestampToggle.uncheck();
-
-        // Timestamp should not be visible
-        await expect(timestamp).not.toBeVisible();
-      }
+      // 外すと時刻が消える
+      await timestampToggle.uncheck();
+      await expect(timestamp).not.toBeVisible();
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
@@ -176,10 +190,11 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
 
   test.describe('Display Settings', () => {
     test('should respect font size boundaries (10-24px)', async () => {
+      await openControlPanel(mainPage);
       // Get initial font size
-      const fontSizeDisplay = mainPage.locator('text=/\\d+px/').first();
-      const decreaseButton = mainPage.locator('button[title="文字を小さく"]');
-      const increaseButton = mainPage.locator('button[title="文字を大きく"]');
+      const fontSizeDisplay = panelFontSize();
+      const decreaseButton = mainPage.getByRole('button', { name: '文字を小さく' });
+      const increaseButton = mainPage.getByRole('button', { name: '文字を大きく' });
 
       // Decrease to minimum
       for (let i = 0; i < 20; i++) {
@@ -207,35 +222,49 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
   });
 
   test.describe('Message Display Styling', () => {
-    test('should display member message with green styling', async () => {
+    test('should display member name in member-text color without a green background or border', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
-      // Add member message
-      await addMockMessage({
-        message_type: 'text',
-        author: 'GreenBgMember',
-        content: 'Member with green background',
-        is_member: true,
-      });
+      // メンバーの 2 回目のコメントを見る (初回は優先順位 2 で名前が通常の色になるため。仕様「1 行の形」)
+      for (const content of ['Member first', 'Member with green background']) {
+        await addMockMessage({
+          message_type: 'text',
+          author: 'GreenBgMember',
+          content,
+          channel_id: 'UC_green_bg_member',
+          is_member: true,
+        });
+      }
 
-      // Find the message element
       const memberMessage = mainPage.locator('[data-message-id]').filter({
-        has: mainPage.locator('text=GreenBgMember')
+        hasText: 'Member with green background',
       }).first();
 
       await expect(memberMessage).toBeVisible({ timeout: 5000 });
 
-      // Check for green styling - could be on border, background, or author name
-      // Option 1: Check author name color (green for members)
-      const authorSpan = memberMessage.locator('span').filter({ hasText: 'GreenBgMember' }).first();
+      // 仕様「1 行の形」: メンバーは名前を緑の文字にする。背景・枠は付けない
+      // ダークテーマの member-text #4cc26a = rgb(76, 194, 106)
+      const authorSpan = memberMessage.getByTestId('author-name');
+      await expect(authorSpan).toHaveClass(/text-member-text/);
       const authorColor = await authorSpan.evaluate(el => getComputedStyle(el).color);
+      expect(authorColor).toMatch(/rgb\(76,\s*194,\s*106\)/);
 
-      // Should use var(--member-accent): dark theme #6ec98a = rgb(110, 201, 138)
-      expect(authorColor).toMatch(/rgb\(110,\s*201,\s*138\)/);
+      // 行の根にも、行の本体にも背景色と枠が付かない (透明・枠なし)
+      const decoration = await memberMessage.evaluate((root) => {
+        const body = root.firstElementChild as HTMLElement;
+        return [root, body].map((el) => {
+          const st = getComputedStyle(el);
+          return { background: st.backgroundColor, borderWidth: st.borderTopWidth, borderStyle: st.borderTopStyle };
+        });
+      });
+      for (const d of decoration) {
+        expect(d.background).toBe('rgba(0, 0, 0, 0)');
+        expect(d.borderStyle === 'none' || d.borderWidth === '0px').toBe(true);
+      }
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
@@ -243,10 +272,10 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
 
     test('should display author icon', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // Add message
       await addMockMessage({
@@ -277,44 +306,31 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
       await setStreamState({ title: longTitle });
 
       // Connect to stream with long title
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
 
-      // Find the title element (look for <div> containing part of the long title)
-      // The title should be in the InputSection component
+      // 上の行の札は 1 行のまま (タイトルは札のヒント)、全文は操作パネルの接続の一覧に出る
+      await expect(connectionChips(mainPage, longTitle)).toBeVisible({ timeout: 10000 });
+      await openControlPanel(mainPage);
       const titleElement = mainPage.locator('[data-testid="stream-title"]').first();
 
       await expect(titleElement).toBeVisible({ timeout: 10000 });
 
-      // CRITICAL: Check that the title element has proper overflow handling
-      // Without these styles, long titles will cause horizontal overflow
-      const styles = await titleElement.evaluate(el => {
-        const style = window.getComputedStyle(el);
+      // 長いタイトルでもウィンドウが横に溢れない (操作パネルの中で折り返す。上の行の札には全文を出さない)
+      const overflow = await mainPage.evaluate(() => {
+        const panel = document.querySelector('section[aria-label="操作パネル"]');
         return {
-          overflow: style.overflow,
-          textOverflow: style.textOverflow,
-          whiteSpace: style.whiteSpace,
-          // Also check if the text is actually being clipped
-          scrollWidth: el.scrollWidth,
-          clientWidth: el.clientWidth,
+          pageScroll: document.documentElement.scrollWidth,
+          pageClient: document.documentElement.clientWidth,
+          panelScroll: panel?.scrollWidth ?? 0,
+          panelClient: panel?.clientWidth ?? 0,
         };
       });
-
-      // The title MUST have truncation styles to prevent overflow
-      // Tailwind's `truncate` class applies: overflow-hidden, text-overflow: ellipsis, white-space: nowrap
-      const hasTruncation = styles.textOverflow === 'ellipsis' && styles.overflow === 'hidden';
-
-      // Assert: Title must have ellipsis truncation applied
-      expect(hasTruncation).toBeTruthy();
-
-      // Additional check: If text is being clipped, scrollWidth should be >= clientWidth
-      // and the visible text should be shorter than the full title
-      if (styles.scrollWidth > styles.clientWidth) {
-        // Text is being truncated (scrollWidth > clientWidth means content overflows)
-        // This is expected behavior with truncation
-        log.debug(`Title truncated: scrollWidth=${styles.scrollWidth}, clientWidth=${styles.clientWidth}`);
-      }
+      expect(overflow.pageScroll).toBeLessThanOrEqual(overflow.pageClient);
+      expect(overflow.panelScroll).toBeLessThanOrEqual(overflow.panelClient);
+      // 全文が省略されずに DOM にある
+      expect(await titleElement.textContent()).toContain('超長いタイトルのテスト日本語も含めて配信タイトル');
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
@@ -324,13 +340,13 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
     });
 
     // 著者名の表示幅（02_chat.md:584）
-    // 固定200px上限を撤廃し「利用可能幅まで表示、行が収まらない場合のみ末尾省略」する挙動を検証する。
+    // 仕様「1 行の形」: 長い名前は折り返して全文を出し、省略 (…) しない。
     test('should display a moderately long author name wider than the former 200px cap without truncation', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // 全角約24文字（13px換算で ~300px、旧上限200pxを明確に超える）。
       // 一意トークンを先頭に付与し、メッセージ本文とは別に著者名 span を特定できるようにする。
@@ -351,26 +367,28 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
       }).first();
       await expect(message).toBeVisible({ timeout: 5000 });
 
-      const authorSpan = message.locator('span').filter({ hasText: widthMarker }).first();
+      // 名前は inline の span なので、幅は描画矩形で測る (clientWidth は inline だと 0)
+      const authorSpan = message.getByTestId('author-name');
+      await expect(authorSpan).toHaveText(moderateName);
       const metrics = await authorSpan.evaluate((el) => ({
-        clientWidth: el.clientWidth,
-        scrollWidth: el.scrollWidth,
+        width: el.getBoundingClientRect().width,
+        textOverflow: getComputedStyle(el).textOverflow,
       }));
 
-      // 固定上限が撤廃され、名前が200pxを超えて表示されている
-      expect(metrics.clientWidth).toBeGreaterThan(200);
-      // 利用可能幅に収まっているため省略されず全体表示（クリップなし、1pxの丸め誤差を許容）
-      expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth + 1);
+      // 固定の 200px 上限が無く、名前が 200px を超えて表示されている
+      expect(metrics.width).toBeGreaterThan(200);
+      // 省略 (…) の指定が無い
+      expect(metrics.textOverflow).not.toBe('ellipsis');
 
       await disconnectAndInitialize(mainPage);
     });
 
-    test('should ellipsize an over-long author name while keeping the member badge visible and the row from overflowing', async () => {
+    test('should wrap an over-long author name in full while keeping the member badge visible and the row from overflowing', async () => {
       // Connect to stream
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       // どんな現実的なパネル幅も超える長さ（全角300文字）。
       // is_member: true で「メンバー」バッジを同居させ、長い名前がバッジを押し出さない
@@ -391,34 +409,32 @@ test.describe('Chat Display — Styling (02_chat.md)', () => {
       }).first();
       await expect(message).toBeVisible({ timeout: 5000 });
 
-      const authorSpan = message.locator('span').filter({ hasText: 'OVFMARK_' }).first();
+      // 仕様: 省略せず折り返して全文を出す。行は横にはみ出さない
+      const authorSpan = message.getByTestId('author-name');
+      await expect(authorSpan).toHaveText(overLongName);
       const result = await authorSpan.evaluate((el) => {
         const style = window.getComputedStyle(el);
-        // 著者名 span の親 = メタデータ flex 行
-        const row = el.parentElement as HTMLElement;
+        const root = el.closest('[data-message-id]') as HTMLElement;
         return {
           textOverflow: style.textOverflow,
-          overflow: style.overflow,
-          whiteSpace: style.whiteSpace,
-          spanClientWidth: el.clientWidth,
-          spanScrollWidth: el.scrollWidth,
-          rowClientWidth: row.clientWidth,
-          rowScrollWidth: row.scrollWidth,
+          lineCount: el.getClientRects().length,
+          rootClientWidth: root.clientWidth,
+          rootScrollWidth: root.scrollWidth,
+          spanRight: el.getBoundingClientRect().right,
+          rootRight: root.getBoundingClientRect().right,
         };
       });
 
-      // 省略スタイルが適用されている（truncate = overflow-hidden / ellipsis / nowrap）
-      expect(result.textOverflow).toBe('ellipsis');
-      expect(result.overflow).toBe('hidden');
-      expect(result.whiteSpace).toBe('nowrap');
-      // 実際にクリップが発生している（収まらないので末尾省略）
-      expect(result.spanScrollWidth).toBeGreaterThan(result.spanClientWidth);
-      // 保存則: 名前が縮小を吸収し、メタデータ行は横方向に溢れない。
-      // バッジが同居するため、名前が譲らなければ行が溢れる ⇒ この検証は非自明
-      expect(result.rowScrollWidth).toBeLessThanOrEqual(result.rowClientWidth + 1);
+      // 省略の指定が無い
+      expect(result.textOverflow).not.toBe('ellipsis');
+      // 実際に複数行へ折り返している (1 行に押し込んで切っていない)
+      expect(result.lineCount).toBeGreaterThan(1);
+      // 行は横方向に溢れず、名前の右端も行の中に収まる
+      expect(result.rootScrollWidth).toBeLessThanOrEqual(result.rootClientWidth + 1);
+      expect(result.spanRight).toBeLessThanOrEqual(result.rootRight + 1);
 
-      // 成功条件: 長い名前があってもメンバーバッジは表示され、押し出されない。
-      // バッジの右端がメッセージ枠内に収まっていることで「押し出されない」を実証する。
+      // 成功条件: 長い名前があってもメンバーバッジは表示され、行からはみ出さない。
+      // バッジの右端がメッセージ枠内に収まっていることで実証する。
       // メンバーは画像バッジ（authorBadges の customThumbnail）で表示される（02_chat.md「バッジ表示優先順位」）
       const memberBadge = message.locator('img[alt="Member"]').first();
       await expect(memberBadge).toBeVisible();

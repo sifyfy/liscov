@@ -84,7 +84,6 @@ fn build_app_state(tts_manager: TtsManager) -> AppState {
         next_connection_id: Arc::new(AtomicU64::new(0)),
         connections: Arc::new(RwLock::new(HashMap::new())),
         connection_slots: Default::default(),
-        started_at: chrono::Utc::now(),
     }
 }
 

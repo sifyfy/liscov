@@ -22,8 +22,10 @@ export const DEFAULT_CONFIG: Config = {
   chat_display: {
     message_font_size: 13,
     show_timestamps: true,
-    auto_scroll_enabled: true,
-    chat_mode: 'top'
+    hide_panel_on_connect: true,
+    chat_mode: 'top',
+    flowed_newcomers_height_ratio: 0.125,
+    flowed_supporters_height_ratio: 0.125
   },
   ui: {
     theme: 'dark'

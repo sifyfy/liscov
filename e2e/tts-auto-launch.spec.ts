@@ -17,7 +17,7 @@ import {
 
 // Helper to wait for SvelteKit app to fully render (not just HTML load)
 async function waitForAppReady(page: Page): Promise<void> {
-  await expect(page.locator('nav button:has-text("Chat")')).toBeVisible({ timeout: 30000 });
+  await expect(page.locator('nav button[aria-label="チャット"]')).toBeVisible({ timeout: 30000 });
 }
 
 /**
@@ -65,7 +65,7 @@ function killVoicevox(): void {
 // Navigate to TTS settings tab
 async function navigateToTtsSettings(page: Page): Promise<void> {
   // Click Settings tab in main navigation
-  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('button', { name: '設定', exact: true }).click();
   // Wait for settings sidebar button to appear (condition-based instead of fixed timeout)
   await expect(page.getByRole('button', { name: 'TTS読み上げ' })).toBeVisible({ timeout: 5000 });
   // Click TTS tab in the settings sidebar (it's a button, not a link)
@@ -497,8 +497,8 @@ test.describe('TTS VOICEVOX Auto-Launch', () => {
       }
     });
 
-    // Verify error message is displayed (CSS variable-based theme classes)
-    const errorDisplay = mainPage.locator('div.rounded-lg p.text-sm').filter({ hasText: /not found|見つかりません|失敗|executable/i });
+    // エラーの文が出る (role="alert")
+    const errorDisplay = mainPage.getByRole('alert').filter({ hasText: /not found|見つかりません|失敗|executable/i });
     await expect(errorDisplay).toBeVisible({ timeout: 10000 });
   });
 });

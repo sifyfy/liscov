@@ -10,6 +10,8 @@ import {
   addMockMessage,
   addMockReaction,
   disconnectAndInitialize,
+  openUrlInput,
+  openControlPanel,
 } from './utils/test-helpers';
 
 /**
@@ -24,28 +26,35 @@ import {
  * - Message format verification per spec
  */
 
+// WebSocket の状態は操作パネルにある (02_chat.md「上の行と操作パネル」)。
+// 動いているとき「WebSocket: ポート 8765・0 件の接続」、止まっているとき「WebSocket: 止まっています」
+async function webSocketStatus(page: Page) {
+  await openControlPanel(page);
+  return page.getByTestId('websocket-status');
+}
+
 // Helper to get the actual WebSocket port from the UI status display
-// Format: "WS:53124(0)" (E2E では OS が選ぶ空きポートなので桁数は決まらない)
 async function getWebSocketPort(page: Page): Promise<number> {
-  const wsStatusLocator = page.locator('text=/WS:\\d+\\(\\d+\\)/');
+  const status = await webSocketStatus(page);
   const timeout = 15000;
   const start = Date.now();
 
   while (Date.now() - start < timeout) {
-    const count = await wsStatusLocator.count();
-    if (count > 0) {
-      const wsStatus = await wsStatusLocator.first().textContent();
-      if (wsStatus) {
-        const match = wsStatus.match(/WS:(\d+)/i);
-        if (match) {
-          return parseInt(match[1], 10);
-        }
-      }
+    const wsStatus = await status.textContent();
+    const match = wsStatus?.match(/ポート (\d+)/);
+    if (match) {
+      return parseInt(match[1], 10);
     }
     await page.waitForTimeout(500);
   }
 
   throw new Error('Could not find WebSocket port in UI - WebSocket server may not have started');
+}
+
+// 状態の表示が「ポート {port}・{n} 件の接続」になるのを待つ
+async function expectConnectedClients(page: Page, port: number, clients: number): Promise<void> {
+  const status = await webSocketStatus(page);
+  await expect(status).toHaveText(`WebSocket: ポート ${port}・${clients} 件の接続`, { timeout: 5000 });
 }
 
 // Helper to connect WebSocket client and wait for Connected message
@@ -164,9 +173,9 @@ test.describe('WebSocket API (03_websocket.md)', () => {
       ws.close();
     });
 
-    test('should display port number in header status', async () => {
-      const wsStatus = await mainPage.locator('text=/WS:\\d+/i').textContent();
-      expect(wsStatus).toMatch(/WS:\d+/i);
+    test('should display port number in the control panel status', async () => {
+      const wsStatus = await (await webSocketStatus(mainPage)).textContent();
+      expect(wsStatus).toMatch(/WebSocket: ポート \d+・\d+ 件の接続/);
 
       const port = await getWebSocketPort(mainPage);
       expect(port).toBeGreaterThanOrEqual(1);
@@ -187,11 +196,11 @@ test.describe('WebSocket API (03_websocket.md)', () => {
     test('should update UI when client connects (websocket-client-connected event)', async () => {
       const port = await getWebSocketPort(mainPage);
 
-      await expect(mainPage.locator(`text=/WS:${port}\\(0\\)/`)).toBeVisible({ timeout: 5000 });
+      await expectConnectedClients(mainPage, port, 0);
 
       const { ws } = await connectWebSocket(`ws://127.0.0.1:${port}`);
 
-      await expect(mainPage.locator(`text=/WS:${port}\\(1\\)/`)).toBeVisible({ timeout: 5000 });
+      await expectConnectedClients(mainPage, port, 1);
 
       ws.close();
     });
@@ -201,33 +210,33 @@ test.describe('WebSocket API (03_websocket.md)', () => {
 
       const { ws } = await connectWebSocket(`ws://127.0.0.1:${port}`);
 
-      await expect(mainPage.locator(`text=/WS:${port}\\(1\\)/`)).toBeVisible({ timeout: 5000 });
+      await expectConnectedClients(mainPage, port, 1);
 
       ws.close();
 
-      await expect(mainPage.locator(`text=/WS:${port}\\(0\\)/`)).toBeVisible({ timeout: 5000 });
+      await expectConnectedClients(mainPage, port, 0);
     });
   });
 
   test.describe('Connected Clients Count', () => {
-    test('should display connected clients count in header', async () => {
+    test('should display connected clients count in the control panel', async () => {
       const port = await getWebSocketPort(mainPage);
 
-      await expect(mainPage.locator(`text=/WS:${port}\\(0\\)/`)).toBeVisible({ timeout: 5000 });
+      await expectConnectedClients(mainPage, port, 0);
 
       const { ws } = await connectWebSocket(`ws://127.0.0.1:${port}`);
 
-      await expect(mainPage.locator(`text=/WS:${port}\\(1\\)/`)).toBeVisible({ timeout: 5000 });
+      await expectConnectedClients(mainPage, port, 1);
 
       const { ws: ws2 } = await connectWebSocket(`ws://127.0.0.1:${port}`);
 
-      await expect(mainPage.locator(`text=/WS:${port}\\(2\\)/`)).toBeVisible({ timeout: 5000 });
+      await expectConnectedClients(mainPage, port, 2);
 
       ws.close();
-      await expect(mainPage.locator(`text=/WS:${port}\\(1\\)/`)).toBeVisible({ timeout: 5000 });
+      await expectConnectedClients(mainPage, port, 1);
 
       ws2.close();
-      await expect(mainPage.locator(`text=/WS:${port}\\(0\\)/`)).toBeVisible({ timeout: 5000 });
+      await expectConnectedClients(mainPage, port, 0);
     });
   });
 
@@ -285,10 +294,10 @@ test.describe('WebSocket API (03_websocket.md)', () => {
   test.describe('Complete Data Flow: YouTube → App → WebSocket → Client', () => {
     // spec: 03_websocket.md「Reaction」— ライブリアクションの更新を差分で配信する
     test('should receive live reactions as Reaction through WebSocket API', async () => {
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_reaction_ws`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       const port = await getWebSocketPort(mainPage);
       const { ws } = await connectWebSocket(`ws://127.0.0.1:${port}`);
@@ -318,10 +327,10 @@ test.describe('WebSocket API (03_websocket.md)', () => {
     });
 
     test('should receive text message through WebSocket API', async () => {
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       const port = await getWebSocketPort(mainPage);
       const { ws, connectedMsg } = await connectWebSocket(`ws://127.0.0.1:${port}`);
@@ -368,10 +377,10 @@ test.describe('WebSocket API (03_websocket.md)', () => {
     });
 
     test('should receive SuperChat message with correct format', async () => {
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       const port = await getWebSocketPort(mainPage);
       const { ws } = await connectWebSocket(`ws://127.0.0.1:${port}`);
@@ -416,10 +425,10 @@ test.describe('WebSocket API (03_websocket.md)', () => {
     });
 
     test('should receive membership message with milestone_months', async () => {
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       const port = await getWebSocketPort(mainPage);
       const { ws } = await connectWebSocket(`ws://127.0.0.1:${port}`);
@@ -453,10 +462,10 @@ test.describe('WebSocket API (03_websocket.md)', () => {
     });
 
     test('should receive membership gift message with gift_count', async () => {
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       const port = await getWebSocketPort(mainPage);
       const { ws } = await connectWebSocket(`ws://127.0.0.1:${port}`);
@@ -491,10 +500,10 @@ test.describe('WebSocket API (03_websocket.md)', () => {
 
   test.describe('Message Format Verification (03_websocket.md spec)', () => {
     test('should have correct ChatMessage structure', async () => {
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       const port = await getWebSocketPort(mainPage);
       const { ws } = await connectWebSocket(`ws://127.0.0.1:${port}`);
@@ -573,10 +582,10 @@ test.describe('WebSocket API (03_websocket.md)', () => {
     test('should broadcast to multiple connected clients', async () => {
       await resetMockServer();
 
-      const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+      const urlInput = (await openUrlInput(mainPage));
       await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
-      await mainPage.locator('button:has-text("開始")').click();
-      await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
       await mainPage.waitForTimeout(1000);
 

@@ -142,14 +142,19 @@ pub async fn viewer_get_list(
     state: State<'_, AppState>,
     broadcaster_id: String,
     search_query: Option<String>,
+    without_reading: Option<bool>,
     limit: Option<usize>,
     offset: Option<usize>,
 ) -> Result<Vec<GuiViewerWithInfo>, CommandError> {
     let conn = state.db_connection().await?;
+    let filter = database::ViewerFilter {
+        search: search_query.as_deref(),
+        without_reading: without_reading.unwrap_or(false),
+    };
     let viewers = database::get_viewers_for_broadcaster(
         &conn,
         &broadcaster_id,
-        search_query.as_deref(),
+        &filter,
         limit.unwrap_or(50),
         offset.unwrap_or(0),
     )
@@ -167,10 +172,14 @@ pub async fn viewer_search(
     limit: Option<usize>,
 ) -> Result<Vec<GuiViewerWithInfo>, CommandError> {
     let conn = state.db_connection().await?;
+    let filter = database::ViewerFilter {
+        search: Some(&query),
+        ..Default::default()
+    };
     let viewers = database::get_viewers_for_broadcaster(
         &conn,
         &broadcaster_id,
-        Some(&query),
+        &filter,
         limit.unwrap_or(50),
         0,
     )

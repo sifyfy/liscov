@@ -12,7 +12,7 @@ use tokio_util::sync::CancellationToken;
 use crate::core::api::{InnerTubeClient, WebSocketServer};
 use crate::core::models::{ChatMessage, ChatMode, MessageType, ReactionUpdate};
 use crate::core::raw_response::{RawResponseSaver, SaveConfig};
-use crate::database::{self, Database};
+use crate::database::{self, Database, ViewerAnnotation};
 use crate::tts::{TtsManager, TtsPriority, TtsQueueItem};
 use rusqlite::Connection;
 
@@ -95,7 +95,8 @@ pub trait MonitoringOutput: Send + Sync + 'static {
     /// その時点の生レスポンス保存設定（接続中の設定変更を反映するため、ポーリングごとに呼ぶ）
     fn save_config(&self) -> SaveConfig;
     /// 新しいメッセージを画面に送る
-    fn message(&self, message: &ChatMessage);
+    /// annotation は viewer_annotation で引いた、この接続の配信者のもとでの投稿者の読み仮名とメモ
+    fn message(&self, message: &ChatMessage, annotation: &ViewerAnnotation);
     /// ライブリアクションの更新を画面に送る
     fn reaction(&self, update: &ReactionUpdate);
 }
@@ -254,8 +255,8 @@ pub async fn run_monitoring_loop(
             .collect();
 
         // DB への保存と判定（DB のロックは 1 回、1 トランザクション。08_database.md「書き込み」）。
-        // 読み上げに使う読み仮名も、同じロックのうちにこの接続の配信者のもとで引く
-        let readings: Vec<Option<String>> = if fresh.is_empty() {
+        // 読み上げと画面に使う読み仮名・メモも、同じロックのうちにこの接続の配信者のもとで引く
+        let annotations: Vec<ViewerAnnotation> = if fresh.is_empty() {
             Vec::new()
         } else {
             let target = MessageTarget {
@@ -278,13 +279,13 @@ pub async fn run_monitoring_loop(
             let db_scope = conn.as_deref().zip(broadcaster_id.as_deref());
             fresh
                 .iter()
-                .map(|msg| viewer_reading(msg, db_scope))
+                .map(|msg| viewer_annotation(msg, db_scope))
                 .collect()
         };
 
-        for (msg, reading) in fresh.iter().zip(readings) {
-            // 画面に送る
-            output.message(msg);
+        for (msg, annotation) in fresh.iter().zip(annotations) {
+            // 画面に送る (読み仮名は読み上げと同じ値を名前の横に、メモは本文の下に出す)
+            output.message(msg, &annotation);
 
             // WebSocket クライアントへブロードキャスト
             {
@@ -295,7 +296,7 @@ pub async fn run_monitoring_loop(
             }
 
             // TTS キューに追加
-            enqueue_tts(&deps.tts_manager, msg, reading).await;
+            enqueue_tts(&deps.tts_manager, msg, annotation.reading).await;
         }
 
         // ライブリアクション: 保存・GUI・WebSocket（読み上げはしない）
@@ -549,28 +550,30 @@ async fn save_raw_response(config: &SaveConfig, raw_json: &str) {
     }
 }
 
-/// メッセージの視聴者に、この接続の配信者のもとで登録した読み仮名（04_tts.md「どの読み仮名を使うか」）
+/// メッセージの視聴者に、この接続の配信者のもとで登録した読み仮名とメモ
+/// （04_tts.md「どの読み仮名を使うか」、02_chat.md「1 行の形」）
 ///
-/// 視聴者を特定できない・配信者が分からない・DB を使えないときは None。
-/// 検索に失敗したら警告ログを出して None（投稿者名で読み上げる）。
-fn viewer_reading(msg: &ChatMessage, db_scope: Option<(&Connection, &str)>) -> Option<String> {
-    if msg.channel_id.is_empty() {
-        return None;
-    }
-    let (conn, broadcaster_id) = db_scope?;
-    database::get_viewer_reading(conn, broadcaster_id, &msg.channel_id)
+/// 視聴者を特定できない・配信者が分からない・DB を使えないときは、どちらも None。
+/// 検索に失敗したら警告ログを出して、どちらも None（投稿者名で読み上げる）。
+fn viewer_annotation(
+    msg: &ChatMessage,
+    db_scope: Option<(&Connection, &str)>,
+) -> ViewerAnnotation {
+    let Some((conn, broadcaster_id)) = db_scope.filter(|_| !msg.channel_id.is_empty()) else {
+        return ViewerAnnotation::default();
+    };
+    database::get_viewer_annotation(conn, broadcaster_id, &msg.channel_id)
         .inspect_err(|e| {
             tracing::warn!(
-                "読み仮名を引けない（投稿者名で読み上げる） message_id: {}: {}",
+                "読み仮名・メモを引けない（投稿者名で読み上げる） message_id: {}: {}",
                 msg.id,
                 e
             )
         })
-        .ok()
-        .flatten()
+        .unwrap_or_default()
 }
 
-/// メッセージを TTS キューに追加する（author_reading は viewer_reading で引いたもの）
+/// メッセージを TTS キューに追加する（author_reading は viewer_annotation で引いたもの）
 async fn enqueue_tts(tts_manager: &TtsManager, msg: &ChatMessage, author_reading: Option<String>) {
     let priority = match &msg.message_type {
         MessageType::SuperChat { .. } | MessageType::SuperSticker { .. } | MessageType::Gift(_) => {
@@ -830,13 +833,41 @@ mod tests {
         let conn = db.connection().await;
         let msg = text_message("m1", "UCxxx");
         assert_eq!(
-            viewer_reading(&msg, Some((&conn, "UCbbb"))).as_deref(),
+            viewer_annotation(&msg, Some((&conn, "UCbbb")))
+                .reading
+                .as_deref(),
             Some("タナカ")
         );
         assert_eq!(
-            viewer_reading(&msg, Some((&conn, "UCaaa"))).as_deref(),
+            viewer_annotation(&msg, Some((&conn, "UCaaa")))
+                .reading
+                .as_deref(),
             Some("たなか")
         );
+    }
+
+    // 02_chat.md「1 行の形」: メモも届いた接続の配信者のもとのもの (B のもとにだけメモがある)
+    #[tokio::test]
+    async fn notes_come_from_broadcaster_of_the_connection() {
+        let db = db_with_readings().await;
+        {
+            let conn = db.connection().await;
+            let id = database::upsert_viewer_profile(&conn, "UCbbb", "UCxxx", "@田中-abc", None)
+                .unwrap();
+            let info = database::ViewerCustomInfo::new(id)
+                .with_reading("タナカ")
+                .with_notes("赤スパの人");
+            database::upsert_viewer_custom_info(&conn, &info).unwrap();
+        }
+        let conn = db.connection().await;
+        let msg = text_message("m1", "UCxxx");
+        assert_eq!(
+            viewer_annotation(&msg, Some((&conn, "UCbbb")))
+                .notes
+                .as_deref(),
+            Some("赤スパの人")
+        );
+        assert_eq!(viewer_annotation(&msg, Some((&conn, "UCaaa"))).notes, None);
     }
 
     #[tokio::test]
@@ -845,12 +876,18 @@ mod tests {
         let db = db_with_readings().await;
         let conn = db.connection().await;
         let msg = text_message("m1", "");
-        assert_eq!(viewer_reading(&msg, Some((&conn, "UCaaa"))), None);
+        assert_eq!(
+            viewer_annotation(&msg, Some((&conn, "UCaaa"))),
+            ViewerAnnotation::default()
+        );
     }
 
     #[test]
     fn no_reading_without_db_or_broadcaster() {
-        assert_eq!(viewer_reading(&text_message("m1", "UCxxx"), None), None);
+        assert_eq!(
+            viewer_annotation(&text_message("m1", "UCxxx"), None),
+            ViewerAnnotation::default()
+        );
     }
 
     // 08_database.md「書き込み」: 1 回のポーリング分をまとめて保存し、1 件の失敗はほかを止めない。

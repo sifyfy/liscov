@@ -59,7 +59,7 @@ test.describe('セッションの終了 (08_database.md)', () => {
     const connection = await connectToApp();
     browser = connection.browser;
     mainPage = connection.page;
-    await expect(mainPage.locator('nav button:has-text("Chat")')).toBeVisible({ timeout: 30000 });
+    await expect(mainPage.locator('nav button[aria-label="チャット"]')).toBeVisible({ timeout: 30000 });
   }
 
   // 仕様: アプリを終了 → 接続中のセッションを切断と同じく閉じる

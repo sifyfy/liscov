@@ -15,7 +15,7 @@ use crate::core::models::{
     extract_video_id,
 };
 use crate::core::raw_response::SaveConfig;
-use crate::database;
+use crate::database::{self, ViewerAnnotation};
 use crate::errors::CommandError;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -38,12 +38,13 @@ impl MonitoringOutput for TauriMonitoringOutput {
         self.app.state::<ConfigState>().get().raw_response
     }
 
-    fn message(&self, message: &ChatMessage) {
+    fn message(&self, message: &ChatMessage, annotation: &ViewerAnnotation) {
         let gui_msg = GuiChatMessage::from_with_connection(
             message.clone(),
             self.connection_id,
             &self.platform,
             &self.broadcaster_name,
+            annotation.clone(),
         );
         let _ = self.app.emit("chat:message", &gui_msg);
     }
@@ -167,6 +168,10 @@ pub struct GuiChatMessage {
     pub platform: String,
     /// 配信者名
     pub broadcaster_name: String,
+    /// この接続の配信者のもとで登録した、投稿者の読み仮名（02_chat.md「配信中の画面」。読み上げと同じ値）
+    pub author_reading: Option<String>,
+    /// この接続の配信者のもとで登録した、投稿者のメモ（02_chat.md「1 行の形」。本文の下に出す。読み上げには使わない）
+    pub author_notes: Option<String>,
 }
 
 impl From<ChatMessage> for GuiChatMessage {
@@ -214,34 +219,40 @@ impl From<ChatMessage> for GuiChatMessage {
             })
             .collect();
 
-        // metadata を変換
-        let metadata = msg.metadata.map(|m| GuiMessageMetadata {
-            amount: m.amount,
-            milestone_months,
-            gift_count,
-            gift_name,
-            gift_image_url,
-            jewel_count,
-            badges: m.badges,
-            badge_info: m
-                .badge_info
-                .into_iter()
-                .map(|b| BadgeInfo {
-                    badge_type: b.badge_type,
-                    label: b.label.clone(),
-                    tooltip: b.tooltip.or(Some(b.label)),
-                    image_url: b.icon_url,
-                })
-                .collect(),
-            is_moderator: m.is_moderator,
-            is_verified: m.is_verified,
-            superchat_colors: m.superchat_colors.map(|c| SuperChatColors {
-                header_background: c.header_background,
-                header_text: c.header_text,
-                body_background: c.body_background,
-                body_text: c.body_text,
-            }),
-        });
+        // metadata を変換。種別に件数などがあるのに metadata が無いとき (パーサーはメンバーシップギフトに付けない) は、
+        // 空の metadata に種別の値を載せる。載せないと件数が画面に届かない
+        let has_type_details =
+            milestone_months.is_some() || gift_count.is_some() || gift_name.is_some();
+        let metadata = msg
+            .metadata
+            .or_else(|| has_type_details.then(crate::core::models::MessageMetadata::default))
+            .map(|m| GuiMessageMetadata {
+                amount: m.amount,
+                milestone_months,
+                gift_count,
+                gift_name,
+                gift_image_url,
+                jewel_count,
+                badges: m.badges,
+                badge_info: m
+                    .badge_info
+                    .into_iter()
+                    .map(|b| BadgeInfo {
+                        badge_type: b.badge_type,
+                        label: b.label.clone(),
+                        tooltip: b.tooltip.or(Some(b.label)),
+                        image_url: b.icon_url,
+                    })
+                    .collect(),
+                is_moderator: m.is_moderator,
+                is_verified: m.is_verified,
+                superchat_colors: m.superchat_colors.map(|c| SuperChatColors {
+                    header_background: c.header_background,
+                    header_text: c.header_text,
+                    body_background: c.body_background,
+                    body_text: c.body_text,
+                }),
+            });
 
         Self {
             id: msg.id,
@@ -262,23 +273,29 @@ impl From<ChatMessage> for GuiChatMessage {
             connection_id: 0,
             platform: "youtube".to_string(),
             broadcaster_name: String::new(),
+            author_reading: None,
+            author_notes: None,
         }
     }
 }
 
 impl GuiChatMessage {
-    /// 接続情報付きで ChatMessage から GuiChatMessage を生成する
+    /// 接続情報と投稿者の読み仮名・メモ付きで ChatMessage から GuiChatMessage を生成する
     pub fn from_with_connection(
         msg: ChatMessage,
         connection_id: u64,
         platform: &str,
         broadcaster_name: &str,
+        annotation: ViewerAnnotation,
     ) -> Self {
-        let mut gui = Self::from(msg);
-        gui.connection_id = connection_id;
-        gui.platform = platform.to_string();
-        gui.broadcaster_name = broadcaster_name.to_string();
-        gui
+        Self {
+            connection_id,
+            platform: platform.to_string(),
+            broadcaster_name: broadcaster_name.to_string(),
+            author_reading: annotation.reading,
+            author_notes: annotation.notes,
+            ..Self::from(msg)
+        }
     }
 }
 
@@ -565,10 +582,7 @@ pub async fn get_connections(
     Ok(connections.values().map(ConnectionInfo::from).collect())
 }
 
-/// リアクションメーターの「勢い」の窓（02_chat.md: 直近60秒）
-const REACTION_RECENT_WINDOW_USEC: i64 = 60 * 1_000_000;
-
-/// その接続の配信のリアクション累計と直近60秒の更新を返す（F5 リロード後のメーター復元用）
+/// その接続の配信のリアクション累計を返す（接続直後・F5 リロード後の復元用）
 #[tauri::command]
 pub async fn get_connection_reactions(
     state: State<'_, AppState>,
@@ -585,10 +599,9 @@ pub async fn get_connection_reactions(
     };
     let video_id = extract_video_id(&stream_url)
         .ok_or_else(|| CommandError::InvalidInput("Invalid YouTube URL".to_string()))?;
-    let since_usec = chrono::Utc::now().timestamp_micros() - REACTION_RECENT_WINDOW_USEC;
 
     let conn = state.db_connection().await?;
-    database::get_reaction_summary(&conn, &video_id, since_usec)
+    database::get_reaction_summary(&conn, &video_id)
         .map_err(|e| CommandError::DatabaseError(e.to_string()))
 }
 
@@ -624,4 +637,73 @@ pub async fn set_chat_mode(
     );
 
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::models::MessageType;
+
+    fn text_message() -> ChatMessage {
+        ChatMessage {
+            id: "m1".to_string(),
+            timestamp: "12:00:00".to_string(),
+            timestamp_usec: "1000000".to_string(),
+            message_type: MessageType::Text,
+            author: "@田中-abc".to_string(),
+            author_icon_url: None,
+            channel_id: "UCxxx".to_string(),
+            content: "こんにちは".to_string(),
+            runs: vec![],
+            metadata: None,
+            is_member: false,
+            is_first_time_viewer: false,
+            in_stream_comment_count: None,
+        }
+    }
+
+    // 02_chat.md「メッセージ表示仕様」優先順位 1 の面: メンバーシップギフトは「メンバーシップを N 件ギフト」。
+    // パーサーはメンバーシップギフトに metadata を付けないが、件数は画面に届く
+    #[test]
+    fn membership_gift_count_reaches_gui_without_metadata() {
+        let msg = ChatMessage {
+            message_type: MessageType::MembershipGift { gift_count: 5 },
+            content: "Sent 5 Channel gift memberships".to_string(),
+            ..text_message()
+        };
+        let gui = GuiChatMessage::from(msg);
+        assert_eq!(gui.metadata.and_then(|m| m.gift_count), Some(5));
+    }
+
+    // 02_chat.md「配信中の画面」1 行の形: 読み仮名が登録されている視聴者は、名前の横に小さく出す
+    #[test]
+    fn gui_message_carries_reading_of_the_viewer() {
+        let gui = GuiChatMessage::from_with_connection(
+            text_message(),
+            1,
+            "youtube",
+            "配信者A",
+            ViewerAnnotation {
+                reading: Some("たなか".to_string()),
+                notes: Some("赤スパの人".to_string()),
+            },
+        );
+        assert_eq!(gui.author_reading.as_deref(), Some("たなか"));
+        assert_eq!(gui.author_notes.as_deref(), Some("赤スパの人"));
+        assert_eq!(gui.connection_id, 1);
+        assert_eq!(gui.broadcaster_name, "配信者A");
+    }
+
+    #[test]
+    fn gui_message_without_reading() {
+        let gui = GuiChatMessage::from_with_connection(
+            text_message(),
+            1,
+            "youtube",
+            "配信者A",
+            ViewerAnnotation::default(),
+        );
+        assert_eq!(gui.author_reading, None);
+        assert_eq!(gui.author_notes, None);
+    }
 }

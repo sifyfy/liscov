@@ -7,11 +7,14 @@ import {
   resetMockServer,
   addMockReaction,
   disconnectAndInitialize,
+  openUrlInput,
+  APP_READY,
 } from './utils/test-helpers';
 
 /**
- * E2E tests for ライブリアクション（02_chat.md「ライブリアクション」「リアクションメーター」）
- * モックの emojiFountainDataEntity → パース → DB → chat:reaction → リアクションメーター
+ * E2E tests for ライブリアクション（02_chat.md「ライブリアクション」「状態の行のリアクション」）
+ * モックの emojiFountainDataEntity → パース → DB → chat:reaction → 状態の行のリアクション
+ * (主の配信の累計だけを、多い順に 3 つまで出す。勢い (/分) は出さない)
  */
 test.describe('ライブリアクション (02_chat.md)', () => {
   let browser: Browser;
@@ -35,48 +38,62 @@ test.describe('ライブリアクション (02_chat.md)', () => {
   });
 
   async function connect(videoId: string, url = `${mockServerUrl()}/watch?v=${videoId}`) {
-    const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+    const urlInput = (await openUrlInput(mainPage));
     await urlInput.fill(url);
-    await mainPage.locator('button:has-text("開始")').click();
-    await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+    await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+    await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
   }
 
+  // 状態の行のリアクション (絵文字ごとの「🎉 4」)。多い順
+  const statusReactions = () => mainPage.getByTestId('status-reactions');
+  const reactionItems = () => statusReactions().locator('> span');
   function total(emoji: string) {
-    return mainPage.locator(`[data-testid="reaction-total"][data-emoji="${emoji}"]`);
+    return reactionItems().filter({ hasText: emoji });
   }
 
-  const meter = () => mainPage.locator('[data-testid="reaction-meter"]');
-  const perMinute = () => mainPage.locator('[data-testid="reaction-per-minute"]');
-
-  // 仕様例: 🎉4（2秒）→ ❤3 → 累計 ❤ 3・🎉 4（多い順）、勢い 7/分
-  test('リアクションを絵文字別の累計と勢いで表示する', async () => {
+  // 仕様例: 🎉4 → ❤3 → 状態の行に `🎉 4  ❤ 3`（多い順）
+  test('リアクションを絵文字別の累計で状態の行に出す', async () => {
     await connect('test_video_reactions_meter');
-    await expect(meter()).toHaveCount(0);
+    // 1 件も無いうちは出さない
+    await expect(statusReactions()).toHaveCount(0);
 
     await addMockReaction({ '🎉': 4 }, 2);
     await expect(total('🎉')).toHaveText('🎉 4', { timeout: 5000 });
     await addMockReaction({ '❤': 3 });
     await expect(total('❤')).toHaveText('❤ 3', { timeout: 5000 });
 
-    await expect(mainPage.locator('[data-testid="reaction-total"]')).toHaveText(['🎉 4', '❤ 3']);
-    await expect(perMinute()).toHaveText('7/分');
+    await expect(reactionItems()).toHaveText(['🎉 4', '❤ 3']);
 
+    // 切断して主の配信が無くなったら出さない
     await disconnectAndInitialize(mainPage);
-    await expect(meter()).toHaveCount(0);
+    await expect(statusReactions()).toHaveCount(0);
   });
 
-  // 仕様: F5リロード → 累計と直近60秒の件数を get_connection_reactions で読み直す
-  test('F5 リロード後もメーターを復元する', async () => {
+  // 仕様例: ❤430・🎉418・😄94・💯56 → 状態の行は多い 3 つ。4 つ目以降もヒントと読み上げ用の名前に全部出す
+  test('4 種類以上は多い順に 3 つまで出し、全部をヒントと読み上げ用の名前に出す', async () => {
+    await connect('test_video_reactions_top3');
+    await addMockReaction({ '❤': 43, '🎉': 41, '😄': 9, '💯': 5 });
+    await expect(reactionItems()).toHaveCount(3, { timeout: 5000 });
+
+    await expect(reactionItems()).toHaveText(['❤ 43', '🎉 41', '😄 9']);
+    const all = 'リアクション ❤ 43、🎉 41、😄 9、💯 5';
+    await expect(statusReactions()).toHaveAttribute('title', all);
+    await expect(statusReactions()).toHaveAttribute('aria-label', all);
+
+    await disconnectAndInitialize(mainPage);
+  });
+
+  // 仕様: F5リロード → 累計を get_connection_reactions で読み直す
+  test('F5 リロード後も状態の行のリアクションを復元する', async () => {
     await connect('test_video_reactions_reload');
     await addMockReaction({ '😄': 2, '💯': 1 });
     await expect(total('😄')).toHaveText('😄 2', { timeout: 5000 });
 
     await mainPage.reload();
-    await expect(mainPage.locator('nav button:has-text("Chat")')).toBeVisible({ timeout: 30000 });
+    await expect(mainPage.locator(APP_READY)).toBeVisible({ timeout: 30000 });
 
     await expect(total('😄')).toHaveText('😄 2', { timeout: 10000 });
     await expect(total('💯')).toHaveText('💯 1');
-    await expect(perMinute()).toHaveText('3/分');
 
     await disconnectAndInitialize(mainPage);
   });

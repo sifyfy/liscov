@@ -4,4 +4,16 @@ import type { ChatModeSetting } from "./ChatModeSetting";
 /**
  * Chat display configuration section
  */
-export type ChatDisplayConfig = { message_font_size: number, show_timestamps: boolean, auto_scroll_enabled: boolean, chat_mode: ChatModeSetting, };
+export type ChatDisplayConfig = { message_font_size: number, show_timestamps: boolean, 
+/**
+ * 配信に接続したら操作パネルを隠す (02_chat.md「上の行と操作パネル」)
+ */
+hide_panel_on_connect: boolean, chat_mode: ChatModeSetting, 
+/**
+ * 「流れた新規さん」の欄の高さの上限 (コメントの流れの部分の高さに対する割合。02_chat.md「流れたもの」)
+ */
+flowed_newcomers_height_ratio: number, 
+/**
+ * 「この配信のスパチャ等の一覧」の欄の高さの上限 (同上。概要と詳細で共通。キーの名前は統合前の「流れたスパチャ等」のまま)
+ */
+flowed_supporters_height_ratio: number, };

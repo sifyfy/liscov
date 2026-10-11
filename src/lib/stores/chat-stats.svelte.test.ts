@@ -11,7 +11,7 @@ vi.mock('./config.svelte', () => ({
 		isLoaded: false,
 		messageFontSize: 13,
 		showTimestamps: true,
-		autoScrollEnabled: true,
+		hidePanelOnConnect: true,
 		setMessageFontSize: vi.fn(),
 	},
 }));
@@ -37,6 +37,8 @@ function message(channelId: string, overrides: Partial<ChatMessage> = {}): ChatM
 		connection_id: BigInt(1),
 		platform: 'youtube',
 		broadcaster_name: 'B',
+		author_reading: null,
+		author_notes: null,
 		...overrides,
 	};
 }

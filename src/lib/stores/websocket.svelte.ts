@@ -4,8 +4,14 @@ import * as wsApi from '$lib/tauri/websocket';
 import { normalizeError } from '$lib/tauri/errors';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
+/**
+ * 起動を待ち終えた後に状態を取り直す間隔 (03_websocket.md「画面の表示」)。
+ * 途中で止まったことに気づくため。負荷を下げるため長めにしている (接続数はイベントでも数える)
+ */
+export const STATUS_POLL_MS = 30_000;
+
 // ファクトリ関数：テスト時に独立したストアインスタンスを生成できる
-function createWebsocketStore() {
+export function createWebsocketStore() {
   // リアクティブ状態
   let isRunning = $state(false);
   let actualPort = $state<number | null>(null);
@@ -66,6 +72,8 @@ function createWebsocketStore() {
       }
 
       initialized = true;
+      // アプリの間ずっと確かめ続ける (ストアはアプリ全体で 1 つ)
+      setInterval(() => void refreshStatus(), STATUS_POLL_MS);
     } catch (e) {
       error = normalizeError(e).message;
     }

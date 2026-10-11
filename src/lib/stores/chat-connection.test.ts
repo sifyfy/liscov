@@ -20,7 +20,7 @@ vi.mock('./config.svelte', () => ({
 		isLoaded: false,
 		messageFontSize: 13,
 		showTimestamps: true,
-		autoScrollEnabled: true,
+		hidePanelOnConnect: true,
 		chatMode: 'top',
 		setMessageFontSize: vi.fn(),
 		setChatMode: vi.fn(),
@@ -159,6 +159,17 @@ describe('chatStore 接続管理', () => {
 			await chatStore.connect('https://example.com');
 
 			// spec: 成功後は error が null になる
+			expect(chatStore.error).toBeNull();
+		});
+
+		// spec: 02_chat.md「配信中の画面」の「状態」: エラーの「閉じる」を押す → エラーを消す
+		it('dismissError() でエラーを消す', async () => {
+			const { connectToStream } = await import('$lib/tauri/chat');
+			vi.mocked(connectToStream).mockRejectedValueOnce(new Error('network error'));
+			await chatStore.connect('https://example.com');
+			expect(chatStore.error).toBe('network error');
+
+			chatStore.dismissError();
 			expect(chatStore.error).toBeNull();
 		});
 
@@ -384,6 +395,99 @@ describe('chatStore 接続管理', () => {
 	});
 
 	// =====================================================================
+	// originOf（主の配信と相手の配信）
+	// spec: 02_chat.md「配信中の画面」の「主の配信と相手の配信」
+	// =====================================================================
+	describe('originOf', () => {
+		function messageFrom(connectionId: number): ChatMessage {
+			return { id: 'm1', channel_id: 'UCxxx', connection_id: BigInt(connectionId) } as ChatMessage;
+		}
+
+		async function connect(...ids: number[]): Promise<void> {
+			const { connectToStream } = await import('$lib/tauri/chat');
+			for (const id of ids) {
+				vi.mocked(connectToStream).mockResolvedValueOnce(
+					makeSuccessResult({ connection_id: BigInt(id), broadcaster_channel_id: `UC${id}` })
+				);
+				await chatStore.connect(`https://example.com/${id}`);
+			}
+		}
+
+		it('接続が 1 つなら主の配信', async () => {
+			await connect(1);
+			expect(chatStore.originOf(messageFrom(1))).toBe('primary');
+		});
+
+		it('接続が 2 つなら、最初の接続が主の配信で、それ以外は相手の配信', async () => {
+			await connect(1, 2);
+			expect(chatStore.originOf(messageFrom(1))).toBe('primary');
+			expect(chatStore.originOf(messageFrom(2))).toBe('partner');
+		});
+
+		it('主の配信を切断して他が残ったら、残ったうちいちばん先に接続したものが主の配信', async () => {
+			const { disconnectStream } = await import('$lib/tauri/chat');
+			vi.mocked(disconnectStream).mockResolvedValue(undefined);
+			await connect(1, 2, 3);
+			await chatStore.disconnect(1);
+			expect(chatStore.originOf(messageFrom(2))).toBe('primary');
+			expect(chatStore.originOf(messageFrom(3))).toBe('partner');
+		});
+
+		// spec: 状態の行のリアクション「主の配信を切断し、他の接続が残った → 新しい主の配信の累計を出す」
+		it('primaryConnection は主の配信の接続。切断したら残ったうちいちばん先のもの', async () => {
+			const { disconnectStream } = await import('$lib/tauri/chat');
+			vi.mocked(disconnectStream).mockResolvedValue(undefined);
+			expect(chatStore.primaryConnection).toBeUndefined();
+			await connect(1, 2);
+			expect(chatStore.primaryConnection?.id).toBe(1);
+			await chatStore.disconnect(1);
+			expect(chatStore.primaryConnection?.id).toBe(2);
+		});
+	});
+
+	// =====================================================================
+	// infoOf / setViewerInfo（パネル・視聴者のタブで保存した読み仮名とメモを行に出す）
+	// spec: 02_chat.md「配信中の画面」の「1 行の形」（読み仮名・メモ）
+	// =====================================================================
+	describe('infoOf', () => {
+		function messageFrom(connectionId: number, channelId = 'UCxxx'): ChatMessage {
+			return { id: 'm1', channel_id: channelId, connection_id: BigInt(connectionId) } as ChatMessage;
+		}
+
+		async function connectAandB(): Promise<void> {
+			const { connectToStream } = await import('$lib/tauri/chat');
+			vi.mocked(connectToStream)
+				.mockResolvedValueOnce(makeSuccessResult({ connection_id: BigInt(1), broadcaster_channel_id: 'UCaaa' }))
+				.mockResolvedValueOnce(makeSuccessResult({ connection_id: BigInt(2), broadcaster_channel_id: 'UCbbb' }));
+			await chatStore.connect('https://example.com/a');
+			await chatStore.connect('https://example.com/b');
+		}
+
+		it('保存していなければ undefined（届いたときの読み仮名・メモを使う）', async () => {
+			await connectAandB();
+			expect(chatStore.infoOf(messageFrom(1))).toBeUndefined();
+		});
+
+		it('配信者 B のもとで保存した読み仮名・メモは、B の接続に届いた同じ視聴者のコメントに出る', async () => {
+			await connectAandB();
+			chatStore.setViewerInfo('UCbbb', 'UCxxx', { reading: 'タナカ', notes: '赤スパの人' });
+			expect(chatStore.infoOf(messageFrom(2))).toEqual({ reading: 'タナカ', notes: '赤スパの人' });
+		});
+
+		it('配信者 B のもとで保存した読み仮名・メモは、A の接続のコメントには使わない（配信者ごと）', async () => {
+			await connectAandB();
+			chatStore.setViewerInfo('UCbbb', 'UCxxx', { reading: 'タナカ', notes: '赤スパの人' });
+			expect(chatStore.infoOf(messageFrom(1))).toBeUndefined();
+		});
+
+		it('空にして保存したら空文字（読み仮名・メモを出さない）', async () => {
+			await connectAandB();
+			chatStore.setViewerInfo('UCaaa', 'UCxxx', { reading: '', notes: '' });
+			expect(chatStore.infoOf(messageFrom(1))).toEqual({ reading: '', notes: '' });
+		});
+	});
+
+	// =====================================================================
 	// chat:connection イベント
 	// =====================================================================
 	describe('chat:connection イベント', () => {
@@ -412,7 +516,7 @@ describe('chatStore 接続管理', () => {
 					isLoaded: false,
 					messageFontSize: 13,
 					showTimestamps: true,
-					autoScrollEnabled: true,
+					hidePanelOnConnect: true,
 					setMessageFontSize: vi.fn(),
 					setChatMode: vi.fn(),
 				},
@@ -786,7 +890,6 @@ describe('chatStore 接続管理', () => {
 	describe('restoreConnections 詳細', () => {
 		// spec: 復元された接続の全フィールドが正しく設定される
 		it('復元された接続のフィールドが正しく設定される', async () => {
-			const { getConnectionColor } = await import('$lib/utils/connection-colors');
 			vi.mocked(chatApi.getConnections).mockResolvedValue([makeConnectionInfo({
 				id: BigInt(5),
 				platform: 'youtube',
@@ -806,8 +909,6 @@ describe('chatStore 接続管理', () => {
 			expect(conn!.broadcasterChannelId).toBe('UC_bob');
 			expect(conn!.platform).toBe('youtube');
 			expect(conn!.connectionState).toBe('connected');
-			// spec: color は broadcaster_channel_id ベースで計算される
-			expect(conn!.color).toBe(getConnectionColor('UC_bob'));
 		});
 
 		// spec: is_monitoring=false の接続は disconnecting 状態で復元される
@@ -843,21 +944,6 @@ describe('chatStore 接続管理', () => {
 			// 元のタイトルが保持される（上書きされない）
 			const conn = chatStore.connections.get(1);
 			expect(conn!.streamTitle).toBe('Original');
-		});
-
-		// spec: broadcaster_channel_id が空文字の場合 String(connId) でcolor計算される
-		it('broadcaster_channel_id が空文字の場合 color が String(connId) ベースで計算される', async () => {
-			const { getConnectionColor } = await import('$lib/utils/connection-colors');
-			vi.mocked(chatApi.getConnections).mockResolvedValue([makeConnectionInfo({
-				id: BigInt(7),
-				broadcaster_channel_id: '',
-			})]);
-
-			await chatStore.restoreConnections();
-
-			const conn = chatStore.connections.get(7);
-			// spec: 空文字はfalsyなので String(connId) がcolor計算に使われる
-			expect(conn!.color).toBe(getConnectionColor('7'));
 		});
 
 		// spec: 複数の接続が一度に復元される
@@ -1034,7 +1120,7 @@ describe('chatStore 追加補強テスト', () => {
 				isLoaded: false,
 				messageFontSize: 13,
 				showTimestamps: true,
-				autoScrollEnabled: true,
+				hidePanelOnConnect: true,
 				setMessageFontSize: vi.fn(),
 				setChatMode: vi.fn(),
 			},
@@ -1166,7 +1252,7 @@ describe('chatStore 追加補強テスト', () => {
 				isLoaded: false,
 				messageFontSize: 13,
 				showTimestamps: true,
-				autoScrollEnabled: true,
+				hidePanelOnConnect: true,
 				setMessageFontSize: vi.fn(),
 				setChatMode: vi.fn(),
 			},
@@ -1237,49 +1323,6 @@ describe('chatStore 追加補強テスト', () => {
 	});
 
 	// =====================================================================
-	// 10. connect() 成功時の color 計算（broadcaster_channel_id=null 時は connection_id を使う）
-	// spec: broadcaster_channel_id が null のとき getConnectionColor(String(connId)) が使われる
-	// spec: broadcaster_channel_id が非null のとき getConnectionColor(broadcaster_channel_id) が使われる
-	// =====================================================================
-	it('broadcaster_channel_id=null のとき color が String(connId) ベースで計算される', async () => {
-		const { getConnectionColor } = await import('$lib/utils/connection-colors');
-		const { connectToStream } = await import('$lib/tauri/chat');
-		vi.mocked(connectToStream).mockResolvedValue(
-			makeSuccessResult({ connection_id: BigInt(5), broadcaster_channel_id: null })
-		);
-
-		await chatStore.connect('https://example.com');
-
-		const conn = chatStore.connections.get(5);
-		// spec: color が non-null
-		expect(conn?.color).not.toBeNull();
-		// spec: color が getConnectionColor(String(5)) と一致
-		expect(conn?.color).toBe(getConnectionColor('5'));
-	});
-
-	it('broadcaster_channel_id が非null のとき color が getConnectionColor(broadcaster_channel_id) になる', async () => {
-		const { getConnectionColor } = await import('$lib/utils/connection-colors');
-		const { connectToStream } = await import('$lib/tauri/chat');
-		vi.mocked(connectToStream).mockResolvedValue(
-			makeSuccessResult({ connection_id: BigInt(5), broadcaster_channel_id: 'UC_alice' })
-		);
-
-		await chatStore.connect('https://example.com');
-
-		const conn = chatStore.connections.get(5);
-		// spec: color が getConnectionColor('UC_alice') と一致
-		expect(conn?.color).toBe(getConnectionColor('UC_alice'));
-	});
-
-	it('broadcaster_channel_id=null の color と非null の color は異なる値になる', async () => {
-		const { getConnectionColor } = await import('$lib/utils/connection-colors');
-		const colorWithNull = getConnectionColor('5');
-		const colorWithId = getConnectionColor('UC_alice');
-		// spec: 両ケースで color が異なる（パレットの多様性の確認）
-		expect(colorWithNull).not.toBe(colorWithId);
-	});
-
-	// =====================================================================
 	// 11. connect() 例外時の is_replay フィールド
 	// spec: connect() で例外が発生した場合、戻り値の is_replay は false
 	// =====================================================================
@@ -1318,7 +1361,7 @@ describe('chatStore initDisplaySettings', () => {
 				isLoaded: false,
 				messageFontSize: 99, // isLoaded=false なので反映されないはず
 				showTimestamps: false,
-				autoScrollEnabled: false,
+				hidePanelOnConnect: false,
 				setMessageFontSize: vi.fn(),
 				setChatMode: vi.fn(),
 			},
@@ -1332,7 +1375,6 @@ describe('chatStore initDisplaySettings', () => {
 		// spec: isLoaded=false のため configStore の値は反映されず、デフォルト値のまま
 		expect(store.messageFontSize).toBe(13);
 		expect(store.showTimestamps).toBe(true);
-		expect(store.autoScroll).toBe(true);
 
 		store.cleanup();
 		vi.doUnmock('$lib/tauri/chat');
@@ -1340,7 +1382,7 @@ describe('chatStore initDisplaySettings', () => {
 	});
 
 	// spec: isLoaded=true の場合に configStore の値が反映される
-	it('isLoaded=true のとき configStore の値が messageFontSize/showTimestamps/autoScroll に反映される', async () => {
+	it('isLoaded=true のとき configStore の値が messageFontSize/showTimestamps に反映される', async () => {
 		vi.resetModules();
 		vi.doMock('$lib/tauri/chat', () => ({
 			connectToStream: vi.fn(),
@@ -1354,7 +1396,7 @@ describe('chatStore initDisplaySettings', () => {
 				isLoaded: true,
 				messageFontSize: 20,
 				showTimestamps: false,
-				autoScrollEnabled: false,
+				hidePanelOnConnect: false,
 				setMessageFontSize: vi.fn(),
 				setChatMode: vi.fn(),
 			},
@@ -1369,8 +1411,6 @@ describe('chatStore initDisplaySettings', () => {
 		expect(store.messageFontSize).toBe(20);
 		// spec: showTimestamps が configStore の値になる
 		expect(store.showTimestamps).toBe(false);
-		// spec: autoScroll が configStore.autoScrollEnabled になる
-		expect(store.autoScroll).toBe(false);
 
 		store.cleanup();
 		vi.doUnmock('$lib/tauri/chat');
@@ -1414,6 +1454,8 @@ describe('chatStore ジュエル数を取れない接続の注記', () => {
 			connection_id: BigInt(connectionId),
 			platform: 'youtube',
 			broadcaster_name: 'Alice',
+			author_reading: null,
+			author_notes: null,
 		};
 	}
 
@@ -1440,7 +1482,7 @@ describe('chatStore ジュエル数を取れない接続の注記', () => {
 				isLoaded: false,
 				messageFontSize: 13,
 				showTimestamps: true,
-				autoScrollEnabled: true,
+				hidePanelOnConnect: true,
 				setMessageFontSize: vi.fn(),
 				setChatMode: vi.fn(),
 			},
@@ -1488,8 +1530,8 @@ describe('chatStore ジュエル数を取れない接続の注記', () => {
 	});
 });
 
-// spec: docs/specs/02_chat.md「リアクションメーター」
-describe('chatStore リアクションメーター', () => {
+// spec: docs/specs/02_chat.md「ライブリアクション」
+describe('chatStore リアクションの累計', () => {
 	let store: typeof import('./chat.svelte').chatStore;
 	let emitReaction: (update: GuiReactionUpdate) => void;
 	const nowUsec = () => Date.now() * 1000;
@@ -1522,14 +1564,14 @@ describe('chatStore リアクションメーター', () => {
 			disconnectAllStreams: vi.fn(),
 			setChatMode: vi.fn(),
 			getConnections: vi.fn(),
-			getConnectionReactions: vi.fn().mockResolvedValue({ totals: {}, recent: [] }),
+			getConnectionReactions: vi.fn().mockResolvedValue({ totals: {} }),
 		}));
 		vi.doMock('./config.svelte', () => ({
 			configStore: {
 				isLoaded: false,
 				messageFontSize: 13,
 				showTimestamps: true,
-				autoScrollEnabled: true,
+				hidePanelOnConnect: true,
 				setMessageFontSize: vi.fn(),
 				setChatMode: vi.fn(),
 			},
@@ -1556,12 +1598,11 @@ describe('chatStore リアクションメーター', () => {
 		expect(store.connections.get(1)?.reactions.totals).toEqual({});
 	});
 
-	it('chat:reaction をその接続のメーターに加える', () => {
+	it('chat:reaction をその接続の累計に加える', () => {
 		emitReaction(reaction(1, { '🎉': 4 }));
 		emitReaction(reaction(1, { '❤': 3 }));
 
 		expect(store.connections.get(1)?.reactions.totals).toEqual({ '🎉': 4, '❤': 3 });
-		expect(store.connections.get(1)?.reactions.recent).toHaveLength(2);
 		expect(store.connections.get(2)?.reactions.totals).toEqual({});
 	});
 
@@ -1573,7 +1614,7 @@ describe('chatStore リアクションメーター', () => {
 	// spec: 同じ配信に再接続 → 累計は DB の続きから
 	it('接続したら DB の累計を読み込む', async () => {
 		const { connectToStream, getConnectionReactions } = await import('$lib/tauri/chat');
-		vi.mocked(getConnectionReactions).mockResolvedValueOnce({ totals: { '❤': 430 }, recent: [] });
+		vi.mocked(getConnectionReactions).mockResolvedValueOnce({ totals: { '❤': 430 } });
 		vi.mocked(connectToStream).mockResolvedValueOnce(makeSuccessResult({ connection_id: BigInt(3) }));
 
 		await store.connect('https://www.youtube.com/watch?v=a');
@@ -1583,22 +1624,18 @@ describe('chatStore リアクションメーター', () => {
 	});
 
 	// spec: F5リロード → get_connection_reactions で読み直す
-	it('復元した接続のメーターを読み直す', async () => {
+	it('復元した接続の累計を読み直す', async () => {
 		await store.initialize();
 		const { getConnections, getConnectionReactions } = await import('$lib/tauri/chat');
 		vi.mocked(getConnections).mockResolvedValueOnce([makeConnectionInfo({ id: BigInt(5) })]);
-		vi.mocked(getConnectionReactions).mockResolvedValueOnce({
-			totals: { '🎉': 2 },
-			recent: [{ update_time_usec: nowUsec(), duration_seconds: 1, counts: { '🎉': 2 }, total: 2 }],
-		});
+		vi.mocked(getConnectionReactions).mockResolvedValueOnce({ totals: { '🎉': 2 } });
 
 		await store.restoreConnections();
 
 		expect(store.connections.get(5)?.reactions.totals).toEqual({ '🎉': 2 });
-		expect(store.connections.get(5)?.reactions.peakPerMinute).toBe(2);
 	});
 
-	// spec: 読み直しに失敗したらその接続のメーターは空から始める
+	// spec: 読み直しに失敗したらその接続の累計は 0 から始める
 	it('読み直しに失敗しても接続は復元する', async () => {
 		await store.initialize();
 		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -1625,13 +1662,13 @@ describe('chatStore チャットモードの記憶', () => {
 			disconnectAllStreams: vi.fn(),
 			setChatMode: vi.fn().mockResolvedValue(true),
 			getConnections: vi.fn(),
-			getConnectionReactions: vi.fn().mockResolvedValue({ totals: {}, recent: [] }),
+			getConnectionReactions: vi.fn().mockResolvedValue({ totals: {} }),
 		};
 		const configStoreMock = {
 			...config,
 			messageFontSize: 13,
 			showTimestamps: true,
-			autoScrollEnabled: true,
+			hidePanelOnConnect: true,
 			setMessageFontSize: vi.fn(),
 			setChatMode: vi.fn(),
 		};

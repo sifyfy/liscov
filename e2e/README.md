@@ -79,7 +79,7 @@ Windows ではパスの大文字・小文字を区別しない。
 | CDP | `--remote-debugging-port=0` | 起動前に消しておいた `<WebView2 のデータ>\EBWebView\DevToolsActivePort` が書かれるのを待って読む |
 | モックサーバー | `mock-server.exe --port 0` | 標準出力の `Mock server on http://127.0.0.1:<port>` を読む |
 | フロントエンド | 静的サーバーを `127.0.0.1:0` で listen | listen した結果から読む |
-| アプリの WebSocket サーバー | アプリに `LISCOV_WEBSOCKET_PORT=0` を渡す | 画面のステータス表示 `WS:<port>(<接続数>)` から読む |
+| アプリの WebSocket サーバー | アプリに `LISCOV_WEBSOCKET_PORT=0` を渡す | 操作パネルの表示 `WebSocket: ポート <port>・<接続数> 件の接続` から読む |
 
 WebSocket サーバーは、環境変数を渡さないと本番と同じ 8765〜8774 を使う。本番の liscov が止まっていると E2E のアプリが 8765 を取り、
 本番向けに 8765 へつなぎに来る OBS のブラウザソースのオーバーレイがつながってしまう (接続数のテストが落ち、テストのコメントが配信画面に流れうる)。
@@ -151,6 +151,31 @@ Remove-Item -Recurse -Force "$env:LOCALAPPDATA\liscov-test*", "$env:APPDATA\lisc
 2. **認証状態表示**: ログイン後の状態が正しく表示されることを確認
 3. **ログアウト**: ログアウト後の状態が正しく表示されることを確認
 
+## デザインの撮影
+
+テストではなく、デザインの診断・批評に使うスクリーンショットを撮る。主要な画面を、データの状態
+(未接続・空・通常・長い名前・スパチャ連続・大量・視聴者情報) × テーマ (ダーク/ライト) × 大きさ
+(540×960・640×1080・960×1080、`docs/design/brief.md` §3 の基準) で撮る。デザインの試作 (`src/routes/design-proto`) も場面ごとに撮る。
+
+```bash
+pnpm design:capture
+```
+
+- 起動・接続は通常の E2E と同じ (テスト用のアプリ名・モックサーバー。下の「並列実行と分離」)。prebuilt の成果物を使うので、
+  frontend を変えたら先に `pnpm test:e2e:build` (上の「ビルドについて」)
+- 出力は `.tmp/design-capture/latest/` (git に入れない)。フォルダ名は `LISCOV_DESIGN_CAPTURE_LABEL` で変えられる。
+  撮影を始めるときにそのフォルダを消すので、シェルの作業ディレクトリにしていると消せずに失敗する
+- 各状態・テーマで、axe によるコントラストの検査 (WCAG 2 AA) も行い、`<名前>-<テーマ>.axe.json` に残す。
+  `incomplete` (背景がグラデーションなどで判定できなかったもの) は合格ではない
+- 撮影の本体は `design-capture.capture.ts`、流すデータは `utils/design-capture-data.ts` (名前・本文はすべて架空)。
+  ファイル名が `*.spec.ts` ではないので、通常の E2E では動かない。設定は `playwright.capture.config.ts`
+
+### 見た目の回帰テスト
+
+撮影と違い、通常の E2E として動く。`chat-row-visual.spec.ts` が `/design-tokens` の「コメントの行」
+(本物の `ChatMessage` を固定の架空データ `src/routes/design-proto/data.ts` の `ROW_SAMPLES` で並べたもの) を
+幅 540 のダーク/ライトで撮り、`chat-row-visual.spec.ts-snapshots/` の基準と比べる。
+見た目を意図して変えたら、撮影で確かめてから `--update-snapshots` で基準を更新する。
 
 ## 環境変数
 

@@ -30,12 +30,15 @@ export async function viewerGetList(
   broadcasterId: string,
   searchQuery?: string,
   limit?: number,
-  offset?: number
+  offset?: number,
+  /** 読み仮名が登録されていない人だけ (06_viewer.md「視聴者のタブ」) */
+  withoutReading?: boolean
 ): Promise<ViewerWithCustomInfo[]> {
   try {
     return await invoke('viewer_get_list', {
       broadcasterId,
       searchQuery,
+      withoutReading,
       limit,
       offset
     });

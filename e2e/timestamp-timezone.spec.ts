@@ -8,6 +8,8 @@ import {
   resetMockServer,
   addMockMessage,
   disconnectAndInitialize,
+  openUrlInput,
+  openControlPanel,
 } from './utils/test-helpers';
 
 /**
@@ -71,17 +73,15 @@ test.describe('Timestamp Timezone Display', () => {
     // Expected behavior: If a message arrives at 19:00 JST (10:00 UTC),
     // the displayed time should be "19:00:00", not "10:00:00".
 
-    // Enable timestamp display
-    const timestampToggle = mainPage.locator('label:has-text("タイムスタンプ") input[type="checkbox"]');
-    if (!(await timestampToggle.isChecked())) {
-      await timestampToggle.check();
-    }
+    // Enable timestamp display (操作パネルの「時刻」)
+    await openControlPanel(mainPage);
+    await mainPage.getByRole('checkbox', { name: '時刻' }).check();
 
     // Connect to stream
-    const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+    const urlInput = (await openUrlInput(mainPage));
     await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
-    await mainPage.locator('button:has-text("開始")').click();
-    await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+    await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+    await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
     // Record the current local time BEFORE adding the message
     const localTimeBeforeMs = Date.now();
@@ -174,17 +174,15 @@ test.describe('Timestamp Timezone Display', () => {
   test('should display consistent timestamps across multiple messages', async () => {
     // This test verifies that all messages use the same timezone (local)
 
-    // Enable timestamp display
-    const timestampToggle = mainPage.locator('label:has-text("タイムスタンプ") input[type="checkbox"]');
-    if (!(await timestampToggle.isChecked())) {
-      await timestampToggle.check();
-    }
+    // Enable timestamp display (操作パネルの「時刻」)
+    await openControlPanel(mainPage);
+    await mainPage.getByRole('checkbox', { name: '時刻' }).check();
 
     // Connect to stream
-    const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+    const urlInput = (await openUrlInput(mainPage));
     await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
-    await mainPage.locator('button:has-text("開始")').click();
-    await expect(mainPage.getByText('Mock Live').first()).toBeVisible({ timeout: 10000 });
+    await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+    await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
 
     // Add multiple messages with short delays
     for (let i = 1; i <= 3; i++) {

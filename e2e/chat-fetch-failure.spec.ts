@@ -40,7 +40,7 @@ test.describe('チャット取得の失敗 (02_chat.md)', () => {
     await disconnectAndInitialize(mainPage);
   });
 
-  const connectionItems = () => mainPage.locator('.connection-item');
+  const connectionItems = () => mainPage.locator('[data-testid="connection-chip"]');
   const logText = () => {
     const logFile = path.join(getTestAppDataDir(), 'logs', 'liscov.log');
     return fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8') : '';
@@ -54,7 +54,7 @@ test.describe('チャット取得の失敗 (02_chat.md)', () => {
     await mainPage.waitForTimeout(1000);
 
     const started = Date.now();
-    await mainPage.locator('.connection-item .disconnect-btn').first().click();
+    await mainPage.locator('[data-testid="connection-chip"] button').first().click();
     await expect(connectionItems()).toHaveCount(0, { timeout: 10000 });
 
     expect(Date.now() - started).toBeLessThan(3000);

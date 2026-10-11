@@ -73,7 +73,6 @@ toml = "0.8"
 # TypeScript 型自動生成
 ts-rs = { version = "10", features = ["serde-compat"] }
 # Excel export
-rust_xlsxwriter = "0.78"
 tauri-plugin-dialog = "2.7"
 rodio = "0.21.1"
 

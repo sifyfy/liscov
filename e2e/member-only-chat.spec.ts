@@ -8,6 +8,10 @@ import {
   addMockMessage,
   resetMockServer,
   disconnectAndInitialize,
+  openUrlInput,
+  openControlPanel,
+  navigateToTab,
+  connectionChips,
 } from './utils/test-helpers';
 
 /**
@@ -69,7 +73,7 @@ test.describe('Member-Only Stream Chat Access', () => {
     await setAuthState({ session_valid: true });
 
     // Settings タブへ移動してログイン
-    await mainPage.getByRole('button', { name: 'Settings' }).click();
+    await mainPage.getByRole('button', { name: '設定', exact: true }).click();
     await expect(
       mainPage.getByRole('heading', { name: 'YouTube認証' }),
     ).toBeVisible();
@@ -85,8 +89,11 @@ test.describe('Member-Only Stream Chat Access', () => {
     await expect(logoutButton).toBeVisible({ timeout: 15000 });
 
     // 認証済み状態を確認
-    const authIndicator = mainPage.getByTestId('auth-indicator');
-    await expect(authIndicator).toContainText('認証済み', { timeout: 15000 });
+    // AuthIndicator は操作パネル (チャットのタブ) の中にある
+    await navigateToTab(mainPage, 'Chat');
+    await openControlPanel(mainPage);
+    const authIndicator = mainPage.getByRole('region', { name: '操作パネル' }).getByTestId('auth-indicator');
+    await expect(authIndicator).toHaveText('ログイン中', { timeout: 15000 });
 
     log.info('Login completed, ready for member-only stream tests');
   });
@@ -110,17 +117,17 @@ test.describe('Member-Only Stream Chat Access', () => {
     });
 
     // Chat タブへ移動
-    await mainPage.getByRole('button', { name: 'Chat' }).click();
+    await mainPage.getByRole('button', { name: 'チャット', exact: true }).click();
 
     // ストリームURLを入力して接続
-    const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+    const urlInput = (await openUrlInput(mainPage));
     await expect(urlInput).toBeVisible();
     await urlInput.fill(`${mockServerUrl()}/watch?v=member_only_stream`);
-    await mainPage.locator('button:has-text("開始")').click();
+    await mainPage.getByRole('button', { name: '接続', exact: true }).click();
 
     // 接続成功: ストリームタイトルが表示される
     await expect(
-      mainPage.getByText('メンバー限定配信テスト').first(),
+      connectionChips(mainPage, 'メンバー限定配信テスト').first(),
     ).toBeVisible({ timeout: 10000 });
 
     // メッセージを追加
@@ -152,17 +159,17 @@ test.describe('Member-Only Stream Chat Access', () => {
     });
 
     // Chat タブへ移動
-    await mainPage.getByRole('button', { name: 'Chat' }).click();
+    await mainPage.getByRole('button', { name: 'チャット', exact: true }).click();
 
     // ストリームURLを入力して接続
-    const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+    const urlInput = (await openUrlInput(mainPage));
     await expect(urlInput).toBeVisible();
     await urlInput.fill(`${mockServerUrl()}/watch?v=normal_stream`);
-    await mainPage.locator('button:has-text("開始")').click();
+    await mainPage.getByRole('button', { name: '接続', exact: true }).click();
 
     // 接続成功
     await expect(
-      mainPage.getByText('通常配信テスト').first(),
+      connectionChips(mainPage, '通常配信テスト').first(),
     ).toBeVisible({ timeout: 10000 });
 
     // メッセージが受信できることを確認
@@ -192,17 +199,17 @@ test.describe('Member-Only Stream Chat Access', () => {
     });
 
     // Chat タブへ移動
-    await mainPage.getByRole('button', { name: 'Chat' }).click();
+    await mainPage.getByRole('button', { name: 'チャット', exact: true }).click();
 
     // ストリームURLを入力して接続
-    const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+    const urlInput = (await openUrlInput(mainPage));
     await expect(urlInput).toBeVisible();
     await urlInput.fill(`${mockServerUrl()}/watch?v=fallback_stream`);
-    await mainPage.locator('button:has-text("開始")').click();
+    await mainPage.getByRole('button', { name: '接続', exact: true }).click();
 
     // 接続成功: /next APIフォールバック経由でストリームタイトルが表示される
     await expect(
-      mainPage.getByText('APIフォールバックテスト').first(),
+      connectionChips(mainPage, 'APIフォールバックテスト').first(),
     ).toBeVisible({ timeout: 15000 });
 
     // メッセージが受信できることを確認
@@ -236,17 +243,17 @@ test.describe('Member-Only Stream Chat Access', () => {
     });
 
     // Chat タブへ移動
-    await mainPage.getByRole('button', { name: 'Chat' }).click();
+    await mainPage.getByRole('button', { name: 'チャット', exact: true }).click();
 
     // ストリームURLを入力して接続
-    const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+    const urlInput = (await openUrlInput(mainPage));
     await expect(urlInput).toBeVisible();
     await urlInput.fill(`${mockServerUrl()}/watch?v=cookie_pipeline_test`);
-    await mainPage.locator('button:has-text("開始")').click();
+    await mainPage.getByRole('button', { name: '接続', exact: true }).click();
 
     // 接続成功を待つ
     await expect(
-      mainPage.getByText('Cookie完全性テスト').first(),
+      connectionChips(mainPage, 'Cookie完全性テスト').first(),
     ).toBeVisible({ timeout: 10000 });
 
     // モックサーバーから実際に受信したCookieヘッダーを取得
@@ -278,7 +285,7 @@ test.describe('Member-Only Stream Chat Access', () => {
 
   test('should fail to connect to member-only stream without authentication', async () => {
     // ログアウトしてから接続試行
-    await mainPage.getByRole('button', { name: 'Settings' }).click();
+    await mainPage.getByRole('button', { name: '設定', exact: true }).click();
     const logoutButton = mainPage.getByRole('button', { name: 'ログアウト' });
     await expect(logoutButton).toBeVisible({ timeout: 5000 });
     await logoutButton.click();
@@ -297,11 +304,11 @@ test.describe('Member-Only Stream Chat Access', () => {
     });
 
     // Chat タブへ移動して接続試行
-    await mainPage.getByRole('button', { name: 'Chat' }).click();
-    const urlInput = mainPage.locator('input[placeholder*="youtube.com"]');
+    await mainPage.getByRole('button', { name: 'チャット', exact: true }).click();
+    const urlInput = (await openUrlInput(mainPage));
     await expect(urlInput).toBeVisible();
     await urlInput.fill(`${mockServerUrl()}/watch?v=no_auth_stream`);
-    await mainPage.locator('button:has-text("開始")').click();
+    await mainPage.getByRole('button', { name: '接続', exact: true }).click();
 
     // 接続失敗: エラー表示を確認
     // continuation tokenが取得できないためエラーになる
