@@ -19,7 +19,7 @@ import {
  *
  * Tests verify:
  * - Server auto-starts on app launch (no manual start/stop)
- * - Port selection within 8765-8774 range
+ * - E2E のアプリは本番の範囲 8765-8774 を使わない (LISCOV_WEBSOCKET_PORT=0 で OS が選ぶ空きポート。ADR-005)
  * - Tauri events: websocket-client-connected, websocket-client-disconnected
  * - Connected clients count in UI
  * - Complete data flow: YouTube (mock) → Tauri App → WebSocket API → External Client
@@ -164,8 +164,6 @@ test.describe('WebSocket API (03_websocket.md)', () => {
   test.describe('Auto-Start Behavior', () => {
     test('should have WebSocket server running on app launch', async () => {
       const port = await getWebSocketPort(mainPage);
-      expect(port).toBeGreaterThanOrEqual(8765);
-      expect(port).toBeLessThanOrEqual(8774);
 
       const { ws, connectedMsg } = await connectWebSocket(`ws://127.0.0.1:${port}`);
       const connected = connectedMsg as { type: string; data: { client_id: number } };
@@ -177,19 +175,20 @@ test.describe('WebSocket API (03_websocket.md)', () => {
 
     test('should display port number in the control panel status', async () => {
       const wsStatus = await (await webSocketStatus(mainPage)).textContent();
-      expect(wsStatus).toMatch(/WebSocket: ポート \d{4}・\d+ 件の接続/);
+      expect(wsStatus).toMatch(/WebSocket: ポート \d+・\d+ 件の接続/);
 
       const port = await getWebSocketPort(mainPage);
-      expect(port).toBeGreaterThanOrEqual(8765);
-      expect(port).toBeLessThanOrEqual(8774);
+      expect(port).toBeGreaterThanOrEqual(1);
+      expect(port).toBeLessThanOrEqual(65535);
     });
   });
 
-  test.describe('Port Range (8765-8774)', () => {
-    test('should use port within valid range', async () => {
+  // 本番の範囲 8765-8774 (未設定時) は Rust の統合テスト (src-tauri/tests/websocket_api.rs) で確かめる
+  test.describe('Port Isolation (03_websocket.md 開始ポートの上書き)', () => {
+    test('should not use the production port range 8765-8774', async () => {
+      // 本番の liscov 向けに 8765 へつなぎに来るオーバーレイが、E2E のアプリにつながらないこと
       const port = await getWebSocketPort(mainPage);
-      expect(port).toBeGreaterThanOrEqual(8765);
-      expect(port).toBeLessThanOrEqual(8774);
+      expect(port < 8765 || port > 8774).toBe(true);
     });
   });
 

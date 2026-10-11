@@ -400,6 +400,9 @@ export async function startTauriAppWithEnv(extraEnv: NodeJS.ProcessEnv): Promise
     // 同じフォルダを使うアプリ (本番の liscov や別のワークツリーの E2E) が起動中だとブラウザプロセスを共有し、
     // 上の引数が効かず CDP が開かない。ワークツリーごとのフォルダに分ける（環境変数がアプリの指定より優先される）
     WEBVIEW2_USER_DATA_FOLDER: getTestWebViewDataDir(),
+    // WebSocket サーバーは OS が選ぶ空きポートで動かす。本番の 8765 を取ると、本番の liscov 向けにつなぎに来る
+    // オーバーレイ (OBS のブラウザソースなど) がこのアプリにつながる（03_websocket.md「開始ポートの上書き」、ADR-005）
+    LISCOV_WEBSOCKET_PORT: '0',
   });
 
   log.info(`Starting prebuilt Tauri app: ${PREBUILT_TAURI_APP_PATH}`);

@@ -80,6 +80,7 @@ E2Eテストは本番データと分離された専用の名前空間を使用�
 | `LISCOV_KEYRING_SERVICE` | `liscov` | `liscov-test` | Windows資格情報マネージャーのサービス名 |
 | `LISCOV_AUTH_URL` | YouTube URL | mock server | 認証ウィンドウのURL |
 | `LISCOV_SESSION_CHECK_URL` | YouTube API | mock server | セッション検証エンドポイント |
+| `LISCOV_WEBSOCKET_PORT` | なし (8765〜8774) | `0` (OS が選ぶ空きポート) | WebSocket サーバーの開始ポート |
 
 テスト実行時の `beforeAll` フックで自動的に:
 1. 既存のTauriアプリを終了
