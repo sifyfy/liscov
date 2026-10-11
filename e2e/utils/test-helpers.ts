@@ -783,6 +783,8 @@ export async function setStreamState(state: {
   title?: string;
   chat_delay_ms?: number;
   chat_fail?: boolean;
+  /** 応答の timeoutMs（既定 1000。liscov の下限 1.5 秒より短いので間隔は延びない） */
+  chat_timeout_ms?: number;
   /** 次に接続する配信の配信者チャンネル ID（空文字で既定に戻す）。接続ごとに配信者を分けるときに使う */
   channel_id?: string;
 }): Promise<void> {
@@ -791,6 +793,15 @@ export async function setStreamState(state: {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(state),
   });
+}
+
+/**
+ * モックサーバーが起動してから受けたチャット取得（get_live_chat）の回数。reset では戻らない
+ */
+export async function mockChatRequestCount(): Promise<number> {
+  const response = await fetch(`${mockServerUrl()}/status`);
+  const status = (await response.json()) as { request_count: number };
+  return status.request_count;
 }
 
 /**

@@ -22,6 +22,8 @@ pub use client::{get_innertube_api_url, get_youtube_base_url};
 pub struct ChatFetch {
     pub messages: Vec<ChatMessage>,
     pub reactions: Vec<ReactionUpdate>,
+    /// 採用した continuation の `timeoutMs`（02_chat.md「取得の間隔」の上限。無い応答では None）
+    pub timeout: Option<Duration>,
     /// 生のレスポンス JSON（05_raw_response.md の保存用）
     pub raw_json: String,
 }
@@ -276,13 +278,16 @@ impl InnerTubeClient {
         let raw_json = response.text().await?;
         let data: serde_json::Value = serde_json::from_str(&raw_json)?;
 
-        if let Some(new_continuation) = client::extract_continuation(&data) {
-            self.adopt_continuation(new_continuation);
+        let continuation = client::extract_continuation(&data);
+        let timeout = continuation.as_ref().and_then(|c| c.timeout);
+        if let Some(continuation) = continuation {
+            self.adopt_continuation(continuation.token);
         }
 
         Ok(ChatFetch {
             messages: chat_parser::parse_chat_actions(&data),
             reactions: reaction_parser::parse_reaction_updates(&data),
+            timeout,
             raw_json,
         })
     }
