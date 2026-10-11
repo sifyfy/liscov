@@ -10,7 +10,9 @@ rust-version = "1.85.0"
 
 [lib]
 name = "app_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# staticlib は iOS 向けにしか要らず、ビルドのたびに 1GB を超える app_lib.lib を作るので外した (2026-10)。
+# iOS 版を作るときは足す。cdylib は Android 向け (Windows では 2MB 程度なので残す)
+crate-type = ["cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2.6", features = [] }
