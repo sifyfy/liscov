@@ -7,7 +7,7 @@
 // - ページ: 「前の 50 人」「次の 50 人」「1〜50 人目」
 // - 読み込み中・記録が無い・見つからない・配信者がいない のそれぞれの文
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/dom';
+import { screen, waitFor, within } from '@testing-library/svelte';
 import { invoke } from '@tauri-apps/api/core';
 import type { BroadcasterChannel, ViewerWithCustomInfo } from '$lib/types';
 
