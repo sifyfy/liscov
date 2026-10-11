@@ -3,6 +3,7 @@
 use crate::core::models::*;
 use anyhow::{Result, anyhow};
 use serde_json::Value;
+use std::time::Duration;
 
 use super::initial_data::parse_initial_data;
 
@@ -41,22 +42,32 @@ pub fn build_request_body(video_id: &str, continuation: &str, client_version: &s
     })
 }
 
-/// レスポンスから continuation トークンを抽出する
-pub fn extract_continuation(data: &Value) -> Option<String> {
-    let paths = [
-        "/continuationContents/liveChatContinuation/continuations/0/invalidationContinuationData/continuation",
-        "/continuationContents/liveChatContinuation/continuations/0/timedContinuationData/continuation",
-        "/continuationContents/liveChatContinuation/continuations/0/reloadContinuationData/continuation",
-    ];
+/// 応答から採用した continuation（02_chat.md「Continuation Token」）
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Continuation {
+    pub token: String,
+    /// そのデータの `timeoutMs`。次の取得までの待ちの上限に使う（無い応答もある）
+    pub timeout: Option<Duration>,
+}
 
-    for path in paths {
-        if let Some(cont) = data.pointer(path) {
-            if let Some(s) = cont.as_str() {
-                return Some(s.to_string());
-            }
-        }
-    }
-    None
+/// レスポンスから continuation を抽出する（優先度の高いデータから）
+pub fn extract_continuation(data: &Value) -> Option<Continuation> {
+    const KINDS: [&str; 3] = [
+        "invalidationContinuationData",
+        "timedContinuationData",
+        "reloadContinuationData",
+    ];
+    let entry = data.pointer("/continuationContents/liveChatContinuation/continuations/0")?;
+    KINDS.iter().find_map(|kind| {
+        let cont = entry.get(kind)?;
+        Some(Continuation {
+            token: cont.get("continuation")?.as_str()?.to_string(),
+            timeout: cont
+                .get("timeoutMs")
+                .and_then(Value::as_u64)
+                .map(Duration::from_millis),
+        })
+    })
 }
 
 /// InnerTube `next` API 経由でウォッチページの初期データを取得する。
@@ -140,4 +151,42 @@ pub async fn fetch_initial_data_via_api(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn response_with(continuation: Value) -> Value {
+        serde_json::json!({
+            "continuationContents": {"liveChatContinuation": {"continuations": [continuation]}}
+        })
+    }
+
+    // 02_chat.md「Continuation Token」: 採用したデータの timeoutMs を待ちの上限に使う
+    #[test]
+    fn continuation_carries_its_timeout() {
+        let data = response_with(serde_json::json!({
+            "invalidationContinuationData": {"continuation": "cont_a", "timeoutMs": 10000}
+        }));
+        let continuation = extract_continuation(&data).unwrap();
+        assert_eq!(continuation.token, "cont_a");
+        assert_eq!(continuation.timeout, Some(Duration::from_millis(10000)));
+    }
+
+    // 02_chat.md「取得の間隔」: timeoutMs が無い応答（reloadContinuationData など）
+    #[test]
+    fn continuation_without_timeout() {
+        let data = response_with(serde_json::json!({
+            "reloadContinuationData": {"continuation": "cont_b"}
+        }));
+        let continuation = extract_continuation(&data).unwrap();
+        assert_eq!(continuation.token, "cont_b");
+        assert_eq!(continuation.timeout, None);
+    }
+
+    #[test]
+    fn no_continuation() {
+        assert!(extract_continuation(&serde_json::json!({})).is_none());
+    }
 }

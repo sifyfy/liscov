@@ -260,6 +260,8 @@ struct StreamState {
     chat_delay_ms: u64,
     /// チャット取得を 500 で失敗させる（02_chat.md「取得に失敗したとき」の検証用）
     chat_fail: bool,
+    /// 応答の timeoutMs（None は MOCK_CHAT_TIMEOUT_MS）。02_chat.md「取得の間隔」の検証用
+    chat_timeout_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -534,7 +536,13 @@ fn build_routes(
                     tv.decoded_length = 0;
                     tv.validation_count += 1;
                 }
-                let mut resp = build_resp(get_actions(&sa), chattype);
+                let timeout_ms = sa
+                    .stream_state
+                    .lock()
+                    .unwrap()
+                    .chat_timeout_ms
+                    .unwrap_or(MOCK_CHAT_TIMEOUT_MS);
+                let mut resp = build_resp(get_actions(&sa), chattype, timeout_ms);
                 if let Some(entity) = sa.reaction_queue.lock().unwrap().pop_front() {
                     resp["frameworkUpdates"] = json!({"entityBatchUpdate":{"mutations":[{"entityKey":"mock_emoji_fountain","type":"ENTITY_MUTATION_TYPE_REPLACE","payload":{"emojiFountainDataEntity":entity}}]}});
                 }
@@ -659,6 +667,9 @@ fn build_routes(
             }
             if let Some(v) = b.chat_fail {
                 ss.chat_fail = v;
+            }
+            if let Some(v) = b.chat_timeout_ms {
+                ss.chat_timeout_ms = Some(v);
             }
             warp::reply::json(&json!({"status":"ok","stream":&*ss}))
         });
@@ -839,6 +850,7 @@ struct SSR {
     watch_delay_ms: Option<u64>,
     chat_delay_ms: Option<u64>,
     chat_fail: Option<bool>,
+    chat_timeout_ms: Option<u64>,
 }
 #[derive(Debug, Deserialize)]
 struct AutoMsgReq {
@@ -1190,10 +1202,14 @@ fn gen_reaction_entity(update_time_usec: u64, r: &ARR) -> Value {
     json!({"key":"mock_emoji_fountain","reactionBuckets":buckets,"updateTimeUsec":update_time_usec.to_string()})
 }
 
-fn build_resp(acts: Vec<Value>, chattype: u8) -> Value {
+/// 応答の timeoutMs の既定値。liscov の下限（1.5 秒）より短くし、既存の E2E を 1.5 秒間隔で動かす
+/// （02_chat.md「取得の間隔」: 上限が下限より短いときは下限で取る）
+const MOCK_CHAT_TIMEOUT_MS: u64 = 1000;
+
+fn build_resp(acts: Vec<Value>, chattype: u8, timeout_ms: u64) -> Value {
     // Preserve the chat mode from the incoming request
     let token = generate_mock_continuation_token(chattype);
-    json!({"continuationContents":{"liveChatContinuation":{"continuations":[{"invalidationContinuationData":{"continuation":token,"timeoutMs":5000}}],"actions":acts}}})
+    json!({"continuationContents":{"liveChatContinuation":{"continuations":[{"invalidationContinuationData":{"continuation":token,"timeoutMs":timeout_ms}}],"actions":acts}}})
 }
 
 fn gen_msg(s: &ServerState, r: &AMR) -> Value {

@@ -19,8 +19,12 @@ use rusqlite::Connection;
 /// 接続ごとに覚える受信済み message_id の件数（02_chat.md「設定値」）
 const RECENT_MESSAGE_IDS_CAPACITY: usize = 10_000;
 
-/// 取得に成功している間のポーリング間隔（02_chat.md「設定値」）
+/// ポーリング間隔の下限（02_chat.md「設定値」）
 const POLL_INTERVAL: Duration = Duration::from_millis(1500);
+/// 空振りの 2 回目から 1 回ごとに延ばす幅（02_chat.md「設定値」）
+const EMPTY_POLL_STEP: Duration = Duration::from_millis(1000);
+/// 応答に timeoutMs が無いときの、成功している間の間隔の上限（02_chat.md「設定値」）
+const DEFAULT_POLL_CEILING: Duration = Duration::from_millis(10_000);
 /// この回数までの連続失敗は成功と同じ間隔で再試行する（02_chat.md「取得に失敗したとき」）
 const FAILURES_BEFORE_BACKOFF: u32 = 10;
 /// この回数続けて失敗したら切断する（02_chat.md「取得に失敗したとき」）
@@ -160,7 +164,7 @@ pub async fn run_monitoring_loop(
     // この接続で受け取った message_id（YouTube の再送を捨てるため）
     let mut recent_message_ids = RecentMessageIds::new(RECENT_MESSAGE_IDS_CAPACITY);
 
-    let mut fetch_failures = FetchFailures::default();
+    let mut schedule = PollSchedule::default();
 
     let end = loop {
         // CancellationToken でループ停止を確認
@@ -186,22 +190,29 @@ pub async fn run_monitoring_loop(
             }
             fetched = client.fetch_chat() => fetched,
         };
-        fetch_failures.record(fetched.is_ok());
-        let (new_messages, new_reactions, raw_response) = match fetched {
+        // fetched_timeout は成功したときだけ Some（中身は応答の timeoutMs）。
+        // 成功は再送を除いた件数で数えるので、記録は再送を捨てた後に行う
+        let (new_messages, new_reactions, raw_response, fetched_timeout) = match fetched {
             Ok(fetch) => {
                 if !fetch.messages.is_empty() {
                     tracing::debug!("ポーリング {}: {} 件取得", poll_count, fetch.messages.len());
                 }
-                (fetch.messages, fetch.reactions, Some(fetch.raw_json))
+                (
+                    fetch.messages,
+                    fetch.reactions,
+                    Some(fetch.raw_json),
+                    Some(fetch.timeout),
+                )
             }
             Err(e) => {
+                schedule = schedule.after(PollOutcome::Failed);
                 tracing::warn!(
                     "ポーリング {}: メッセージ取得失敗（連続 {} 回）: {:#}",
                     poll_count,
-                    fetch_failures.consecutive,
+                    schedule.consecutive_failures,
                     e
                 );
-                (vec![], vec![], None)
+                (vec![], vec![], None, None)
             }
         };
 
@@ -253,6 +264,12 @@ pub async fn run_monitoring_loop(
                 is_new
             })
             .collect();
+        if let Some(timeout) = fetched_timeout {
+            schedule = schedule.after(PollOutcome::Fetched {
+                fresh: fresh.len(),
+                timeout,
+            });
+        }
 
         // DB への保存と判定（DB のロックは 1 回、1 トランザクション。08_database.md「書き込み」）。
         // 読み上げと画面に使う読み仮名・メモも、同じロックのうちにこの接続の配信者のもとで引く
@@ -326,14 +343,20 @@ pub async fn run_monitoring_loop(
             }
         }
 
-        let Some(wait) = fetch_failures.next_wait() else {
+        let Some(wait) = schedule.next_wait() else {
             tracing::warn!(
                 "取得に {} 回続けて失敗したため監視を停止 connection_id: {}",
-                fetch_failures.consecutive,
+                schedule.consecutive_failures,
                 connection_id
             );
             break MonitoringEnd::FetchFailedRepeatedly;
         };
+        tracing::debug!(
+            "次の取得まで {:?} connection_id: {} 空振り: {} 回",
+            wait,
+            connection_id,
+            schedule.consecutive_empty
+        );
 
         // スリープ中もキャンセルを検知できるように select! を使用
         tokio::select! {
@@ -444,26 +467,74 @@ fn process_message(
     }
 }
 
-/// 取得の連続失敗回数と、次の取得までの待ち（02_chat.md「取得に失敗したとき」）
-#[derive(Debug, Default)]
-struct FetchFailures {
-    consecutive: u32,
+/// 1 回の取得の結果のうち、次の取得までの待ちに関わるもの
+#[derive(Debug, Clone, Copy)]
+enum PollOutcome {
+    /// 取得に成功した。fresh は再送を除いた新しいメッセージの件数、timeout は応答の timeoutMs
+    Fetched {
+        fresh: usize,
+        timeout: Option<Duration>,
+    },
+    Failed,
 }
 
-impl FetchFailures {
-    /// 1 回の取得の結果を数える。成功したら 0 に戻す
-    fn record(&mut self, succeeded: bool) {
-        self.consecutive = if succeeded { 0 } else { self.consecutive + 1 };
+/// 次の取得までの待ちを決める状態
+/// （02_chat.md「取得の間隔」「取得に失敗したとき」）
+#[derive(Debug, Clone, Copy)]
+struct PollSchedule {
+    consecutive_failures: u32,
+    consecutive_empty: u32,
+    /// 直近の成功した応答の上限
+    ceiling: Duration,
+}
+
+impl Default for PollSchedule {
+    fn default() -> Self {
+        Self {
+            consecutive_failures: 0,
+            consecutive_empty: 0,
+            ceiling: DEFAULT_POLL_CEILING,
+        }
+    }
+}
+
+impl PollSchedule {
+    /// 1 回の取得の結果を数えた後の状態。失敗は空振りの回数を変えない
+    #[must_use]
+    fn after(self, outcome: PollOutcome) -> Self {
+        match outcome {
+            PollOutcome::Fetched { fresh, timeout } => Self {
+                consecutive_failures: 0,
+                consecutive_empty: if fresh == 0 {
+                    self.consecutive_empty.saturating_add(1)
+                } else {
+                    0
+                },
+                ceiling: timeout.unwrap_or(DEFAULT_POLL_CEILING),
+            },
+            PollOutcome::Failed => Self {
+                consecutive_failures: self.consecutive_failures + 1,
+                ..self
+            },
+        }
     }
 
     /// 次の取得までの待ち。`None` なら切断する
     ///
-    /// 11 回目からは失敗のたびに倍にする（3・6・12・24 秒）。
+    /// 失敗の 11 回目からは失敗のたびに倍にする（3・6・12・24 秒）。
+    /// 成功している間は空振りの 2 回目から延ばし、上限（下限より短ければ下限）で止める。
     fn next_wait(&self) -> Option<Duration> {
-        match self.consecutive {
+        match self.consecutive_failures {
             n if n >= FAILURES_BEFORE_DISCONNECT => None,
-            n if n <= FAILURES_BEFORE_BACKOFF => Some(POLL_INTERVAL),
-            n => Some(POLL_INTERVAL * 2u32.pow(n - FAILURES_BEFORE_BACKOFF)),
+            n if n > FAILURES_BEFORE_BACKOFF => {
+                Some(POLL_INTERVAL * 2u32.pow(n - FAILURES_BEFORE_BACKOFF))
+            }
+            0 => {
+                let grown =
+                    POLL_INTERVAL + EMPTY_POLL_STEP * self.consecutive_empty.saturating_sub(1);
+                Some(grown.min(self.ceiling).max(POLL_INTERVAL))
+            }
+            _ => Some(POLL_INTERVAL),
         }
     }
 }
@@ -651,19 +722,97 @@ async fn finish_session(deps: &MonitoringDeps, connection_id: u64, session_id: &
 mod tests {
     use super::*;
 
-    fn failures_after(results: &[bool]) -> FetchFailures {
-        let mut failures = FetchFailures::default();
-        for &succeeded in results {
-            failures.record(succeeded);
+    const FRESH: PollOutcome = PollOutcome::Fetched {
+        fresh: 1,
+        timeout: Some(Duration::from_millis(10_000)),
+    };
+    const FAILED: PollOutcome = PollOutcome::Failed;
+
+    /// 新しいメッセージが 0 件の成功（timeoutMs はミリ秒、None は応答に無い）
+    fn empty(timeout_ms: Option<u64>) -> PollOutcome {
+        PollOutcome::Fetched {
+            fresh: 0,
+            timeout: timeout_ms.map(Duration::from_millis),
         }
-        failures
+    }
+
+    fn schedule_after(outcomes: &[PollOutcome]) -> PollSchedule {
+        outcomes
+            .iter()
+            .fold(PollSchedule::default(), |schedule, &outcome| {
+                schedule.after(outcome)
+            })
+    }
+
+    fn wait_ms(schedule: PollSchedule) -> Option<u128> {
+        schedule.next_wait().map(|wait| wait.as_millis())
+    }
+
+    /// 空振りを続けたときの、1 回ごとの次の取得までの待ち（ミリ秒）
+    fn waits_while_empty(timeout_ms: Option<u64>, count: usize) -> Vec<u128> {
+        (1..=count)
+            .map(|n| wait_ms(schedule_after(&vec![empty(timeout_ms); n])).unwrap())
+            .collect()
+    }
+
+    // 02_chat.md「取得の間隔」: 新しいメッセージが届いたら 1.5秒
+    #[test]
+    fn wait_after_fresh_messages_is_minimum() {
+        assert_eq!(wait_ms(schedule_after(&[FRESH])), Some(1500));
+    }
+
+    // 02_chat.md「取得の間隔」: timeoutMs 10000 の応答で空振りが続く（10回目から 10秒）
+    #[test]
+    fn wait_grows_while_empty_up_to_timeout() {
+        assert_eq!(
+            waits_while_empty(Some(10_000), 12),
+            [
+                1500, 2500, 3500, 4500, 5500, 6500, 7500, 8500, 9500, 10_000, 10_000, 10_000
+            ]
+        );
+    }
+
+    // 02_chat.md「取得の間隔」: 空振り6回（待ち 6.5秒）のあと新しいメッセージが届く
+    #[test]
+    fn fresh_messages_reset_the_wait() {
+        let mut outcomes = vec![empty(Some(10_000)); 6];
+        assert_eq!(wait_ms(schedule_after(&outcomes)), Some(6500));
+        outcomes.push(FRESH);
+        assert_eq!(wait_ms(schedule_after(&outcomes)), Some(1500));
+    }
+
+    // 02_chat.md「取得の間隔」: timeoutMs 3000 の応答で空振りが続く
+    #[test]
+    fn short_timeout_caps_the_wait() {
+        assert_eq!(waits_while_empty(Some(3000), 4), [1500, 2500, 3000, 3000]);
+    }
+
+    // 02_chat.md「取得の間隔」: 上限が 1.5秒より短いときは下限を優先する
+    #[test]
+    fn timeout_below_minimum_keeps_minimum() {
+        assert_eq!(waits_while_empty(Some(1000), 4), [1500; 4]);
+    }
+
+    // 02_chat.md「取得の間隔」: timeoutMs が無い応答で空振り12回 → 10秒
+    #[test]
+    fn missing_timeout_uses_default_cap() {
+        assert_eq!(waits_while_empty(None, 12)[11], 10_000);
+    }
+
+    // 02_chat.md「取得の間隔」: 空振り5回 → 失敗 → 成功して 0 件
+    #[test]
+    fn failure_does_not_change_empty_count() {
+        let mut outcomes = vec![empty(Some(10_000)); 5];
+        outcomes.push(FAILED);
+        assert_eq!(wait_ms(schedule_after(&outcomes)), Some(1500));
+        outcomes.push(empty(Some(10_000)));
+        assert_eq!(wait_ms(schedule_after(&outcomes)), Some(6500));
     }
 
     // 02_chat.md「取得に失敗したとき」の表: 連続失敗回数 → 次の取得までの待ち（None は切断）
     #[test]
     fn wait_after_consecutive_failures_follows_spec_table() {
         let cases = [
-            (0, Some(1500)),
             (1, Some(1500)),
             (10, Some(1500)),
             (11, Some(3000)),
@@ -673,10 +822,9 @@ mod tests {
             (15, None),
         ];
         for (count, expected) in cases {
-            let failures = failures_after(&vec![false; count]);
             assert_eq!(
-                failures.next_wait(),
-                expected.map(std::time::Duration::from_millis),
+                wait_ms(schedule_after(&vec![FAILED; count])),
+                expected,
                 "{count} 回連続で失敗"
             );
         }
@@ -685,12 +833,9 @@ mod tests {
     // 02_chat.md: 失敗12回 → 成功 → 失敗 なら、次の待ちは 1.5秒
     #[test]
     fn success_resets_consecutive_failures() {
-        let mut results = vec![false; 12];
-        results.extend([true, false]);
-        assert_eq!(
-            failures_after(&results).next_wait(),
-            Some(std::time::Duration::from_millis(1500))
-        );
+        let mut outcomes = vec![FAILED; 12];
+        outcomes.extend([FRESH, FAILED]);
+        assert_eq!(wait_ms(schedule_after(&outcomes)), Some(1500));
     }
 
     fn reaction_at(time: i64) -> ReactionUpdate {
