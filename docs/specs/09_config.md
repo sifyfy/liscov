@@ -96,7 +96,7 @@ max_backup_files = 5
 | `hide_panel_on_connect` | boolean | `true` | - | 配信に接続したら操作パネルを隠す (02_chat.md「上の行と操作パネル」) |
 | `chat_mode` | string | `"top"` | `top` / `all` | チャットモード（トップ / 全て）。最後に選んだモードを覚えておき、次の起動でもそのモードで接続する |
 | `flowed_newcomers_height_ratio` | float | `0.125` | 0.05〜1/3 | 「流れた新規さん」の欄の高さの上限 (コメントの流れの部分の高さに対する割合)。欄の境目のドラッグで変わる (02_chat.md「流れたもの」) |
-| `flowed_supporters_height_ratio` | float | `0.125` | 0.05〜1/3 | 「流れたスパチャ等」の欄の高さの上限。同上 |
+| `flowed_supporters_height_ratio` | float | `0.125` | 0.05〜1/2 | 「この配信のスパチャ等の一覧」の欄の高さの上限 (概要と詳細で共通)。同上。キーの名前は統合前の「流れたスパチャ等」の欄のときのまま |
 
 `flowed_*_height_ratio` を `config_set_value` で範囲外 (または数でない値) にしようとするとエラーにする。ファイルに範囲外の値が書かれていても読み込みは失敗させず、画面が表示のときに範囲に収める。
 

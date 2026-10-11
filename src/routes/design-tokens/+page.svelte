@@ -9,14 +9,13 @@
    */
   import ChatMessage from '$lib/components/chat/ChatMessage.svelte';
   import FlowedSection from '$lib/components/chat/FlowedSection.svelte';
-  import ThanksList from '$lib/components/chat/ThanksList.svelte';
   import StatusLine from '$lib/components/chat/StatusLine.svelte';
   import AuthIndicator from '$lib/components/auth/AuthIndicator.svelte';
   import type { AuthIndicatorState } from '$lib/types';
   import type { StatusAlert } from '$lib/utils/status-alerts';
   import { ROW_SAMPLES, feedOf, newcomersOf, originOf, supportersOf } from '../design-proto/data';
 
-  // 流れたものの欄とお礼の一覧の見本 (試作の通常の場面のデータ)
+  // 流れたものの欄 (スパチャ等の一覧は概要と詳細) の見本 (試作の通常の場面のデータ)
   const feed = feedOf('normal');
   const supporters = supportersOf(feed);
   const flowedSupporters = [...supporters].reverse();
@@ -140,13 +139,31 @@
     </div>
   </section>
 
-  <!-- 流れたものの欄とお礼の一覧 (見た目の回帰テスト e2e/chat-row-visual.spec.ts が撮る) -->
+  <!-- 流れたものの欄 (見た目の回帰テスト e2e/chat-row-visual.spec.ts が撮る) -->
   <section class="mt-8">
-    <h2 class="text-label text-fg-2">流れたものの欄とお礼の一覧</h2>
+    <h2 class="text-label text-fg-2">流れたものの欄 (スパチャ等の一覧は概要と詳細)</h2>
     <div data-testid="flow-samples" class="mt-3 flex max-w-lg flex-col bg-surface">
-      <ThanksList items={supporters} fontSize={13} showTimestamps {originOf} infoOf={noInfo} onClose={() => {}} />
       <FlowedSection label="流れた新規さん" items={flowedNewcomers} fontSize={13} showTimestamps {originOf} infoOf={noInfo} />
-      <FlowedSection label="流れたスパチャ等" items={flowedSupporters} fontSize={13} showTimestamps {originOf} infoOf={noInfo} />
+      <FlowedSection
+        label="この配信のスパチャ等の一覧"
+        items={flowedSupporters}
+        countLabel="流れた {flowedSupporters.length}"
+        fontSize={13}
+        showTimestamps
+        {originOf}
+        infoOf={noInfo}
+      />
+      <FlowedSection
+        label="この配信のスパチャ等の一覧"
+        items={supporters}
+        layout="all"
+        countLabel="全 {supporters.length} 件・時刻順"
+        maxRatio={1 / 2}
+        fontSize={13}
+        showTimestamps
+        {originOf}
+        infoOf={noInfo}
+      />
     </div>
   </section>
 

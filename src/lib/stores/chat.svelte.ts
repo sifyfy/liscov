@@ -377,7 +377,7 @@ function createChatStore() {
       return primaryConnection;
     },
     originOf,
-    // お礼の一覧・流れたスパチャ等の候補と、流れた新規さんの候補（02_chat.md「流れたもの」「配信の最後のお礼」）。
+    // スパチャ等の一覧 (詳細・概要) の候補と、流れた新規さんの候補（02_chat.md「流れたもの」「配信の最後のお礼」）。
     // フィルタ・表示件数によらず、一覧にあるものすべてから取る（クリアすると消える）。届いた順
     get supporters() {
       return supporters;

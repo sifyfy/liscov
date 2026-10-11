@@ -1,6 +1,6 @@
 /**
  * スパチャ等の札の文言 (docs/specs/02_chat.md「メッセージ表示仕様」)。
- * 流れの面の見出し、相手の配信のスパチャ等に添える札、流れたものの欄、お礼の一覧で使う
+ * 流れの面の見出し、相手の配信のスパチャ等に添える札、流れたものの欄 (スパチャ等の一覧の詳細を含む) で使う
  */
 import type { GuiChatMessage } from '$lib/types/generated/GuiChatMessage';
 

@@ -736,7 +736,7 @@ export async function navigateToTab(page: Page, tabName: string): Promise<void> 
   await page.locator(`nav[aria-label="画面"] button[aria-label="${TAB_LABELS[tabName] ?? tabName}"]`).click();
 }
 
-/** 流れ・流れたものの欄・お礼の一覧の中で、text を含むコメントの行 (いちばん上のもの) */
+/** 流れ・流れたものの欄 (スパチャ等の一覧の詳細を含む) の中で、text を含むコメントの行 (いちばん上のもの) */
 export function chatRow(page: Page, text: string): Locator {
   return page.locator('[data-message-id]').filter({ hasText: text }).first();
 }

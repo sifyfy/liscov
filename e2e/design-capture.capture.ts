@@ -173,10 +173,11 @@ test.describe('Design capture', () => {
     await page.waitForTimeout(3000);
     await captureAll('chat-5-heavy');
 
-    // 配信の最後のお礼: この配信のスパチャ等の一覧を開く (02_chat.md「配信の最後のお礼」)
-    await page.getByRole('button', { name: /この配信のスパチャ等の一覧/ }).click();
+    // 配信の最後のお礼: この配信のスパチャ等の一覧を詳細にする (02_chat.md「配信の最後のお礼」)
+    const supporters = page.locator('section[aria-label="この配信のスパチャ等の一覧"]');
+    await supporters.getByRole('button', { name: '詳細' }).click();
     await captureAll('chat-5-thanks');
-    await page.locator('section[aria-label="この配信のスパチャ等"]').getByRole('button', { name: '閉じる' }).click();
+    await supporters.getByRole('button', { name: '概要' }).click();
 
     // 手でスクロールして最新から離れた: 「最新へ」と、戻るまでの残り時間の帯 (02_chat.md「自動スクロール」)
     await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));

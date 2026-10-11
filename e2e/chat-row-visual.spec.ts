@@ -6,7 +6,7 @@ import { setupTestEnvironment, teardownTestEnvironment } from './utils/test-help
  * コメントの行の見た目の回帰テスト (docs/specs/02_chat.md「メッセージ表示仕様」、docs/design/tokens.md)
  *
  * /design-tokens の「コメントの行」(本物の ChatMessage を固定の架空データで並べたもの) と
- * 「流れたものの欄とお礼の一覧」を撮り、基準の画像と比べる。
+ * 「流れたものの欄 (スパチャ等の一覧の概要と詳細を含む)」を撮り、基準の画像と比べる。
  * 優先順位 1〜5・種類・相手の配信の札・読み仮名・折り返し・詰めた形・短い札を守る。
  * データは固定で時刻も文字列なので、モックサーバーやタイムゾーンに左右されない。
  *
@@ -42,7 +42,7 @@ test.describe('コメントの行の見た目', () => {
       await page.evaluate((t) => document.documentElement.setAttribute('data-theme', t), theme);
       await page.mouse.move(-1, -1);
       await expect(page.getByTestId('row-samples')).toHaveScreenshot(`chat-rows-${theme}.png`, { animations: 'disabled' });
-      // 流れたものの欄とお礼の一覧 (docs/specs/02_chat.md「流れたものの欄とお礼の一覧」「詰めた形」)
+      // 流れたものの欄 (スパチャ等の一覧の概要と詳細を含む) (docs/specs/02_chat.md「流れたものの欄」「詰めた形」)
       await expect(page.getByTestId('flow-samples')).toHaveScreenshot(`chat-flow-${theme}.png`, { animations: 'disabled' });
     });
   }

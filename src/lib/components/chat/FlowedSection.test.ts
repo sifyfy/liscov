@@ -8,6 +8,11 @@ import type { ChatMessage } from '$lib/types';
 // - あるときだけ出す
 // - 欄の上の境目をドラッグすると高さの上限が変わる。ダブルクリックで既定 (1/8)、↑↓ は高さの 1/50 ずつ。離したときに保存する
 // - 例: 流れの部分が 800px、中身が 300px、既定の 100px から 60px 上へ引くと 0.2 (160px)
+// spec: 同「配信の最後のお礼」(この配信のスパチャ等の一覧)
+// - 自分の配信のスパチャ等があれば、流れたものが 0 件でも見出しの 1 行だけ出す (「流れた 0」)
+// - 見出しの右端に「概要」「詳細」の切り替え。件数は概要なら「流れた N」、詳細なら「全 N 件・時刻順」
+// - 詳細は時刻順の全件を全文の行で (短い札にしない)
+// - 高さの上限は 1/2 まで
 function message(id: string, overrides: Partial<ChatMessage> = {}): ChatMessage {
   return {
     id,
@@ -53,26 +58,29 @@ const superchat = (id: string, amount: string) =>
     },
   });
 
-const renderSection = (label: string, items: readonly ChatMessage[]) =>
+const renderSection = (label: string, items: readonly ChatMessage[], extra: Record<string, unknown> = {}) =>
   render(FlowedSection, {
-    props: { label, items, fontSize: 13, showTimestamps: true, originOf: () => 'primary' as const, infoOf: () => undefined },
+    props: { label, items, fontSize: 13, showTimestamps: true, originOf: () => 'primary' as const, infoOf: () => undefined, ...extra },
   });
+
+const rowIds = (container: HTMLElement) => [...container.querySelectorAll('[data-message-id]')].map((el) => el.getAttribute('data-message-id'));
+const headingText = (container: HTMLElement) => container.querySelector('h3')?.textContent?.replace(/\s+/g, ' ').trim();
 
 describe('FlowedSection', () => {
   it('中身が無ければ出さない', () => {
-    const { container } = renderSection('流れたスパチャ等', []);
+    const { container } = renderSection('この配信のスパチャ等の一覧', []);
     expect(container.querySelector('section')).toBeNull();
   });
 
   it('見出しに欄の名前と件数を出す', () => {
-    const { container } = renderSection('流れたスパチャ等', [superchat('a', '¥500')]);
-    expect(container.querySelector('section')?.getAttribute('aria-label')).toBe('流れたスパチャ等');
-    expect(container.querySelector('h3')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('流れたスパチャ等 1');
+    const { container } = renderSection('この配信のスパチャ等の一覧', [superchat('a', '¥500')]);
+    expect(container.querySelector('section')?.getAttribute('aria-label')).toBe('この配信のスパチャ等の一覧');
+    expect(container.querySelector('h3')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('この配信のスパチャ等の一覧 1');
   });
 
   it('新しい 2 件は全文の行、それより前は短い札 (● 金額 名前)', () => {
     const items = [superchat('new', '¥10,000'), superchat('mid', '¥1,000'), superchat('old', '¥200')];
-    const { container } = renderSection('流れたスパチャ等', items);
+    const { container } = renderSection('この配信のスパチャ等の一覧', items);
     const rows = [...container.querySelectorAll('[data-message-id]')].map((el) => el.getAttribute('data-message-id'));
     expect(rows).toEqual(['new', 'mid']);
     const chips = [...container.querySelectorAll('[data-testid="flowed-chip"]')].map((el) => el.textContent?.replace(/\s+/g, ' ').trim());
@@ -86,6 +94,37 @@ describe('FlowedSection', () => {
     const { container } = renderSection('流れた新規さん', items);
     const chips = [...container.querySelectorAll('[data-testid="flowed-chip"]')].map((el) => el.textContent?.replace(/\s+/g, ' ').trim());
     expect(chips).toEqual(['初見 name-c']);
+  });
+
+  describe('この配信のスパチャ等の一覧', () => {
+    const label = 'この配信のスパチャ等の一覧';
+
+    it('showEmpty なら、流れたものが 0 件でも見出しの 1 行だけ出す (流れた 0)', () => {
+      const { container } = renderSection(label, [], { showEmpty: true, countLabel: '流れた 0' });
+      expect(container.querySelector('section')?.getAttribute('aria-label')).toBe(label);
+      expect(headingText(container)).toBe('この配信のスパチャ等の一覧 流れた 0');
+      expect(rowIds(container)).toEqual([]);
+    });
+
+    it('詳細 (layout="all") は渡した順 (時刻順) に全件を全文の行で出し、短い札にしない', () => {
+      const items = [superchat('a', '¥500'), superchat('b', '¥1,000'), superchat('c', '¥200'), superchat('d', '¥10,000')];
+      const { container } = renderSection(label, items, { layout: 'all', countLabel: '全 4 件・時刻順' });
+      expect(rowIds(container)).toEqual(['a', 'b', 'c', 'd']);
+      expect(container.querySelectorAll('[data-testid="flowed-chip"]')).toHaveLength(0);
+      expect(headingText(container)).toBe('この配信のスパチャ等の一覧 全 4 件・時刻順');
+    });
+
+    it('高さの上限を 1/2 まで上げられる (maxRatio)', () => {
+      const { container, getByRole } = renderSection(label, [superchat('a', '¥500')], { maxRatio: 1 / 2, heightRatio: 0.45 });
+      expect(getByRole('separator').getAttribute('aria-valuenow')).toBe('45');
+      expect(getByRole('separator').getAttribute('aria-valuemax')).toBe('50');
+      expect((container.querySelector('section') as HTMLElement).style.maxHeight).toContain('45%');
+    });
+
+    it('上限を渡さなければ 1/3 で止める', () => {
+      const { getByRole } = renderSection('流れた新規さん', [message('a')], { heightRatio: 0.45 });
+      expect(getByRole('separator').getAttribute('aria-valuenow')).toBe('33');
+    });
   });
 
   describe('欄の高さ', () => {

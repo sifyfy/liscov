@@ -21,7 +21,7 @@
 | スーパーチャット・スーパーステッカー・メンバーシップ・ギフトのメッセージ | DB の `messages` (08_database.md)。金額は表示用の文字列 `amount` のまま |
 | スーパーチャットのヘッダー背景色 (段階の判定に使う) | DB の `messages.superchat_color` (08_database.md) |
 | ギフトの名前・画像・ジュエル数 | DB の `messages.metadata` の `gift_name`・`gift_image_url`・`jewel_count` (08_database.md) |
-| 配信ごとのスパチャ等の時刻順の一覧 (配信の最後のお礼) | 画面のお礼の一覧 (02_chat.md「配信の最後のお礼」)。この機能とは別 |
+| 配信ごとのスパチャ等の時刻順の一覧 (配信の最後のお礼) | 画面の「この配信のスパチャ等の一覧」の詳細 (02_chat.md「配信の最後のお礼」)。この機能とは別 |
 
 ### Tier別集計
 

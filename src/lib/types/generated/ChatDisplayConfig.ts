@@ -14,6 +14,6 @@ hide_panel_on_connect: boolean, chat_mode: ChatModeSetting,
  */
 flowed_newcomers_height_ratio: number, 
 /**
- * 「流れたスパチャ等」の欄の高さの上限 (同上)
+ * 「この配信のスパチャ等の一覧」の欄の高さの上限 (同上。概要と詳細で共通。キーの名前は統合前の「流れたスパチャ等」のまま)
  */
 flowed_supporters_height_ratio: number, };

@@ -5,7 +5,8 @@
  * - 例: 流れの部分が 800px、中身が 300px → 既定の上限は 100px (1/8)。境目を 60px 上へ引くと 160px (0.2)。
  *   さらに 200px 上へ引いても 266px (1/3) で止まる。中身が 120px しかなければ 120px (0.15) で止まる。
  *   ダブルクリックで 100px (0.125) に戻る
- * - 範囲は 0.05〜1/3。範囲外の値 (古い・手で書いた config.toml) は表示のときに範囲に収める
+ * - 範囲は 0.05〜1/3。「この配信のスパチャ等の一覧」だけは 1/2 まで。範囲外の値 (古い・手で書いた config.toml) は表示のときに範囲に収める
+ * - 例: 「この配信のスパチャ等の一覧」なら 200px 上へ引くと 360px (0.45) まで伸び、400px (1/2) で止まる
  * - ↑ / ↓ は高さの 1/50 ずつ
  */
 import { describe, expect, it } from 'vitest';
@@ -19,6 +20,12 @@ describe('clampFlowedRatio', () => {
   it('範囲外は範囲に収める', () => {
     expect(clampFlowedRatio(0.01)).toBe(0.05);
     expect(clampFlowedRatio(0.9)).toBe(1 / 3);
+  });
+
+  it('この配信のスパチャ等の一覧は 1/2 まで', () => {
+    expect(FLOWED_HEIGHT.supportersMax).toBe(1 / 2);
+    expect(clampFlowedRatio(0.45, FLOWED_HEIGHT.supportersMax)).toBe(0.45);
+    expect(clampFlowedRatio(0.9, FLOWED_HEIGHT.supportersMax)).toBe(1 / 2);
   });
 
   it('数でない値は既定 (1/8)', () => {
@@ -36,6 +43,12 @@ describe('resizedFlowedRatio (例: 流れの部分 800px、中身 300px)', () =>
 
   it('さらに 200px 上へ引いても 1/3 (266px) で止まる', () => {
     expect(resizedFlowedRatio({ ...base, startPx: 160, dragUpPx: 200 })).toBe(1 / 3);
+  });
+
+  it('この配信のスパチャ等の一覧なら、200px 上へ引くと 0.45 (360px) まで伸び、1/2 (400px) で止まる', () => {
+    const supporters = { parentPx: 800, contentPx: 1000, max: FLOWED_HEIGHT.supportersMax };
+    expect(resizedFlowedRatio({ ...supporters, startPx: 160, dragUpPx: 200 })).toBeCloseTo(0.45);
+    expect(resizedFlowedRatio({ ...supporters, startPx: 360, dragUpPx: 200 })).toBe(1 / 2);
   });
 
   it('中身が 120px しかなければ 0.15 (120px) で止まる', () => {

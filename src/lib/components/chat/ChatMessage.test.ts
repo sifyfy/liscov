@@ -160,7 +160,7 @@ describe('ChatMessage', () => {
 				expect(body.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 			});
 
-			it('詰めた 1 行 (流れたものの欄・お礼の一覧) にも出す', () => {
+			it('詰めた 1 行 (流れたものの欄・スパチャ等の一覧の詳細) にも出す', () => {
 				const { container } = renderRow(superchat({ author_notes: 'イラストのお礼を言う' }), { compact: true });
 				expect(notesOf(container)?.textContent).toContain('イラストのお礼を言う');
 			});
@@ -288,7 +288,7 @@ describe('ChatMessage', () => {
 			expect(source.className).not.toMatch(/\bbg-/);
 		});
 
-		it('詰めた形 (流れたものの欄・お礼の一覧) でも、名前の行の上に配信者名を出す', () => {
+		it('詰めた形 (流れたものの欄・スパチャ等の一覧の詳細) でも、名前の行の上に配信者名を出す', () => {
 			const { container } = renderRow(createMessage({ broadcaster_name: 'あおば' }), { origin: 'partner', compact: true });
 			const source = container.querySelector('[data-testid="source-label"]') as HTMLElement;
 			const nameLine = container.querySelector('[data-testid="name-line"]') as HTMLElement;
@@ -326,7 +326,7 @@ describe('ChatMessage', () => {
 		});
 	});
 
-	// 02_chat.md「メッセージ表示仕様」「詰めた形」: 流れたものの欄 (新しい 2 件) とお礼の一覧で使う
+	// 02_chat.md「メッセージ表示仕様」「詰めた形」: 流れたものの欄 (新しい 2 件) とスパチャ等の一覧の詳細で使う
 	describe('詰めた形 (compact)', () => {
 		it('アイコンを出さない', () => {
 			const { container } = renderRow(createMessage({ author_icon_url: 'https://example.com/a.png' }), { compact: true });

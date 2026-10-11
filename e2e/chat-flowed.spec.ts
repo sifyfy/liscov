@@ -14,10 +14,12 @@ import {
 } from './utils/test-helpers';
 
 /**
- * 流れたものの欄とお礼の一覧 (docs/specs/02_chat.md「配信中の画面」の「流れたもの」「配信の最後のお礼」)
+ * 流れたものの欄 (docs/specs/02_chat.md「配信中の画面」の「流れたもの」「配信の最後のお礼」)
  *
- * 仕様の例: ¥10,000 の赤スパのあとにコメントが 40 件来て流れの画面から外れた → 「流れたスパチャ等」の欄の先頭に出る
+ * 仕様の例: ¥10,000 の赤スパのあとにコメントが 40 件来て流れの画面から外れた → 「この配信のスパチャ等の一覧」の概要の先頭に出る
  * 仕様の例 (欄の高さ): 境目を 60px 上へ引くと 60px 高くなり、離すと割合を覚える。ダブルクリックで既定 (1/8) に戻る
+ * 仕様の例 (お礼の一覧): 「詳細」を押すと同じ欄の中身が時刻順の全件になり、件数は「全 N 件・時刻順」。「概要」で流れたものに戻る
+ * 仕様の例 (流れたものが無い): 全部画面に見えている → 欄は見出しの 1 行「… 流れた 0」だけ
  */
 
 /** config.toml に保存された流れた新規さんの欄の高さの割合 (無ければ null) */
@@ -31,7 +33,7 @@ function readNewcomersHeightRatio(): number | null {
 // 視聴者は実行ごとに新しい channel_id にする (初見の判定はテスト用の DB に残るため)
 const RUN = Date.now().toString(36);
 
-test.describe('流れたものの欄とお礼の一覧', () => {
+test.describe('流れたものの欄 (スパチャ等の一覧の概要と詳細)', () => {
   let browser: Browser;
   let page: Page;
 
@@ -47,7 +49,7 @@ test.describe('流れたものの欄とお礼の一覧', () => {
     await teardownTestEnvironment(browser);
   });
 
-  test('流れて画面の外に出たスパチャと新規さんが欄に残り、お礼の一覧で時刻順に見られる', async () => {
+  test('流れて画面の外に出たスパチャと新規さんが欄に残り、スパチャ等の一覧の詳細で時刻順に見られる', async () => {
     test.setTimeout(120000);
     await resetMockServer();
     await connectToMockStream(page);
@@ -68,31 +70,42 @@ test.describe('流れたものの欄とお礼の一覧', () => {
     await expect(page.getByText('コメント 39')).toBeVisible({ timeout: 15000 });
 
     // 流れた: スパチャと、新規さんの初回コメントが、それぞれの欄に出る
-    const flowedSupers = page.locator('section[aria-label="流れたスパチャ等"]');
+    const flowedSupers = page.locator('section[aria-label="この配信のスパチャ等の一覧"]');
     const flowedNewcomers = page.locator('section[aria-label="流れた新規さん"]');
     await expect(flowedSupers).toContainText('RedDonor', { timeout: 5000 });
     await expect(flowedSupers).toContainText('¥10,000');
     await expect(flowedSupers).toContainText('遅れてきました！');
     await expect(flowedNewcomers).toContainText('NewViewer');
 
-    // 配信の最後のお礼: 一覧を開く (1 手)。流れたスパチャ等の欄は一覧に含まれるので消え、最新のコメントは見えたまま
-    await page.getByRole('button', { name: /この配信のスパチャ等の一覧/ }).click();
-    const thanks = page.locator('section[aria-label="この配信のスパチャ等"]');
-    await expect(thanks).toContainText('RedDonor');
-    await expect(thanks).toContainText('1 件・時刻順');
-    await expect(flowedSupers).toHaveCount(0);
+    // 概要の件数は「流れた N」
+    await expect(flowedSupers.locator('h3')).toContainText('流れた 1');
+    const summary = flowedSupers.getByRole('button', { name: '概要' });
+    const detail = flowedSupers.getByRole('button', { name: '詳細' });
+    await expect(summary).toHaveAttribute('aria-pressed', 'true');
+
+    // 配信の最後のお礼: 「詳細」を押す (1 手)。同じ欄の中身が時刻順の全件になる。
+    // 流れた新規さんの欄と最新のコメントは見えたまま
+    await detail.click();
+    await expect(detail).toHaveAttribute('aria-pressed', 'true');
+    await expect(flowedSupers.locator('h3')).toContainText('全 1 件・時刻順');
+    await expect(flowedSupers).toContainText('RedDonor');
+    await expect(flowedSupers).toContainText('遅れてきました！');
     await expect(flowedNewcomers).toContainText('NewViewer');
     await expect(page.getByText('コメント 39')).toBeVisible();
 
-    await thanks.getByRole('button', { name: '閉じる' }).click();
-    await expect(thanks).toHaveCount(0);
+    // 「概要」で流れたものに戻る
+    await summary.click();
+    await expect(summary).toHaveAttribute('aria-pressed', 'true');
+    await expect(flowedSupers.locator('h3')).toContainText('流れた 1');
     await expect(flowedSupers).toContainText('RedDonor');
 
     // 手でスクロールして戻り (自動スクロールは止まる)、また見えたら欄から外れる
     await page.getByText('コメント 39').hover();
     await page.mouse.wheel(0, -20000);
     await expect(page.getByText('遅れてきました！').first()).toBeVisible({ timeout: 5000 });
-    await expect(flowedSupers).toHaveCount(0, { timeout: 5000 });
+    // スパチャ等の一覧は見出しの 1 行だけ残る (流れた 0)。新規さんの欄は消える
+    await expect(flowedSupers.locator('[data-message-id]')).toHaveCount(0, { timeout: 5000 });
+    await expect(flowedSupers.locator('h3')).toContainText('流れた 0');
     await expect(flowedNewcomers).toHaveCount(0);
 
     await disconnectAndInitialize(page);

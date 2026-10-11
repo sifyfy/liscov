@@ -2,9 +2,10 @@
   /**
    * 配信中の画面のコメントの部分 (docs/specs/02_chat.md「配信中の画面」「メッセージ表示仕様」)
    *
-   * 上から: お礼の一覧 (開いたときだけ) / コメントの流れ / 流れた新規さん / 流れたスパチャ等 / お礼の一覧を開くボタン
+   * 上から: コメントの流れ / 流れた新規さん / この配信のスパチャ等の一覧 (概要・詳細を切り替える)
    * - 流れたもの = 流れの画面のいちばん上に見えている行より前に届いた優先順位 1・2 (src/lib/design/flow.ts)
-   * - 流れの高さが変わったとき (欄や一覧が開閉した・ウィンドウの大きさ) も、自動スクロール中なら最新を見せ続ける
+   * - スパチャ等の一覧の概要は流れたもの、詳細は時刻順の全件 (配信の最後のお礼)。起動・F5 では概要
+   * - 流れの高さが変わったとき (欄の伸び縮み・概要と詳細の切り替え・ウィンドウの大きさ) も、自動スクロール中なら最新を見せ続ける
    * - 自動スクロール: 手でスクロールして最新から離れたら止め、流れの上で 30 秒操作が無ければ最新に戻る (src/lib/utils/auto-return.ts)。
    *   離れている間は右下に「最新へ」のボタン (離れている間に届いた優先順位 1・2 の件数を添える)
    * - 視聴者情報パネル: 押したコメントの行のすぐ下に広げる (「視聴者の読み仮名・メモ」)。流れは止まり、打っている間は最新に戻らない。
@@ -15,8 +16,8 @@
   import { VList, type VListHandle } from 'virtua/svelte';
   import ChatMessageComponent from './ChatMessage.svelte';
   import FlowedSection from './FlowedSection.svelte';
-  import ThanksList from './ThanksList.svelte';
   import { arrivedSince, flowedAbove } from '$lib/design/flow';
+  import { FLOWED_HEIGHT } from '$lib/design/flowed-height';
   import { ViewerInfoPanel } from '$lib/components/viewer';
   import type { ChatMessage } from '$lib/types';
   import { messageKey, type MessageKey } from '$lib/utils/message-key';
@@ -119,10 +120,10 @@
   /**
    * 視聴者情報パネル (開いていなければ null)。
    * - broadcasterChannelId は押したコメントが届いた接続の配信者。パネル内のコメントを押しても変えない (02_chat.md「どの配信者のもとで開くか」)
-   * - anchorKey と place は広げる行と、その行がある所 (流れ・流れたものの欄・お礼の一覧)
+   * - anchorKey と place は広げる行と、その行がある所 (流れ・流れたものの欄。スパチャ等の一覧の詳細も流れたものの欄)
    * - wasFollowing は開く前に最新を追っていたか (閉じたら最新に戻す)。returnFocus は閉じたらフォーカスを戻す行
    */
-  type PanelPlace = 'flow' | 'flowed' | 'thanks';
+  type PanelPlace = 'flow' | 'flowed';
   let panel = $state<{
     viewer: { channelId: string; displayName: string; iconUrl?: string; message: ChatMessage };
     broadcasterChannelId: string;
@@ -140,8 +141,9 @@
   // Highlighted message ID (for scroll-to feature)
   let highlightedMessageKey = $state<MessageKey | null>(null);
 
-  // 配信の最後のお礼の一覧を開いているか
-  let thanksOpen = $state(false);
+  // この配信のスパチャ等の一覧の表示。概要 = 流れたもの、詳細 = 時刻順の全件 (配信の最後のお礼)。覚えない
+  type SupportersView = 'summary' | 'detail';
+  let supportersView = $state<SupportersView>('summary');
 
   // 流れの画面のいちばん上に見えている行 (一部だけ見えているものを含む)。何も無ければ undefined
   let firstVisible = $state.raw<ChatMessage | undefined>(undefined);
@@ -158,10 +160,11 @@
     queueMicrotask(updateFirstVisible);
   });
 
-  // 流れたもの。フィルタで隠しているものは流れていないので、フィルタ後の一覧の中で前にあるものだけ。
-  // 一覧が開いている間のスパチャ等は一覧に含まれるので出さない
-  let flowedSupporters = $derived(thanksOpen ? [] : flowedAbove(chatStore.supporters, chatStore.filteredMessages, firstVisible));
+  // 流れたもの。フィルタで隠しているものは流れていないので、フィルタ後の一覧の中で前にあるものだけ
+  let flowedSupporters = $derived(flowedAbove(chatStore.supporters, chatStore.filteredMessages, firstVisible));
   let flowedNewcomers = $derived(flowedAbove(chatStore.newcomers, chatStore.filteredMessages, firstVisible));
+  // スパチャ等の一覧の中身 (詳細はフィルタ・表示件数によらない)
+  let supportersItems = $derived(supportersView === 'detail' ? chatStore.supporters : flowedSupporters);
 
   /** 流れの高さが変わったら、自動スクロール中なら最新に合わせ直す ({@attach}) */
   function followResize(node: HTMLElement): () => void {
@@ -196,8 +199,7 @@
   // パネルを広げた行がある一覧
   function placeItems(place: PanelPlace): readonly ChatMessage[] {
     if (place === 'flow') return chatStore.displayedMessages;
-    if (place === 'thanks') return thanksOpen ? chatStore.supporters : [];
-    return [...flowedNewcomers, ...flowedSupporters];
+    return [...flowedNewcomers, ...supportersItems];
   }
 
   // 流れの中でパネルを広げた行の位置 (virtua が画面の外に出ても消さないように keepMounted に渡す)
@@ -222,7 +224,7 @@
 
   /**
    * コメントを押した (from は押した行がある所)。押した行のすぐ下に視聴者情報パネルを広げ、流れを止める。
-   * 流れたものの欄・お礼の一覧で押したら、流れのそのコメントまで移ってその下に広げる。流れに無ければ押した行の下に広げる
+   * 流れたものの欄 (スパチャ等の一覧の詳細を含む) で押したら、流れのそのコメントまで移ってその下に広げる。流れに無ければ押した行の下に広げる
    */
   function handleMessageClick(message: ChatMessage, from: PanelPlace = 'flow') {
     // 視聴者を特定できないギフト（channel_id が空）は視聴者情報パネルを開かない
@@ -305,20 +307,6 @@
 </script>
 
 <div class="relative flex h-full flex-col bg-surface">
-  {#if thanksOpen}
-    <ThanksList
-      items={chatStore.supporters}
-      {fontSize}
-      {showTimestamps}
-      originOf={chatStore.originOf}
-      infoOf={chatStore.infoOf}
-      onClick={(message) => handleMessageClick(message, 'thanks')}
-      onClose={() => (thanksOpen = false)}
-      openKey={panel?.place === 'thanks' ? panel.anchorKey : null}
-      panel={viewerPanel}
-    />
-  {/if}
-
   <!-- コメントの流れ (最新が下) -->
   <div
     class="relative flex min-h-0 flex-1 flex-col"
@@ -387,9 +375,15 @@
     openKey={panel?.place === 'flowed' ? panel.anchorKey : null}
     panel={viewerPanel}
   />
+  <!-- 自分の配信のスパチャ等があれば、流れたものが無くても見出しの 1 行を出す (詳細へ切り替えられるように) -->
   <FlowedSection
-    label="流れたスパチャ等"
-    items={flowedSupporters}
+    label="この配信のスパチャ等の一覧"
+    items={supportersItems}
+    layout={supportersView === 'detail' ? 'all' : 'flowed'}
+    countLabel={supportersView === 'detail' ? `全 ${supportersItems.length} 件・時刻順` : `流れた ${supportersItems.length}`}
+    showEmpty={chatStore.supporters.length > 0}
+    actions={supportersViewSwitch}
+    maxRatio={FLOWED_HEIGHT.supportersMax}
     heightRatio={configStore.flowedSupportersHeightRatio}
     onHeightChange={(ratio) => configStore.setFlowedHeightRatio('supporters', ratio)}
     {fontSize}
@@ -400,21 +394,28 @@
     openKey={panel?.place === 'flowed' ? panel.anchorKey : null}
     panel={viewerPanel}
   />
-  {#if !thanksOpen && chatStore.supporters.length > 0}
-    <button
-      type="button"
-      onclick={() => (thanksOpen = true)}
-      class="h-7 shrink-0 border-t border-outline-variant bg-surface-low px-3 text-left text-label text-fg-2 hover:bg-fg-1/8 active:bg-fg-1/12"
-    >
-      この配信のスパチャ等の一覧 <span class="tabular-nums">{chatStore.supporters.length}</span>
-    </button>
-  {/if}
 
   <!-- 読み上げ用の知らせ (パネルは保存すると閉じるので外に置く) -->
   <p class="sr-only" aria-live="polite">{announcement}</p>
 </div>
 
-<!-- 視聴者情報パネル。押した行のすぐ下に、流れ・流れたものの欄・お礼の一覧のどこでも同じものを広げる -->
+<!-- この配信のスパチャ等の一覧の概要・詳細の切り替え (見出しの右端) -->
+{#snippet supportersViewSwitch()}
+  <div role="group" aria-label="表示" class="flex items-center gap-0.5">
+    {#each [['summary', '概要'], ['detail', '詳細']] as const as [view, text] (view)}
+      <button
+        type="button"
+        aria-pressed={supportersView === view}
+        onclick={() => (supportersView = view)}
+        class="rounded-control px-1.5 text-caption {supportersView === view ? 'bg-accent/15 text-accent' : 'text-fg-2 hover:bg-fg-1/8'}"
+      >
+        {text}
+      </button>
+    {/each}
+  </div>
+{/snippet}
+
+<!-- 視聴者情報パネル。押した行のすぐ下に、流れ・流れたものの欄のどこでも同じものを広げる -->
 {#snippet viewerPanel()}
   {#if panel}
     <ViewerInfoPanel

@@ -433,20 +433,21 @@ test.describe('Chat Display — Viewer Panel (02_chat.md)', () => {
       await disconnectAndInitialize(mainPage);
     });
 
-    test('流れたスパチャ等の欄で押すと、流れのそのコメントまで移ってその下に広げる', async () => {
+    test('この配信のスパチャ等の一覧 (概要) で押すと、流れのそのコメントまで移ってその下に広げる', async () => {
       await connectToMockStream(mainPage);
       await addMockMessage({ message_type: 'superchat', author: 'FlowedChatter', content: 'Flowed superchat body', amount: '¥1,000', tier: 'yellow' });
       await addFiller('Flow', 40);
-      const flowed = mainPage.getByRole('region', { name: '流れたスパチャ等' });
+      const flowed = mainPage.getByRole('region', { name: 'この配信のスパチャ等の一覧' });
       await expect(flowed.getByText('Flowed superchat body')).toBeVisible({ timeout: 5000 });
 
       await flowed.locator('[data-message-id]').filter({ hasText: 'Flowed superchat body' }).click();
       const panel = viewerPanel(mainPage);
       await expect(panel.getByLabel('読み仮名')).toBeEnabled({ timeout: 5000 });
       await expect(panel).toBeInViewport();
-      // 流れの中に広げる (欄の中ではない)。流れにそのコメントが見えるので、欄からは外れる
+      // 流れの中に広げる (欄の中ではない)。流れにそのコメントが見えるので、欄 (概要) からは外れ、見出しだけ残る
       await expect(chatContainer().getByRole('region', { name: '視聴者情報' })).toHaveCount(1);
-      await expect(flowed).toHaveCount(0, { timeout: 5000 });
+      await expect(flowed.locator('[data-message-id]')).toHaveCount(0, { timeout: 5000 });
+      await expect(flowed).toContainText('流れた 0');
 
       await panel.getByLabel('読み仮名').press('Escape');
       await disconnectAndInitialize(mainPage);
