@@ -477,11 +477,11 @@ fn parse_membership_gift_message(renderer: &Value) -> Option<ChatMessage> {
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
-    // プライマリテキストを抽出（例: "Sent 5 [channel] gift memberships"）
-    let primary_text = text_of(header.get("primaryText")).unwrap_or_default();
-
-    // プライマリテキストからギフト数を抽出する
-    let gift_count = extract_gift_count(&primary_text).unwrap_or(1);
+    // プライマリテキスト（例: "Sent 5 [channel] gift memberships"）は YouTube の定型文なので、
+    // 件数を取るためだけに使い本文には入れない（02_chat.md「メンバーシップギフトの本文」）
+    let gift_count = text_of(header.get("primaryText"))
+        .and_then(|text| extract_gift_count(&text))
+        .unwrap_or(1);
 
     Some(ChatMessage {
         id,
@@ -491,7 +491,7 @@ fn parse_membership_gift_message(renderer: &Value) -> Option<ChatMessage> {
         author,
         author_icon_url,
         channel_id,
-        content: primary_text,
+        content: String::new(),
         runs: vec![],
         metadata: None,
         is_member: true,
@@ -952,10 +952,9 @@ mod tests {
         assert_eq!(extract_gift_count("1 membership"), Some(1));
     }
 
-    #[test]
-    fn test_parse_membership_gift_message() {
-        // メンバーシップギフトアナウンスのパース（実際の YouTube フォーマット）
-        let action = serde_json::json!({
+    /// メンバーシップギフト（実際の YouTube の形）。primaryText の runs を差し替えられる
+    fn membership_gift_action(primary_text_runs: Value) -> Value {
+        serde_json::json!({
             "addChatItemAction": {
                 "item": {
                     "liveChatSponsorshipsGiftPurchaseAnnouncementRenderer": {
@@ -966,32 +965,50 @@ mod tests {
                             "liveChatSponsorshipsHeaderRenderer": {
                                 "authorName": {"simpleText": "GiftGiver"},
                                 "authorPhoto": {"thumbnails": [{"url": "https://example.com/av.png"}]},
-                                "primaryText": {"runs": [
-                                    {"text": "Sent ", "bold": true},
-                                    {"text": "5", "bold": true},
-                                    {"text": " ", "bold": true},
-                                    {"text": "Channel Name", "bold": true},
-                                    {"text": " gift memberships", "bold": true}
-                                ]}
+                                "primaryText": {"runs": primary_text_runs}
                             }
                         }
                     }
                 }
             }
-        });
+        })
+    }
 
-        let msg = parse_chat_action(&action);
-        assert!(msg.is_some(), "ギフトメッセージがパースされること");
-        let msg = msg.unwrap();
+    // 02_chat.md「メンバーシップギフトの本文」の例
+    #[test]
+    fn membership_gift_takes_count_from_primary_text_and_leaves_body_empty() {
+        let action = membership_gift_action(serde_json::json!([
+            {"text": "Sent ", "bold": true},
+            {"text": "5", "bold": true},
+            {"text": " ", "bold": true},
+            {"text": "Channel Name", "bold": true},
+            {"text": " gift memberships", "bold": true}
+        ]));
+
+        let msg = parse_chat_action(&action).expect("ギフトをパースすること");
+
         assert_eq!(msg.author, "GiftGiver");
         assert_eq!(msg.channel_id, "UC_gift_giver");
+        assert_eq!(
+            msg.message_type,
+            MessageType::MembershipGift { gift_count: 5 }
+        );
+        assert_eq!(msg.content, "");
+        assert!(msg.runs.is_empty());
+    }
 
-        match msg.message_type {
-            MessageType::MembershipGift { gift_count } => {
-                assert_eq!(gift_count, 5, "5ギフトを抽出すること");
-            }
-            _ => panic!("MembershipGift メッセージタイプを期待"),
-        }
+    #[test]
+    fn membership_gift_with_unreadable_count_is_one_and_body_empty() {
+        let action = membership_gift_action(serde_json::json!([{"text": "Sent gift memberships"}]));
+
+        let msg = parse_chat_action(&action).expect("ギフトをパースすること");
+
+        assert_eq!(
+            msg.message_type,
+            MessageType::MembershipGift { gift_count: 1 }
+        );
+        assert_eq!(msg.content, "");
+        assert!(msg.runs.is_empty());
     }
 
     /// メンバーシップギフトの受け取り（02_chat.md「メンバーシップギフトの受け取り」の実測の形）

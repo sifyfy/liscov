@@ -193,11 +193,22 @@ pub fn save_message(
         _ => None,
     };
 
-    // metadata は現在 gift のみ（08_database.md ギフトの保存形式）
+    // 件数・月数・レベル名・ギフトの内容は content に入らないので metadata に残す（08_database.md 保存形式）
     let metadata = match &message.message_type {
-        crate::core::models::MessageType::Gift(gift) => serde_json::to_string(gift).ok(),
+        crate::core::models::MessageType::Membership {
+            milestone_months,
+            membership_level,
+        } => Some(serde_json::json!({
+            "milestone_months": milestone_months,
+            "membership_level": membership_level,
+        })),
+        crate::core::models::MessageType::MembershipGift { gift_count } => {
+            Some(serde_json::json!({ "gift_count": gift_count }))
+        }
+        crate::core::models::MessageType::Gift(gift) => serde_json::to_value(gift).ok(),
         _ => None,
-    };
+    }
+    .map(|value| value.to_string());
 
     // バッジを読めない種類は NULL（不明）。08_database.md messages テーブル
     let badges = message.author_badge_metadata();
@@ -2410,6 +2421,87 @@ mod tests {
             get_session_messages(&conn, &session_id, 10).unwrap()[0].metadata,
             None
         );
+    }
+
+    /// 1 件保存して、保存した content と metadata (JSON) を返す
+    async fn save_and_read_content_metadata(message: ChatMessage) -> (String, serde_json::Value) {
+        let db = setup_db();
+        let conn = db.connection().await;
+        let session_id = create_session(&conn, None, None, Some("UC_bc"), Some("BC")).unwrap();
+        save_message(&conn, &session_id, Some("UC_bc"), &message, None).unwrap();
+        let stored = &get_session_messages(&conn, &session_id, 10).unwrap()[0];
+        let metadata = serde_json::from_str(stored.metadata.as_deref().unwrap()).unwrap();
+        (stored.content.clone(), metadata)
+    }
+
+    fn make_membership_message(
+        milestone_months: Option<u32>,
+        membership_level: Option<&str>,
+        content: &str,
+    ) -> ChatMessage {
+        ChatMessage {
+            id: "mem1".to_string(),
+            message_type: MessageType::Membership {
+                milestone_months,
+                membership_level: membership_level.map(str::to_string),
+            },
+            author: "@a".to_string(),
+            channel_id: "UC_a".to_string(),
+            content: content.to_string(),
+            ..Default::default()
+        }
+    }
+
+    // 08_database.md「メンバーシップ・メンバーシップギフトの保存形式」の例
+    #[tokio::test]
+    async fn new_member_saved_with_level_in_metadata() {
+        let (content, metadata) =
+            save_and_read_content_metadata(make_membership_message(None, Some("ほしぞら組"), ""))
+                .await;
+        assert_eq!(content, "");
+        assert_eq!(
+            metadata,
+            serde_json::json!({"milestone_months": null, "membership_level": "ほしぞら組"})
+        );
+    }
+
+    #[tokio::test]
+    async fn milestone_saved_with_months_and_level_in_metadata() {
+        let (content, metadata) = save_and_read_content_metadata(make_membership_message(
+            Some(17),
+            Some("ほしぞら組"),
+            "いつも楽しい！",
+        ))
+        .await;
+        assert_eq!(content, "いつも楽しい！");
+        assert_eq!(
+            metadata,
+            serde_json::json!({"milestone_months": 17, "membership_level": "ほしぞら組"})
+        );
+    }
+
+    #[tokio::test]
+    async fn new_member_without_level_saved_with_null_level() {
+        let (_, metadata) =
+            save_and_read_content_metadata(make_membership_message(None, None, "")).await;
+        assert_eq!(
+            metadata,
+            serde_json::json!({"milestone_months": null, "membership_level": null})
+        );
+    }
+
+    #[tokio::test]
+    async fn membership_gift_saved_with_gift_count_in_metadata() {
+        let (content, metadata) = save_and_read_content_metadata(ChatMessage {
+            id: "mg1".to_string(),
+            message_type: MessageType::MembershipGift { gift_count: 5 },
+            author: "@gifter-x9".to_string(),
+            channel_id: "UCgifterx9".to_string(),
+            ..Default::default()
+        })
+        .await;
+        assert_eq!(content, "");
+        assert_eq!(metadata, serde_json::json!({"gift_count": 5}));
     }
 
     #[tokio::test]
