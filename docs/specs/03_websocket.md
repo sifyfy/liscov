@@ -339,7 +339,7 @@ pub enum ClientMessage {
 | `Text` | 通常メッセージ | なし |
 | `SuperChat` | スーパーチャット | `amount` |
 | `SuperSticker` | スーパーステッカー | `amount` |
-| `Membership` | メンバーシップ | `milestone_months` |
+| `Membership` | メンバーシップ | `milestone_months`、`membership_level`（レベル名。取れなければ null） |
 | `MembershipGift` | ギフトメンバーシップ | `gift_count` |
 | `Gift` | ジュエルで送るギフト | `gift_name`、`gift_image_url`（無ければ null）、`jewel_count`（取れなければ null） |
 | `System` | システムメッセージ | なし |
