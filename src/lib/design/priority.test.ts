@@ -26,6 +26,13 @@ describe('messagePriority', () => {
     },
   );
 
+  // docs/specs/02_chat.md「メンバーシップギフトの受け取り」: お礼の対象ではない。コメント回数は数えない (null)
+  it('メンバーシップギフトの受け取りは、主の配信でも優先順位 5', () => {
+    expect(
+      messagePriority({ message_type: 'membership_gift_redemption', is_first_time_viewer: false, in_stream_comment_count: null }, 'primary'),
+    ).toBe(5);
+  });
+
   it('有料のものは、新規さんの初回でも優先順位 1', () => {
     expect(messagePriority({ message_type: 'superchat', is_first_time_viewer: true, in_stream_comment_count: 1 })).toBe(1);
   });

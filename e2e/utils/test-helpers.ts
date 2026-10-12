@@ -553,6 +553,8 @@ export async function addMockMessage(message: {
   milestone_months?: number;
   gift_count?: number;
   gift_image_url?: string;
+  /** メンバーシップギフトの受け取り (membership_gift_redemption) の贈った人。省略すると太字の run が無い (贈った人が分からない) */
+  gifter?: string;
   /** 同じ id を再び積むと YouTube の再送を再現できる。省略時はモックが採番する */
   id?: string;
 }): Promise<void> {

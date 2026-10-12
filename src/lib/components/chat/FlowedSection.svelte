@@ -38,6 +38,8 @@
     originOf: (message: ChatMessage) => MessageOrigin;
     /** パネル・視聴者のタブで保存し直した読み仮名とメモ (chatStore.infoOf) */
     infoOf: (message: ChatMessage) => ViewerInfo | undefined;
+    /** その行にまとめたメンバーシップギフトの受け取り (chatStore.recipientsOf) */
+    recipientsOf?: (message: ChatMessage) => readonly ChatMessage[];
     onClick?: (message: ChatMessage) => void;
     /** 視聴者情報パネルを広げる行 */
     openKey?: MessageKey | null;
@@ -60,6 +62,7 @@
     showTimestamps,
     originOf,
     infoOf,
+    recipientsOf = () => [],
     onClick,
     openKey = null,
     panel,
@@ -173,6 +176,7 @@
         origin={originOf(message)}
         reading={infoOf(message)?.reading}
         notes={infoOf(message)?.notes}
+        recipients={recipientsOf(message)}
         onClick={() => onClick?.(message)}
       />
       {#if panel && messageKey(message) === openKey}{@render panel()}{/if}

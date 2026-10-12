@@ -346,6 +346,7 @@
             origin={chatStore.originOf(message)}
             reading={chatStore.infoOf(message)?.reading}
             notes={chatStore.infoOf(message)?.notes}
+            recipients={chatStore.recipientsOf(message)}
             highlighted={highlightedMessageKey === messageKey(message) || panel?.anchorKey === messageKey(message)}
             onClick={() => handleMessageClick(message)}
           />
@@ -390,6 +391,7 @@
     {showTimestamps}
     originOf={chatStore.originOf}
     infoOf={chatStore.infoOf}
+    recipientsOf={chatStore.recipientsOf}
     onClick={(message) => handleMessageClick(message, 'flowed')}
     openKey={panel?.place === 'flowed' ? panel.anchorKey : null}
     panel={viewerPanel}

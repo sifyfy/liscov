@@ -71,6 +71,7 @@ const metadata = (overrides: Partial<NonNullable<Message['metadata']>>): NonNull
   amount: null,
   milestone_months: null,
   gift_count: null,
+  gifter: null,
   gift_name: null,
   gift_image_url: null,
   jewel_count: null,

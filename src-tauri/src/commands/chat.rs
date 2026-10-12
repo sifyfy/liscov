@@ -132,6 +132,8 @@ pub struct GuiMessageMetadata {
     pub amount: Option<String>,
     pub milestone_months: Option<u32>,
     pub gift_count: Option<u32>,
+    // 贈った人の名前（membership_gift_redemption のみ）
+    pub gifter: Option<String>,
     // ギフト名（gift のみ）
     pub gift_name: Option<String>,
     // ギフト画像 URL（gift のみ）
@@ -193,6 +195,10 @@ impl From<ChatMessage> for GuiChatMessage {
             MessageType::MembershipGift { gift_count } => Some(*gift_count),
             _ => None,
         };
+        let gifter = match &msg.message_type {
+            MessageType::MembershipGiftRedemption { gifter } => gifter.clone(),
+            _ => None,
+        };
         let (gift_name, gift_image_url, jewel_count) = match &msg.message_type {
             MessageType::Gift(gift) => (
                 Some(gift.gift_name.clone()),
@@ -220,10 +226,12 @@ impl From<ChatMessage> for GuiChatMessage {
             })
             .collect();
 
-        // metadata を変換。種別に件数などがあるのに metadata が無いとき (パーサーはメンバーシップギフトに付けない) は、
+        // metadata を変換。種別に件数などがあるのに metadata が無いとき (パーサーはメンバーシップギフトとその受け取りに付けない) は、
         // 空の metadata に種別の値を載せる。載せないと件数が画面に届かない
-        let has_type_details =
-            milestone_months.is_some() || gift_count.is_some() || gift_name.is_some();
+        let has_type_details = milestone_months.is_some()
+            || gift_count.is_some()
+            || gifter.is_some()
+            || gift_name.is_some();
         let metadata = msg
             .metadata
             .or_else(|| has_type_details.then(crate::core::models::MessageMetadata::default))
@@ -231,6 +239,7 @@ impl From<ChatMessage> for GuiChatMessage {
                 amount: m.amount,
                 milestone_months,
                 gift_count,
+                gifter,
                 gift_name,
                 gift_image_url,
                 jewel_count,
@@ -700,6 +709,24 @@ mod tests {
         };
         let gui = GuiChatMessage::from(msg);
         assert_eq!(gui.metadata.and_then(|m| m.gift_count), Some(5));
+    }
+
+    // 02_chat.md「メンバーシップギフトの受け取り」: 画面で贈った人の行にまとめるため、贈った人の名前が画面に届く
+    #[test]
+    fn redemption_gifter_reaches_gui_without_metadata() {
+        let msg = ChatMessage {
+            message_type: MessageType::MembershipGiftRedemption {
+                gifter: Some("@gifter-x9".to_string()),
+            },
+            content: "received a gift membership by @gifter-x9".to_string(),
+            ..text_message()
+        };
+        let gui = GuiChatMessage::from(msg);
+        assert_eq!(gui.message_type, "membership_gift_redemption");
+        assert_eq!(
+            gui.metadata.and_then(|m| m.gifter).as_deref(),
+            Some("@gifter-x9")
+        );
     }
 
     // 02_chat.md「配信中の画面」1 行の形: 読み仮名が登録されている視聴者は、名前の横に小さく出す

@@ -502,6 +502,63 @@ fn parse_membership_gift_message(renderer: &Value) -> Option<ChatMessage> {
     })
 }
 
+/// メンバーシップギフトの受け取りをパースする（02_chat.md「メンバーシップギフトの受け取り」）
+///
+/// author は受け取った人。贈った人は本文の最初の太字の run（例: "received a gift membership by " + "@gifter"）。
+/// バッジは届かないので metadata を付けない（保存は NULL = 不明）
+fn parse_membership_gift_redemption(renderer: &Value) -> Option<ChatMessage> {
+    let id = renderer.get("id")?.as_str()?.to_string();
+    let timestamp_usec = renderer.get("timestampUsec")?.as_str()?.to_string();
+
+    let author = renderer
+        .pointer("/authorName/simpleText")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Unknown")
+        .to_string();
+
+    let channel_id = renderer
+        .get("authorExternalChannelId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let author_icon_url = renderer
+        .pointer("/authorPhoto/thumbnails/0/url")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let runs = renderer
+        .pointer("/message/runs")
+        .and_then(|v| v.as_array())
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    fn run_text(run: &Value) -> Option<&str> {
+        run.get("text")?.as_str()
+    }
+    let content = runs.iter().filter_map(run_text).collect::<String>();
+    let gifter = runs
+        .iter()
+        .find(|r| r.get("bold").and_then(|b| b.as_bool()) == Some(true))
+        .and_then(run_text)
+        .map(|s| s.to_string());
+
+    Some(ChatMessage {
+        id,
+        timestamp: format_timestamp(&timestamp_usec),
+        timestamp_usec,
+        message_type: MessageType::MembershipGiftRedemption { gifter },
+        author,
+        author_icon_url,
+        channel_id,
+        content,
+        runs: vec![],
+        metadata: None,
+        is_member: true,
+        is_first_time_viewer: false,
+        in_stream_comment_count: None,
+    })
+}
+
 /// ギフト（giftMessageViewModel）の本文とアクセシビリティラベルから (ギフト名, ジュエル数) を取り出す
 ///
 /// 本文 "sent <名前> for <n> Jewels" を優先し、読めなければラベル "... sent a gift, <名前>" を使う。
@@ -612,6 +669,9 @@ pub fn parse_chat_action(action: &Value) -> Option<ChatMessage> {
     }
     if let Some(renderer) = item.get("liveChatSponsorshipsGiftPurchaseAnnouncementRenderer") {
         return parse_membership_gift_message(renderer);
+    }
+    if let Some(renderer) = item.get("liveChatSponsorshipsGiftRedemptionAnnouncementRenderer") {
+        return parse_membership_gift_redemption(renderer);
     }
     if let Some(view_model) = item.get("giftMessageViewModel") {
         return parse_jewel_gift_message(view_model);
@@ -885,6 +945,85 @@ mod tests {
             }
             _ => panic!("MembershipGift メッセージタイプを期待"),
         }
+    }
+
+    /// メンバーシップギフトの受け取り（02_chat.md「メンバーシップギフトの受け取り」の実測の形）
+    fn redemption_action(message: Option<Value>) -> Value {
+        let mut renderer = serde_json::json!({
+            "id": "redemption_1",
+            "timestampUsec": "1791803480391042",
+            "authorExternalChannelId": "UCa1b",
+            "authorName": {"simpleText": "@viewer-a1b"},
+            "authorPhoto": {"thumbnails": [
+                {"url": "https://example.com/s32.png", "width": 32},
+                {"url": "https://example.com/s64.png", "width": 64}
+            ]}
+        });
+        if let Some(message) = message {
+            renderer["message"] = message;
+        }
+        serde_json::json!({
+            "addChatItemAction": {"item": {
+                "liveChatSponsorshipsGiftRedemptionAnnouncementRenderer": renderer
+            }}
+        })
+    }
+
+    #[test]
+    fn redemption_is_parsed_with_recipient_as_author_and_gifter_from_bold_run() {
+        let action = redemption_action(Some(serde_json::json!({"runs": [
+            {"text": "received a gift membership by ", "italics": true},
+            {"text": "@gifter-x9", "bold": true, "italics": true}
+        ]})));
+
+        let msg = parse_chat_action(&action).expect("受け取りをパースすること");
+
+        assert_eq!(msg.id, "redemption_1");
+        assert_eq!(msg.timestamp_usec, "1791803480391042");
+        assert_eq!(msg.author, "@viewer-a1b");
+        assert_eq!(msg.channel_id, "UCa1b");
+        assert_eq!(
+            msg.author_icon_url.as_deref(),
+            Some("https://example.com/s32.png")
+        );
+        assert_eq!(msg.content, "received a gift membership by @gifter-x9");
+        assert_eq!(
+            msg.message_type,
+            MessageType::MembershipGiftRedemption {
+                gifter: Some("@gifter-x9".to_string())
+            }
+        );
+        assert!(msg.is_member);
+        assert!(!msg.is_first_time_viewer);
+        assert_eq!(msg.in_stream_comment_count, None);
+        // バッジは届かないので読まない（保存は NULL = 不明）
+        assert!(msg.author_badge_metadata().is_none());
+    }
+
+    #[test]
+    fn redemption_without_bold_run_has_no_gifter() {
+        let action = redemption_action(Some(serde_json::json!({"runs": [
+            {"text": "received a gift membership"}
+        ]})));
+
+        let msg = parse_chat_action(&action).expect("受け取りをパースすること");
+
+        assert_eq!(msg.content, "received a gift membership");
+        assert_eq!(
+            msg.message_type,
+            MessageType::MembershipGiftRedemption { gifter: None }
+        );
+    }
+
+    #[test]
+    fn redemption_without_message_has_empty_content_and_no_gifter() {
+        let msg = parse_chat_action(&redemption_action(None)).expect("受け取りをパースすること");
+
+        assert_eq!(msg.content, "");
+        assert_eq!(
+            msg.message_type,
+            MessageType::MembershipGiftRedemption { gifter: None }
+        );
     }
 
     #[test]

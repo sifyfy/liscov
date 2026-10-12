@@ -5,11 +5,12 @@
  * - スパチャ・スーパーステッカー: 金額
  * - メンバー加入: 新規メンバー / マイルストーン: メンバー N か月 / メンバーシップギフト: メンバーシップを N 件ギフト
  * - ギフト (ジュエル): ジュエル数があれば「N ジュエル」、無ければギフト名
+ * - メンバーシップギフトの受け取り: ギフトで加入 (受け取った人の行は「受け取った人 N: A、B、C」)
  * - 通常のコメント: 札なし
  */
 import { describe, expect, it } from 'vitest';
 import type { GuiMessageMetadata } from '$lib/types/generated/GuiMessageMetadata';
-import { paidLabelOf } from './paid-label';
+import { paidLabelOf, recipientsLabelOf } from './paid-label';
 
 const base = { message_type: 'text', amount: null, metadata: null } as const;
 
@@ -17,6 +18,7 @@ const meta = (overrides: Partial<GuiMessageMetadata>): GuiMessageMetadata => ({
     amount: null,
     milestone_months: null,
     gift_count: null,
+    gifter: null,
     gift_name: null,
     gift_image_url: null,
     jewel_count: null,
@@ -65,7 +67,25 @@ describe('paidLabelOf', () => {
     expect(paidLabelOf({ ...base, message_type: 'gift', metadata: meta({ gift_name: 'Hiding' }) })).toBe('Hiding');
   });
 
+  it('メンバーシップギフトの受け取りは「ギフトで加入」', () => {
+    expect(
+      paidLabelOf({ ...base, message_type: 'membership_gift_redemption', metadata: meta({ gifter: '@gifter-x9' }) }),
+    ).toBe('ギフトで加入');
+  });
+
   it('通常のコメントは札なし', () => {
     expect(paidLabelOf(base)).toBeNull();
+  });
+});
+
+describe('recipientsLabelOf', () => {
+  const recipient = (author: string) => ({ author });
+
+  it('受け取った人を届いた順に「受け取った人 N: A、B、C」', () => {
+    expect(recipientsLabelOf([recipient('@a'), recipient('@b'), recipient('@c')])).toBe('受け取った人 3: @a、@b、@c');
+  });
+
+  it('1 人でも人数を添える', () => {
+    expect(recipientsLabelOf([recipient('@a')])).toBe('受け取った人 1: @a');
   });
 });

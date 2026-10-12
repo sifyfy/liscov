@@ -52,6 +52,7 @@ const superchat = (id: string, amount: string) =>
       is_verified: false,
       milestone_months: null,
       gift_count: null,
+      gifter: null,
       gift_name: null,
       gift_image_url: null,
       jewel_count: null,
