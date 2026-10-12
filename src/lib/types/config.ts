@@ -7,6 +7,8 @@ export type { Theme } from './generated/Theme';
 export type { ChatModeSetting } from './generated/ChatModeSetting';
 export type { StorageConfig } from './generated/StorageConfig';
 export type { ChatDisplayConfig } from './generated/ChatDisplayConfig';
+// チャットの取り方（02_chat.md「プッシュ通知」）
+export type { ChatFetchConfig } from './generated/ChatFetchConfig';
 export type { UiConfig } from './generated/UiConfig';
 export type { Config } from './generated/Config';
 // 生レスポンス保存設定（05_raw_response.md）
@@ -26,6 +28,9 @@ export const DEFAULT_CONFIG: Config = {
     chat_mode: 'top',
     flowed_newcomers_height_ratio: 0.125,
     flowed_supporters_height_ratio: 0.125
+  },
+  chat_fetch: {
+    push_notification: true
   },
   ui: {
     theme: 'dark'

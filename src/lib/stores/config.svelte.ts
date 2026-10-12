@@ -12,7 +12,7 @@ const FLOWED_HEIGHT_KEYS = {
 } as const satisfies Record<FlowedSectionKind, keyof Config['chat_display']>;
 
 // ファクトリ関数：テスト時に独立したストアインスタンスを生成できる
-function createConfigStore() {
+export function createConfigStore() {
   // リアクティブ状態（ストアは config をミューテートするため、共有定数は deep copy して使う）
   let config = $state<Config>(structuredClone(DEFAULT_CONFIG));
   let isLoaded = $state(false);
@@ -88,6 +88,20 @@ function createConfigStore() {
     }
   }
 
+  // プッシュ通知を受けて取得を早める (09_config.md、02_chat.md「プッシュ通知 > 設定の画面」)。
+  // 配信中の回避策に使うので、保存に失敗したら保存されている値に戻し、画面と実際の動きを食い違わせない
+  async function setPushNotification(enabled: boolean): Promise<void> {
+    const saved = config.chat_fetch.push_notification;
+    config.chat_fetch.push_notification = enabled;
+    try {
+      await configApi.configSetValue('chat_fetch', 'push_notification', enabled);
+      error = null;
+    } catch (e) {
+      config.chat_fetch.push_notification = saved;
+      error = normalizeError(e).message;
+    }
+  }
+
   // 流れたものの欄の高さの上限 (09_config.md、02_chat.md「流れたもの」)。範囲は呼ぶ側 (flowed-height.ts) で収めてある
   async function setFlowedHeightRatio(section: FlowedSectionKind, ratio: number): Promise<void> {
     const key = FLOWED_HEIGHT_KEYS[section];
@@ -153,6 +167,9 @@ function createConfigStore() {
     get chatMode() {
       return config.chat_display.chat_mode;
     },
+    get pushNotification() {
+      return config.chat_fetch.push_notification;
+    },
     get theme() {
       return config.ui.theme;
     },
@@ -170,6 +187,7 @@ function createConfigStore() {
     setMessageFontSize,
     setShowTimestamps,
     setHidePanelOnConnect,
+    setPushNotification,
     setFlowedHeightRatio,
     setChatMode,
     setTheme

@@ -5,6 +5,7 @@
 pub mod api;
 pub mod chat_runtime;
 pub mod models;
+pub mod push_watch;
 pub mod raw_response;
 
 pub use models::*;

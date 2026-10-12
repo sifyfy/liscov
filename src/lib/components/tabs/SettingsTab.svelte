@@ -2,9 +2,9 @@
   /**
    * 設定のタブ。上に項目のタブを横に並べ、下に中身を出す (540 幅でも中身の幅を狭めない)
    */
-  import { AuthSettings, TtsSettings, RawResponseSettings } from '$lib/components/settings';
+  import { AuthSettings, ChatFetchSettings, TtsSettings, RawResponseSettings } from '$lib/components/settings';
 
-  type SettingsSubTab = 'auth' | 'tts' | 'raw' | 'theme';
+  type SettingsSubTab = 'auth' | 'fetch' | 'tts' | 'raw' | 'theme';
 
   // 初期の項目 (ログインの異常から開くときは 'auth')
   let { initialTab = 'auth' }: { initialTab?: SettingsSubTab } = $props();
@@ -14,6 +14,7 @@
 
   const settingsTabs = [
     { id: 'auth', label: 'YouTube認証' },
+    { id: 'fetch', label: 'チャット取得' },
     { id: 'tts', label: 'TTS読み上げ' },
     { id: 'raw', label: '生レスポンス保存' },
     { id: 'theme', label: 'UIテーマ' },
@@ -39,6 +40,8 @@
     <div class="max-w-2xl">
       {#if activeSettingsTab === 'auth'}
         <AuthSettings />
+      {:else if activeSettingsTab === 'fetch'}
+        <ChatFetchSettings />
       {:else if activeSettingsTab === 'tts'}
         <TtsSettings />
       {:else if activeSettingsTab === 'raw'}

@@ -2534,6 +2534,7 @@ dependencies = [
  "chrono",
  "clap",
  "env_logger",
+ "futures-util",
  "log",
  "rand 0.8.8",
  "serde",

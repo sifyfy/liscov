@@ -27,8 +27,15 @@ pub fn get_innertube_api_url() -> String {
 }
 
 /// InnerTube API リクエストボディを構築する
-pub fn build_request_body(video_id: &str, continuation: &str, client_version: &str) -> Value {
-    serde_json::json!({
+///
+/// `publish_at` は最後に受けたプッシュ通知の発行時刻。受けていれば付ける（02_chat.md「リクエスト形式」）
+pub fn build_request_body(
+    video_id: &str,
+    continuation: &str,
+    client_version: &str,
+    publish_at: Option<&str>,
+) -> Value {
+    let mut body = serde_json::json!({
         "context": {
             "client": {
                 "clientName": "WEB",
@@ -39,7 +46,11 @@ pub fn build_request_body(video_id: &str, continuation: &str, client_version: &s
         },
         "continuation": continuation,
         "videoId": video_id
-    })
+    });
+    if let Some(publish_at) = publish_at {
+        body["invalidationPayloadLastPublishAtUsec"] = Value::from(publish_at);
+    }
+    body
 }
 
 /// 応答から採用した continuation（02_chat.md「Continuation Token」）
@@ -161,6 +172,18 @@ mod tests {
         serde_json::json!({
             "continuationContents": {"liveChatContinuation": {"continuations": [continuation]}}
         })
+    }
+
+    // 02_chat.md「リクエスト形式」: 通知を受けていれば最後の発行時刻を付け、受けていなければ付けない
+    #[test]
+    fn request_body_carries_publish_time_only_after_push() {
+        let pushed = build_request_body("vid", "cont", "2.0", Some("1791788848336704"));
+        assert_eq!(
+            pushed["invalidationPayloadLastPublishAtUsec"],
+            "1791788848336704"
+        );
+        let polled = build_request_body("vid", "cont", "2.0", None);
+        assert!(polled.get("invalidationPayloadLastPublishAtUsec").is_none());
     }
 
     // 02_chat.md「Continuation Token」: 採用したデータの timeoutMs を待ちの上限に使う
