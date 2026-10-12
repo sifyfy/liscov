@@ -39,6 +39,8 @@ import {
  */
 
 test.describe('TTS Priority Order Runtime (実 Tauri + モック棒読みちゃん)', () => {
+  // 2 件目は 1 件目でつないだ配信に続けて積む
+  test.describe.configure({ mode: 'serial' });
   test.setTimeout(120000);
   let browser: Browser;
   let mainPage: Page;
@@ -100,8 +102,8 @@ test.describe('TTS Priority Order Runtime (実 Tauri + モック棒読みちゃ�
     });
     await addMockMessage({
       message_type: 'membership',
-      author: '@メンバー',
-      content: 'メンバー加入',
+      author: '@新人',
+      content: '',
       channel_id: 'UCviewer_member',
       is_member: true,
     });
@@ -117,27 +119,47 @@ test.describe('TTS Priority Order Runtime (実 Tauri + モック棒読みちゃ�
 
     await waitForReceivedTexts(mockBouyomichan, 3, 30000);
 
-    const spoken = mockBouyomichan.receivedTexts;
+    // 文は 04_tts.md「スーパーチャット/メンバーシップの読み上げ例」。新規メンバーは YouTube の英文 (Welcome to ...) を読まない
+    expect(mockBouyomichan.receivedTexts).toEqual([
+      'スパチャ太郎さん、500円のスーパーチャット、スパチャ',
+      '新人さん、メンバー加入',
+      '通常ユーザーさん、普通のコメント',
+    ]);
+  });
+
+  test('パーサーを通したメンバーシップ系・ステッカーの読み上げ (04_tts.md の例)', async () => {
+    const before = mockBouyomichan.receivedTexts.length;
+    await addMockMessage({
+      message_type: 'membership_milestone',
+      author: '@古参',
+      content: 'いつも楽しい！',
+      milestone_months: 6,
+      channel_id: 'UCviewer_milestone',
+      is_member: true,
+    });
+    await addMockMessage({
+      message_type: 'membership_gift',
+      author: '@太っ腹',
+      content: '',
+      gift_count: 5,
+      channel_id: 'UCviewer_gift',
+    });
+    await addMockMessage({
+      message_type: 'supersticker',
+      author: '@ステッカー',
+      content: '',
+      amount: '¥200',
+      channel_id: 'UCviewer_sticker',
+    });
+
+    await waitForReceivedTexts(mockBouyomichan, before + 3, 30000);
+
+    // 優先度はステッカー (SuperChat) が先。メンバーシップ系どうしの順は問わない
+    const spoken = mockBouyomichan.receivedTexts.slice(before);
     expect(spoken).toHaveLength(3);
-
-    // 1 番目: SuperChat — 著者名 "スパチャ太郎" + 金額 + 本文 を含む
-    expect(spoken[0]).toContain('スパチャ太郎');
-    expect(spoken[0]).toContain('スパチャ');
-
-    // 2 番目: Membership — メンバー加入文言を含む (04_tts.md 「メンバー加入」)
-    // 04_tts.md より新規メンバーは "メンバー加入" を含む読み上げ
-    expect(spoken[1]).toContain('メンバー');
-
-    // 3 番目: Normal — 通常コメント
-    expect(spoken[2]).toContain('普通のコメント');
-
-    // SuperChat と Membership が Normal より前であることを順序として明示確認
-    const idxSuper = spoken.findIndex((t) => t.includes('スパチャ太郎'));
-    const idxMember = spoken.findIndex((t) => t.includes('メンバー加入') || t === spoken[1]);
-    const idxNormal = spoken.findIndex((t) => t.includes('普通のコメント'));
-    expect(idxSuper).toBe(0);
-    expect(idxNormal).toBe(2);
-    expect(idxMember).toBeLessThan(idxNormal);
-    expect(idxSuper).toBeLessThan(idxMember);
+    expect(spoken[0]).toBe('ステッカーさん、200円のスーパーステッカー');
+    expect(spoken.slice(1)).toEqual(
+      expect.arrayContaining(['古参さん、6ヶ月のメンバーシップ、いつも楽しい！', '太っ腹さん、5人へのメンバーシップギフト']),
+    );
   });
 });

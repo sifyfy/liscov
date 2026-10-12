@@ -13,7 +13,7 @@ use crate::core::api::{InnerTubeClient, WebSocketServer};
 use crate::core::models::{ChatMessage, ChatMode, MessageType, ReactionUpdate};
 use crate::core::raw_response::{RawResponseSaver, SaveConfig};
 use crate::database::{self, Database, ViewerAnnotation};
-use crate::tts::{TtsManager, TtsPriority, TtsQueueItem};
+use crate::tts::TtsManager;
 use rusqlite::Connection;
 
 /// 接続ごとに覚える受信済み message_id の件数（02_chat.md「設定値」）
@@ -710,41 +710,8 @@ fn viewer_annotation(msg: &ChatMessage, db_scope: Option<(&Connection, &str)>) -
 
 /// メッセージを TTS キューに追加する（author_reading は viewer_annotation で引いたもの）
 async fn enqueue_tts(tts_manager: &TtsManager, msg: &ChatMessage, author_reading: Option<String>) {
-    let priority = match &msg.message_type {
-        MessageType::SuperChat { .. } | MessageType::SuperSticker { .. } | MessageType::Gift(_) => {
-            TtsPriority::SuperChat
-        }
-        MessageType::Membership { .. } | MessageType::MembershipGift { .. } => {
-            TtsPriority::Membership
-        }
-        _ => TtsPriority::Normal,
-    };
-
-    let amount = match &msg.message_type {
-        MessageType::SuperChat { amount } | MessageType::SuperSticker { amount } => {
-            Some(amount.clone())
-        }
-        _ => None,
-    };
-
-    // ギフトは本文の代わりに「{n}ジュエルの{名前}のギフト」を読む
-    let text = match &msg.message_type {
-        MessageType::Gift(gift) => {
-            let read_jewels = tts_manager.get_config().await.read_superchat_amount;
-            crate::tts::gift_message(gift, read_jewels)
-        }
-        _ => msg.content.clone(),
-    };
-
-    let item = TtsQueueItem {
-        text,
-        priority,
-        author_name: Some(msg.author.clone()),
-        author_reading,
-        amount,
-        in_stream_comment_count: msg.in_stream_comment_count,
-        message_id: Some(msg.id.clone()),
-    };
+    let read_amount = tts_manager.get_config().await.read_superchat_amount;
+    let item = crate::tts::queue_item_for_chat(msg, author_reading, read_amount);
     tts_manager.enqueue(item).await;
 }
 

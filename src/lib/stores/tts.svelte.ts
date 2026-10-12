@@ -90,7 +90,7 @@ function createTtsStore() {
       return connectionTestResult;
     },
 
-    async speak(text: string, options?: { priority?: TtsPriority; authorName?: string; amount?: string }) {
+    async speak(text: string, options?: { priority?: TtsPriority; authorName?: string }) {
       try {
         await ttsApi.ttsSpeak(text, options);
       } catch (e) {

@@ -7,7 +7,6 @@ import { normalizeError } from './errors';
 export interface SpeakOptions {
   priority?: TtsPriority;
   authorName?: string;
-  amount?: string;
 }
 
 export async function ttsSpeak(text: string, options?: SpeakOptions): Promise<void> {
@@ -15,8 +14,7 @@ export async function ttsSpeak(text: string, options?: SpeakOptions): Promise<vo
     await invoke('tts_speak', {
       text,
       priority: options?.priority,
-      author_name: options?.authorName,
-      amount: options?.amount
+      author_name: options?.authorName
     });
   } catch (e) {
     throw normalizeError(e);

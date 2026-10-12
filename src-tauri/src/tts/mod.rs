@@ -7,7 +7,7 @@ pub mod backends;
 pub mod config;
 pub mod process;
 
-use crate::core::models::GiftDetails;
+use crate::core::models::{ChatMessage, GiftDetails, MessageType};
 use regex::Regex;
 use std::collections::VecDeque;
 use std::sync::{Arc, LazyLock};
@@ -38,7 +38,9 @@ pub struct TtsQueueItem {
     /// 視聴者カスタム読み仮名。あれば投稿者名の代わりに読む（04_tts.md「投稿者名の処理順序」）。
     /// メッセージが届いた接続の配信者のもとで登録されたもの
     pub author_reading: Option<String>,
-    pub amount: Option<String>,
+    /// 投稿者名と本文のあいだに読む種別の文（例: `500円のスーパーチャット`、`メンバー加入`）。
+    /// 通常のコメントは None（04_tts.md「スーパーチャット/メンバーシップの読み上げ」）
+    pub paid_label: Option<String>,
     /// 配信内コメント回数（初回コメント判定に使用）
     pub in_stream_comment_count: Option<u32>,
     /// 由来のチャットメッセージID（障害解析時のトレーサビリティ用）。
@@ -431,13 +433,12 @@ pub(crate) fn truncate_text(text: &str, max_length: usize) -> String {
 pub(crate) fn build_tts_text(
     author_name: Option<&str>,
     author_reading: Option<&str>,
-    amount: Option<&str>,
+    paid_label: Option<&str>,
     message: &str,
     read_author_name: bool,
     strip_at_prefix: bool,
     strip_handle_suffix: bool,
     add_honorific: bool,
-    read_superchat_amount: bool,
     max_text_length: usize,
 ) -> String {
     let mut parts = Vec::new();
@@ -454,14 +455,15 @@ pub(crate) fn build_tts_text(
         }
     }
 
-    if read_superchat_amount {
-        if let Some(amt) = amount {
-            parts.push(format!("{}の", amt));
-        }
+    if let Some(label) = paid_label {
+        parts.push(label.to_string());
     }
 
-    let sanitized = sanitize_message(message);
-    parts.push(truncate_text(&sanitized, max_text_length));
+    // 本文が無ければ種別の文で終える（末尾に「、」を付けない）
+    let body = truncate_text(&sanitize_message(message), max_text_length);
+    if !body.is_empty() {
+        parts.push(body);
+    }
 
     parts.join("、")
 }
@@ -473,13 +475,12 @@ pub(crate) fn speech_text(config: &TtsConfig, item: &TtsQueueItem) -> String {
     let base = build_tts_text(
         item.author_name.as_deref(),
         item.author_reading.as_deref(),
-        item.amount.as_deref(),
+        item.paid_label.as_deref(),
         &item.text,
         config.read_author_name,
         config.strip_at_prefix,
         config.strip_handle_suffix,
         config.add_honorific,
-        config.read_superchat_amount,
         config.max_text_length,
     );
     match build_first_comment_prefix(
@@ -492,10 +493,87 @@ pub(crate) fn speech_text(config: &TtsConfig, item: &TtsQueueItem) -> String {
     }
 }
 
-/// ギフトの読み上げ本文（04_tts.md「ギフトの読み上げ」）
+/// チャットのメッセージを読み上げキューの要素にする（04_tts.md「スーパーチャット/メンバーシップの読み上げ」）
+///
+/// 種別の文はここで作るので、`read_amount`（= read_superchat_amount）はキューに入れた時点の設定が効く
+pub(crate) fn queue_item_for_chat(
+    msg: &ChatMessage,
+    author_reading: Option<String>,
+    read_amount: bool,
+) -> TtsQueueItem {
+    let priority = match &msg.message_type {
+        MessageType::SuperChat { .. } | MessageType::SuperSticker { .. } | MessageType::Gift(_) => {
+            TtsPriority::SuperChat
+        }
+        MessageType::Membership { .. } | MessageType::MembershipGift { .. } => {
+            TtsPriority::Membership
+        }
+        MessageType::Text | MessageType::System => TtsPriority::Normal,
+    };
+
+    // 本文として読むのは視聴者が書いたメッセージだけ。
+    // ステッカーの代わりの文字・メンバーシップギフトの YouTube の英文・ギフト名は読まない
+    let text = match &msg.message_type {
+        MessageType::SuperSticker { .. }
+        | MessageType::MembershipGift { .. }
+        | MessageType::Gift(_) => String::new(),
+        _ => msg.content.clone(),
+    };
+
+    TtsQueueItem {
+        text,
+        priority,
+        author_name: Some(msg.author.clone()),
+        author_reading,
+        paid_label: paid_label(&msg.message_type, read_amount),
+        in_stream_comment_count: msg.in_stream_comment_count,
+        message_id: Some(msg.id.clone()),
+    }
+}
+
+/// 種別の文。通常のコメントは None
+fn paid_label(message_type: &MessageType, read_amount: bool) -> Option<String> {
+    let with_amount = |amount: &str, kind: &str| {
+        if read_amount {
+            format!("{}の{}", spoken_amount(amount), kind)
+        } else {
+            kind.to_string()
+        }
+    };
+    match message_type {
+        MessageType::SuperChat { amount } => Some(with_amount(amount, "スーパーチャット")),
+        MessageType::SuperSticker { amount } => Some(with_amount(amount, "スーパーステッカー")),
+        MessageType::Membership {
+            milestone_months: None,
+            ..
+        } => Some("メンバー加入".to_string()),
+        MessageType::Membership {
+            milestone_months: Some(months),
+            ..
+        } => Some(format!("{}ヶ月のメンバーシップ", months)),
+        MessageType::MembershipGift { gift_count } => {
+            Some(format!("{}人へのメンバーシップギフト", gift_count))
+        }
+        MessageType::Gift(gift) => Some(gift_message(gift, read_amount)),
+        MessageType::Text | MessageType::System => None,
+    }
+}
+
+/// 金額の読み。円は `¥1,000` → `1000円`、ほかの通貨は YouTube の表記のまま
+pub(crate) fn spoken_amount(amount: &str) -> String {
+    match amount
+        .strip_prefix('¥')
+        .or_else(|| amount.strip_prefix('￥'))
+    {
+        Some(yen) => format!("{}円", yen.replace(',', "")),
+        None => amount.to_string(),
+    }
+}
+
+/// ギフトの種別の文（04_tts.md「ギフトの読み上げ」）
 ///
 /// ジュエル数は分かっていて `read_jewels`（= read_superchat_amount）が true のときだけ読む
-pub(crate) fn gift_message(gift: &GiftDetails, read_jewels: bool) -> String {
+fn gift_message(gift: &GiftDetails, read_jewels: bool) -> String {
     match gift.jewel_count.filter(|_| read_jewels) {
         Some(jewels) => format!("{}ジュエルの{}のギフト", jewels, gift.gift_name),
         None => format!("{}のギフト", gift.gift_name),
@@ -505,36 +583,139 @@ pub(crate) fn gift_message(gift: &GiftDetails, read_jewels: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::models::{ChatMessage, MessageType};
     use serial_test::serial;
 
     // ========================================================================
-    // ギフトの読み上げ (04_tts.md「ギフトの読み上げ」)
+    // スーパーチャット/メンバーシップ/ギフトの読み上げ
+    // (04_tts.md「スーパーチャット/メンバーシップの読み上げ例」「ギフトの読み上げ」)
+    // チャットのメッセージ → キューの要素 → 読み上げる文、と本番と同じ経路で確かめる
     // ========================================================================
 
-    fn gift_tts(name: &str, jewels: Option<u32>, read_superchat_amount: bool) -> String {
-        let gift = GiftDetails {
+    fn spoken_with(config: &TtsConfig, message_type: MessageType, content: &str) -> String {
+        let msg = ChatMessage {
+            message_type,
+            author: "@山田太郎-xyz".to_string(),
+            content: content.to_string(),
+            ..ChatMessage::default()
+        };
+        speech_text(
+            config,
+            &queue_item_for_chat(&msg, None, config.read_superchat_amount),
+        )
+    }
+
+    fn spoken(message_type: MessageType, content: &str) -> String {
+        spoken_with(&TtsConfig::default(), message_type, content)
+    }
+
+    fn amount_off() -> TtsConfig {
+        TtsConfig {
+            read_superchat_amount: false,
+            ..TtsConfig::default()
+        }
+    }
+
+    fn superchat(amount: &str) -> MessageType {
+        MessageType::SuperChat {
+            amount: amount.to_string(),
+        }
+    }
+
+    fn membership(milestone_months: Option<u32>) -> MessageType {
+        MessageType::Membership {
+            milestone_months,
+            membership_level: Some("ほしぞら組".to_string()),
+        }
+    }
+
+    fn gift(name: &str, jewel_count: Option<u32>) -> MessageType {
+        MessageType::Gift(GiftDetails {
             gift_name: name.to_string(),
             gift_image_url: None,
-            jewel_count: jewels,
+            jewel_count,
+        })
+    }
+
+    #[test]
+    fn superchat_yen_with_body() {
+        assert_eq!(
+            spoken(superchat("¥500"), "こんにちは！"),
+            "山田太郎さん、500円のスーパーチャット、こんにちは！"
+        );
+    }
+
+    #[test]
+    fn superchat_yen_with_separator_and_no_body() {
+        assert_eq!(
+            spoken(superchat("¥1,000"), ""),
+            "山田太郎さん、1000円のスーパーチャット"
+        );
+    }
+
+    #[test]
+    fn superchat_other_currency_is_read_as_is() {
+        assert_eq!(
+            spoken(superchat("$5.00"), "hi"),
+            "山田太郎さん、$5.00のスーパーチャット、hi"
+        );
+    }
+
+    #[test]
+    fn superchat_when_amount_reading_off() {
+        assert_eq!(
+            spoken_with(&amount_off(), superchat("¥500"), "こんにちは！"),
+            "山田太郎さん、スーパーチャット、こんにちは！"
+        );
+    }
+
+    #[test]
+    fn supersticker_does_not_read_placeholder() {
+        let sticker = MessageType::SuperSticker {
+            amount: "¥200".to_string(),
         };
-        build_tts_text(
-            Some("@山田太郎-xyz"),
-            None,
-            None,
-            &gift_message(&gift, read_superchat_amount),
-            true,
-            true,
-            true,
-            true,
-            read_superchat_amount,
-            200,
-        )
+        assert_eq!(
+            spoken(sticker, "[Sticker]"),
+            "山田太郎さん、200円のスーパーステッカー"
+        );
+    }
+
+    #[test]
+    fn membership_new_member() {
+        assert_eq!(spoken(membership(None), ""), "山田太郎さん、メンバー加入");
+    }
+
+    #[test]
+    fn membership_milestone_without_message() {
+        assert_eq!(
+            spoken(membership(Some(6)), ""),
+            "山田太郎さん、6ヶ月のメンバーシップ"
+        );
+    }
+
+    #[test]
+    fn membership_milestone_with_message() {
+        assert_eq!(
+            spoken(membership(Some(6)), "いつも楽しい！"),
+            "山田太郎さん、6ヶ月のメンバーシップ、いつも楽しい！"
+        );
+    }
+
+    #[test]
+    fn membership_gift_does_not_read_youtube_text() {
+        assert_eq!(
+            spoken(
+                MessageType::MembershipGift { gift_count: 5 },
+                "Sent 5 Channel gift memberships"
+            ),
+            "山田太郎さん、5人へのメンバーシップギフト"
+        );
     }
 
     #[test]
     fn gift_without_jewels() {
         assert_eq!(
-            gift_tts("Hiding", None, true),
+            spoken(gift("Hiding", None), "Hiding"),
             "山田太郎さん、Hidingのギフト"
         );
     }
@@ -542,7 +723,7 @@ mod tests {
     #[test]
     fn gift_with_jewels() {
         assert_eq!(
-            gift_tts("Press F", Some(10), true),
+            spoken(gift("Press F", Some(10)), "Press F"),
             "山田太郎さん、10ジュエルのPress Fのギフト"
         );
     }
@@ -550,9 +731,46 @@ mod tests {
     #[test]
     fn gift_with_jewels_when_amount_reading_off() {
         assert_eq!(
-            gift_tts("Press F", Some(10), false),
+            spoken_with(&amount_off(), gift("Press F", Some(10)), "Press F"),
             "山田太郎さん、Press Fのギフト"
         );
+    }
+
+    #[test]
+    fn text_message_has_no_paid_label() {
+        assert_eq!(
+            spoken(MessageType::Text, "こんにちは"),
+            "山田太郎さん、こんにちは"
+        );
+    }
+
+    #[test]
+    fn spoken_amount_examples() {
+        assert_eq!(spoken_amount("¥500"), "500円");
+        assert_eq!(spoken_amount("¥1,000"), "1000円");
+        assert_eq!(spoken_amount("￥500"), "500円");
+        assert_eq!(spoken_amount("$5.00"), "$5.00");
+        assert_eq!(spoken_amount("CA$5.00"), "CA$5.00");
+    }
+
+    // 04_tts.md「優先度」: スパチャ・ステッカー・ギフトは SuperChat、メンバーシップ系は Membership
+    #[test]
+    fn priority_follows_message_type() {
+        let priority = |message_type| {
+            let msg = ChatMessage {
+                message_type,
+                ..ChatMessage::default()
+            };
+            queue_item_for_chat(&msg, None, true).priority
+        };
+        assert_eq!(priority(superchat("¥500")), TtsPriority::SuperChat);
+        assert_eq!(priority(gift("Hiding", None)), TtsPriority::SuperChat);
+        assert_eq!(priority(membership(None)), TtsPriority::Membership);
+        assert_eq!(
+            priority(MessageType::MembershipGift { gift_count: 1 }),
+            TtsPriority::Membership
+        );
+        assert_eq!(priority(MessageType::Text), TtsPriority::Normal);
     }
 
     // ========================================================================
@@ -790,36 +1008,24 @@ mod tests {
 
     #[test]
     fn build_text_full_superchat() {
-        // spec: "田中さん、¥500の、こんにちは"
+        // spec: [投稿者名]、[種別の文]、[メッセージ本文]
         let result = build_tts_text(
             Some("田中"),
             None,
-            Some("¥500"),
+            Some("500円のスーパーチャット"),
             "こんにちは",
             true, // read_author_name
             true, // strip_at
             true, // strip_handle
             true, // add_honorific
-            true, // read_superchat_amount
             200,  // max_text_length
         );
-        assert_eq!(result, "田中さん、¥500の、こんにちは");
+        assert_eq!(result, "田中さん、500円のスーパーチャット、こんにちは");
     }
 
     #[test]
     fn build_text_no_author() {
-        let result = build_tts_text(
-            None,
-            None,
-            None,
-            "こんにちは",
-            true,
-            true,
-            true,
-            true,
-            true,
-            200,
-        );
+        let result = build_tts_text(None, None, None, "こんにちは", true, true, true, true, 200);
         assert_eq!(result, "こんにちは");
     }
 
@@ -834,27 +1040,26 @@ mod tests {
             true,
             true,
             true,
-            true,
             200,
         );
         assert_eq!(result, "こんにちは");
     }
 
     #[test]
-    fn build_text_amount_disabled() {
+    fn build_text_empty_body_has_no_trailing_separator() {
+        // spec: 本文が無ければ種別の文で終える（末尾に「、」を付けない）
         let result = build_tts_text(
             Some("田中"),
             None,
-            Some("¥500"),
-            "テスト",
+            Some("メンバー加入"),
+            "",
             true,
             true,
             true,
             true,
-            false, // read_superchat_amount disabled
             200,
         );
-        assert_eq!(result, "田中さん、テスト");
+        assert_eq!(result, "田中さん、メンバー加入");
     }
 
     #[test]
@@ -868,32 +1073,9 @@ mod tests {
             true,
             true,
             true,
-            true,
             200,
         );
         assert_eq!(result, "user123さん、hello");
-    }
-
-    #[test]
-    fn build_text_spec_example_superchat() {
-        // spec (04_tts.md lines 194-203):
-        // 投稿者: @山田太郎-xyz, SuperChat ¥500, 本文: こんにちは！
-        // → 山田太郎さん、500円のスーパーチャット、こんにちは
-        // Note: amount formatting (¥500→500円のスーパーチャット) is done
-        // before enqueueing, so here we test with pre-formatted amount
-        let result = build_tts_text(
-            Some("@山田太郎-xyz"),
-            None,
-            Some("¥500"),
-            "こんにちは！",
-            true,
-            true,
-            true,
-            true,
-            true,
-            200,
-        );
-        assert_eq!(result, "山田太郎さん、¥500の、こんにちは！");
     }
 
     #[test]
@@ -908,7 +1090,6 @@ mod tests {
             true,
             true,
             true,
-            true,
             200,
         );
         assert_eq!(result, "見て ね");
@@ -918,9 +1099,7 @@ mod tests {
     fn build_text_sanitize_then_truncate() {
         // spec: サニタイズ後のテキストに対してmax_text_lengthが適用される
         let long_msg = format!("https://example.com/long {}", "あ".repeat(201));
-        let result = build_tts_text(
-            None, None, None, &long_msg, true, true, true, true, true, 200,
-        );
+        let result = build_tts_text(None, None, None, &long_msg, true, true, true, true, 200);
         let expected = format!("{}、以下省略", "あ".repeat(200));
         assert_eq!(result, expected);
     }
@@ -937,7 +1116,6 @@ mod tests {
             true,
             true,
             true,
-            false,
             200,
         );
         assert_eq!(result, "田中さん、テスト");
@@ -1106,9 +1284,8 @@ mod tests {
         let tts_text = build_tts_text(
             Some("@山田太郎-xyz"),
             None,
-            Some("¥500"),
+            Some("500円のスーパーチャット"),
             "こんにちは",
-            true,
             true,
             true,
             true,
@@ -1119,7 +1296,10 @@ mod tests {
             Some(p) => format!("{}{}", p, tts_text),
             None => tts_text,
         };
-        assert_eq!(result, "1回目のコメント。山田太郎さん、¥500の、こんにちは");
+        assert_eq!(
+            result,
+            "1回目のコメント。山田太郎さん、500円のスーパーチャット、こんにちは"
+        );
     }
 
     // ========================================================================
@@ -1144,7 +1324,7 @@ mod tests {
             priority: TtsPriority::Normal,
             author_name: Some("テスター".to_string()),
             author_reading: None,
-            amount: None,
+            paid_label: None,
             in_stream_comment_count: Some(2),
             message_id: None,
         };
@@ -1161,7 +1341,7 @@ mod tests {
             priority: TtsPriority::Normal,
             author_name: Some("テスター".to_string()),
             author_reading: None,
-            amount: None,
+            paid_label: None,
             in_stream_comment_count: Some(1),
             message_id: None,
         };
@@ -1178,7 +1358,7 @@ mod tests {
             priority: TtsPriority::Normal,
             author_name: Some("テスター".to_string()),
             author_reading: None,
-            amount: None,
+            paid_label: None,
             in_stream_comment_count: Some(5),
             message_id: None,
         };
@@ -1199,7 +1379,7 @@ mod tests {
                 priority: TtsPriority::Normal,
                 author_name: None,
                 author_reading: None,
-                amount: None,
+                paid_label: None,
                 in_stream_comment_count: None,
                 message_id: None,
             })
@@ -1266,7 +1446,7 @@ mod tests {
             priority: TtsPriority::Normal,
             author_name: Some("田中".to_string()),
             author_reading: None,
-            amount: None,
+            paid_label: None,
             in_stream_comment_count: None,
             message_id: None,
         };
@@ -1286,7 +1466,7 @@ mod tests {
             priority: TtsPriority::Normal,
             author_name: Some("@田中-abc".to_string()),
             author_reading: Some("たなか".to_string()),
-            amount: None,
+            paid_label: None,
             in_stream_comment_count: None,
             message_id: None,
         };
@@ -1308,7 +1488,7 @@ mod tests {
             priority: TtsPriority::Normal,
             author_name: Some("田中".to_string()),
             author_reading: None,
-            amount: None,
+            paid_label: None,
             in_stream_comment_count: Some(1),
             message_id: None,
         };
@@ -1328,7 +1508,7 @@ mod tests {
             priority,
             author_name: None,
             author_reading: None,
-            amount: None,
+            paid_label: None,
             in_stream_comment_count: None,
             message_id: None,
         }
@@ -1408,7 +1588,7 @@ mod tests {
                 priority: TtsPriority::Normal,
                 author_name: None,
                 author_reading: None,
-                amount: None,
+                paid_label: None,
                 in_stream_comment_count: None,
                 message_id: None,
             })
@@ -1419,7 +1599,7 @@ mod tests {
                 priority: TtsPriority::SuperChat,
                 author_name: None,
                 author_reading: None,
-                amount: None,
+                paid_label: None,
                 in_stream_comment_count: None,
                 message_id: None,
             })
@@ -1442,7 +1622,7 @@ mod tests {
                 priority: TtsPriority::Normal,
                 author_name: None,
                 author_reading: None,
-                amount: None,
+                paid_label: None,
                 in_stream_comment_count: None,
                 message_id: None,
             })
@@ -1453,7 +1633,7 @@ mod tests {
                 priority: TtsPriority::Normal,
                 author_name: None,
                 author_reading: None,
-                amount: None,
+                paid_label: None,
                 in_stream_comment_count: None,
                 message_id: None,
             })
@@ -1476,7 +1656,7 @@ mod tests {
                 priority: TtsPriority::Normal,
                 author_name: None,
                 author_reading: None,
-                amount: None,
+                paid_label: None,
                 in_stream_comment_count: None,
                 message_id: None,
             })
@@ -1487,7 +1667,7 @@ mod tests {
                 priority: TtsPriority::Membership,
                 author_name: None,
                 author_reading: None,
-                amount: None,
+                paid_label: None,
                 in_stream_comment_count: None,
                 message_id: None,
             })
@@ -1498,7 +1678,7 @@ mod tests {
                 priority: TtsPriority::SuperChat,
                 author_name: None,
                 author_reading: None,
-                amount: None,
+                paid_label: None,
                 in_stream_comment_count: None,
                 message_id: None,
             })
@@ -1573,7 +1753,7 @@ mod tests {
                     priority: TtsPriority::Normal,
                     author_name: None,
                     author_reading: None,
-                    amount: None,
+                    paid_label: None,
                     in_stream_comment_count: None,
                     message_id: None,
                 })
@@ -1680,7 +1860,7 @@ mod tests {
             priority: TtsPriority::Normal,
             author_name: None,
             author_reading: None,
-            amount: None,
+            paid_label: None,
             in_stream_comment_count: None,
             message_id: None,
         }
@@ -1819,7 +1999,7 @@ mod tests {
                 priority: TtsPriority::Normal,
                 author_name: None,
                 author_reading: None,
-                amount: None,
+                paid_label: None,
                 in_stream_comment_count: None,
                 message_id: None,
             })
@@ -2042,7 +2222,7 @@ mod tests {
             priority,
             author_name: Some("田中".to_string()),
             author_reading: None,
-            amount: None,
+            paid_label: None,
             in_stream_comment_count,
             message_id: Some(format!("msg-{text}")),
         }

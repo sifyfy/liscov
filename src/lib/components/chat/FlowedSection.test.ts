@@ -51,6 +51,7 @@ const superchat = (id: string, amount: string) =>
       is_moderator: false,
       is_verified: false,
       milestone_months: null,
+      membership_level: null,
       gift_count: null,
       gift_name: null,
       gift_image_url: null,

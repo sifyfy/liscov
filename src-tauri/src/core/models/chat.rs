@@ -16,7 +16,10 @@ pub enum MessageType {
         amount: String,
     },
     Membership {
+        /// マイルストーンの月数。新規は None
         milestone_months: Option<u32>,
+        /// レベル名（配信者が付けたメンバーシップのプラン名）。取れなければ None
+        membership_level: Option<String>,
     },
     MembershipGift {
         gift_count: u32,
@@ -309,6 +312,7 @@ mod tests {
         let mut stats = ChatStats::default();
         stats.update(&make_message(MessageType::Membership {
             milestone_months: None,
+            membership_level: None,
         }));
         assert_eq!(stats.total_messages, 1);
         assert_eq!(stats.memberships, 1);

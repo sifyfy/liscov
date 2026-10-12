@@ -551,6 +551,8 @@ export async function addMockMessage(message: {
   amount?: string;
   tier?: string;
   milestone_months?: number;
+  /** メンバーシップのレベル名。省略時はモックが "Channel" にする */
+  membership_level?: string;
   gift_count?: number;
   gift_image_url?: string;
   /** 同じ id を再び積むと YouTube の再送を再現できる。省略時はモックが採番する */
