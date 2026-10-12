@@ -50,6 +50,7 @@
 | Membership（新規） | `メンバー加入` |
 | Membership（マイルストーン） | `{months}ヶ月のメンバーシップ` |
 | MembershipGift | `{gift_count}人へのメンバーシップギフト` |
+| MembershipGiftRedemption（受け取り） | 読まない |
 
 ### ギフトの読み上げ
 
@@ -326,6 +327,7 @@ auto_close = true
 | Membership（マイルストーン） | `{months}ヶ月のメンバーシップ` |
 | MembershipGift | `{gift_count}人へのメンバーシップギフト` |
 | Gift | `{jewel_count}ジュエルの{gift_name}のギフト`（jewel_count が無い、または `read_superchat_amount=false` なら `{gift_name}のギフト`） |
+| MembershipGiftRedemption | 読まない（キューに入れない）。大量に配られると読み上げが埋まるため。贈った人の MembershipGift は読む（02_chat.md「メンバーシップギフトの受け取り」） |
 
 ### テキストサニタイズ
 

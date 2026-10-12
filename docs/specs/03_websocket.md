@@ -50,6 +50,7 @@ E2E のアプリにつながる。テストの架空のコメントが配信画�
 | `ws://127.0.0.1:{port}` に接続 | `Connected` メッセージ（client_id付き）を受信 |
 | 接続中にチャットメッセージ受信 | 全クライアントに `ChatMessage` をブロードキャスト |
 | 接続中にギフト受信 | 全クライアントに `ChatMessage`（`message_type` = `Gift`）をブロードキャスト。新しいメッセージ種別は作らない |
+| 接続中にメンバーシップギフトの受け取りを受信 | 受け取り 1 件ごとに `ChatMessage`（`message_type` = `MembershipGiftRedemption`）をブロードキャスト。アプリの画面では贈った人の行にまとめるが、WebSocket ではまとめない（02_chat.md「メンバーシップギフトの受け取り」） |
 | 接続中にライブリアクションの更新を受信 | 全クライアントに `Reaction` をブロードキャスト（0件の更新・再送は送らない） |
 | `GetInfo` を送信 | `ServerInfo`（バージョン、接続クライアント数）を受信 |
 | 接続直後 | **過去メッセージは送信されない**。接続後の新着メッセージのみ |
@@ -341,6 +342,7 @@ pub enum ClientMessage {
 | `SuperSticker` | スーパーステッカー | `amount` |
 | `Membership` | メンバーシップ | `milestone_months` |
 | `MembershipGift` | ギフトメンバーシップ | `gift_count` |
+| `MembershipGiftRedemption` | メンバーシップギフトの受け取り（`author` は受け取った人） | `gifter`（贈った人の名前。分からなければ null） |
 | `Gift` | ジュエルで送るギフト | `gift_name`、`gift_image_url`（無ければ null）、`jewel_count`（取れなければ null） |
 | `System` | システムメッセージ | なし |
 
