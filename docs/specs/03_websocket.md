@@ -224,6 +224,12 @@ pub struct WebSocketStatus {
 
 視聴者を特定できないギフトは `channel_id` が `""`、`in_stream_comment_count` が null になる。
 
+**メンバーシップ系の `content`**: `Membership`・`MembershipGift` の `content`・`runs` は視聴者が書いたメッセージだけで、無ければ空（`MembershipGift` は常に空）。YouTube の英語の定型文（`Welcome to ...!`・`Sent 5 ... gift memberships`）は入らない。件数・月数・レベル名は `message_type` の付加情報から読む（02_chat.md「メンバーシップメッセージの判定」）。
+
+```json
+{ "message_type": { "MembershipGift": { "gift_count": 5 } }, "author": "@gifter-x9", "content": "", "runs": [] }
+```
+
 **runs フォーマット（InnerTube API準拠）**
 
 ```json

@@ -331,7 +331,7 @@ describe('ChatMessage', () => {
 	// 02_chat.md「メンバーシップギフトの受け取り」「受け取った人の行」
 	describe('メンバーシップギフトの受け取り', () => {
 		const recipientsLine = (container: HTMLElement) => container.querySelector('[data-testid="gift-recipients"]');
-		const gift = createMessage({ author: '@g', message_type: 'membership_gift', content: 'Sent 3 Channel gift memberships', runs: [] });
+		const gift = createMessage({ author: '@g', message_type: 'membership_gift', content: '', runs: [] });
 		const redemption = (author: string) =>
 			createMessage({
 				id: author,

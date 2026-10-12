@@ -248,10 +248,11 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
         gift_count: 10,
       });
 
-      // Verify gift message is displayed
-      await expect(mainPage.locator('text=GenerousGifter')).toBeVisible({ timeout: 5000 });
-      // Check for gift count in the message content (e.g., "Sent 10 Channel gift memberships")
-      await expect(mainPage.locator('text=/\\b10\\b.*gift/i').first()).toBeVisible();
+      // 02_chat.md「メンバーシップギフトの本文」: 件数は札に出し、YouTube の英文 (Sent 10 ... gift memberships) は本文に出さない
+      const giftCard = mainPage.locator('[data-message-id][data-priority="1"]').filter({ hasText: 'GenerousGifter' });
+      await expect(giftCard).toContainText('メンバーシップを 10 件ギフト', { timeout: 5000 });
+      await expect(giftCard.getByTestId('paid-body')).toHaveCount(0);
+      await expect(giftCard).not.toContainText('gift memberships');
 
       // Disconnect
       await disconnectAndInitialize(mainPage);

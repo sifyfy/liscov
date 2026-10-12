@@ -1267,7 +1267,7 @@ Connecting → (接続失敗) → (削除 + エラー通知)
 |------|------|------|------|
 | スパチャ・ステッカー (色あり) | 背景 `body_background` | 背景 `header_background`・文字 `header_text`: アイコン、名前 (読み仮名)、#N・時刻、右端に金額 (`text-chat-amount`) | 文字 `body_text` (`data-testid="paid-body"`)。本文が無ければ出さない。ステッカーは出さない |
 | スパチャ・ステッカー (色なし) | `bg-surface-highest`・`border-outline` | 同上 (トークンの色) | 同上 |
-| メンバーシップ・マイルストーン・メンバーシップギフト | `bg-member`・`text-on-member` | アイコン、名前、#N・時刻、右端に `paidLabelOf` (新規メンバー / メンバー N か月。レベル名があれば後ろに「 · {レベル名}」(例: `新規メンバー · ほしぞら組`)。メンバーシップギフトは「メンバーシップを N 件ギフト」、件数が分からなければ「メンバーシップのギフト」) | メッセージがあれば |
+| メンバーシップ・マイルストーン・メンバーシップギフト | `bg-member`・`text-on-member` | アイコン、名前、#N・時刻、右端に `paidLabelOf` (新規メンバー / メンバー N か月。レベル名があれば後ろに「 · {レベル名}」(例: `新規メンバー · ほしぞら組`)。メンバーシップギフトは「メンバーシップを N 件ギフト」、件数が分からなければ「メンバーシップのギフト」) | メッセージがあれば (メンバーシップギフトには無い。「メンバーシップギフトの本文」) |
 | ギフト (ジュエル) | `bg-surface-highest`・`border-outline` | ギフトの画像 (`size-chat-gift`、読めなければ消す)、「{author} が {gift_name} を送りました」、#N・時刻、右端に「N ジュエル」(`data-testid="gift-jewels"`、jewel_count があるときだけ) | なし |
 
 - 札の文言は `src/lib/design/paid-label.ts` の `paidLabelOf` (流れたものの欄と共通)
@@ -1815,7 +1815,7 @@ CREATE TABLE messages (
 |---------|------|
 | 新規メンバー | `milestone_months: None` |
 | マイルストーン（n か月） | `milestone_months: Some(n)` |
-| ギフト配布 | `message_type: membership_gift` + `gift_count` |
+| ギフト配布 | `message_type: membership_gift` + `gift_count`。`content`・`runs` は空（下の「メンバーシップギフトの本文」） |
 | ギフト受け取り | `message_type: membership_gift_redemption` + `gifter`。新規メンバーとは分け、贈った人の行にまとめる（「メンバーシップギフトの受け取り」。2026-10-12 に変更。以前は「新規メンバーとして処理」と書いていたが未実装で、受け取りは捨てられていた） |
 
 `liveChatMembershipItemRenderer` は次のように読む（2026-09〜10 の実データで確認）。
@@ -1850,3 +1850,16 @@ InnerTube は `hl=en` で取得しているので英語の文が届く。日本�
 日本語: "(\d+)\s*人に"
 英語: "[Gg]ifted\s+(\d+)", "(\d+)\s+membership"
 ```
+
+#### メンバーシップギフトの本文
+
+`liveChatSponsorshipsGiftPurchaseAnnouncementRenderer` の `header.liveChatSponsorshipsHeaderRenderer.primaryText` は、YouTube が付ける英語の定型文（`Sent 5 {チャンネル名} gift memberships`）で、視聴者のメッセージではない。
+件数を取るためだけに使い、`content`・`runs` には入れない（新規・マイルストーンと同じく、本文は視聴者が書いたものだけ）。
+メンバーシップギフトには視聴者のメッセージが無いので、`content`・`runs` は常に空になる。
+
+以前は `primaryText` を `content` に入れていたため、画面の面・視聴者情報パネルの履歴・WebSocket に英文が出ていた（画面では札の「メンバーシップを N 件ギフト」と重なっていた）。2026-10-13 に変更。
+
+| 届いたもの | `gift_count` | `content` | `runs` |
+|-----------|----|----|----|
+| `primaryText` `Sent 5 Channel Name gift memberships` | 5 | 空 | 空 |
+| `primaryText` から件数が読めない | 1 | 空 | 空 |

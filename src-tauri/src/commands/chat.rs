@@ -711,7 +711,7 @@ mod tests {
     fn membership_gift_count_reaches_gui_without_metadata() {
         let msg = ChatMessage {
             message_type: MessageType::MembershipGift { gift_count: 5 },
-            content: "Sent 5 Channel gift memberships".to_string(),
+            content: String::new(),
             ..text_message()
         };
         let gui = GuiChatMessage::from(msg);
