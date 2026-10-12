@@ -193,13 +193,22 @@ pub struct SignalerClient {
 
 impl SignalerClient {
     pub fn new(api_key: impl Into<String>, video_id: impl Into<String>) -> Self {
+        Self::with_base_url(api_key, video_id, signaler_base_url())
+    }
+
+    /// 通知のサーバーの URL を指定して作る
+    pub fn with_base_url(
+        api_key: impl Into<String>,
+        video_id: impl Into<String>,
+        base_url: String,
+    ) -> Self {
         Self {
             // 受信は開いたまま待つので、全体のタイムアウトは付けない（無通信の判定は呼ぶ側が行う）
             http: Client::builder()
                 .connect_timeout(CONNECT_TIMEOUT)
                 .build()
                 .expect("HTTP クライアントの初期化に失敗"),
-            base_url: signaler_base_url(),
+            base_url,
             api_key: api_key.into(),
             video_id: video_id.into(),
         }
