@@ -90,6 +90,8 @@ pub struct MonitoringTarget {
     pub cancellation_token: CancellationToken,
     /// チャットモード変更要求を受信する watch チャネル
     pub chat_mode_rx: watch::Receiver<ChatMode>,
+    /// プッシュ通知（最後に受けた通知の発行時刻）。通知を使わない接続では None（02_chat.md「プッシュ通知」）
+    pub push_notices: Option<watch::Receiver<Option<String>>>,
 }
 
 /// 監視ループの外とのやりとり（画面への通知と、その時点の保存設定）
@@ -124,6 +126,7 @@ pub async fn run_monitoring_loop(
         broadcaster_id,
         cancellation_token,
         mut chat_mode_rx,
+        mut push_notices,
     } = target;
     tracing::info!("チャット監視タスク開始 connection_id: {}", connection_id);
     let mut poll_count = 0u64;
@@ -179,6 +182,13 @@ pub async fn run_monitoring_loop(
 
         poll_count += 1;
 
+        // 最後に受けた通知の発行時刻をリクエストに付ける（02_chat.md「リクエスト形式」）。
+        // ここで読んだ通知は、この取得が応えたものとして扱う
+        let fetch_started = tokio::time::Instant::now();
+        let publish_at = push_notices
+            .as_mut()
+            .and_then(|rx| rx.borrow_and_update().clone());
+
         // メッセージをフェッチする。応答を待つ間も切断を受け付ける
         let fetched = tokio::select! {
             _ = cancellation_token.cancelled() => {
@@ -188,7 +198,7 @@ pub async fn run_monitoring_loop(
                 );
                 break MonitoringEnd::Cancelled;
             }
-            fetched = client.fetch_chat() => fetched,
+            fetched = client.fetch_chat(publish_at.as_deref()) => fetched,
         };
         // fetched_timeout は成功したときだけ Some（中身は応答の timeoutMs）。
         // 成功は再送を除いた件数で数えるので、記録は再送を捨てた後に行う
@@ -343,7 +353,11 @@ pub async fn run_monitoring_loop(
             }
         }
 
-        let Some(wait) = schedule.next_wait() else {
+        // 応答を待つ間に届いた通知は、この取得が含んでいないことがある（02_chat.md「通知が届いたとき」）
+        let notified_during_fetch = push_notices.as_mut().is_some_and(|rx| {
+            rx.has_changed().unwrap_or(false) && rx.borrow_and_update().is_some()
+        });
+        let Some(wait) = schedule.wait_after_fetch(notified_during_fetch) else {
             tracing::warn!(
                 "取得に {} 回続けて失敗したため監視を停止 connection_id: {}",
                 schedule.consecutive_failures,
@@ -365,6 +379,18 @@ pub async fn run_monitoring_loop(
                 break MonitoringEnd::Cancelled;
             }
             _ = tokio::time::sleep(wait) => {}
+            _ = next_push(push_notices.as_mut(), schedule.accepts_push()) => {
+                let rest = wait_for_push_fetch(fetch_started.elapsed());
+                tracing::debug!(
+                    "プッシュ通知で待ちを打ち切る（{:?} 後に取得） connection_id: {}",
+                    rest,
+                    connection_id
+                );
+                tokio::select! {
+                    _ = cancellation_token.cancelled() => break MonitoringEnd::Cancelled,
+                    _ = tokio::time::sleep(rest) => {}
+                }
+            }
         }
     };
 
@@ -519,6 +545,23 @@ impl PollSchedule {
         }
     }
 
+    /// プッシュ通知で待ちを打ち切ってよいか（02_chat.md「通知が届いたとき」）
+    ///
+    /// 失敗が続いて待ちを延ばしている間は打ち切らない（延ばす意味がなくなるため）。
+    fn accepts_push(&self) -> bool {
+        self.consecutive_failures <= FAILURES_BEFORE_BACKOFF
+    }
+
+    /// 取得の後の待ち。取得の応答を待つ間に通知が届いていたら 1.5 秒にする（02_chat.md「通知が届いたとき」）
+    fn wait_after_fetch(&self, notified_during_fetch: bool) -> Option<Duration> {
+        let wait = self.next_wait()?;
+        Some(if notified_during_fetch && self.accepts_push() {
+            POLL_INTERVAL
+        } else {
+            wait
+        })
+    }
+
     /// 次の取得までの待ち。`None` なら切断する
     ///
     /// 失敗の 11 回目からは失敗のたびに倍にする（3・6・12・24 秒）。
@@ -537,6 +580,30 @@ impl PollSchedule {
             _ => Some(POLL_INTERVAL),
         }
     }
+}
+
+/// 待っている間にプッシュ通知が届くまで待つ。通知を使わない・受け付けないときは待ち続ける
+///
+/// 設定を無効にしたとき（発行時刻が None に戻る）は通知ではないので、待ちを打ち切らない。
+async fn next_push(notices: Option<&mut watch::Receiver<Option<String>>>, accept: bool) {
+    let Some(rx) = notices.filter(|_| accept) else {
+        return std::future::pending().await;
+    };
+    loop {
+        if rx.changed().await.is_err() {
+            return std::future::pending().await;
+        }
+        if rx.borrow_and_update().is_some() {
+            return;
+        }
+    }
+}
+
+/// 待っている間に通知が届いたとき、取りに行くまでの待ち（02_chat.md「通知が届いたとき」）
+///
+/// 通知のときもポーリング間隔の下限（1.5 秒）を守り、前回の取得を始めてから 1.5 秒は空ける。
+fn wait_for_push_fetch(since_fetch_start: Duration) -> Duration {
+    POLL_INTERVAL.saturating_sub(since_fetch_start)
 }
 
 /// この接続で受け取った message_id の記憶（02_chat.md「受信済み message_id の記憶」）
@@ -626,10 +693,7 @@ async fn save_raw_response(config: &SaveConfig, raw_json: &str) {
 ///
 /// 視聴者を特定できない・配信者が分からない・DB を使えないときは、どちらも None。
 /// 検索に失敗したら警告ログを出して、どちらも None（投稿者名で読み上げる）。
-fn viewer_annotation(
-    msg: &ChatMessage,
-    db_scope: Option<(&Connection, &str)>,
-) -> ViewerAnnotation {
+fn viewer_annotation(msg: &ChatMessage, db_scope: Option<(&Connection, &str)>) -> ViewerAnnotation {
     let Some((conn, broadcaster_id)) = db_scope.filter(|_| !msg.channel_id.is_empty()) else {
         return ViewerAnnotation::default();
     };
@@ -828,6 +892,47 @@ mod tests {
                 "{count} 回連続で失敗"
             );
         }
+    }
+
+    // 02_chat.md「通知が届いたとき」: 前回の取得から 4 秒で通知 → 通知の直後
+    #[test]
+    fn push_after_minimum_fetches_immediately() {
+        assert_eq!(wait_for_push_fetch(Duration::from_secs(4)), Duration::ZERO);
+    }
+
+    // 02_chat.md「通知が届いたとき」: 前回の取得から 0.5 秒で通知 → その 1 秒後（前回から 1.5 秒）
+    #[test]
+    fn push_before_minimum_waits_until_minimum() {
+        assert_eq!(
+            wait_for_push_fetch(Duration::from_millis(500)),
+            Duration::from_millis(1000)
+        );
+    }
+
+    // 02_chat.md「通知が届いたとき」: 取得の応答待ちの間に通知。空振り 5 回目（本来の待ち 5.5 秒）→ 1.5 秒後
+    #[test]
+    fn push_during_fetch_shortens_next_wait_to_minimum() {
+        let schedule = schedule_after(&[empty(Some(10_000)); 5]);
+        assert_eq!(
+            schedule.wait_after_fetch(false),
+            Some(Duration::from_millis(5500))
+        );
+        assert_eq!(schedule.wait_after_fetch(true), Some(POLL_INTERVAL));
+    }
+
+    // 02_chat.md「通知が届いたとき」: 失敗 11 回以上で待ちを延ばしている間は、通知で打ち切らない
+    #[test]
+    fn push_does_not_cut_failure_backoff() {
+        let backing_off = schedule_after(&[FAILED; 11]);
+        assert!(!backing_off.accepts_push());
+        assert_eq!(
+            backing_off.wait_after_fetch(true),
+            Some(Duration::from_millis(3000))
+        );
+
+        let retrying = schedule_after(&[FAILED; 10]);
+        assert!(retrying.accepts_push());
+        assert!(PollSchedule::default().accepts_push());
     }
 
     // 02_chat.md: 失敗12回 → 成功 → 失敗 なら、次の待ちは 1.5秒

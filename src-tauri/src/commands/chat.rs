@@ -6,7 +6,7 @@ use crate::commands::config::ConfigState;
 use crate::connection::{
     ConnectionInfo, DISCONNECT_TIMEOUT, MAX_CONNECTIONS, StreamConnection, disconnect_all,
 };
-use crate::core::api::InnerTubeClient;
+use crate::core::api::{InnerTubeClient, SignalerClient};
 use crate::core::chat_runtime::{
     MonitoringDeps, MonitoringOutput, MonitoringTarget, run_monitoring_loop,
 };
@@ -14,6 +14,7 @@ use crate::core::models::{
     ChatMessage, ChatMode, ConnectionStatus, Platform, ReactionSummary, ReactionUpdate,
     extract_video_id,
 };
+use crate::core::push_watch::run_push_watch;
 use crate::core::raw_response::SaveConfig;
 use crate::database::{self, ViewerAnnotation};
 use crate::errors::CommandError;
@@ -413,6 +414,30 @@ pub async fn connect_to_stream(
         // チャットモード制御用の watch チャネルを生成
         let (chat_mode_tx, chat_mode_rx) = watch::channel(mode);
 
+        // プッシュ通知の受信（02_chat.md「プッシュ通知」）。監視タスクが終わったら一緒に止める。
+        // 視聴ページに API キーが無ければ、ポーリングだけで取る
+        let push_cancel = cancellation_token.child_token();
+        let push_notices = match client.signaler_api_key.clone() {
+            Some(api_key) => {
+                let (notice_tx, notice_rx) = watch::channel(None);
+                tokio::spawn(run_push_watch(
+                    SignalerClient::new(api_key, video_id.clone()),
+                    config_state.push_enabled(),
+                    push_cancel.clone(),
+                    notice_tx,
+                    connection_id,
+                ));
+                Some(notice_rx)
+            }
+            None => {
+                tracing::info!(
+                    "視聴ページにプッシュ通知の API キーが無いので、ポーリングだけで取る connection_id: {}",
+                    connection_id
+                );
+                None
+            }
+        };
+
         // 監視タスクの共有依存を構築
         let deps = MonitoringDeps::from_state(&state);
 
@@ -430,6 +455,7 @@ pub async fn connect_to_stream(
             broadcaster_id: result.broadcaster_channel_id.clone(),
             cancellation_token: cancellation_token.clone(),
             chat_mode_rx,
+            push_notices,
         };
 
         // StreamConnection を生成して connections マップに追加
@@ -460,6 +486,7 @@ pub async fn connect_to_stream(
         // 監視タスクをスポーン
         let handle = tokio::spawn(async move {
             let end = run_monitoring_loop(deps, client, target, output).await;
+            push_cancel.cancel();
 
             // 監視タスク終了後: connections マップに残っている場合はクリーンアップ
             // （disconnect_stream 経由で既に削除済みの場合はスキップ）

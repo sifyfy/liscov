@@ -804,6 +804,27 @@ export async function mockChatRequestCount(): Promise<number> {
   return status.request_count;
 }
 
+/** モックの通知のサーバー（signaler）の状態（02_chat.md「プッシュ通知」） */
+export type MockSignalerStatus = {
+  readonly choose_server_count: number;
+  readonly refresh_count: number;
+  /** いま開いている受信の数（liscov が受信を閉じると減る） */
+  readonly open_receivers: number;
+  /** 最後の get_live_chat に付いていた invalidationPayloadLastPublishAtUsec */
+  readonly last_publish_at: string | null;
+};
+
+export async function mockSignalerStatus(): Promise<MockSignalerStatus> {
+  const response = await fetch(`${mockServerUrl()}/signaler_status`);
+  return (await response.json()) as MockSignalerStatus;
+}
+
+/** モックの通知のサーバーから、開いている受信すべてにチャットの更新の通知を送る。発行時刻 (µs) を返す */
+export async function sendMockPushNotification(): Promise<string> {
+  const response = await fetch(`${mockServerUrl()}/signaler_notify`, { method: 'POST' });
+  return ((await response.json()) as { publish_at: string }).publish_at;
+}
+
 /**
  * テスト用に起動したアプリだけを強制終了する（終了処理を走らせない。クラッシュ・強制終了の再現用）
  *

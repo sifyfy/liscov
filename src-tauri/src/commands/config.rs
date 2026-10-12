@@ -10,6 +10,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::RwLock;
 use tauri::State;
+use tokio::sync::watch;
 use ts_rs::TS;
 
 /// Storage mode for credentials
@@ -107,6 +108,23 @@ impl Default for ChatDisplayConfig {
     }
 }
 
+/// チャットの取り方の設定（09_config.md「chat_fetch セクション」）
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/types/generated/")]
+#[serde(default)]
+pub struct ChatFetchConfig {
+    /// プッシュ通知を受けて取得を早める（02_chat.md「プッシュ通知」）。変更は接続中の接続にもすぐ効く
+    pub push_notification: bool,
+}
+
+impl Default for ChatFetchConfig {
+    fn default() -> Self {
+        Self {
+            push_notification: true,
+        }
+    }
+}
+
 /// Application configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default, TS)]
 #[ts(export, export_to = "../../src/lib/types/generated/")]
@@ -115,6 +133,8 @@ pub struct Config {
     pub storage: StorageConfig,
     #[serde(default)]
     pub chat_display: ChatDisplayConfig,
+    #[serde(default)]
+    pub chat_fetch: ChatFetchConfig,
     #[serde(default)]
     pub ui: UiConfig,
     /// 生レスポンス保存設定（05_raw_response.md）。変更は raw_response_update_config だけが行う
@@ -127,13 +147,13 @@ pub struct Config {
 /// Configuration state for managing in-memory config
 pub struct ConfigState {
     config: RwLock<Config>,
+    /// `chat_fetch.push_notification` の今の値。接続中のプッシュ通知の受信に、変更をすぐ届ける（02_chat.md「受け始めと終わり」）
+    push_enabled: watch::Sender<bool>,
 }
 
 impl Default for ConfigState {
     fn default() -> Self {
-        Self {
-            config: RwLock::new(Config::default()),
-        }
+        Self::with_config(Config::default())
     }
 }
 
@@ -142,11 +162,30 @@ impl ConfigState {
         Self::default()
     }
 
+    fn with_config(config: Config) -> Self {
+        Self {
+            push_enabled: watch::Sender::new(config.chat_fetch.push_notification),
+            config: RwLock::new(config),
+        }
+    }
+
     /// 起動時に config.toml から読み込んだ設定で初期化する（09_config.md アプリ起動時）
     pub fn load_from_file() -> Self {
-        Self {
-            config: RwLock::new(load_config_from_file()),
-        }
+        Self::with_config(load_config_from_file())
+    }
+
+    /// `chat_fetch.push_notification` の変更を受け取る（接続ごとのプッシュ通知の受信が持つ）
+    pub fn push_enabled(&self) -> watch::Receiver<bool> {
+        self.push_enabled.subscribe()
+    }
+
+    /// 設定を置き換えた後に、接続中のタスクへ変更を届ける
+    fn publish(&self, config: &Config) {
+        self.push_enabled.send_if_modified(|enabled| {
+            let changed = *enabled != config.chat_fetch.push_notification;
+            *enabled = config.chat_fetch.push_notification;
+            changed
+        });
     }
 
     /// Get a clone of the current config
@@ -156,6 +195,7 @@ impl ConfigState {
 
     /// Update the config（ファイルから読み直したときに使う。変更は `update` で行う）
     pub fn set(&self, config: Config) {
+        self.publish(&config);
         *self.config.write().unwrap() = config;
     }
 
@@ -170,6 +210,7 @@ impl ConfigState {
         let mut config = self.config.write().unwrap();
         let next = change(&config)?;
         *config = next.clone();
+        self.publish(&next);
         let saved = save_config_to_file(&next);
         Ok(ConfigUpdate {
             config: next,
@@ -303,6 +344,10 @@ pub(crate) fn config_lookup(config: &Config, section: &str, key: &str) -> Option
             )),
             _ => None,
         },
+        "chat_fetch" => match key {
+            "push_notification" => Some(serde_json::json!(config.chat_fetch.push_notification)),
+            _ => None,
+        },
         "ui" => match key {
             "theme" => Some(serde_json::to_value(&config.ui.theme).unwrap()),
             _ => None,
@@ -411,6 +456,23 @@ pub(crate) fn config_apply_value(
             _ => {
                 return Err(CommandError::InvalidInput(format!(
                     "Unknown key in chat_display section: {}",
+                    key
+                )));
+            }
+        },
+        "chat_fetch" => match key {
+            "push_notification" => {
+                new_config.chat_fetch.push_notification =
+                    serde_json::from_value(value).map_err(|e| {
+                        CommandError::InvalidInput(format!(
+                            "Invalid push_notification value: {}",
+                            e
+                        ))
+                    })?;
+            }
+            _ => {
+                return Err(CommandError::InvalidInput(format!(
+                    "Unknown key in chat_fetch section: {}",
                     key
                 )));
             }
@@ -691,6 +753,60 @@ future_setting = true
         let config = Config::default();
         let val = config_lookup(&config, "chat_display", "hide_panel_on_connect");
         assert_eq!(val, Some(serde_json::json!(true)));
+    }
+
+    // 09_config.md「chat_fetch セクション」: push_notification の既定は true。ファイルに無ければ true
+    #[test]
+    fn push_notification_defaults_to_enabled() {
+        let config = Config::default();
+        assert_eq!(
+            config_lookup(&config, "chat_fetch", "push_notification"),
+            Some(serde_json::json!(true))
+        );
+        let from_old_file: Config = toml::from_str("[storage]\nmode = \"secure\"\n").unwrap();
+        assert!(from_old_file.chat_fetch.push_notification);
+    }
+
+    #[test]
+    fn push_notification_can_be_disabled() {
+        let config = config_apply_value(
+            &Config::default(),
+            "chat_fetch",
+            "push_notification",
+            serde_json::json!(false),
+        )
+        .unwrap();
+        assert!(!config.chat_fetch.push_notification);
+        assert!(
+            config_apply_value(
+                &config,
+                "chat_fetch",
+                "push_notification",
+                serde_json::json!(1)
+            )
+            .is_err()
+        );
+    }
+
+    // 02_chat.md「受け始めと終わり」: 接続中に設定を変えると、受信のタスクにすぐ届く
+    #[test]
+    fn push_notification_change_reaches_running_watchers() {
+        let state = ConfigState::new();
+        let mut watcher = state.push_enabled();
+        assert!(*watcher.borrow_and_update());
+
+        let _ = state
+            .update(|current| {
+                config_apply_value(
+                    current,
+                    "chat_fetch",
+                    "push_notification",
+                    serde_json::json!(false),
+                )
+            })
+            .unwrap();
+        assert!(watcher.has_changed().unwrap());
+        assert!(!*watcher.borrow_and_update());
     }
 
     #[test]

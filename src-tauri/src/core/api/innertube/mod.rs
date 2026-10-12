@@ -54,6 +54,8 @@ pub struct InnerTubeClient {
     pub broadcaster_name: Option<String>,
     pub stream_title: Option<String>,
     pub is_replay: bool,
+    /// プッシュ通知の API キー（視聴ページから取る。無ければ通知を使わない。02_chat.md「プッシュ通知」）
+    pub signaler_api_key: Option<String>,
 }
 
 impl InnerTubeClient {
@@ -70,6 +72,7 @@ impl InnerTubeClient {
             broadcaster_name: None,
             stream_title: None,
             is_replay: false,
+            signaler_api_key: None,
         }
     }
 
@@ -157,6 +160,7 @@ impl InnerTubeClient {
 
         let response = request.send().await?;
         let html = response.text().await?;
+        self.signaler_api_key = super::extract_signaler_api_key(&html);
 
         if let Some(data) = initial_data::extract_yt_initial_data(&html) {
             let has_chat = data
@@ -235,18 +239,24 @@ impl InnerTubeClient {
 
     /// チャットメッセージを取得する（メッセージのみを返す）
     pub async fn fetch_messages(&mut self) -> Result<Vec<ChatMessage>> {
-        Ok(self.fetch_chat().await?.messages)
+        Ok(self.fetch_chat(None).await?.messages)
     }
 
     /// チャットメッセージ・ライブリアクションと生のレスポンス JSON を取得する
-    pub async fn fetch_chat(&mut self) -> Result<ChatFetch> {
+    ///
+    /// `publish_at` は最後に受けたプッシュ通知の発行時刻（02_chat.md「プッシュ通知」）
+    pub async fn fetch_chat(&mut self, publish_at: Option<&str>) -> Result<ChatFetch> {
         let continuation = self
             .continuation
             .as_ref()
             .ok_or_else(|| anyhow!("No continuation token"))?;
 
-        let request_body =
-            client::build_request_body(&self.video_id, continuation, &self.client_version);
+        let request_body = client::build_request_body(
+            &self.video_id,
+            continuation,
+            &self.client_version,
+            publish_at,
+        );
         let url = format!(
             "{}?key={}&prettyPrint=false",
             client::get_innertube_api_url(),

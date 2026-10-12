@@ -242,6 +242,62 @@ struct ServerState {
     token_validation: Mutex<TokenValidation>, // Detailed token validation results
     auto_message: Mutex<AutoMessageState>, // Auto-generate messages for stress testing
     last_request_cookies: Mutex<LastRequestCookies>, // Track cookies received in API requests
+    /// プッシュ通知のサーバー（signaler）の役（02_chat.md「プッシュ通知」の検証用）
+    signaler: SignalerState,
+}
+
+/// プッシュ通知のサーバーの役の状態
+struct SignalerState {
+    /// /signaler_notify で送る通知（発行時刻 µs）。開いている受信すべてに届く
+    notify: tokio::sync::broadcast::Sender<String>,
+    choose_server_count: AtomicU64,
+    refresh_count: AtomicU64,
+    /// いま開いている受信の数（liscov が受信を閉じたら減る）
+    open_receivers: Arc<AtomicU64>,
+    /// 最後の get_live_chat に付いていた invalidationPayloadLastPublishAtUsec
+    last_publish_at: Mutex<Option<String>>,
+}
+
+impl Default for SignalerState {
+    fn default() -> Self {
+        Self {
+            notify: tokio::sync::broadcast::channel(64).0,
+            choose_server_count: AtomicU64::new(0),
+            refresh_count: AtomicU64::new(0),
+            open_receivers: Arc::new(AtomicU64::new(0)),
+            last_publish_at: Mutex::new(None),
+        }
+    }
+}
+
+/// 受信が開いている間 open_receivers に数え、閉じられたら（応答の本文が捨てられたら）減らす
+struct OpenReceiverGuard(Arc<AtomicU64>);
+
+impl OpenReceiverGuard {
+    fn new(count: &Arc<AtomicU64>) -> Self {
+        count.fetch_add(1, Ordering::SeqCst);
+        Self(Arc::clone(count))
+    }
+}
+
+impl Drop for OpenReceiverGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// 受信の 1 件を「長さ + 改行 + JSON」にする
+fn signaler_frame(entries: &Value) -> String {
+    let json = entries.to_string();
+    format!("{}\n{}", json.len(), json)
+}
+
+fn now_usec() -> String {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_micros()
+        .to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -356,6 +412,7 @@ async fn main() {
         token_validation: Mutex::new(TokenValidation::default()),
         auto_message: Mutex::new(AutoMessageState::default()),
         last_request_cookies: Mutex::new(LastRequestCookies::default()),
+        signaler: SignalerState::default(),
     });
     let routes = build_routes(state);
     let addr: SocketAddr = ([127, 0, 0, 1], args.port).into();
@@ -487,6 +544,11 @@ fn build_routes(
             let sa = Arc::clone(&sa);
             async move {
                 sa.request_count.fetch_add(1, Ordering::SeqCst);
+                // 02_chat.md「リクエスト形式」: 最後に受けた通知の発行時刻が付いているか
+                *sa.signaler.last_publish_at.lock().unwrap() = body
+                    .get("invalidationPayloadLastPublishAtUsec")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
 
                 // Apply chat delay if configured
                 let delay = {
@@ -701,8 +763,96 @@ fn build_routes(
         *srs.token_validation.lock().unwrap() = TokenValidation::default();
         *srs.auto_message.lock().unwrap() = AutoMessageState::default();
         *srs.last_request_cookies.lock().unwrap() = LastRequestCookies::default();
+        *srs.signaler.last_publish_at.lock().unwrap() = None;
+        srs.signaler.choose_server_count.store(0, Ordering::SeqCst);
+        srs.signaler.refresh_count.store(0, Ordering::SeqCst);
         srs.login_page_visits.store(0, Ordering::SeqCst);
         warp::reply::json(&json!({"status":"ok"}))
+    });
+    // ---- プッシュ通知のサーバー（signaler）の役（02_chat.md「通知のサーバーとのやりとり」）----
+    let scs = Arc::clone(&state);
+    let signaler_choose = warp::path!("punctual" / "v1" / "chooseServer")
+        .and(warp::post())
+        .map(move || {
+            scs.signaler
+                .choose_server_count
+                .fetch_add(1, Ordering::SeqCst);
+            warp::reply::json(&json!(["mock_gsessionid", 3, null, now_usec(), now_usec()]))
+        });
+    let signaler_open = warp::path!("punctual" / "multi-watch" / "channel")
+        .and(warp::post())
+        .map(|| signaler_frame(&json!([[0, ["c", "mock_sid", "", 8, 15, 30000]]])));
+    let srcv = Arc::clone(&state);
+    let signaler_receive = warp::path!("punctual" / "multi-watch" / "channel")
+        .and(warp::get())
+        .and(warp::query::<std::collections::HashMap<String, String>>())
+        .map(move |q: std::collections::HashMap<String, String>| {
+            let aid: u64 = q.get("AID").and_then(|a| a.parse().ok()).unwrap_or(0);
+            let (tx, rx) = tokio::sync::mpsc::channel::<String>(16);
+            let mut notices = srcv.signaler.notify.subscribe();
+            // 最初の分: 新しい受信ならトークンと購読の開始、開き直しなら noop（本物と同じ）
+            let first = if aid == 0 {
+                json!([[1, [[null, null, ["mock_token"]]]], [2, [[[["1", [[now_usec()]]]]]]]])
+            } else {
+                json!([[aid + 1, ["noop"]]])
+            };
+            tokio::spawn(async move {
+                let mut next_aid = if aid == 0 { 3 } else { aid + 2 };
+                if tx.send(signaler_frame(&first)).await.is_err() {
+                    return;
+                }
+                // 本物は 20 秒ごと。モックは短くし、liscov が受信を閉じたこと（書き込みの失敗）に早く気づく
+                let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(2));
+                heartbeat.tick().await;
+                loop {
+                    let entry = tokio::select! {
+                        notice = notices.recv() => match notice {
+                            Ok(publish_at) => json!([[next_aid, [[[["1", [null, [[[null, "mock_version", publish_at, publish_at, [], [], 0, 0]]]]]]]]]]),
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                            Err(_) => return,
+                        },
+                        _ = heartbeat.tick() => json!([[next_aid, [[[["1", [null, null, [now_usec()]]]]]]]]),
+                        _ = tx.closed() => return,
+                    };
+                    next_aid += 1;
+                    if tx.send(signaler_frame(&entry)).await.is_err() {
+                        return;
+                    }
+                }
+            });
+            let guard = OpenReceiverGuard::new(&srcv.signaler.open_receivers);
+            let body = futures_util::stream::unfold((rx, guard), |(mut rx, guard)| async move {
+                rx.recv()
+                    .await
+                    .map(|frame| (Ok::<_, std::convert::Infallible>(frame), (rx, guard)))
+            });
+            warp::reply::stream(body)
+        });
+    let srf = Arc::clone(&state);
+    let signaler_refresh = warp::path!("punctual" / "v1" / "refreshCreds")
+        .and(warp::post())
+        .map(move || {
+            srf.signaler.refresh_count.fetch_add(1, Ordering::SeqCst);
+            warp::reply::json(&json!([]))
+        });
+    // テストから通知を送る。開いている受信すべてに届く
+    let snt = Arc::clone(&state);
+    let signaler_notify = warp::path("signaler_notify")
+        .and(warp::post())
+        .map(move || {
+            let publish_at = now_usec();
+            let receivers = snt.signaler.notify.send(publish_at.clone()).unwrap_or(0);
+            warp::reply::json(&json!({"publish_at": publish_at, "receivers": receivers}))
+        });
+    let sst2 = Arc::clone(&state);
+    let signaler_status = warp::path("signaler_status").and(warp::get()).map(move || {
+        let s = &sst2.signaler;
+        warp::reply::json(&json!({
+            "choose_server_count": s.choose_server_count.load(Ordering::SeqCst),
+            "refresh_count": s.refresh_count.load(Ordering::SeqCst),
+            "open_receivers": s.open_receivers.load(Ordering::SeqCst),
+            "last_publish_at": *s.last_publish_at.lock().unwrap(),
+        }))
     });
     // InnerTube `next` API endpoint - fallback for member-only streams
     let snx = Arc::clone(&state);
@@ -791,6 +941,12 @@ fn build_routes(
         .or(set_auto_message)
         .or(auto_message_status)
         .or(last_request_cookies)
+        .or(signaler_choose)
+        .or(signaler_open)
+        .or(signaler_receive)
+        .or(signaler_refresh)
+        .or(signaler_notify)
+        .or(signaler_status)
 }
 
 #[derive(Debug, Deserialize)]
@@ -1080,14 +1236,18 @@ fn split_title_into_runs(title: &str) -> Vec<serde_json::Value> {
     runs
 }
 
+/// 視聴ページの ytcfg のうち、プッシュ通知の API キー（02_chat.md「通知のサーバーとのやりとり」）
+const MOCK_TANGO_CONFIG: &str = r#"<script>ytcfg.set({"LIVE_CHAT_BASE_TANGO_CONFIG":{"apiKey":"mock_signaler_key"}});</script>"#;
+
 fn gen_html(_vid: &str, cid: &str, cn: &str, t: &str) -> String {
     // Generate a proper continuation token with TopChat mode (chattype=4)
     let ct = generate_mock_continuation_token(4);
     let title_runs = split_title_into_runs(t);
     let d = json!({"contents":{"twoColumnWatchNextResults":{"results":{"results":{"contents":[{"videoPrimaryInfoRenderer":{"title":{"runs":title_runs}}},{"videoSecondaryInfoRenderer":{"owner":{"videoOwnerRenderer":{"title":{"runs":[{"text":cn}]},"navigationEndpoint":{"browseEndpoint":{"browseId":cid}}}}}}]}},"conversationBar":{"liveChatRenderer":{"continuations":[{"reloadContinuationData":{"continuation":ct}}],"isReplay":false}}}}});
     format!(
-        "<!DOCTYPE html><html><head><title>{}</title></head><body><script>var ytInitialData = {};</script></body></html>",
+        "<!DOCTYPE html><html><head><title>{}</title></head><body>{}<script>var ytInitialData = {};</script></body></html>",
         t,
+        MOCK_TANGO_CONFIG,
         serde_json::to_string(&d).unwrap()
     )
 }

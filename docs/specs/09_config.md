@@ -64,6 +64,9 @@ chat_mode = "top"  # "top" or "all"
 flowed_newcomers_height_ratio = 0.125
 flowed_supporters_height_ratio = 0.125
 
+[chat_fetch]
+push_notification = true
+
 [ui]
 theme = "dark"  # "dark" or "light"
 
@@ -102,6 +105,14 @@ max_backup_files = 5
 
 `auto_scroll_enabled` は 2026-10 に外した (自動スクロールは止めたままにできなくなった。02_chat.md「自動スクロール」)。古い config.toml に残っていても、未知のキーとして無視する。
 
+### chat_fetch セクション
+
+チャットの取り方に関する設定。詳細は[チャット機能仕様](02_chat.md)を参照。
+
+| キー | 型 | デフォルト | 説明 |
+|-----|-----|----------|------|
+| `push_notification` | boolean | `true` | YouTube のプッシュ通知を受けて取得を早める (02_chat.md「プッシュ通知」)。実験的な機能で、問題が起きたときに止めるためのもの。設定の画面の「チャット取得」のタブで切り替える。変更はすぐ効く (接続中の接続にも) |
+
 ### ui セクション
 
 UIの表示に関する設定。
@@ -129,6 +140,7 @@ UIの表示に関する設定。
 pub struct Config {
     pub storage: StorageConfig,
     pub chat_display: ChatDisplayConfig,
+    pub chat_fetch: ChatFetchConfig,
     pub ui: UiConfig,
     pub raw_response: SaveConfig,  // 05_raw_response.md
 }
@@ -144,6 +156,10 @@ pub struct ChatDisplayConfig {
     pub chat_mode: ChatModeSetting,
     pub flowed_newcomers_height_ratio: f64,
     pub flowed_supporters_height_ratio: f64,
+}
+
+pub struct ChatFetchConfig {
+    pub push_notification: bool,
 }
 
 pub enum ChatModeSetting {
