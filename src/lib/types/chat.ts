@@ -24,6 +24,7 @@ export type MessageType =
   | 'supersticker'
   | 'membership'
   | 'membership_gift'
+  | 'membership_gift_redemption'
   | 'gift'
   | 'system';
 

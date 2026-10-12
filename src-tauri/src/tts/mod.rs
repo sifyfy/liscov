@@ -495,12 +495,13 @@ pub(crate) fn speech_text(config: &TtsConfig, item: &TtsQueueItem) -> String {
 
 /// チャットのメッセージを読み上げキューの要素にする（04_tts.md「スーパーチャット/メンバーシップの読み上げ」）
 ///
+/// 読まない種別（メンバーシップギフトの受け取り）は None。
 /// 種別の文はここで作るので、`read_amount`（= read_superchat_amount）はキューに入れた時点の設定が効く
 pub(crate) fn queue_item_for_chat(
     msg: &ChatMessage,
     author_reading: Option<String>,
     read_amount: bool,
-) -> TtsQueueItem {
+) -> Option<TtsQueueItem> {
     let priority = match &msg.message_type {
         MessageType::SuperChat { .. } | MessageType::SuperSticker { .. } | MessageType::Gift(_) => {
             TtsPriority::SuperChat
@@ -509,6 +510,8 @@ pub(crate) fn queue_item_for_chat(
             TtsPriority::Membership
         }
         MessageType::Text | MessageType::System => TtsPriority::Normal,
+        // 大量に配られると読み上げが埋まるので読まない（贈った人のギフトは読む）
+        MessageType::MembershipGiftRedemption { .. } => return None,
     };
 
     // 本文として読むのは視聴者が書いたメッセージだけ。
@@ -520,7 +523,7 @@ pub(crate) fn queue_item_for_chat(
         _ => msg.content.clone(),
     };
 
-    TtsQueueItem {
+    Some(TtsQueueItem {
         text,
         priority,
         author_name: Some(msg.author.clone()),
@@ -528,7 +531,7 @@ pub(crate) fn queue_item_for_chat(
         paid_label: paid_label(&msg.message_type, read_amount),
         in_stream_comment_count: msg.in_stream_comment_count,
         message_id: Some(msg.id.clone()),
-    }
+    })
 }
 
 /// 種別の文。通常のコメントは None
@@ -555,7 +558,9 @@ fn paid_label(message_type: &MessageType, read_amount: bool) -> Option<String> {
             Some(format!("{}人へのメンバーシップギフト", gift_count))
         }
         MessageType::Gift(gift) => Some(gift_message(gift, read_amount)),
-        MessageType::Text | MessageType::System => None,
+        MessageType::Text | MessageType::System | MessageType::MembershipGiftRedemption { .. } => {
+            None
+        }
     }
 }
 
@@ -599,10 +604,9 @@ mod tests {
             content: content.to_string(),
             ..ChatMessage::default()
         };
-        speech_text(
-            config,
-            &queue_item_for_chat(&msg, None, config.read_superchat_amount),
-        )
+        let item = queue_item_for_chat(&msg, None, config.read_superchat_amount)
+            .expect("読み上げる種別であること");
+        speech_text(config, &item)
     }
 
     fn spoken(message_type: MessageType, content: &str) -> String {
@@ -753,7 +757,8 @@ mod tests {
         assert_eq!(spoken_amount("CA$5.00"), "CA$5.00");
     }
 
-    // 04_tts.md「優先度」: スパチャ・ステッカー・ギフトは SuperChat、メンバーシップ系は Membership
+    // 04_tts.md「優先度」: スパチャ・ステッカー・ギフトは SuperChat、メンバーシップ系は Membership。
+    // メンバーシップギフトの受け取りは読まない（キューに入れない）
     #[test]
     fn priority_follows_message_type() {
         let priority = |message_type| {
@@ -761,16 +766,20 @@ mod tests {
                 message_type,
                 ..ChatMessage::default()
             };
-            queue_item_for_chat(&msg, None, true).priority
+            queue_item_for_chat(&msg, None, true).map(|item| item.priority)
         };
-        assert_eq!(priority(superchat("¥500")), TtsPriority::SuperChat);
-        assert_eq!(priority(gift("Hiding", None)), TtsPriority::SuperChat);
-        assert_eq!(priority(membership(None)), TtsPriority::Membership);
+        assert_eq!(priority(superchat("¥500")), Some(TtsPriority::SuperChat));
+        assert_eq!(priority(gift("Hiding", None)), Some(TtsPriority::SuperChat));
+        assert_eq!(priority(membership(None)), Some(TtsPriority::Membership));
         assert_eq!(
             priority(MessageType::MembershipGift { gift_count: 1 }),
-            TtsPriority::Membership
+            Some(TtsPriority::Membership)
         );
-        assert_eq!(priority(MessageType::Text), TtsPriority::Normal);
+        assert_eq!(priority(MessageType::Text), Some(TtsPriority::Normal));
+        assert_eq!(
+            priority(MessageType::MembershipGiftRedemption { gifter: None }),
+            None
+        );
     }
 
     // ========================================================================

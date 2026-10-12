@@ -18,9 +18,16 @@ export function paidLabelOf(
     }
     case 'membership_gift':
       return meta?.gift_count != null ? `メンバーシップを ${meta.gift_count} 件ギフト` : 'メンバーシップのギフト';
+    case 'membership_gift_redemption':
+      return 'ギフトで加入';
     case 'gift':
       return meta?.jewel_count != null ? `${meta.jewel_count} ジュエル` : (meta?.gift_name ?? 'ギフト');
     default:
       return null;
   }
+}
+
+/** メンバーシップギフトの受け取った人の行の文言 (docs/specs/02_chat.md「受け取った人の行」)。届いた順 */
+export function recipientsLabelOf(recipients: readonly Readonly<Pick<GuiChatMessage, 'author'>>[]): string {
+  return `受け取った人 ${recipients.length}: ${recipients.map((r) => r.author).join('、')}`;
 }

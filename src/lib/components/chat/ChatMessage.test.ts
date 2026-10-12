@@ -50,6 +50,7 @@ describe('ChatMessage', () => {
 				milestone_months: null,
 				membership_level: null,
 				gift_count: null,
+				gifter: null,
 				gift_name: null,
 				gift_image_url: null,
 				jewel_count: null,
@@ -327,6 +328,51 @@ describe('ChatMessage', () => {
 		});
 	});
 
+	// 02_chat.md「メンバーシップギフトの受け取り」「受け取った人の行」
+	describe('メンバーシップギフトの受け取り', () => {
+		const recipientsLine = (container: HTMLElement) => container.querySelector('[data-testid="gift-recipients"]');
+		const gift = createMessage({ author: '@g', message_type: 'membership_gift', content: 'Sent 3 Channel gift memberships', runs: [] });
+		const redemption = (author: string) =>
+			createMessage({
+				id: author,
+				author,
+				message_type: 'membership_gift_redemption',
+				content: 'received a gift membership by @g',
+				runs: [],
+				is_member: true,
+			});
+
+		it('メンバーシップギフトの面は、本文の下に受け取った人を届いた順に出す', () => {
+			const { container } = renderRow(gift, { recipients: [redemption('@a'), redemption('@b'), redemption('@c')] });
+			expect(root(container).dataset.priority).toBe('1');
+			expect(recipientsLine(container)?.textContent).toBe('受け取った人 3: @a、@b、@c');
+		});
+
+		it('受け取りがまだ無いメンバーシップギフトには出さない', () => {
+			const { container } = renderRow(gift);
+			expect(recipientsLine(container)).toBeNull();
+		});
+
+		it('まとめ先の受け取りの行は優先順位 5 に「ギフトで加入」の札。受け取った人が 1 人のうちは出さない', () => {
+			const first = redemption('@a');
+			const { container } = renderRow(first, { recipients: [first] });
+			expect(root(container).dataset.priority).toBe('5');
+			expect(container.querySelector('[data-testid="paid-label"]')?.textContent).toBe('ギフトで加入');
+			expect(recipientsLine(container)).toBeNull();
+		});
+
+		it('まとめ先の受け取りの行に 2 人目がまとまったら、受け取った人を出す', () => {
+			const first = redemption('@a');
+			const { container } = renderRow(first, { recipients: [first, redemption('@b')] });
+			expect(recipientsLine(container)?.textContent).toBe('受け取った人 2: @a、@b');
+		});
+
+		it('詰めた 1 行 (スパチャ等の一覧の詳細) にも受け取った人を出す', () => {
+			const { container } = renderRow(gift, { compact: true, recipients: [redemption('@a')] });
+			expect(recipientsLine(container)?.textContent).toBe('受け取った人 1: @a');
+		});
+	});
+
 	// 02_chat.md「メッセージ表示仕様」「詰めた形」: 流れたものの欄 (新しい 2 件) とスパチャ等の一覧の詳細で使う
 	describe('詰めた形 (compact)', () => {
 		it('アイコンを出さない', () => {
@@ -386,6 +432,7 @@ describe('ChatMessage', () => {
 					milestone_months: null,
 					membership_level: null,
 					gift_count: null,
+					gifter: null,
 					gift_name: 'Press F',
 					gift_image_url: imageUrl,
 					jewel_count: jewelCount,

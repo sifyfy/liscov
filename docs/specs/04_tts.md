@@ -49,6 +49,7 @@
 | Membership（新規） | `メンバー加入` |
 | Membership（マイルストーン） | `{months}ヶ月のメンバーシップ` |
 | MembershipGift | `{gift_count}人へのメンバーシップギフト` |
+| MembershipGiftRedemption（受け取り） | 読まない |
 
 - 本文として読むのは視聴者が書いたメッセージだけ（スーパーチャット・マイルストーンのメッセージ）。YouTube が付ける英語の定型文（新規メンバーの `Welcome to {チャンネル名}!`、メンバーシップギフトの `Sent 5 {チャンネル名} gift memberships`）は読まない
 - 本文が無ければ種別の文で終える（末尾に「、」を付けない）
@@ -342,8 +343,9 @@ auto_close = true
 | Membership（マイルストーン） | `{months}ヶ月のメンバーシップ` | 読む（視聴者のメッセージ） |
 | MembershipGift | `{gift_count}人へのメンバーシップギフト` | 読まない（`content` は YouTube の英文） |
 | Gift | `{jewel_count}ジュエルの{gift_name}のギフト`（jewel_count が無い、または `read_superchat_amount=false` なら `{gift_name}のギフト`） | 読まない |
+| MembershipGiftRedemption | 読まない（キューに入れない）。大量に配られると読み上げが埋まるため。贈った人の MembershipGift は読む（02_chat.md「メンバーシップギフトの受け取り」） | - |
 
-- 種別の文はチャット取得がキューに入れるとき（`chat_runtime::enqueue_tts`）に `tts::paid_label` で作り、`TtsQueueItem.paid_label` に入れる。本文は `TtsQueueItem.text`
+- チャット取得がキューに入れるとき（`chat_runtime::enqueue_tts`）に `tts::queue_item_for_chat` がキューの要素を作る（読まない受け取りは None）。種別の文は `TtsQueueItem.paid_label`、本文は `TtsQueueItem.text`
 - 金額の読み（`¥1,000` → `1000円`、ほかの通貨はそのまま）は `tts::spoken_amount`
 - サニタイズと `max_text_length` は本文にだけ効く。種別の文には効かない
 

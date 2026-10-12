@@ -449,7 +449,11 @@ fn process_message(
     in_stream_counts: &mut HashMap<String, u32>,
     known_handles: &mut HashMap<String, String>,
 ) {
-    let is_system = matches!(msg.message_type, MessageType::System);
+    // システムメッセージとメンバーシップギフトの受け取りは視聴者のコメントではない（コメント回数・初見判定の対象外）
+    let is_comment = !matches!(
+        msg.message_type,
+        MessageType::System | MessageType::MembershipGiftRedemption { .. }
+    );
 
     // ギフトには channel_id が届かないので handle から特定する（特定できなければ空のまま）
     if matches!(msg.message_type, MessageType::Gift(_)) && msg.channel_id.is_empty() {
@@ -463,8 +467,8 @@ fn process_message(
     // 視聴者を特定できないメッセージは視聴者単位の集計・判定の対象外
     let has_viewer = !msg.channel_id.is_empty();
 
-    // システムメッセージ以外は in-stream コメントカウンターをインクリメント
-    if !is_system && has_viewer {
+    // コメントだけ in-stream コメントカウンターをインクリメント
+    if is_comment && has_viewer {
         let count = in_stream_counts.entry(msg.channel_id.clone()).or_insert(0);
         *count += 1;
         msg.in_stream_comment_count = Some(*count);
@@ -484,7 +488,7 @@ fn process_message(
     }
 
     // DB 保存後に初回視聴者かどうかを判定（viewer_streams が更新済みのため）
-    if !is_system && has_viewer {
+    if is_comment && has_viewer {
         if let Some(bid) = target.broadcaster_id {
             msg.is_first_time_viewer =
                 database::is_first_time_viewer(db, bid, &msg.channel_id, target.video_id)
@@ -711,7 +715,10 @@ fn viewer_annotation(msg: &ChatMessage, db_scope: Option<(&Connection, &str)>) -
 /// メッセージを TTS キューに追加する（author_reading は viewer_annotation で引いたもの）
 async fn enqueue_tts(tts_manager: &TtsManager, msg: &ChatMessage, author_reading: Option<String>) {
     let read_amount = tts_manager.get_config().await.read_superchat_amount;
-    let item = crate::tts::queue_item_for_chat(msg, author_reading, read_amount);
+    // 読まない種別（メンバーシップギフトの受け取り）は None
+    let Some(item) = crate::tts::queue_item_for_chat(msg, author_reading, read_amount) else {
+        return;
+    };
     tts_manager.enqueue(item).await;
 }
 
@@ -1157,5 +1164,77 @@ mod tests {
         assert!(msgs[0].is_first_time_viewer);
         assert!(msgs[2].is_first_time_viewer);
         assert_eq!(msgs[3].in_stream_comment_count, Some(2));
+    }
+
+    fn redemption_message(id: &str, channel_id: &str) -> ChatMessage {
+        ChatMessage {
+            message_type: MessageType::MembershipGiftRedemption {
+                gifter: Some("@gifter-x9".to_string()),
+            },
+            content: "received a gift membership by @gifter-x9".to_string(),
+            is_member: true,
+            ..text_message(id, channel_id)
+        }
+    }
+
+    // 02_chat.md「メンバーシップギフトの受け取り」: 保存はするが、コメント回数・初見判定・viewer_profiles・viewer_streams には入れない。
+    // 受け取った人がその後に初めてコメントすると #1 で初見
+    #[tokio::test]
+    async fn redemption_is_saved_but_not_counted_as_comment() {
+        let db = Database::new_in_memory().expect("in-memory DB");
+        let conn = db.connection().await;
+        let session_id = database::create_session(
+            &conn,
+            Some("https://www.youtube.com/watch?v=abc"),
+            None,
+            Some("UCown"),
+            None,
+        )
+        .unwrap();
+        let target = MessageTarget {
+            video_id: "abc",
+            session_id: Some(&session_id),
+            broadcaster_id: Some("UCown"),
+        };
+        let mut counts = HashMap::new();
+
+        let mut redemption = vec![redemption_message("R", "UCa1b")];
+        process_messages(
+            &mut redemption,
+            Some(&conn),
+            &target,
+            &mut counts,
+            &mut HashMap::new(),
+        );
+
+        assert_eq!(redemption[0].in_stream_comment_count, None);
+        assert!(!redemption[0].is_first_time_viewer);
+        let saved: Vec<String> = conn
+            .prepare("SELECT message_type FROM messages WHERE message_id = 'R'")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(saved, ["membership_gift_redemption"]);
+        let profiles: i64 = conn
+            .query_row("SELECT COUNT(*) FROM viewer_profiles", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(profiles, 0, "受け取りでは viewer_profiles を作らない");
+
+        let mut comment = vec![text_message("C", "UCa1b")];
+        process_messages(
+            &mut comment,
+            Some(&conn),
+            &target,
+            &mut counts,
+            &mut HashMap::new(),
+        );
+        assert_eq!(comment[0].in_stream_comment_count, Some(1));
+        assert!(comment[0].is_first_time_viewer);
+
+        // 再接続の復元も受け取りを数えない
+        let restored = database::get_in_stream_comment_counts(&conn, "abc").unwrap();
+        assert_eq!(restored.get("UCa1b"), Some(&1));
     }
 }

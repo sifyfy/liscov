@@ -498,6 +498,33 @@ test.describe('WebSocket API (03_websocket.md)', () => {
       ws.close();
       await disconnectAndInitialize(mainPage);
     });
+
+    // 03_websocket.md「クライアント接続」: 画面ではまとめるが、WebSocket には受け取り 1 件ごとに送る
+    test('メンバーシップギフトの受け取りは 1 件ずつ MembershipGiftRedemption で届く', async () => {
+      const urlInput = (await openUrlInput(mainPage));
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
+
+      const port = await getWebSocketPort(mainPage);
+      const { ws } = await connectWebSocket(`ws://127.0.0.1:${port}`);
+
+      await addMockMessage({ message_type: 'membership_gift', author: '@gifter-x9', content: '', gift_count: 2 });
+      await addMockMessage({ message_type: 'membership_gift_redemption', author: '@recipient-a', channel_id: 'UCrecipienta', content: '', gifter: '@gifter-x9' });
+      await addMockMessage({ message_type: 'membership_gift_redemption', author: '@recipient-b', channel_id: 'UCrecipientb', content: '', gifter: '@gifter-x9' });
+
+      const messages = await collectMessages(ws, 5000);
+      const redemptions = messages
+        .filter((m: unknown) => (m as { type: string }).type === 'ChatMessage')
+        .map((m) => (m as { data: { author: string; message_type: Record<string, unknown> } }).data)
+        .filter((d) => 'MembershipGiftRedemption' in d.message_type);
+
+      expect(redemptions.map((d) => d.author)).toEqual(['@recipient-a', '@recipient-b']);
+      expect(redemptions[0].message_type.MembershipGiftRedemption).toEqual({ gifter: '@gifter-x9' });
+
+      ws.close();
+      await disconnectAndInitialize(mainPage);
+    });
   });
 
   test.describe('Message Format Verification (03_websocket.md spec)', () => {

@@ -24,6 +24,10 @@ pub enum MessageType {
     MembershipGift {
         gift_count: u32,
     },
+    /// メンバーシップギフトの受け取り。author は受け取った人、gifter は贈った人の名前（02_chat.md「メンバーシップギフトの受け取り」）
+    MembershipGiftRedemption {
+        gifter: Option<String>,
+    },
     /// ジュエルで送るギフト（メンバーシップギフトとは別物）
     Gift(GiftDetails),
     System,
@@ -47,6 +51,7 @@ impl MessageType {
             MessageType::SuperSticker { .. } => "supersticker",
             MessageType::Membership { .. } => "membership",
             MessageType::MembershipGift { .. } => "membership_gift",
+            MessageType::MembershipGiftRedemption { .. } => "membership_gift_redemption",
             MessageType::Gift(_) => "gift",
             MessageType::System => "system",
         }
@@ -130,7 +135,7 @@ impl ChatMessage {
 
     /// 発言者のバッジを読める種類なら、そのバッジを持つ metadata を返す
     ///
-    /// バッジを読めない種類（メンバーシップギフト・ギフト・システム）は None（不明）。
+    /// バッジを読めない種類（メンバーシップギフト・その受け取り・ギフト・システム）は None（不明）。
     /// 不明を「バッジ無し」と区別するため、保存・エクスポートはこれを通す（08_database.md）。
     pub fn author_badge_metadata(&self) -> Option<&MessageMetadata> {
         match self.message_type {
@@ -138,7 +143,10 @@ impl ChatMessage {
             | MessageType::SuperChat { .. }
             | MessageType::SuperSticker { .. }
             | MessageType::Membership { .. } => self.metadata.as_ref(),
-            MessageType::MembershipGift { .. } | MessageType::Gift(_) | MessageType::System => None,
+            MessageType::MembershipGift { .. }
+            | MessageType::MembershipGiftRedemption { .. }
+            | MessageType::Gift(_)
+            | MessageType::System => None,
         }
     }
 }
@@ -235,7 +243,10 @@ impl ChatStats {
             MessageType::MembershipGift { gift_count } => {
                 self.membership_gifts += *gift_count as usize;
             }
-            MessageType::Gift(_) | MessageType::System => {}
+            // 受け取りは贈った人のギフトの件数で数えているので、memberships には足さない
+            MessageType::MembershipGiftRedemption { .. }
+            | MessageType::Gift(_)
+            | MessageType::System => {}
         }
     }
 }
@@ -335,6 +346,31 @@ mod tests {
         assert_eq!(stats.super_stickers, 0);
         assert_eq!(stats.memberships, 0);
         assert_eq!(stats.total_revenue, 0.0);
+    }
+
+    // spec: 02_chat.md「メンバーシップギフトの受け取り」— セッションの memberships には数えない（贈った人のギフトの件数で数えている）
+    #[test]
+    fn update_membership_gift_redemption_counts_only_total() {
+        let mut stats = ChatStats::default();
+        stats.update(&make_message(MessageType::MembershipGiftRedemption {
+            gifter: Some("@gifter-x9".to_string()),
+        }));
+        assert_eq!(stats.total_messages, 1);
+        assert_eq!(stats.memberships, 0);
+        assert_eq!(stats.membership_gifts, 0);
+    }
+
+    // spec: 03_websocket.md「MessageType」— 受け取りは MembershipGiftRedemption { gifter } で流れ、DB の種別名は membership_gift_redemption
+    #[test]
+    fn membership_gift_redemption_serializes_with_gifter() {
+        let redemption = MessageType::MembershipGiftRedemption {
+            gifter: Some("@gifter-x9".to_string()),
+        };
+        assert_eq!(
+            serde_json::to_value(&redemption).unwrap(),
+            serde_json::json!({"MembershipGiftRedemption": {"gifter": "@gifter-x9"}})
+        );
+        assert_eq!(redemption.as_str(), "membership_gift_redemption");
     }
 
     // spec: 02_chat.md - 複数メッセージを処理すると各フィールドが正しく累積される

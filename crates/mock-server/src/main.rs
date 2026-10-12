@@ -974,6 +974,8 @@ struct AMR {
     gift_count: Option<u32>,
     /// ギフト（jewel）の画像 URL。実データと同じくスキーム無しを既定にする
     gift_image_url: Option<String>,
+    /// メンバーシップギフトの受け取りの贈った人。省略すると太字の run を付けない（贈った人が分からない）
+    gifter: Option<String>,
     /// メッセージ ID。同じ ID を再び積むと YouTube の再送を再現できる。省略時は採番する
     id: Option<String>,
 }
@@ -1425,6 +1427,14 @@ fn gen_msg(s: &ServerState, r: &AMR) -> Value {
             let count = r.gift_count.unwrap_or(5);
             // Actual YouTube format: authorExternalChannelId at root level
             json!({"addChatItemAction":{"item":{"liveChatSponsorshipsGiftPurchaseAnnouncementRenderer":{"id":id,"timestampUsec":ts,"authorExternalChannelId":&r.channel_id,"header":{"liveChatSponsorshipsHeaderRenderer":{"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":MOCK_AVATAR_URL}]},"primaryText":{"runs":[{"text":"Sent "},{"text":format!("{}", count)},{"text":" "},{"text":"Channel"},{"text":" gift memberships"}]}}}}}}})
+        }
+        "membership_gift_redemption" => {
+            // 実データ（2026-10-12）と同じ形: 受け取った人が author、贈った人は本文の太字の run。バッジは付かない
+            let mut runs = vec![json!({"text":"received a gift membership by ","italics":true})];
+            if let Some(gifter) = &r.gifter {
+                runs.push(json!({"text":gifter,"bold":true,"italics":true}));
+            }
+            json!({"addChatItemAction":{"item":{"liveChatSponsorshipsGiftRedemptionAnnouncementRenderer":{"id":id,"timestampUsec":ts,"authorExternalChannelId":&r.channel_id,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":MOCK_AVATAR_URL}]},"message":{"runs":runs}}}}})
         }
         "gift" => {
             // ジュエルで送るギフト: channelId・timestampUsec が無く、authorName は末尾に空白が付く（実データ準拠）
