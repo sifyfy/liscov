@@ -86,13 +86,14 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
       await addMockMessage({
         message_type: 'membership',
         author: 'NewMember',
-        content: 'New member!',
+        content: '',
+        membership_level: 'ほしぞら組',
       });
 
-      // Verify membership message is displayed
+      // 02_chat.md「メンバーシップメッセージの判定」: 札にレベル名を添え、YouTube の定型文は本文に出さない
       await expect(mainPage.getByText('NewMember').first()).toBeVisible({ timeout: 5000 });
-      // "新規メンバー" label in header badge (Japanese for "New Member")
-      await expect(mainPage.getByText('新規メンバー').first()).toBeVisible();
+      await expect(mainPage.getByText('新規メンバー · ほしぞら組').first()).toBeVisible();
+      await expect(mainPage.getByText('Welcome to')).toHaveCount(0);
 
       // Disconnect
       await disconnectAndInitialize(mainPage);
@@ -204,7 +205,7 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
     });
 
     test('should display membership milestone message', async () => {
-      // Milestone months are extracted from badge tooltip (e.g., "Member (12 months)")
+      // 月数は headerPrimaryText ("Member for 12 months") から取る。バッジは月数と一致しない (02_chat.md)
 
       // Connect to stream
       const urlInput = (await openUrlInput(mainPage));
@@ -218,12 +219,13 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
         author: 'LoyalMember',
         content: '1年間ありがとうございます！',
         milestone_months: 12,
+        membership_level: 'ほしぞら組',
       });
 
-      // Verify milestone message is displayed
-      // Note: content is headerSubtext ("Welcome to Channel!"), user message is in separate field
+      // 札は「メンバー 12 か月 · {レベル名}」、本文は視聴者のメッセージ
       await expect(mainPage.locator('text=LoyalMember')).toBeVisible({ timeout: 5000 });
-      await expect(mainPage.locator('text=Welcome to Channel')).toBeVisible();
+      await expect(mainPage.getByText('メンバー 12 か月 · ほしぞら組').first()).toBeVisible();
+      await expect(mainPage.getByText('1年間ありがとうございます！').first()).toBeVisible();
 
       // Disconnect
       await disconnectAndInitialize(mainPage);

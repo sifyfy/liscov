@@ -4,6 +4,7 @@
  * テストの例は仕様の表から取る:
  * - スパチャ・スーパーステッカー: 金額
  * - メンバー加入: 新規メンバー / マイルストーン: メンバー N か月 / メンバーシップギフト: メンバーシップを N 件ギフト
+ * - メンバー加入・マイルストーンはレベル名があれば後ろに「 · {レベル名}」
  * - ギフト (ジュエル): ジュエル数があれば「N ジュエル」、無ければギフト名
  * - メンバーシップギフトの受け取り: ギフトで加入 (受け取った人の行は「受け取った人 N: A、B、C」)
  * - 通常のコメント: 札なし
@@ -17,6 +18,7 @@ const base = { message_type: 'text', amount: null, metadata: null } as const;
 const meta = (overrides: Partial<GuiMessageMetadata>): GuiMessageMetadata => ({
     amount: null,
     milestone_months: null,
+    membership_level: null,
     gift_count: null,
     gifter: null,
     gift_name: null,
@@ -45,6 +47,18 @@ describe('paidLabelOf', () => {
 
   it('マイルストーンは「メンバー N か月」', () => {
     expect(paidLabelOf({ ...base, message_type: 'membership', metadata: meta({ milestone_months: 12 }) })).toBe('メンバー 12 か月');
+  });
+
+  it('レベル名のあるメンバー加入は「新規メンバー · {レベル名}」', () => {
+    expect(paidLabelOf({ ...base, message_type: 'membership', metadata: meta({ membership_level: 'ほしぞら組' }) })).toBe(
+      '新規メンバー · ほしぞら組',
+    );
+  });
+
+  it('レベル名のあるマイルストーンは「メンバー N か月 · {レベル名}」', () => {
+    expect(
+      paidLabelOf({ ...base, message_type: 'membership', metadata: meta({ milestone_months: 17, membership_level: 'ほしぞら組' }) }),
+    ).toBe('メンバー 17 か月 · ほしぞら組');
   });
 
   it('メンバーシップギフトは「メンバーシップを N 件ギフト」', () => {

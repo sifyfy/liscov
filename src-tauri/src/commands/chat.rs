@@ -131,6 +131,8 @@ pub struct SuperChatColors {
 pub struct GuiMessageMetadata {
     pub amount: Option<String>,
     pub milestone_months: Option<u32>,
+    // メンバーシップのレベル名（membership で取れたときのみ）
+    pub membership_level: Option<String>,
     pub gift_count: Option<u32>,
     // 贈った人の名前（membership_gift_redemption のみ）
     pub gifter: Option<String>,
@@ -187,9 +189,12 @@ impl From<ChatMessage> for GuiChatMessage {
             }
             _ => None,
         };
-        let milestone_months = match &msg.message_type {
-            MessageType::Membership { milestone_months } => *milestone_months,
-            _ => None,
+        let (milestone_months, membership_level) = match &msg.message_type {
+            MessageType::Membership {
+                milestone_months,
+                membership_level,
+            } => (*milestone_months, membership_level.clone()),
+            _ => (None, None),
         };
         let gift_count = match &msg.message_type {
             MessageType::MembershipGift { gift_count } => Some(*gift_count),
@@ -229,6 +234,7 @@ impl From<ChatMessage> for GuiChatMessage {
         // metadata を変換。種別に件数などがあるのに metadata が無いとき (パーサーはメンバーシップギフトとその受け取りに付けない) は、
         // 空の metadata に種別の値を載せる。載せないと件数が画面に届かない
         let has_type_details = milestone_months.is_some()
+            || membership_level.is_some()
             || gift_count.is_some()
             || gifter.is_some()
             || gift_name.is_some();
@@ -238,6 +244,7 @@ impl From<ChatMessage> for GuiChatMessage {
             .map(|m| GuiMessageMetadata {
                 amount: m.amount,
                 milestone_months,
+                membership_level,
                 gift_count,
                 gifter,
                 gift_name,
@@ -709,6 +716,23 @@ mod tests {
         };
         let gui = GuiChatMessage::from(msg);
         assert_eq!(gui.metadata.and_then(|m| m.gift_count), Some(5));
+    }
+
+    // 02_chat.md「メッセージ表示仕様」: 札の「メンバー N か月 · {レベル名}」に使う月数とレベル名が画面に届く
+    #[test]
+    fn membership_level_reaches_gui() {
+        let msg = ChatMessage {
+            message_type: MessageType::Membership {
+                milestone_months: Some(17),
+                membership_level: Some("ほしぞら組".to_string()),
+            },
+            ..text_message()
+        };
+        let meta = GuiChatMessage::from(msg)
+            .metadata
+            .expect("metadata があること");
+        assert_eq!(meta.milestone_months, Some(17));
+        assert_eq!(meta.membership_level.as_deref(), Some("ほしぞら組"));
     }
 
     // 02_chat.md「メンバーシップギフトの受け取り」: 画面で贈った人の行にまとめるため、贈った人の名前が画面に届く

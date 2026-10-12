@@ -129,6 +129,7 @@ describe('chatStore の統計と視聴者ごとの一覧', () => {
 				metadata: {
 					amount: null,
 					milestone_months: null,
+					membership_level: null,
 					gift_count: null,
 					gifter,
 					gift_name: null,

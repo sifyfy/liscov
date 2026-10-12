@@ -78,9 +78,10 @@ export const superMessages: readonly MockMessage[] = [
   { message_type: 'superchat', ...authors[0], content: 'いつも楽しい配信ありがとう！', amount: '¥500', tier: 'green' },
   { message_type: 'superchat', ...authors[5], content: 'クリアおめでとう！', amount: '¥1,000', tier: 'yellow' },
   { message_type: 'supersticker', ...authors[6], content: '', amount: '¥200', tier: 'cyan' },
-  { message_type: 'membership', ...authors[7], content: 'メンバーになりました' },
+  // レベル名は札に出る (02_chat.md)。長いレベル名でも最小幅で名前が潰れないかを見る
+  { message_type: 'membership', ...authors[7], content: '', membership_level: '名誉ほしぞらサポーター隊' },
   { message_type: 'superchat', ...authors[1], content: '次の配信も楽しみにしてます', amount: '¥10,000', tier: 'red' },
-  { message_type: 'membership_milestone', ...authors[4], content: '1 年経ちました！', milestone_months: 12 },
+  { message_type: 'membership_milestone', ...authors[4], content: '1 年経ちました！', milestone_months: 12, membership_level: 'ほしぞら組' },
   { message_type: 'membership_gift', ...authors[3], content: '', gift_count: 5 },
 ];
 

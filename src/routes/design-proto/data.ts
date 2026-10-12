@@ -70,6 +70,7 @@ const fromPartner = (m: Message): Message => ({
 const metadata = (overrides: Partial<NonNullable<Message['metadata']>>): NonNullable<Message['metadata']> => ({
   amount: null,
   milestone_months: null,
+  membership_level: null,
   gift_count: null,
   gifter: null,
   gift_name: null,

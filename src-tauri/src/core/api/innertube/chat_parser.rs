@@ -7,10 +7,14 @@ use std::sync::LazyLock;
 
 // 呼び出しごとの再コンパイルを避けるため、正規表現はプロセス起動後の初回使用時に
 // 一度だけコンパイルする（tts/mod.rs と同じ方式）
+// マイルストーンの headerPrimaryText: "Member for 17 months" / "メンバー歴 17 か月"
 static MILESTONE_EN_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\((\d+)\s*months?\)").expect("正規表現コンパイル失敗"));
+    LazyLock::new(|| Regex::new(r"Member for (\d+) months?").expect("正規表現コンパイル失敗"));
 static MILESTONE_JA_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"[（(](\d+)\s*か月[）)]").expect("正規表現コンパイル失敗"));
+    LazyLock::new(|| Regex::new(r"メンバー歴\s*(\d+)\s*か月").expect("正規表現コンパイル失敗"));
+// 新規メンバーの headerSubtext: "Welcome to {レベル名}!"
+static WELCOME_LEVEL_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^Welcome to (.+)!$").expect("正規表現コンパイル失敗"));
 static GIFT_JA_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(\d+)\s*人").expect("正規表現コンパイル失敗"));
 static GIFT_SENT_RE: LazyLock<Regex> =
@@ -150,16 +154,27 @@ fn parse_supersticker_colors(renderer: &Value) -> Option<SuperChatColors> {
     })
 }
 
-/// バッジ tooltip から milestone の月数を抽出する（例: "Member (6 months)"）。
-/// 新規メンバーバッジは None を返す。
-pub fn extract_milestone_months_from_badge(tooltip: &str) -> Option<u32> {
-    // "New member" バッジはスキップ
-    if tooltip.to_lowercase().contains("new member") {
-        return None;
-    }
+/// マイルストーンの headerPrimaryText から月数を抽出する（例: "Member for 17 months"）。
+/// バッジの tooltip は実際の月数と一致しないので使わない（02_chat.md「メンバーシップメッセージの判定」）
+pub fn extract_milestone_months(primary_text: &str) -> Option<u32> {
+    capture_u32(&MILESTONE_EN_RE, primary_text)
+        .or_else(|| capture_u32(&MILESTONE_JA_RE, primary_text))
+}
 
-    // 英語フォーマット: "Member (6 months)" / 日本語フォーマット: "メンバー（6か月）"
-    capture_u32(&MILESTONE_EN_RE, tooltip).or_else(|| capture_u32(&MILESTONE_JA_RE, tooltip))
+/// simpleText または runs のテキストを 1 つの文字列にする
+fn text_of(value: Option<&Value>) -> Option<String> {
+    let value = value?;
+    value
+        .get("simpleText")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .or_else(|| {
+            value.get("runs").and_then(|v| v.as_array()).map(|runs| {
+                runs.iter()
+                    .filter_map(|r| r.get("text").and_then(|t| t.as_str()))
+                    .collect()
+            })
+        })
 }
 
 /// メンバーシップギフトメッセージからギフト数を抽出する。
@@ -396,42 +411,39 @@ fn parse_membership_message(renderer: &Value) -> Option<ChatMessage> {
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
-    // headerSubtext は simpleText または runs フォーマットの場合がある
-    let content = renderer
-        .pointer("/headerSubtext/simpleText")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .or_else(|| {
-            // runs フォーマットの場合は全テキストを結合する
-            renderer
-                .pointer("/headerSubtext/runs")
-                .and_then(|v| v.as_array())
-                .map(|runs| {
-                    runs.iter()
-                        .filter_map(|r| r.get("text").and_then(|t| t.as_str()))
-                        .collect::<String>()
-                })
-        })
-        .unwrap_or_else(|| "New member".to_string());
+    // 新規かマイルストーンかは headerPrimaryText（"Member for 17 months"）で決める。無ければ新規
+    let milestone_months = text_of(renderer.get("headerPrimaryText"))
+        .as_deref()
+        .and_then(extract_milestone_months);
 
-    // バッジの tooltip から milestone の月数を抽出する（例: "Member (6 months)"）
-    let badge_tooltip = renderer
-        .pointer("/authorBadges/0/liveChatAuthorBadgeRenderer/tooltip")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    // レベル名: マイルストーンは headerSubtext そのもの、新規は "Welcome to {レベル名}!" の中身
+    let subtext = text_of(renderer.get("headerSubtext"));
+    let membership_level = match milestone_months {
+        Some(_) => subtext.filter(|s| !s.is_empty()),
+        None => subtext
+            .as_deref()
+            .and_then(|s| WELCOME_LEVEL_RE.captures(s).map(|c| c[1].to_string())),
+    };
 
-    let milestone_months = extract_milestone_months_from_badge(badge_tooltip);
+    // 本文は視聴者が書いたメッセージだけ（マイルストーンで書いたときだけある）
+    let (content, runs) = renderer
+        .get("message")
+        .map(parse_message_content)
+        .unwrap_or_default();
 
     Some(ChatMessage {
         id,
         timestamp: format_timestamp(&timestamp_usec),
         timestamp_usec,
-        message_type: MessageType::Membership { milestone_months },
+        message_type: MessageType::Membership {
+            milestone_months,
+            membership_level,
+        },
         author,
         author_icon_url,
         channel_id,
         content,
-        runs: vec![],
+        runs,
         metadata: Some(parse_author_badges(renderer).into_metadata(None, None)),
         is_member: true,
         is_first_time_viewer: false,
@@ -466,21 +478,7 @@ fn parse_membership_gift_message(renderer: &Value) -> Option<ChatMessage> {
         .map(|s| s.to_string());
 
     // プライマリテキストを抽出（例: "Sent 5 [channel] gift memberships"）
-    let primary_text = header
-        .pointer("/primaryText/runs")
-        .and_then(|v| v.as_array())
-        .map(|runs| {
-            runs.iter()
-                .filter_map(|r| r.get("text").and_then(|t| t.as_str()))
-                .collect::<String>()
-        })
-        .or_else(|| {
-            header
-                .pointer("/primaryText/simpleText")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-        })
-        .unwrap_or_default();
+    let primary_text = text_of(header.get("primaryText")).unwrap_or_default();
 
     // プライマリテキストからギフト数を抽出する
     let gift_count = extract_gift_count(&primary_text).unwrap_or(1);
@@ -801,42 +799,133 @@ mod tests {
         );
     }
 
+    // ========================================================================
+    // メンバーシップ (02_chat.md「メンバーシップメッセージの判定」の表)
+    // ========================================================================
+
+    /// liveChatMembershipItemRenderer を実データの形で作る。
+    /// headerPrimaryText は runs、新規の headerSubtext は runs、マイルストーンの headerSubtext は simpleText
+    fn membership_action(
+        primary: Option<&str>,
+        subtext: Option<Value>,
+        badge: &str,
+        message: Option<&str>,
+    ) -> Value {
+        let mut renderer = serde_json::json!({
+            "id": "membership_1",
+            "timestampUsec": "1234567890000000",
+            "authorName": {"simpleText": "@山田太郎-xyz"},
+            "authorExternalChannelId": "UC_member",
+            "authorBadges": [{"liveChatAuthorBadgeRenderer": {"tooltip": badge}}]
+        });
+        if let Some(primary) = primary {
+            let (head, rest) = primary.split_at("Member for ".len());
+            let (months, tail) = rest.split_once(' ').unwrap();
+            renderer["headerPrimaryText"] = serde_json::json!({"runs": [
+                {"text": head}, {"text": months}, {"text": format!(" {}", tail)}
+            ]});
+        }
+        if let Some(subtext) = subtext {
+            renderer["headerSubtext"] = subtext;
+        }
+        if let Some(message) = message {
+            renderer["message"] = serde_json::json!({"runs": [{"text": message}]});
+        }
+        serde_json::json!({"addChatItemAction": {"item": {"liveChatMembershipItemRenderer": renderer}}})
+    }
+
+    fn welcome(level: &str) -> Value {
+        serde_json::json!({"runs": [{"text": "Welcome to "}, {"text": level}, {"text": "!"}]})
+    }
+
+    fn simple(text: &str) -> Value {
+        serde_json::json!({"simpleText": text})
+    }
+
+    /// (milestone_months, membership_level, content)
+    fn parse_membership(action: &Value) -> (Option<u32>, Option<String>, String) {
+        let msg = parse_chat_action(action).expect("メンバーシップがパースされること");
+        match msg.message_type {
+            MessageType::Membership {
+                milestone_months,
+                membership_level,
+            } => (milestone_months, membership_level, msg.content),
+            other => panic!("Membership を期待: {:?}", other),
+        }
+    }
+
     #[test]
-    fn test_extract_milestone_months_from_badge_english() {
-        // 英語フォーマット: "Member (6 months)"
+    fn membership_new_member() {
+        let action = membership_action(None, Some(welcome("ほしぞら組")), "New member", None);
         assert_eq!(
-            extract_milestone_months_from_badge("Member (6 months)"),
-            Some(6)
-        );
-        assert_eq!(
-            extract_milestone_months_from_badge("Member (1 month)"),
-            Some(1)
-        );
-        assert_eq!(
-            extract_milestone_months_from_badge("Member (12 months)"),
-            Some(12)
+            parse_membership(&action),
+            (None, Some("ほしぞら組".to_string()), String::new())
         );
     }
 
     #[test]
-    fn test_extract_milestone_months_from_badge_japanese() {
-        // 日本語フォーマット: "メンバー（6か月）"
+    fn membership_new_member_with_existing_badge_is_still_new() {
+        let action = membership_action(None, Some(welcome("ほしぞら組")), "Member (2 years)", None);
         assert_eq!(
-            extract_milestone_months_from_badge("メンバー（6か月）"),
-            Some(6)
-        );
-        assert_eq!(
-            extract_milestone_months_from_badge("メンバー(12か月)"),
-            Some(12)
+            parse_membership(&action),
+            (None, Some("ほしぞら組".to_string()), String::new())
         );
     }
 
     #[test]
-    fn test_extract_milestone_months_from_badge_none() {
-        // None を返すケース（新規メンバー）
-        assert_eq!(extract_milestone_months_from_badge("New member"), None);
-        assert_eq!(extract_milestone_months_from_badge("Member"), None);
-        assert_eq!(extract_milestone_months_from_badge(""), None);
+    fn membership_milestone_months_come_from_header_not_badge() {
+        let action = membership_action(
+            Some("Member for 17 months"),
+            Some(simple("ほしぞら組")),
+            "Member (1 year)",
+            Some("いつも楽しい！"),
+        );
+        assert_eq!(
+            parse_membership(&action),
+            (
+                Some(17),
+                Some("ほしぞら組".to_string()),
+                "いつも楽しい！".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn membership_milestone_without_message() {
+        let action = membership_action(
+            Some("Member for 10 months"),
+            Some(simple("サポーター")),
+            "Member (6 months)",
+            None,
+        );
+        assert_eq!(
+            parse_membership(&action),
+            (Some(10), Some("サポーター".to_string()), String::new())
+        );
+    }
+
+    #[test]
+    fn membership_milestone_one_month() {
+        let action = membership_action(
+            Some("Member for 1 month"),
+            Some(simple("ほしぞら組")),
+            "Member (1 month)",
+            None,
+        );
+        assert_eq!(parse_membership(&action).0, Some(1));
+    }
+
+    #[test]
+    fn membership_without_header_texts() {
+        let action = membership_action(None, None, "New member", None);
+        assert_eq!(parse_membership(&action), (None, None, String::new()));
+    }
+
+    #[test]
+    fn membership_milestone_months_japanese_fallback() {
+        assert_eq!(extract_milestone_months("メンバー歴 6 か月"), Some(6));
+        assert_eq!(extract_milestone_months("Member for 6 months"), Some(6));
+        assert_eq!(extract_milestone_months("Welcome to ほしぞら組!"), None);
     }
 
     #[test]
@@ -861,48 +950,6 @@ mod tests {
         // フォールバックパターン
         assert_eq!(extract_gift_count("5 gift memberships"), Some(5));
         assert_eq!(extract_gift_count("1 membership"), Some(1));
-    }
-
-    #[test]
-    fn test_parse_membership_milestone_message() {
-        // milestone メンバーシップメッセージのパース（月数はバッジ tooltip から取得）
-        let action = serde_json::json!({
-            "addChatItemAction": {
-                "item": {
-                    "liveChatMembershipItemRenderer": {
-                        "id": "milestone_msg_1",
-                        "timestampUsec": "1234567890000000",
-                        "authorName": {"simpleText": "LongTimeMember"},
-                        "authorExternalChannelId": "UC_milestone",
-                        "authorPhoto": {"thumbnails": [{"url": "https://example.com/av.png"}]},
-                        "headerSubtext": {"runs": [{"text": "Welcome to "}, {"text": "Channel"}, {"text": "!"}]},
-                        "authorBadges": [{
-                            "liveChatAuthorBadgeRenderer": {
-                                "tooltip": "Member (12 months)",
-                                "customThumbnail": {"thumbnails": [{"url": "https://example.com/badge.png"}]}
-                            }
-                        }]
-                    }
-                }
-            }
-        });
-
-        let msg = parse_chat_action(&action);
-        assert!(msg.is_some(), "milestone メッセージがパースされること");
-        let msg = msg.unwrap();
-        assert_eq!(msg.author, "LongTimeMember");
-        assert!(msg.is_member);
-
-        match msg.message_type {
-            MessageType::Membership { milestone_months } => {
-                assert_eq!(
-                    milestone_months,
-                    Some(12),
-                    "バッジ tooltip から 12 か月を抽出すること"
-                );
-            }
-            _ => panic!("Membership メッセージタイプを期待"),
-        }
     }
 
     #[test]
@@ -1024,42 +1071,6 @@ mod tests {
             msg.message_type,
             MessageType::MembershipGiftRedemption { gifter: None }
         );
-    }
-
-    #[test]
-    fn test_parse_new_member_no_milestone() {
-        // 新規メンバーは milestone 月数なし（バッジ tooltip は "New member"）
-        let action = serde_json::json!({
-            "addChatItemAction": {
-                "item": {
-                    "liveChatMembershipItemRenderer": {
-                        "id": "new_member_1",
-                        "timestampUsec": "1234567890000000",
-                        "authorName": {"simpleText": "NewMember"},
-                        "authorExternalChannelId": "UC_new",
-                        "authorPhoto": {"thumbnails": [{"url": "https://example.com/av.png"}]},
-                        "headerSubtext": {"runs": [{"text": "Welcome to "}, {"text": "Channel"}, {"text": "!"}]},
-                        "authorBadges": [{
-                            "liveChatAuthorBadgeRenderer": {
-                                "tooltip": "New member",
-                                "customThumbnail": {"thumbnails": [{"url": "https://example.com/badge.png"}]}
-                            }
-                        }]
-                    }
-                }
-            }
-        });
-
-        let msg = parse_chat_action(&action);
-        assert!(msg.is_some(), "新規メンバーメッセージがパースされること");
-        let msg = msg.unwrap();
-
-        match msg.message_type {
-            MessageType::Membership { milestone_months } => {
-                assert_eq!(milestone_months, None, "新規メンバーは milestone なし");
-            }
-            _ => panic!("Membership メッセージタイプを期待"),
-        }
     }
 
     #[test]

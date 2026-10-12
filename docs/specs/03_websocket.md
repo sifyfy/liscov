@@ -340,7 +340,7 @@ pub enum ClientMessage {
 | `Text` | 通常メッセージ | なし |
 | `SuperChat` | スーパーチャット | `amount` |
 | `SuperSticker` | スーパーステッカー | `amount` |
-| `Membership` | メンバーシップ | `milestone_months` |
+| `Membership` | メンバーシップ | `milestone_months`、`membership_level`（レベル名。取れなければ null） |
 | `MembershipGift` | ギフトメンバーシップ | `gift_count` |
 | `MembershipGiftRedemption` | メンバーシップギフトの受け取り（`author` は受け取った人） | `gifter`（贈った人の名前。分からなければ null） |
 | `Gift` | ジュエルで送るギフト | `gift_name`、`gift_image_url`（無ければ null）、`jewel_count`（取れなければ null） |

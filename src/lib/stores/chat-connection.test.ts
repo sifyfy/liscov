@@ -1441,6 +1441,7 @@ describe('chatStore ジュエル数を取れない接続の注記', () => {
 			metadata: {
 				amount: null,
 				milestone_months: null,
+				membership_level: null,
 				gift_count: null,
 				gifter: null,
 				gift_name: 'Hiding',

@@ -486,7 +486,7 @@ pub enum MessageRun {
 | `text` | 通常のチャットメッセージ | なし |
 | `superchat` | スーパーチャット | `amount`（金額文字列）、`superchat_colors` |
 | `supersticker` | スーパーステッカー | `amount`（金額文字列）、`superchat_colors` |
-| `membership` | メンバーシップ新規/更新 | `milestone_months`（マイルストーン月数、新規はNone） |
+| `membership` | メンバーシップ新規/更新 | `milestone_months`（マイルストーン月数、新規はNone）、`membership_level`（レベル名、取れなければNone） |
 | `membership_gift` | メンバーシップギフト配布 | `gift_count`（ギフト数） |
 | `membership_gift_redemption` | メンバーシップギフトの受け取り。author は受け取った人 | `gifter`（贈った人の名前。分からなければ None） |
 | `gift` | ジュエルで送るギフト。`content` はギフト名 | `gift_name`、`gift_image_url`、`jewel_count`（取れなければ None） |
@@ -498,6 +498,7 @@ pub enum MessageRun {
 pub struct GuiMessageMetadata {
     pub amount: Option<String>,                // 金額
     pub milestone_months: Option<u32>,         // メンバーシップマイルストーン月数
+    pub membership_level: Option<String>,      // メンバーシップのレベル名（membership で取れたときのみ）
     pub gift_count: Option<u32>,               // メンバーシップギフト数
     pub gifter: Option<String>,                // 贈った人の名前（membership_gift_redemption のみ）
     pub gift_name: Option<String>,             // ギフト名（gift のみ）
@@ -1266,12 +1267,12 @@ Connecting → (接続失敗) → (削除 + エラー通知)
 |------|------|------|------|
 | スパチャ・ステッカー (色あり) | 背景 `body_background` | 背景 `header_background`・文字 `header_text`: アイコン、名前 (読み仮名)、#N・時刻、右端に金額 (`text-chat-amount`) | 文字 `body_text` (`data-testid="paid-body"`)。本文が無ければ出さない。ステッカーは出さない |
 | スパチャ・ステッカー (色なし) | `bg-surface-highest`・`border-outline` | 同上 (トークンの色) | 同上 |
-| メンバーシップ・マイルストーン・メンバーシップギフト | `bg-member`・`text-on-member` | アイコン、名前、#N・時刻、右端に `paidLabelOf` (新規メンバー / メンバー N か月 / メンバーシップを N 件ギフト。件数が分からなければ「メンバーシップのギフト」) | メッセージがあれば |
+| メンバーシップ・マイルストーン・メンバーシップギフト | `bg-member`・`text-on-member` | アイコン、名前、#N・時刻、右端に `paidLabelOf` (新規メンバー / メンバー N か月。レベル名があれば後ろに「 · {レベル名}」(例: `新規メンバー · ほしぞら組`)。メンバーシップギフトは「メンバーシップを N 件ギフト」、件数が分からなければ「メンバーシップのギフト」) | メッセージがあれば |
 | ギフト (ジュエル) | `bg-surface-highest`・`border-outline` | ギフトの画像 (`size-chat-gift`、読めなければ消す)、「{author} が {gift_name} を送りました」、#N・時刻、右端に「N ジュエル」(`data-testid="gift-jewels"`、jewel_count があるときだけ) | なし |
 
 - 札の文言は `src/lib/design/paid-label.ts` の `paidLabelOf` (流れたものの欄と共通)
 - 視聴者を特定できないギフトは #N を出さない (`in_stream_comment_count` が null)
-- 件数・か月数・ギフト名・贈った人は `message_type` から `metadata` に載せる。パーサーが `metadata` を付けない種別 (メンバーシップギフト・その受け取り) でも、空の `metadata` を作って載せる (`GuiChatMessage::from`)
+- 件数・か月数・レベル名・ギフト名・贈った人は `message_type` から `metadata` に載せる。パーサーが `metadata` を付けない種別 (メンバーシップギフト・その受け取り) でも、空の `metadata` を作って載せる (`GuiChatMessage::from`)
 - メンバーシップギフトの面は、まとめた受け取りがあれば本文の下に「受け取った人の行」を出す
 
 ### 受け取った人の行
@@ -1817,12 +1818,31 @@ CREATE TABLE messages (
 | ギフト配布 | `message_type: membership_gift` + `gift_count` |
 | ギフト受け取り | `message_type: membership_gift_redemption` + `gifter`。新規メンバーとは分け、贈った人の行にまとめる（「メンバーシップギフトの受け取り」。2026-10-12 に変更。以前は「新規メンバーとして処理」と書いていたが未実装で、受け取りは捨てられていた） |
 
-#### マイルストーン月数の抽出パターン
+`liveChatMembershipItemRenderer` は次のように読む（2026-09〜10 の実データで確認）。
+
+- **新規かマイルストーンか**は `headerPrimaryText` で決める。`Member for 17 months` があればマイルストーン（月数はこの文から取る）、無ければ新規
+- **バッジの tooltip（`Member (1 year)` など）は使わない。** バッジは段階ごとの表示で実際の月数と一致せず（`Member for 17 months` に `Member (1 year)`）、加入の通知にも既存のバッジが付く（`Welcome to ほしぞら組!` に `Member (2 years)`。入り直しやプランの変更と思われる）
+- **レベル名**（配信者が付けたメンバーシップのプラン名）は `membership_level` に入れる。新規は `headerSubtext` の `Welcome to {レベル名}!` から、マイルストーンは `headerSubtext` そのもの。取れなければ None
+- **`content`・`runs`** は視聴者が書いたメッセージ（`message`。マイルストーンで書いたときだけある）。無ければ空。`headerSubtext` は本文に入れない
+
+| 届いたもの | `milestone_months` | `membership_level` | `content` |
+|-----------|----|----|-----------|
+| `headerPrimaryText` 無し、`headerSubtext` `Welcome to ほしぞら組!`、バッジ `New member` | None | `ほしぞら組` | 空 |
+| 同上でバッジ `Member (2 years)` | None | `ほしぞら組` | 空 |
+| `headerPrimaryText` `Member for 17 months`、`headerSubtext` `ほしぞら組`、バッジ `Member (1 year)`、メッセージ `いつも楽しい！` | 17 | `ほしぞら組` | `いつも楽しい！` |
+| `headerPrimaryText` `Member for 10 months`、`headerSubtext` `サポーター`、メッセージ無し | 10 | `サポーター` | 空 |
+| `headerPrimaryText` `Member for 1 month` | 1 | （`headerSubtext` のとおり） | （メッセージのとおり） |
+| `headerPrimaryText` 無し、`headerSubtext` 無し | None | None | 空 |
+
+#### マイルストーン月数の抽出パターン（`headerPrimaryText`）
 
 ```
-日本語: "(\d+)\s*か月", "メンバー歴\s*(\d+)"
-英語: "(\d+)\s*month", "member\s+for\s+(\d+)"
+英語: "Member for (\d+) months?"
+日本語: "メンバー歴\s*(\d+)\s*か月"
 ```
+
+InnerTube は `hl=en` で取得しているので英語の文が届く。日本語は念のための予備。
+新規のレベル名も英語の文（`^Welcome to (.+)!$`）から取る。合わなければ None。
 
 #### ギフト数の抽出パターン
 

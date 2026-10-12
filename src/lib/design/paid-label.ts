@@ -12,8 +12,10 @@ export function paidLabelOf(
     case 'superchat':
     case 'supersticker':
       return message.amount;
-    case 'membership':
-      return meta?.milestone_months ? `メンバー ${meta.milestone_months} か月` : '新規メンバー';
+    case 'membership': {
+      const kind = meta?.milestone_months ? `メンバー ${meta.milestone_months} か月` : '新規メンバー';
+      return meta?.membership_level ? `${kind} · ${meta.membership_level}` : kind;
+    }
     case 'membership_gift':
       return meta?.gift_count != null ? `メンバーシップを ${meta.gift_count} 件ギフト` : 'メンバーシップのギフト';
     case 'membership_gift_redemption':

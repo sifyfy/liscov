@@ -13,7 +13,7 @@ use crate::core::api::{InnerTubeClient, WebSocketServer};
 use crate::core::models::{ChatMessage, ChatMode, MessageType, ReactionUpdate};
 use crate::core::raw_response::{RawResponseSaver, SaveConfig};
 use crate::database::{self, Database, ViewerAnnotation};
-use crate::tts::{TtsManager, TtsPriority, TtsQueueItem};
+use crate::tts::TtsManager;
 use rusqlite::Connection;
 
 /// 接続ごとに覚える受信済み message_id の件数（02_chat.md「設定値」）
@@ -712,51 +712,12 @@ fn viewer_annotation(msg: &ChatMessage, db_scope: Option<(&Connection, &str)>) -
         .unwrap_or_default()
 }
 
-/// 読み上げの優先度。None は読まない（04_tts.md「スーパーチャット/メンバーシップの読み上げ」）
-fn tts_priority(message_type: &MessageType) -> Option<TtsPriority> {
-    match message_type {
-        MessageType::SuperChat { .. } | MessageType::SuperSticker { .. } | MessageType::Gift(_) => {
-            Some(TtsPriority::SuperChat)
-        }
-        MessageType::Membership { .. } | MessageType::MembershipGift { .. } => {
-            Some(TtsPriority::Membership)
-        }
-        // 大量に配られると読み上げが埋まるので読まない（贈った人のギフトは読む）
-        MessageType::MembershipGiftRedemption { .. } => None,
-        MessageType::Text | MessageType::System => Some(TtsPriority::Normal),
-    }
-}
-
 /// メッセージを TTS キューに追加する（author_reading は viewer_annotation で引いたもの）
 async fn enqueue_tts(tts_manager: &TtsManager, msg: &ChatMessage, author_reading: Option<String>) {
-    let Some(priority) = tts_priority(&msg.message_type) else {
+    let read_amount = tts_manager.get_config().await.read_superchat_amount;
+    // 読まない種別（メンバーシップギフトの受け取り）は None
+    let Some(item) = crate::tts::queue_item_for_chat(msg, author_reading, read_amount) else {
         return;
-    };
-
-    let amount = match &msg.message_type {
-        MessageType::SuperChat { amount } | MessageType::SuperSticker { amount } => {
-            Some(amount.clone())
-        }
-        _ => None,
-    };
-
-    // ギフトは本文の代わりに「{n}ジュエルの{名前}のギフト」を読む
-    let text = match &msg.message_type {
-        MessageType::Gift(gift) => {
-            let read_jewels = tts_manager.get_config().await.read_superchat_amount;
-            crate::tts::gift_message(gift, read_jewels)
-        }
-        _ => msg.content.clone(),
-    };
-
-    let item = TtsQueueItem {
-        text,
-        priority,
-        author_name: Some(msg.author.clone()),
-        author_reading,
-        amount,
-        in_stream_comment_count: msg.in_stream_comment_count,
-        message_id: Some(msg.id.clone()),
     };
     tts_manager.enqueue(item).await;
 }
@@ -1275,31 +1236,5 @@ mod tests {
         // 再接続の復元も受け取りを数えない
         let restored = database::get_in_stream_comment_counts(&conn, "abc").unwrap();
         assert_eq!(restored.get("UCa1b"), Some(&1));
-    }
-
-    // 04_tts.md: 受け取りは読まない。ほかの種別の優先度は今までどおり
-    #[test]
-    fn redemption_is_not_read_aloud() {
-        assert_eq!(
-            tts_priority(&MessageType::MembershipGiftRedemption { gifter: None }),
-            None
-        );
-        assert_eq!(
-            tts_priority(&MessageType::MembershipGift { gift_count: 5 }),
-            Some(TtsPriority::Membership)
-        );
-        assert_eq!(
-            tts_priority(&MessageType::Membership {
-                milestone_months: None
-            }),
-            Some(TtsPriority::Membership)
-        );
-        assert_eq!(
-            tts_priority(&MessageType::SuperChat {
-                amount: "¥500".to_string()
-            }),
-            Some(TtsPriority::SuperChat)
-        );
-        assert_eq!(tts_priority(&MessageType::Text), Some(TtsPriority::Normal));
     }
 }

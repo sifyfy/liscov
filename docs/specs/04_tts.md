@@ -40,8 +40,7 @@
 
 ### スーパーチャット/メンバーシップの読み上げ例
 
-**入力:** 投稿者 `@山田太郎-xyz`, SuperChat `¥500`, 本文 `こんにちは！`
-**出力:** `山田太郎さん、500円のスーパーチャット、こんにちは`
+スーパーチャット・スーパーステッカー・メンバーシップ・メンバーシップギフトは、投稿者名と本文のあいだに種別の文（下の表）を挟む。
 
 | メッセージタイプ | 読み上げ形式 |
 |----------------|-------------|
@@ -51,6 +50,23 @@
 | Membership（マイルストーン） | `{months}ヶ月のメンバーシップ` |
 | MembershipGift | `{gift_count}人へのメンバーシップギフト` |
 | MembershipGiftRedemption（受け取り） | 読まない |
+
+- 本文として読むのは視聴者が書いたメッセージだけ（スーパーチャット・マイルストーンのメッセージ）。YouTube が付ける英語の定型文（新規メンバーの `Welcome to {チャンネル名}!`、メンバーシップギフトの `Sent 5 {チャンネル名} gift memberships`）は読まない
+- 本文が無ければ種別の文で終える（末尾に「、」を付けない）
+- 金額: `¥`（`￥`）で始まる金額は `{数字}円` と読む。桁区切りの `,` は除く。それ以外の通貨は YouTube の表記のまま読む（読み方は読み上げソフトに任せる）
+- `read_superchat_amount=false` なら金額を読まず、`スーパーチャット` / `スーパーステッカー` だけを読む（ギフトのジュエル数と同じ）
+
+| 条件（投稿者 `@山田太郎-xyz`、ほかの設定は既定値） | 読み上げ |
+|------|---------|
+| SuperChat `¥500`、本文 `こんにちは！` | `山田太郎さん、500円のスーパーチャット、こんにちは！` |
+| SuperChat `¥1,000`、本文なし | `山田太郎さん、1000円のスーパーチャット` |
+| SuperChat `$5.00`、本文 `hi` | `山田太郎さん、$5.00のスーパーチャット、hi` |
+| SuperChat `¥500`、本文 `こんにちは！`、`read_superchat_amount=false` | `山田太郎さん、スーパーチャット、こんにちは！` |
+| SuperSticker `¥200` | `山田太郎さん、200円のスーパーステッカー` |
+| Membership（新規） | `山田太郎さん、メンバー加入` |
+| Membership（マイルストーン 6 か月）、メッセージなし | `山田太郎さん、6ヶ月のメンバーシップ` |
+| Membership（マイルストーン 6 か月）、メッセージ `いつも楽しい！` | `山田太郎さん、6ヶ月のメンバーシップ、いつも楽しい！` |
+| MembershipGift 5 件 | `山田太郎さん、5人へのメンバーシップギフト` |
 
 ### ギフトの読み上げ
 
@@ -137,7 +153,7 @@
 |---------|------|------|------|
 | `tts_get_config` | なし | `TtsConfigDto` | 設定取得 |
 | `tts_update_config` | `config: TtsConfigDto` | `()` | 設定更新。保存後の enabled に合わせてキュー処理を開始・停止する（動いていなければ開始、false なら停止） |
-| `tts_speak` | `text, priority?, author_name?, amount?` | `()` | 読み上げキューに追加（チャットメッセージ読み上げの本番経路） |
+| `tts_speak` | `text, priority?, author_name?` | `()` | 読み上げキューに追加（チャットの読み上げはこのコマンドを通らず、チャット取得が直接キューに入れる） |
 | `tts_speak_direct` | `text: String` | `()` | キューを介さず直接読み上げ（テスト用） |
 | `tts_test_connection` | `backend: Option<String>` | `bool` | 接続テスト |
 | `tts_start` | なし | `()` | キュー処理開始 |
@@ -286,10 +302,10 @@ auto_close = true
 ### フォーマット
 
 ```
-[投稿者名]、[スーパーチャット情報]、[メッセージ本文]
+[投稿者名]、[種別の文]、[メッセージ本文]
 ```
 
-各要素は「、」で結合される。
+各要素は「、」で結合される。無い要素（名前を読まない設定、通常のコメントの種別の文、空の本文）は飛ばす。
 
 ### 投稿者名の処理フロー
 
@@ -319,15 +335,19 @@ auto_close = true
 
 ### スーパーチャット/メンバーシップの読み上げ
 
-| メッセージタイプ | 読み上げ形式 |
-|----------------|-------------|
-| SuperChat | `{amount}のスーパーチャット` |
-| SuperSticker | `{amount}のスーパーステッカー` |
-| Membership（新規） | `メンバー加入` |
-| Membership（マイルストーン） | `{months}ヶ月のメンバーシップ` |
-| MembershipGift | `{gift_count}人へのメンバーシップギフト` |
-| Gift | `{jewel_count}ジュエルの{gift_name}のギフト`（jewel_count が無い、または `read_superchat_amount=false` なら `{gift_name}のギフト`） |
-| MembershipGiftRedemption | 読まない（キューに入れない）。大量に配られると読み上げが埋まるため。贈った人の MembershipGift は読む（02_chat.md「メンバーシップギフトの受け取り」） |
+| メッセージタイプ | 種別の文 | 本文 |
+|----------------|-------------|------|
+| SuperChat | `{amount}のスーパーチャット`（`read_superchat_amount=false` なら `スーパーチャット`） | 読む |
+| SuperSticker | `{amount}のスーパーステッカー`（同上なら `スーパーステッカー`） | 読まない（`content` は代わりの文字 `[Sticker]`） |
+| Membership（新規） | `メンバー加入` | 読む（新規は `content` が空。02_chat.md「メンバーシップメッセージの判定」） |
+| Membership（マイルストーン） | `{months}ヶ月のメンバーシップ` | 読む（視聴者のメッセージ） |
+| MembershipGift | `{gift_count}人へのメンバーシップギフト` | 読まない（`content` は YouTube の英文） |
+| Gift | `{jewel_count}ジュエルの{gift_name}のギフト`（jewel_count が無い、または `read_superchat_amount=false` なら `{gift_name}のギフト`） | 読まない |
+| MembershipGiftRedemption | 読まない（キューに入れない）。大量に配られると読み上げが埋まるため。贈った人の MembershipGift は読む（02_chat.md「メンバーシップギフトの受け取り」） | - |
+
+- チャット取得がキューに入れるとき（`chat_runtime::enqueue_tts`）に `tts::queue_item_for_chat` がキューの要素を作る（読まない受け取りは None）。種別の文は `TtsQueueItem.paid_label`、本文は `TtsQueueItem.text`
+- 金額の読み（`¥1,000` → `1000円`、ほかの通貨はそのまま）は `tts::spoken_amount`
+- サニタイズと `max_text_length` は本文にだけ効く。種別の文には効かない
 
 ### テキストサニタイズ
 
@@ -345,7 +365,7 @@ auto_close = true
 
 **出力:**
 ```
-山田太郎さん、500円のスーパーチャット、こんにちは
+山田太郎さん、500円のスーパーチャット、こんにちは！
 ```
 
 ## キュー処理

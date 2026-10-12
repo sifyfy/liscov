@@ -551,6 +551,8 @@ export async function addMockMessage(message: {
   amount?: string;
   tier?: string;
   milestone_months?: number;
+  /** メンバーシップのレベル名。省略時はモックが "Channel" にする */
+  membership_level?: string;
   gift_count?: number;
   gift_image_url?: string;
   /** メンバーシップギフトの受け取り (membership_gift_redemption) の贈った人。省略すると太字の run が無い (贈った人が分からない) */

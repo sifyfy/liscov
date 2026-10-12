@@ -162,7 +162,6 @@ pub async fn tts_speak(
     text: String,
     priority: Option<String>,
     author_name: Option<String>,
-    amount: Option<String>,
 ) -> Result<(), CommandError> {
     let priority = parse_tts_priority(priority.as_deref());
 
@@ -171,7 +170,7 @@ pub async fn tts_speak(
         priority,
         author_name,
         author_reading: None,
-        amount,
+        paid_label: None,
         in_stream_comment_count: None,
         message_id: None,
     };

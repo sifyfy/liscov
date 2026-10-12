@@ -48,6 +48,7 @@ describe('ChatMessage', () => {
 				is_moderator: false,
 				is_verified: false,
 				milestone_months: null,
+				membership_level: null,
 				gift_count: null,
 				gifter: null,
 				gift_name: null,
@@ -429,6 +430,7 @@ describe('ChatMessage', () => {
 				metadata: {
 					amount: null,
 					milestone_months: null,
+					membership_level: null,
 					gift_count: null,
 					gifter: null,
 					gift_name: 'Press F',

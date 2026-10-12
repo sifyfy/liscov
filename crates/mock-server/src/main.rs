@@ -969,6 +969,8 @@ struct AMR {
     #[serde(default)]
     is_moderator: bool,
     milestone_months: Option<u32>,
+    /// メンバーシップのレベル名（新規は "Welcome to {レベル名}!"、マイルストーンは headerSubtext に入る）。省略時は "Channel"
+    membership_level: Option<String>,
     gift_count: Option<u32>,
     /// ギフト（jewel）の画像 URL。実データと同じくスキーム無しを既定にする
     gift_image_url: Option<String>,
@@ -1405,12 +1407,21 @@ fn gen_msg(s: &ServerState, r: &AMR) -> Value {
             json!({"addChatItemAction":{"item":{"liveChatPaidStickerRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":MOCK_AVATAR_URL}]},"authorExternalChannelId":&r.channel_id,"purchaseAmountText":{"simpleText":r.amount.as_deref().unwrap_or("¥500")},"sticker":{"thumbnails":[{"url":MOCK_STICKER_URL}]},"moneyChipBackgroundColor":tier_col(r.tier.as_deref()),"moneyChipTextColor":tier_text_col(r.tier.as_deref()),"authorBadges":author_badges}}}})
         }
         "membership" => {
-            json!({"addChatItemAction":{"item":{"liveChatMembershipItemRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":MOCK_AVATAR_URL}]},"authorExternalChannelId":&r.channel_id,"headerSubtext":{"runs":[{"text":"Welcome to "},{"text":"Channel"},{"text":"!"}]},"authorBadges":[{"liveChatAuthorBadgeRenderer":{"tooltip":"New member","customThumbnail":{"thumbnails":[{"url":MOCK_BADGE_URL}]}}}]}}}})
+            // 実データの形: headerPrimaryText は無く、headerSubtext は "Welcome to {レベル名}!"。本文（message）は無い
+            let level = r.membership_level.as_deref().unwrap_or("Channel");
+            json!({"addChatItemAction":{"item":{"liveChatMembershipItemRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":MOCK_AVATAR_URL}]},"authorExternalChannelId":&r.channel_id,"headerSubtext":{"runs":[{"text":"Welcome to "},{"text":level},{"text":"!"}]},"authorBadges":[{"liveChatAuthorBadgeRenderer":{"tooltip":"New member","customThumbnail":{"thumbnails":[{"url":MOCK_BADGE_URL}]}}}]}}}})
         }
         "membership_milestone" => {
+            // 実データの形: 月数は headerPrimaryText（"Member for N months"）、headerSubtext はレベル名、
+            // 本文（message）は視聴者が書いたときだけある。バッジは段階の表示で月数と一致しない（02_chat.md）
             let months = r.milestone_months.unwrap_or(6);
-            // Actual YouTube format: months in badge tooltip, not headerSubtext
-            json!({"addChatItemAction":{"item":{"liveChatMembershipItemRenderer":{"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":MOCK_AVATAR_URL}]},"authorExternalChannelId":&r.channel_id,"headerSubtext":{"runs":[{"text":"Welcome to "},{"text":"Channel"},{"text":"!"}]},"message":{"runs":[{"text":&r.content}]},"authorBadges":[{"liveChatAuthorBadgeRenderer":{"tooltip":format!("Member ({} months)", months),"customThumbnail":{"thumbnails":[{"url":MOCK_BADGE_URL}]}}}]}}}})
+            let level = r.membership_level.as_deref().unwrap_or("Channel");
+            let unit = if months == 1 { " month" } else { " months" };
+            let mut renderer = json!({"id":id,"timestampUsec":ts,"authorName":{"simpleText":&r.author},"authorPhoto":{"thumbnails":[{"url":MOCK_AVATAR_URL}]},"authorExternalChannelId":&r.channel_id,"headerPrimaryText":{"runs":[{"text":"Member for "},{"text":months.to_string()},{"text":unit}]},"headerSubtext":{"simpleText":level},"authorBadges":[{"liveChatAuthorBadgeRenderer":{"tooltip":"Member (1 month)","customThumbnail":{"thumbnails":[{"url":MOCK_BADGE_URL}]}}}]});
+            if !r.content.is_empty() {
+                renderer["message"] = json!({"runs":[{"text":&r.content}]});
+            }
+            json!({"addChatItemAction":{"item":{"liveChatMembershipItemRenderer":renderer}}})
         }
         "membership_gift" => {
             let count = r.gift_count.unwrap_or(5);

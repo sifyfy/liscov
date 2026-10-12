@@ -448,13 +448,15 @@ test.describe('WebSocket API (03_websocket.md)', () => {
         type: string;
         data: {
           author: string;
-          message_type: { Membership: { milestone_months: number | null } };
+          message_type: { Membership: { milestone_months: number | null; membership_level: string | null } };
           is_member: boolean;
         };
       };
 
       expect(memberMsg.data.message_type).toHaveProperty('Membership');
-      expect(memberMsg.data.message_type.Membership).toHaveProperty('milestone_months');
+      // 03_websocket.md: Membership に月数とレベル名が載る (モックのレベル名の既定は "Channel")
+      expect(memberMsg.data.message_type.Membership.milestone_months).toBe(12);
+      expect(memberMsg.data.message_type.Membership.membership_level).toBe('Channel');
       expect(memberMsg.data.is_member).toBe(true);
 
       ws.close();
