@@ -1,5 +1,5 @@
-// チャット一覧のメッセージ: 受信のバッチ・重複チェック・視聴者ごとの索引・フィルタ・表示件数
-// （02_chat.md「メッセージ表示」「フィルタ機能」「接続設定の統計」）。接続の管理は chat.svelte.ts
+// チャット一覧のメッセージ: 受信のバッチ・重複チェック・視聴者ごとの索引・フィルタ・表示件数・メンバーシップギフトの受け取りのまとめ
+// （02_chat.md「メッセージ表示」「フィルタ機能」「接続設定の統計」「メンバーシップギフトの受け取り」）。接続の管理は chat.svelte.ts
 import type { ChatMessage, ChatFilter } from '$lib/types';
 import { SvelteMap } from 'svelte/reactivity';
 import { messageKey, type MessageKey } from '$lib/utils/message-key';
@@ -19,7 +19,9 @@ function matchesFilter(msg: ChatMessage, filter: ChatFilter): boolean {
     return false;
   if (
     !filter.showMembership &&
-    (msg.message_type === 'membership' || msg.message_type === 'membership_gift')
+    (msg.message_type === 'membership' ||
+      msg.message_type === 'membership_gift' ||
+      msg.message_type === 'membership_gift_redemption')
   )
     return false;
 
@@ -28,6 +30,16 @@ function matchesFilter(msg: ChatMessage, filter: ChatFilter): boolean {
     return msg.content.toLowerCase().includes(query) || msg.author.toLowerCase().includes(query);
   }
   return true;
+}
+
+/** 受信を待っているメッセージ。row は一覧の行になるか、recipientOf はまとめ先 (受け取りのときだけ) */
+type Pending = Readonly<{ message: ChatMessage; row: boolean; recipientOf: MessageKey | null }>;
+
+const NO_RECIPIENTS: readonly ChatMessage[] = [];
+
+/** 受け取りのまとめ先を探すキー: 接続と贈った人 (受け取りは gifter、メンバーシップギフトは author。分からなければ null) */
+function giftGroupKey(connectionId: bigint, gifter: string | null): string {
+  return JSON.stringify([String(connectionId), gifter]);
 }
 
 export function createMessageList() {
@@ -88,20 +100,48 @@ export function createMessageList() {
     return filteredMessages;
   });
 
-  let pendingMessages: ChatMessage[] = [];
+  // まとめ先 (メンバーシップギフトの行と、まとめ先を作った受け取りの行) ごとの受け取り。届いた順
+  const recipientsByAnchor = new SvelteMap<MessageKey, readonly ChatMessage[]>();
+  // 接続と贈った人ごとの最後のまとめ先。届いた順に決めるので、受け取ったとき (バッチ待ちを含む) に更新する
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity -- 画面から読まない
+  const lastAnchor = new Map<string, MessageKey>();
+
+  let pendingMessages: Pending[] = [];
   let batchTimeout: ReturnType<typeof setTimeout> | null = null;
 
   function flushPendingMessages(): void {
     batchTimeout = null;
     if (pendingMessages.length === 0) return;
 
-    // チャンネルインデックスを更新（視聴者ごとに 1 回だけ差し替える）
-    const byChannel = Map.groupBy(pendingMessages, (msg) => msg.channel_id);
+    // チャンネルインデックスを更新（視聴者ごとに 1 回だけ差し替える）。まとめた受け取りも入れる (人の数・パネル)
+    const byChannel = Map.groupBy(pendingMessages, (p) => p.message.channel_id);
     for (const [channelId, added] of byChannel) {
-      messagesByChannel.set(channelId, [...(messagesByChannel.get(channelId) ?? []), ...added]);
+      messagesByChannel.set(channelId, [...(messagesByChannel.get(channelId) ?? []), ...added.map((p) => p.message)]);
     }
-    messages = [...messages, ...pendingMessages];
+    for (const [anchor, added] of Map.groupBy(pendingMessages, (p) => p.recipientOf)) {
+      if (anchor === null) continue;
+      recipientsByAnchor.set(anchor, [...(recipientsByAnchor.get(anchor) ?? []), ...added.map((p) => p.message)]);
+    }
+    messages = [...messages, ...pendingMessages.filter((p) => p.row).map((p) => p.message)];
     pendingMessages = [];
+  }
+
+  /** 受け取ったメッセージを、一覧の行にするか・どのまとめ先に入れるかに振り分ける */
+  function toPending(message: ChatMessage, key: MessageKey): Pending {
+    if (message.message_type === 'membership_gift') {
+      lastAnchor.set(giftGroupKey(message.connection_id, message.author), key);
+    }
+    if (message.message_type !== 'membership_gift_redemption') {
+      return { message, row: true, recipientOf: null };
+    }
+    const groupKey = giftGroupKey(message.connection_id, message.metadata?.gifter ?? null);
+    const anchor = lastAnchor.get(groupKey);
+    if (anchor !== undefined) {
+      return { message, row: false, recipientOf: anchor };
+    }
+    // まとめ先が無ければこの受け取りを行にし、続く同じ贈った人の受け取りのまとめ先にする
+    lastAnchor.set(groupKey, key);
+    return { message, row: true, recipientOf: key };
   }
 
   /** メッセージを受け取る。同じ接続の同じ message_id を既に受け取っていれば false（足さない） */
@@ -112,7 +152,7 @@ export function createMessageList() {
     }
 
     messageIds.add(key);
-    pendingMessages.push(message);
+    pendingMessages.push(toPending(message, key));
 
     // バッチフラッシュをスケジュール（未スケジュールの場合のみ）
     if (!batchTimeout) {
@@ -125,6 +165,8 @@ export function createMessageList() {
     messages = [];
     messageIds.clear();
     messagesByChannel.clear();
+    recipientsByAnchor.clear();
+    lastAnchor.clear();
     pendingMessages = [];
   }
 
@@ -157,6 +199,10 @@ export function createMessageList() {
     },
     getMessagesForChannel(channelId: string): ChatMessage[] {
       return messagesByChannel.get(channelId) ?? [];
+    },
+    /** その行 (まとめ先) にまとめたメンバーシップギフトの受け取り。届いた順。まとめ先の受け取りの行なら自身を先頭に含む */
+    recipientsOf(message: ChatMessage): readonly ChatMessage[] {
+      return recipientsByAnchor.get(messageKey(message)) ?? NO_RECIPIENTS;
     }
   };
 }

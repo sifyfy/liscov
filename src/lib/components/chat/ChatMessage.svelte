@@ -8,13 +8,14 @@
    * - text-chat-meta の中に text-chat-meta を重ねない (em が二重にかかって縮む)
    * - 相手の配信のコメントは、強さを変えずに配信者名の札で見分ける
    * - メモが登録されている視聴者は、本文の下に「メモ」の札とメモを毎回出す (試作 src/routes/design-proto/memo の B)
+   * - メンバーシップギフトの受け取りをまとめた行は、本文の下に「受け取った人 N: …」を出す (「受け取った人の行」)
    * - 文字の大きさは表示の設定 (fontSize) を行の font-size にし、中の文字は em の段階 (text-chat-*) で決める
    * - 試作は src/routes/design-proto/Row.svelte
    */
   import type { ChatMessage } from '$lib/types';
   import { formatTimestamp } from '$lib/utils/format';
   import { messagePriority, type MessageOrigin } from '$lib/design/priority';
-  import { paidLabelOf } from '$lib/design/paid-label';
+  import { paidLabelOf, recipientsLabelOf } from '$lib/design/paid-label';
 
   interface Props {
     message: ChatMessage;
@@ -30,6 +31,8 @@
     compact?: boolean;
     /** パネル・視聴者のタブで登録し直したメモ。undefined なら届いたときの値 (author_notes) を使う。空文字は「メモなし」 */
     notes?: string;
+    /** この行にまとめたメンバーシップギフトの受け取り (chatStore.recipientsOf)。届いた順 */
+    recipients?: readonly ChatMessage[];
   }
 
   let {
@@ -42,6 +45,7 @@
     reading,
     compact = false,
     notes,
+    recipients = [],
   }: Props = $props();
 
   let priority = $derived(messagePriority(message, origin));
@@ -77,6 +81,11 @@
   let giftImageUrl = $derived(giftImageFailed ? null : (message.metadata?.gift_image_url ?? null));
 
   let isMembership = $derived(message.message_type === 'membership' || message.message_type === 'membership_gift');
+
+  // 受け取った人の行。受け取りの行は自身を含むので、1 人のうちは名前の行と同じになるため出さない
+  let recipientsText = $derived(
+    recipients.length >= (message.message_type === 'membership_gift_redemption' ? 2 : 1) ? recipientsLabelOf(recipients) : null,
+  );
 
   /** 面 (優先順位 1) の種類。詰めた形では面にせず 1 行 (line) にする */
   let surface = $derived.by(() => {
@@ -142,6 +151,11 @@
   {/if}
 {/snippet}
 
+<!-- 受け取った人の行 (省略せず折り返す) -->
+{#snippet recipientsLine(cls: string)}
+  <p data-testid="gift-recipients" class="text-chat-meta break-words {cls}">{recipientsText}</p>
+{/snippet}
+
 <!-- 名前 (読み仮名)。size は名前の大きさ (2 段の行では text-chat-meta。読み仮名は兄弟にして em を重ねない) -->
 {#snippet name(size = '')}
   <span data-testid="author-name" class="font-bold break-words {size} {nameClass}">{message.author}</span>
@@ -189,6 +203,7 @@
               class="ml-1.5">{@render runs()}</span
             >{/if}
         </p>
+        {#if recipientsText}{@render recipientsLine('mt-0.5')}{/if}
         {#if authorNotes}{@render notesLine('mt-0.5 text-fg-2')}{/if}
       </div>
     </div>
@@ -226,6 +241,7 @@
       {#if hasBody}
         <p data-testid="paid-body" class="px-3 pt-0 pb-2 break-words">{@render runs()}</p>
       {/if}
+      {#if recipientsText}{@render recipientsLine('px-3 pb-2')}{/if}
       {#if authorNotes}<div class="px-3 pb-2">{@render notesLine('')}</div>{/if}
     </div>
   {:else if surface === 'gift'}
@@ -280,6 +296,7 @@
             {@render meta(priority === 2 ? 'text-fg-2' : 'text-fg-3')}
           </p>
           {#if hasBody}<p data-testid="message-body" class="break-words">{@render runs()}</p>{/if}
+          {#if recipientsText}{@render recipientsLine('mt-0.5')}{/if}
           {#if authorNotes}{@render notesLine('mt-0.5 text-fg-2')}{/if}
         </div>
       </div>

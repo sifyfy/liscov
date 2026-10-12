@@ -38,6 +38,7 @@
 | 過去に別の配信でコメント済み | `is_first_time_viewer = false` |
 | 配信者Aで初見 + 配信者Bでは常連 | 配信者ごとに独立判定 |
 | 視聴者を特定できないギフト（`channel_id == ""`） | `is_first_time_viewer = false` |
+| メンバーシップギフトの受け取り | `is_first_time_viewer = false`（コメントではない。「メンバーシップギフトの受け取り」） |
 
 ### ギフト
 
@@ -89,6 +90,54 @@
 | 切断・再接続・F5リロード | 注記は消える。再びジュエル数の無いギフトを受けたら出る |
 
 ダイアログや通知は出さない（配信中の操作を妨げない）。
+
+### メンバーシップギフトの受け取り
+
+視聴者が、他の人が贈ったメンバーシップを受け取ったお知らせ。InnerTube では `liveChatSponsorshipsGiftRedemptionAnnouncementRenderer` で、受け取った人 1 人につき 1 件届く。贈った人のお知らせ (`membership_gift`) の後に続く (実測: 1 件のギフトで 1.3 秒後、同じ応答の中)。種別は `membership_gift_redemption`。
+
+メンバーシップギフトを大量に贈る人がいるチャンネルでは、受け取りのお知らせで流れが埋まる。そのため受け取りを 1 件ずつ行にせず、画面では贈った人の行にまとめる。お礼の対象は贈った人なので、受け取りはお礼の一覧に入れない (シフィさん、2026-10-12)。
+
+**パース:**
+
+| 入力 | 結果 |
+|------|------|
+| `authorName.simpleText` = `@viewer-a1b`、`authorExternalChannelId` = `UCa1b` | author = `@viewer-a1b`、channel_id = `UCa1b` (受け取った人) |
+| `message.runs` = `received a gift membership by ` + `@gifter-x9` (`bold: true`) | content = `received a gift membership by @gifter-x9`、gifter = `@gifter-x9` (最初の太字の run) |
+| `message.runs` に太字の run が無い | gifter = `None` |
+| `message` が無い | content = `""`、gifter = `None` |
+| タイムスタンプ・アイコン | `timestampUsec`・`authorPhoto.thumbnails[0]` |
+| バッジ・メンバー情報 | バッジは届かないので読まない (保存は NULL = 不明)。is_member = true |
+
+**扱い:**
+
+| 項目 | 扱い |
+|------|------|
+| 流れ | 1 件ずつの行にしない。贈った人の行にまとめる (下の「まとめ方」) |
+| お礼の一覧・流れたものの欄 | 入れない |
+| 保存 | 1 件ずつ messages に保存する。viewer_profiles・viewer_streams は更新しない (受け取った人のコメントではない。viewer_streams を更新すると、後の配信でその人が初めてコメントしたときに初見と判定されなくなる) |
+| 配信内コメント回数・初見判定 | 数えない (`in_stream_comment_count` = None、`is_first_time_viewer` = false)。受け取った人がその後に初めてコメントすると `#1` |
+| 読み上げ | 読まない (大量に配られると読み上げが埋まる。贈った人のギフトは今までどおり読む) |
+| WebSocket | 1 件ずつ `MembershipGiftRedemption` で送る (まとめるのは画面だけ) |
+| フィルタ | 「メンバーシップ」と一緒に隠す |
+| 状態の行の統計 | 件には数えない (行ではない)。人には数える (一覧に名前が出る) |
+| セッションの統計 (`memberships`) | 数えない (贈った人のギフトの件数で数えている) |
+
+**まとめ方:**
+
+受け取りは、同じ接続で、届いた時点で最後の「まとめ先」にまとめる。まとめ先は、author が gifter と同じ `membership_gift` の行と、下の「まとめ先が無い」で作った受け取りの行。
+
+| 状況 | 結果 |
+|------|------|
+| `@g` の「メンバーシップを 3 件ギフト」の後に、受け取り A・B・C が届いた | 贈った人の面の本文の下に「受け取った人 3: A、B、C」(届いた順)。流れの行は増えない |
+| 受け取り A が届いた時点で、まとめ先が無い (接続する前に贈られた・gifter が分からない) | A を標準の行 (優先順位 5) で出す。札は「ギフトで加入」、本文は content。続く同じ gifter の受け取り B・C はこの行にまとめ、「受け取った人 3: A、B、C」を足す (受け取った人が 1 人のうちは出さない) |
+| gifter が分からない受け取りが続いた | gifter が分からないもの同士で、同じように最後の受け取りの行にまとめる |
+| `@g` が 2 回贈った | 受け取りは、届いた時点で最後の `@g` のまとめ先に入る |
+| 別の接続の `@g` のギフト | まとめない (接続ごと) |
+| 受け取った人の名前 | 省略せず折り返す。読み仮名は出さず、名前は押せない (行を押すと、その行の視聴者のパネルが開く) |
+| 「コメントを消す」の後に届いた受け取り | まとめ先が無いので、新しい受け取りの行になる |
+| 贈った人の行が表示件数で外れた・フィルタで隠れた | まとめた受け取りも一緒に隠れる |
+
+例: `@g` が 50 件贈り、受け取りが 50 件届く → 流れには `@g` の「メンバーシップを 50 件ギフト」の面が 1 つだけあり、面の中の「受け取った人 50: …」が届くたびに伸びる。お礼の一覧には `@g` の 1 件だけ。読み上げは `@g` のギフトの 1 回だけ。
 
 ### ライブリアクション
 
@@ -224,6 +273,7 @@
 | それ以外 (配信内コメント回数が分からないものを含む) | 5 | 印なし (標準) |
 | 相手の配信のスパチャ等 | 5 | 標準の行に金額 (またはメンバーシップの種類) の枠つきの札を添える。お礼の対象ではない |
 | 相手の配信の新規さん・常連 | 自分の配信と同じ (2〜5) | 同じ表し方 + 配信元の行 |
+| メンバーシップギフトの受け取り (まとめ先が無かったもの) | 5 | 標準の行に枠つきの札「ギフトで加入」。お礼の対象ではない (「メンバーシップギフトの受け取り」) |
 
 **1 行の形:**
 
@@ -438,6 +488,7 @@ pub enum MessageRun {
 | `supersticker` | スーパーステッカー | `amount`（金額文字列）、`superchat_colors` |
 | `membership` | メンバーシップ新規/更新 | `milestone_months`（マイルストーン月数、新規はNone） |
 | `membership_gift` | メンバーシップギフト配布 | `gift_count`（ギフト数） |
+| `membership_gift_redemption` | メンバーシップギフトの受け取り。author は受け取った人 | `gifter`（贈った人の名前。分からなければ None） |
 | `gift` | ジュエルで送るギフト。`content` はギフト名 | `gift_name`、`gift_image_url`、`jewel_count`（取れなければ None） |
 | `system` | システムメッセージ | なし |
 
@@ -448,6 +499,7 @@ pub struct GuiMessageMetadata {
     pub amount: Option<String>,                // 金額
     pub milestone_months: Option<u32>,         // メンバーシップマイルストーン月数
     pub gift_count: Option<u32>,               // メンバーシップギフト数
+    pub gifter: Option<String>,                // 贈った人の名前（membership_gift_redemption のみ）
     pub gift_name: Option<String>,             // ギフト名（gift のみ）
     pub gift_image_url: Option<String>,        // ギフト画像URL（gift のみ）
     pub jewel_count: Option<u32>,              // ジュエル数（gift で取れたときのみ）
@@ -765,6 +817,7 @@ CREATE TABLE viewer_streams (
 | 判定タイミング | `save_message`（`upsert_viewer_stream` 含む）の**後**に判定する |
 | システムメッセージ | `message_type == "system"` のメッセージは判定対象外 |
 | 特定できないギフト | `channel_id == ""` のギフトは判定対象外（false） |
+| メンバーシップギフトの受け取り | 判定対象外（false）。`save_message` は viewer_profiles・viewer_streams を更新しない |
 | 将来の拡張 | 視聴者の訪問配信一覧、前回来た配信の特定等に利用可能 |
 
 ### 配信内コメント数カウンタ
@@ -785,7 +838,7 @@ type InStreamCommentCounter = HashMap<String, u32>;
 |---------|------|
 | 新規接続 | 空のHashMapを作成 |
 | 再接続（同一video_id） | DBから該当セッションのメッセージを集計し、channel_idごとのカウントで初期化。URL の書き方（`watch?v=`・`/live/`・`youtu.be/`）が前回と違っても同じ配信として数える |
-| メッセージ受信 | カウンタをインクリメントし、現在値を `in_stream_comment_count` に設定 |
+| メッセージ受信 | カウンタをインクリメントし、現在値を `in_stream_comment_count` に設定。システムメッセージ・視聴者を特定できないギフト・メンバーシップギフトの受け取りは数えない（`None`） |
 | 切断 | カウンタを破棄（DBにメッセージが保存されているため復元可能） |
 
 #### 再接続時の復元SQL
@@ -795,7 +848,7 @@ SELECT m.channel_id, COUNT(*) as count
 FROM messages m
 JOIN sessions s ON m.session_id = s.id
 WHERE s.video_id = {video_id}
-  AND m.message_type != 'system'
+  AND m.message_type NOT IN ('system', 'membership_gift_redemption')
   AND m.channel_id <> ''
 GROUP BY m.channel_id
 ```
@@ -1030,7 +1083,8 @@ liscov も通知を受け、届いたら「取得の間隔」の待ちを打ち�
 
 | 状態 | 型 | 説明 |
 |-----|-----|------|
-| `messages` | `ChatMessage[]` | 全接続のメッセージを統合した配列 |
+| `messages` | `ChatMessage[]` | 全接続のメッセージを統合した配列。まとめ先に入ったメンバーシップギフトの受け取りは入れない |
+| `recipientsOf(message)` | `readonly ChatMessage[]` | その行 (まとめ先) にまとめた受け取り (届いた順)。まとめ先の受け取りの行なら、その行自身を先頭に含む。まとめ先でなければ空 |
 | `filteredMessages` | `ChatMessage[]` | フィルタ済みメッセージ（derived） |
 | `displayedMessages` | `ChatMessage[]` | displayLimit適用後の表示用メッセージ（derived） |
 | `connections` | `Map<number, FrontendConnectionState>` | アクティブ接続マップ（connection_id → 状態） |
@@ -1067,7 +1121,7 @@ liscov も通知を受け、届いたら「取得の間隔」の待ちを打ち�
 interface ChatFilter {
     showText: boolean;        // 通常チャット表示
     showSuperchat: boolean;   // スーパーチャット/ステッカー/ギフト表示
-    showMembership: boolean;  // メンバーシップ関連表示
+    showMembership: boolean;  // メンバーシップ関連表示（メンバーシップギフトの受け取りを含む）
     searchQuery: string;      // 検索クエリ（著者/コンテンツ）
 }
 ```
@@ -1091,7 +1145,7 @@ interface ChatFilter {
 
 | 表示 | 値 |
 |-----|-----|
-| 件 | 画面のメッセージ一覧の件数（「コメントを消す」で 0） |
+| 件 | 画面のメッセージ一覧の件数（「コメントを消す」で 0）。まとめた受け取りは数えない |
 | /分 | 直近 60 秒に投稿されたコメントの数（投稿時刻 `timestamp_usec` で数える）。コメントが止まれば下がっていく（5 秒ごとに数え直す） |
 | 人 | 画面のメッセージ一覧にいる視聴者の数（`channel_id` ごと。視聴者を特定できないギフトは数えない） |
 
@@ -1104,6 +1158,7 @@ interface ChatFilter {
 | 状況（人） | 結果 |
 |------|------|
 | UCa が 3 件、UCb が 1 件、視聴者を特定できないギフトが 1 件 | 2 |
+| UCa のメンバーシップギフト 1 件と、それにまとめた UCb・UCc の受け取り | 3（件は 1） |
 
 件・人はストアが受信のたびに差分で数える（全件を数え直さない）。/分は一覧の末尾から辿り、投稿時刻が 90 秒より前のメッセージに当たったら止める
 （一覧は到着順。複数の接続で到着が前後しても数十秒に収まる前提）。
@@ -1198,7 +1253,8 @@ Connecting → (接続失敗) → (削除 + エラー通知)
 | 読み仮名 | `chatStore.infoOf(message)?.reading` (パネル・視聴者のタブで保存した値) があればそれ、無ければ `author_reading`。空なら出さない。`text-chat-meta`・`text-fg-2` で `(たなか)` |
 | メモ (`data-testid="author-notes"`) | `chatStore.infoOf(message)?.notes` があればそれ、無ければ `author_notes`。空なら出さない。本文の段落の下に `text-chat-meta`・`text-fg-2` の 1 行で、枠 (`border-current`) の札「メモ」とメモ。札の大きさは囲む文字に合わせる (`text-chat-meta` を重ねない)。スパチャ等の面では面の文字色のまま本文の下 (`px-3 pb-2`)、詰めた 1 行では名前と本文の段落の下 |
 | バッジ | `badge_info` の画像 (`size-chat-badge`、読めなければ消す)。メンバーで画像が無ければ `border-member-text` の札「メンバー」。モデレーター 🔧・認証済み ✓ |
-| 金額の札 (`data-testid="paid-label"`) | 相手の配信のスパチャ等のとき。`border-outline` の枠に `paidLabelOf` の文言 |
+| 金額の札 (`data-testid="paid-label"`) | 相手の配信のスパチャ等と、メンバーシップギフトの受け取りの行のとき。`border-outline` の枠に `paidLabelOf` の文言 (受け取りは「ギフトで加入」) |
+| 受け取った人 (`data-testid="gift-recipients"`) | 下の「受け取った人の行」 |
 | 本文 | `runs` (テキストと絵文字)。絵文字は `h-chat-emoji` (1.3em)。ステッカーは本文を出さない (`content` は代わりの文字「[Sticker]」) |
 | #N・時刻 (`data-testid="message-time"`) | `text-chat-meta`・`text-fg-3` (優先順位 2 の行では `text-fg-2`)。時刻は表示の設定で消せる (HH:MM:SS、ローカル時刻) |
 
@@ -1215,7 +1271,19 @@ Connecting → (接続失敗) → (削除 + エラー通知)
 
 - 札の文言は `src/lib/design/paid-label.ts` の `paidLabelOf` (流れたものの欄と共通)
 - 視聴者を特定できないギフトは #N を出さない (`in_stream_comment_count` が null)
-- 件数・か月数・ギフト名は `message_type` から `metadata` に載せる。パーサーが `metadata` を付けない種別 (メンバーシップギフト) でも、空の `metadata` を作って載せる (`GuiChatMessage::from`)
+- 件数・か月数・ギフト名・贈った人は `message_type` から `metadata` に載せる。パーサーが `metadata` を付けない種別 (メンバーシップギフト・その受け取り) でも、空の `metadata` を作って載せる (`GuiChatMessage::from`)
+- メンバーシップギフトの面は、まとめた受け取りがあれば本文の下に「受け取った人の行」を出す
+
+### 受け取った人の行
+
+メンバーシップギフトの受け取りをまとめた行 (振る舞いは「メンバーシップギフトの受け取り」) に出す 1 行。`ChatMessage` の `recipients` (= `chatStore.recipientsOf(message)`) から作る。
+
+| 項目 | 表し方 |
+|------|------|
+| 出すとき | メンバーシップギフトの行は受け取りが 1 人以上、受け取りの行は 2 人以上 (1 人なら名前の行と同じなので出さない) |
+| 文言 | `受け取った人 {人数}: {名前}、{名前}…` (届いた順。名前は author)。`src/lib/design/paid-label.ts` の `recipientsLabelOf` |
+| 見た目 | `data-testid="gift-recipients"`・`text-chat-meta`・`break-words` (省略しない)。面の中では面の文字色のまま本文の下 (`px-3 pb-2`)、標準の行と詰めた 1 行では本文の下 |
+| まとめ方の実装 | `src/lib/stores/chat-messages.svelte.ts`。受け取りを足すとき、接続と gifter ごとの最後のまとめ先 (`connection_id` + gifter → まとめ先の `MessageKey`) を引く。`membership_gift` の行とまとめ先を作った受け取りの行を足すたびに更新し、「コメントを消す」で空にする。受け取りは `messages` には入れず、まとめ先ごとの受け取りの一覧に足す (視聴者ごとの索引 = 人の数・パネルには入れる) |
 
 ### 詰めた形 (流れたものの欄)
 
@@ -1224,7 +1292,7 @@ Connecting → (接続失敗) → (削除 + エラー通知)
 | 項目 | 表し方 |
 |------|------|
 | アイコン | 出さない |
-| 優先順位 1 | 面にせず 1 行: 時刻 (`text-fg-3`、表示の設定によらず出す。お礼で順に読むため)・札 (`data-testid="paid-chip"`)・名前 (読み仮名)・本文 |
+| 優先順位 1 | 面にせず 1 行: 時刻 (`text-fg-3`、表示の設定によらず出す。お礼で順に読むため)・札 (`data-testid="paid-chip"`)・名前 (読み仮名)・本文。メンバーシップギフトは受け取った人の行も |
 | 札の色 | スパチャ・ステッカーはティアの見出しの色 (`header_background`・`header_text`)、メンバーシップ系は `bg-member`、色の無いものとギフトは `border-outline` の枠 |
 | ギフト (ジュエル) | 札は「N ジュエル」、本文の代わりに「{gift_name} を送りました」。ジュエル数が無ければ札がギフト名で、本文なし |
 | 優先順位 2〜5 | 流れと同じ (アイコンだけ出さない) |
@@ -1747,7 +1815,7 @@ CREATE TABLE messages (
 | 新規メンバー | `milestone_months: None` |
 | マイルストーン（n か月） | `milestone_months: Some(n)` |
 | ギフト配布 | `message_type: membership_gift` + `gift_count` |
-| ギフト受け取り | 新規メンバーとして処理 |
+| ギフト受け取り | `message_type: membership_gift_redemption` + `gifter`。新規メンバーとは分け、贈った人の行にまとめる（「メンバーシップギフトの受け取り」。2026-10-12 に変更。以前は「新規メンバーとして処理」と書いていたが未実装で、受け取りは捨てられていた） |
 
 #### マイルストーン月数の抽出パターン
 

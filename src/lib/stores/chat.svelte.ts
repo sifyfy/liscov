@@ -438,6 +438,7 @@ function createChatStore() {
     setShowTimestamps,
     setDisplayLimit: list.setDisplayLimit,
     getMessagesForChannel: list.getMessagesForChannel,
+    recipientsOf: list.recipientsOf,
     setupEventListeners,
     cleanup,
     initDisplaySettings,

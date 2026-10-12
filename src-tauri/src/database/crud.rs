@@ -231,9 +231,13 @@ pub fn save_message(
     )?;
 
     // Update viewer profile (if broadcaster_channel_id is available)
-    // channel_id が空（視聴者を特定できないギフト）ならプロフィールを作らない
-    if let Some(broadcaster_id) = broadcaster_channel_id.filter(|_| !message.channel_id.is_empty())
-    {
+    // channel_id が空（視聴者を特定できないギフト）と、コメントではないメンバーシップギフトの受け取りはプロフィールを作らない
+    let is_viewer_comment = !message.channel_id.is_empty()
+        && !matches!(
+            message.message_type,
+            crate::core::models::MessageType::MembershipGiftRedemption { .. }
+        );
+    if let Some(broadcaster_id) = broadcaster_channel_id.filter(|_| is_viewer_comment) {
         let profile_id = upsert_viewer_profile(
             conn,
             broadcaster_id,
@@ -348,7 +352,7 @@ pub fn get_in_stream_comment_counts(
          FROM messages m
          JOIN sessions s ON m.session_id = s.id
          WHERE s.video_id = ?1
-           AND m.message_type != 'system'
+           AND m.message_type NOT IN ('system', 'membership_gift_redemption')
            AND m.channel_id <> ''
          GROUP BY m.channel_id",
     )?;

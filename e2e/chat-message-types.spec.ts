@@ -254,6 +254,63 @@ test.describe('Chat Display — Message Types (02_chat.md)', () => {
       // Disconnect
       await disconnectAndInitialize(mainPage);
     });
+
+    // 02_chat.md「メンバーシップギフトの受け取り」: 受け取りは 1 件ずつ行にせず、贈った人の面にまとめる
+    test('メンバーシップギフトの受け取りは贈った人の面の「受け取った人」にまとまる', async () => {
+      const urlInput = (await openUrlInput(mainPage));
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
+
+      await addMockMessage({ message_type: 'membership_gift', author: '@gifter-x9', channel_id: 'UCgifterx9', content: '', gift_count: 3 });
+      for (const name of ['a', 'b', 'c']) {
+        await addMockMessage({
+          message_type: 'membership_gift_redemption',
+          author: `@recipient-${name}`,
+          channel_id: `UCrecipient${name}`,
+          content: '',
+          gifter: '@gifter-x9',
+        });
+      }
+
+      const giftCard = mainPage.locator('[data-message-id][data-priority="1"]').filter({ hasText: '@gifter-x9' });
+      await expect(giftCard.getByTestId('gift-recipients')).toHaveText('受け取った人 3: @recipient-a、@recipient-b、@recipient-c', {
+        timeout: 5000,
+      });
+      // 受け取りの行は流れに出ない (行は贈った人の面の 1 つだけ)
+      await expect(mainPage.locator('[data-message-id]')).toHaveCount(1);
+
+      await disconnectAndInitialize(mainPage);
+    });
+
+    test('まとめ先が無い受け取りは「ギフトで加入」の札の行になり、続く受け取りをまとめる', async () => {
+      const urlInput = (await openUrlInput(mainPage));
+      await urlInput.fill(`${mockServerUrl()}/watch?v=test_video_123`);
+      await mainPage.getByRole('button', { name: '接続', exact: true }).click();
+      await expect(mainPage.locator('[data-testid="connection-chip"][title="Mock Live"]').first()).toBeVisible({ timeout: 10000 });
+
+      for (const name of ['a', 'b']) {
+        await addMockMessage({
+          message_type: 'membership_gift_redemption',
+          author: `@recipient-${name}`,
+          channel_id: `UCrecipient${name}`,
+          content: '',
+          gifter: '@gifter-x9',
+        });
+      }
+
+      const row = mainPage.locator('[data-message-id][data-priority="5"]').filter({ hasText: '@recipient-a' });
+      await expect(row.getByTestId('paid-label')).toHaveText('ギフトで加入', { timeout: 5000 });
+      await expect(row.getByTestId('message-body')).toHaveText('received a gift membership by @gifter-x9');
+      await expect(row.getByTestId('gift-recipients')).toHaveText('受け取った人 2: @recipient-a、@recipient-b');
+      // コメント回数に数えないので #N を出さない
+      await expect(row.getByTestId('name-line')).not.toContainText('#');
+      await expect(mainPage.locator('[data-message-id]')).toHaveCount(1);
+      // お礼の対象ではないので、スパチャ等の一覧は出ない
+      await expect(mainPage.locator('section[aria-label="この配信のスパチャ等の一覧"]')).toHaveCount(0);
+
+      await disconnectAndInitialize(mainPage);
+    });
   });
 
   test.describe('バッジ (02_chat.md「バッジの種類」)', () => {

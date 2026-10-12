@@ -198,7 +198,7 @@ CREATE UNIQUE INDEX idx_messages_unique ON messages(session_id, message_id);
 | `author_icon_url` | TEXT | 投稿者アイコンURL |
 | `channel_id` | TEXT | 投稿者チャンネルID |
 | `content` | TEXT | メッセージ本文 |
-| `message_type` | TEXT | メッセージタイプ（text/superchat/supersticker/membership/membership_gift/gift/system） |
+| `message_type` | TEXT | メッセージタイプ（text/superchat/supersticker/membership/membership_gift/membership_gift_redemption/gift/system） |
 | `amount` | TEXT | SuperChat金額（通貨記号含む、例: "¥500"） |
 | `is_member` | INTEGER | メンバーシップ加入者フラグ（0/1） |
 | `metadata` | TEXT | JSON形式のメタデータ（現在は gift のみ。他の種別は NULL） |
@@ -208,7 +208,10 @@ CREATE UNIQUE INDEX idx_messages_unique ON messages(session_id, message_id);
 | `badges` | TEXT | バッジの種類の JSON 配列（例: `["moderator","member"]`。02_chat.md「バッジの種類」） |
 
 `is_moderator`・`is_verified`・`badges` は、発言者のバッジを読める種類（text・superchat・supersticker・membership）だけに入れる。
-それ以外の種類（membership_gift・gift・system）と、005 より前に保存した行は NULL（不明）。
+それ以外の種類（membership_gift・membership_gift_redemption・gift・system）と、005 より前に保存した行は NULL（不明）。
+
+**メンバーシップギフトの受け取り（`message_type = 'membership_gift_redemption'`）:** author・channel_id は受け取った人、content は YouTube の文（例: `received a gift membership by @gifter-x9`）。贈った人は content にだけ残る（metadata は NULL）。
+受け取った人のコメントではないので、viewer_profiles・viewer_streams は更新しない（02_chat.md「メンバーシップギフトの受け取り」）。
 NULL は「バッジが無い」ではなく「分からない」を表す。分析・エクスポートは NULL を false や空配列として扱わない。
 
 **ギフト（`message_type = 'gift'`）の保存形式:**
@@ -441,7 +444,7 @@ CREATE INDEX idx_contributor_stats_session ON contributor_stats(session_id);
         ↓
 2. messages テーブルに INSERT
         ↓
-3. viewer_profiles を UPSERT（channel_id が '' のギフトは 3 以降を行わない）
+3. viewer_profiles を UPSERT（channel_id が '' のギフトと、メンバーシップギフトの受け取りは 3 以降を行わない）
    - message_count をインクリメント
    - last_seen を更新
    - SuperChat時は total_contribution に加算
