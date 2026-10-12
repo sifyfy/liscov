@@ -201,7 +201,7 @@ CREATE UNIQUE INDEX idx_messages_unique ON messages(session_id, message_id);
 | `message_type` | TEXT | メッセージタイプ（text/superchat/supersticker/membership/membership_gift/membership_gift_redemption/gift/system） |
 | `amount` | TEXT | SuperChat金額（通貨記号含む、例: "¥500"） |
 | `is_member` | INTEGER | メンバーシップ加入者フラグ（0/1） |
-| `metadata` | TEXT | JSON形式のメタデータ（現在は gift のみ。他の種別は NULL） |
+| `metadata` | TEXT | JSON形式のメタデータ（membership・membership_gift・gift。他の種別は NULL。下の保存形式） |
 | `superchat_color` | TEXT | スーパーチャットのヘッダー背景色 `#RRGGBB`（段階の判定に使う。07_revenue.md）。superchat 以外は NULL |
 | `is_moderator` | INTEGER | モデレーターのバッジがあるか（0/1） |
 | `is_verified` | INTEGER | 認証済みのバッジがあるか（0/1） |
@@ -213,6 +213,20 @@ CREATE UNIQUE INDEX idx_messages_unique ON messages(session_id, message_id);
 **メンバーシップギフトの受け取り（`message_type = 'membership_gift_redemption'`）:** author・channel_id は受け取った人、content は YouTube の文（例: `received a gift membership by @gifter-x9`）。贈った人は content にだけ残る（metadata は NULL）。
 受け取った人のコメントではないので、viewer_profiles・viewer_streams は更新しない（02_chat.md「メンバーシップギフトの受け取り」）。
 NULL は「バッジが無い」ではなく「分からない」を表す。分析・エクスポートは NULL を false や空配列として扱わない。
+
+**メンバーシップ（`message_type = 'membership'`）・メンバーシップギフト（`message_type = 'membership_gift'`）の保存形式:**
+content は視聴者が書いたメッセージで、無ければ `''`（メンバーシップギフトは常に `''`。02_chat.md「メンバーシップメッセージの判定」）。
+件数・月数・レベル名は content に入らないので metadata に残す。
+
+| 届いたもの | `content` | `metadata` |
+|-----------|-----------|------------|
+| 新規メンバー（レベル名 `ほしぞら組`） | `''` | `{"milestone_months":null,"membership_level":"ほしぞら組"}` |
+| マイルストーン 17 か月（レベル名 `ほしぞら組`、メッセージ `いつも楽しい！`） | `いつも楽しい！` | `{"milestone_months":17,"membership_level":"ほしぞら組"}` |
+| レベル名が取れない新規メンバー | `''` | `{"milestone_months":null,"membership_level":null}` |
+| メンバーシップギフト 5 件 | `''` | `{"gift_count":5}` |
+
+分析では `json_extract(metadata, '$.gift_count')` などで引ける。
+2026-10-13 より前に保存した行は metadata が NULL で、content に YouTube の英文が入っていることがある（メンバーシップギフトの件数は content の `Sent 5 ... gift memberships` にだけ残る）。保存済みの行は書き換えない。
 
 **ギフト（`message_type = 'gift'`）の保存形式:**
 
