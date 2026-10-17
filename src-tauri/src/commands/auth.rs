@@ -31,23 +31,141 @@ pub(crate) trait CredentialStorage: Send + Sync {
     fn is_available(&self) -> bool;
 }
 
-/// keyring を使用するセキュアストレージ実装（本番用）
-struct KeyringStorage;
+/// keyring の 1 件に入る長さ（keyring 3.6.3 の Windows 実装は UTF-16 で 1280 単位 = 2560 バイト）
+const KEYRING_MAX_UTF16_UNITS: usize = 1280;
 
-impl CredentialStorage for KeyringStorage {
+/// keyring の 1 件ずつの読み書き（分割保存の下の層。テスト時は差し替える）
+pub(crate) trait SecretSlots: Send + Sync {
+    /// 件が無ければ `Ok(None)`
+    fn get(&self, user: &str) -> Result<Option<String>, String>;
+    fn set(&self, user: &str, secret: &str) -> Result<(), String>;
+    /// 件が無くても `Ok`
+    fn remove(&self, user: &str) -> Result<(), String>;
+}
+
+/// Windows Credential Manager などの OS のセキュアストレージ（本番用）
+struct KeyringSlots;
+
+impl KeyringSlots {
+    fn entry(user: &str) -> Result<keyring::Entry, String> {
+        keyring::Entry::new(&crate::paths::keyring_service(), user)
+            .map_err(|e| format!("Failed to access secure storage: {}", e))
+    }
+}
+
+impl SecretSlots for KeyringSlots {
+    fn get(&self, user: &str) -> Result<Option<String>, String> {
+        match Self::entry(user)?.get_password() {
+            Ok(secret) => Ok(Some(secret)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e) => Err(format!("Failed to read from secure storage: {}", e)),
+        }
+    }
+
+    fn set(&self, user: &str, secret: &str) -> Result<(), String> {
+        Self::entry(user)?
+            .set_password(secret)
+            .map_err(|e| format!("Failed to save to secure storage: {}", e))
+    }
+
+    fn remove(&self, user: &str) -> Result<(), String> {
+        match Self::entry(user)?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(format!("Failed to delete from secure storage: {}", e)),
+        }
+    }
+}
+
+/// 分けて保存したときの本体の件の中身（01_auth.md「1 件に入らないときの分割」）
+#[derive(Debug, Serialize, Deserialize)]
+struct PartsHeader {
+    parts: usize,
+}
+
+/// 分けたときの i 番目（1 始まり）の件のユーザー名
+fn part_user(i: usize) -> String {
+    format!("{}.{}", KEYRING_USER, i)
+}
+
+/// 文字の境目で、UTF-16 で `max_units` 単位以下ずつに分ける
+fn split_secret(secret: &str, max_units: usize) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut units = 0;
+    for c in secret.chars() {
+        if units + c.len_utf16() > max_units {
+            parts.push(std::mem::take(&mut current));
+            units = 0;
+        }
+        current.push(c);
+        units += c.len_utf16();
+    }
+    if !current.is_empty() {
+        parts.push(current);
+    }
+    parts
+}
+
+/// `start` 番目から、見つからなくなるまでの部分を消す
+fn remove_parts_from(slots: &dyn SecretSlots, start: usize) -> Result<(), String> {
+    let mut i = start;
+    while slots.get(&part_user(i))?.is_some() {
+        slots.remove(&part_user(i))?;
+        i += 1;
+    }
+    Ok(())
+}
+
+/// 1 件に入らなければ分けて書き、前回の余った部分を消す
+fn write_split_secret(slots: &dyn SecretSlots, secret: &str) -> Result<(), String> {
+    let parts = if secret.encode_utf16().count() <= KEYRING_MAX_UTF16_UNITS {
+        slots.set(KEYRING_USER, secret)?;
+        0
+    } else {
+        let parts = split_secret(secret, KEYRING_MAX_UTF16_UNITS);
+        for (i, part) in parts.iter().enumerate() {
+            slots.set(&part_user(i + 1), part)?;
+        }
+        let header = serde_json::to_string(&PartsHeader { parts: parts.len() })
+            .map_err(|e| format!("Failed to serialize credentials: {}", e))?;
+        slots.set(KEYRING_USER, &header)?;
+        parts.len()
+    };
+    remove_parts_from(slots, parts + 1)
+}
+
+/// 本体の件が見出しなら部分をつないで返す。件が無ければ `Ok(None)`
+fn read_split_secret(slots: &dyn SecretSlots) -> Result<Option<String>, String> {
+    let Some(main) = slots.get(KEYRING_USER)? else {
+        return Ok(None);
+    };
+    let Ok(header) = serde_json::from_str::<PartsHeader>(&main) else {
+        return Ok(Some(main));
+    };
+    (1..=header.parts)
+        .map(|i| {
+            slots
+                .get(&part_user(i))?
+                .ok_or_else(|| format!("Secure storage is missing part {} of {}", i, header.parts))
+        })
+        .collect::<Result<String, String>>()
+        .map(Some)
+}
+
+/// keyring を使用するセキュアストレージ実装。1 件に入らない認証情報は分けて保存する
+struct KeyringStorage<S>(S);
+
+/// 本番のセキュアストレージ
+const KEYRING_STORAGE: KeyringStorage<KeyringSlots> = KeyringStorage(KeyringSlots);
+
+impl<S: SecretSlots> CredentialStorage for KeyringStorage<S> {
     fn load(&self) -> Result<YouTubeCookies, String> {
         log::info!("📂 Loading from secure storage...");
-        let entry = keyring::Entry::new(&crate::paths::keyring_service(), KEYRING_USER)
-            .map_err(|e| format!("Failed to access secure storage: {}", e))?;
-
-        let secret = entry.get_password().map_err(|e| {
-            let msg = match e {
-                keyring::Error::NoEntry => "No credentials found in secure storage".to_string(),
-                _ => format!("Failed to read from secure storage: {}", e),
-            };
-            log::info!("📂 Load error: {}", msg);
-            msg
-        })?;
+        let secret = read_split_secret(&self.0)
+            .and_then(|secret| {
+                secret.ok_or_else(|| "No credentials found in secure storage".to_string())
+            })
+            .inspect_err(|msg| log::info!("📂 Load error: {}", msg))?;
         log::info!("📂 Load success");
 
         let json: CredentialsJson = serde_json::from_str(&secret)
@@ -64,30 +182,22 @@ impl CredentialStorage for KeyringStorage {
 
     fn save(&self, cookies: &YouTubeCookies) -> Result<(), String> {
         log::info!("📝 Saving to secure storage...");
-        let entry = keyring::Entry::new(&crate::paths::keyring_service(), KEYRING_USER)
-            .map_err(|e| format!("Failed to access secure storage: {}", e))?;
-
         let json: CredentialsJson = cookies.into();
         let secret = serde_json::to_string(&json)
             .map_err(|e| format!("Failed to serialize credentials: {}", e))?;
 
         log::debug!("Credential JSON length: {} chars", secret.len());
 
-        entry
-            .set_password(&secret)
-            .map_err(|e| format!("Failed to save to secure storage: {}", e))?;
+        write_split_secret(&self.0, &secret)?;
 
         log::info!("Credentials saved to secure storage");
 
         // 保存直後に読み戻して検証
-        match entry.get_password() {
-            Ok(read_back) => {
-                if read_back == secret {
-                    log::info!("✅ Verified: credentials can be read back");
-                } else {
-                    log::warn!("⚠️ Mismatch: written and read data differ");
-                }
+        match read_split_secret(&self.0) {
+            Ok(Some(read_back)) if read_back == secret => {
+                log::info!("✅ Verified: credentials can be read back");
             }
+            Ok(_) => log::warn!("⚠️ Mismatch: written and read data differ"),
             Err(e) => {
                 log::error!("❌ Verification failed: could not read back: {}", e);
                 return Err(format!("Credentials saved but cannot be read back: {}", e));
@@ -98,26 +208,16 @@ impl CredentialStorage for KeyringStorage {
     }
 
     fn delete(&self) -> Result<(), String> {
-        let entry = keyring::Entry::new(&crate::paths::keyring_service(), KEYRING_USER)
-            .map_err(|e| format!("Failed to access secure storage: {}", e))?;
-
-        match entry.delete_credential() {
-            Ok(_) => log::info!("Credentials deleted from secure storage"),
-            Err(keyring::Error::NoEntry) => {
-                log::info!("No credentials to delete from secure storage")
-            }
-            Err(e) => return Err(format!("Failed to delete from secure storage: {}", e)),
-        }
+        self.0.remove(KEYRING_USER)?;
+        remove_parts_from(&self.0, 1)?;
+        log::info!("Credentials deleted from secure storage");
         Ok(())
     }
 
     fn is_available(&self) -> bool {
-        let Ok(entry) = keyring::Entry::new(&crate::paths::keyring_service(), KEYRING_USER) else {
-            return false;
-        };
         // エントリへのアクセスを試行（読み込みテスト）
         // エントリなしでもストレージ自体は利用可能
-        matches!(entry.get_password(), Ok(_) | Err(keyring::Error::NoEntry))
+        self.0.get(KEYRING_USER).is_ok()
     }
 }
 
@@ -266,12 +366,12 @@ fn credentials_file_exists() -> bool {
 
 /// Load cookies from secure storage (keyring)
 fn load_cookies_from_secure_storage() -> Result<YouTubeCookies, String> {
-    KeyringStorage.load()
+    KEYRING_STORAGE.load()
 }
 
 /// Check if secure storage is available
 fn is_secure_storage_available() -> bool {
-    KeyringStorage.is_available()
+    KEYRING_STORAGE.is_available()
 }
 
 // =============================================================================
@@ -363,6 +463,20 @@ fn delete_credentials_file() -> Result<(), String> {
     Ok(())
 }
 
+/// secure モードで残っている credentials.toml を消す
+///
+/// secure モードのファイルは、旧版が容量超過のときに同意なしに書いた平文の Cookie
+/// （01_auth.md「secure モードの保存先」）。消せなくても読み書きは成功とする
+fn remove_leftover_credentials_file() {
+    if !credentials_file_exists() {
+        return;
+    }
+    match delete_credentials_file() {
+        Ok(()) => log::info!("Removed leftover plaintext credentials file in secure mode"),
+        Err(e) => log::warn!("⚠️ Failed to remove leftover credentials file: {}", e),
+    }
+}
+
 // =============================================================================
 // Combined operations (based on storage mode)
 // =============================================================================
@@ -373,7 +487,7 @@ fn delete_credentials_file() -> Result<(), String> {
 /// 1. インメモリキャッシュを確認
 /// 2. Fallbackモード → ファイルから読み込み
 /// 3. Secureモード → secure_storage.load() を試行
-///    - 成功 → キャッシュ更新して返却
+///    - 成功 → 残っている credentials.toml を消し、キャッシュ更新して返却
 ///    - "No credentials found" → ファイルからのマイグレーションを試行
 ///    - その他のエラー → そのまま返却
 pub(crate) fn load_cookies_with_storage(
@@ -402,6 +516,7 @@ pub(crate) fn load_cookies_with_storage(
             // セキュアストレージから読み込みを試行
             match secure_storage.load() {
                 Ok(cookies) => {
+                    remove_leftover_credentials_file();
                     // キャッシュ更新
                     if let Ok(mut guard) = cache.write() {
                         *guard = Some(cookies.clone());
@@ -436,9 +551,9 @@ pub(crate) fn load_cookies_with_storage(
 
 /// Cookieを保存する（CredentialStorage差し替え可能版）
 ///
-/// Secure modeでkeyringの容量制限に引っかかった場合、自動的にfile storageにフォールバックする
-/// （ユーザーが既にSecureモードで保存を試みた結果のフォールバックであり、仕様の
-///  「ユーザーの明示的な同意なしに自動フォールバックしない」には抵触しない）
+/// Secureモードで保存に失敗したら（容量超過も含む）エラーを返し、ファイルには書かない
+/// （01_auth.md「制約・不変条件」: 同意なしにファイル保存へフォールバックしない）。
+/// 大きい Cookie は secure_storage が分けて保存する
 pub(crate) fn save_cookies_with_storage(
     cookies: &YouTubeCookies,
     storage_mode: &StorageMode,
@@ -453,17 +568,11 @@ pub(crate) fn save_cookies_with_storage(
 
     match storage_mode {
         StorageMode::Fallback => save_cookies_to_file(cookies),
-        StorageMode::Secure => match secure_storage.save(cookies) {
-            Ok(()) => Ok(()),
-            Err(e) if e.contains("platform limit") || e.contains("2560") => {
-                log::warn!(
-                    "⚠️ Secure storage size limit exceeded, falling back to file storage: {}",
-                    e
-                );
-                save_cookies_to_file(cookies)
-            }
-            Err(e) => Err(e),
-        },
+        StorageMode::Secure => {
+            secure_storage.save(cookies)?;
+            remove_leftover_credentials_file();
+            Ok(())
+        }
     }
 }
 
@@ -492,17 +601,17 @@ pub(crate) fn delete_credentials_with_storage(
 
 /// Load cookies based on storage mode（本番用ラッパー）
 pub(crate) fn load_cookies(storage_mode: &StorageMode) -> Result<YouTubeCookies, String> {
-    load_cookies_with_storage(storage_mode, &KeyringStorage, &CREDENTIALS_CACHE)
+    load_cookies_with_storage(storage_mode, &KEYRING_STORAGE, &CREDENTIALS_CACHE)
 }
 
 /// Save cookies based on storage mode（本番用ラッパー）
 fn save_cookies(cookies: &YouTubeCookies, storage_mode: &StorageMode) -> Result<(), String> {
-    save_cookies_with_storage(cookies, storage_mode, &KeyringStorage, &CREDENTIALS_CACHE)
+    save_cookies_with_storage(cookies, storage_mode, &KEYRING_STORAGE, &CREDENTIALS_CACHE)
 }
 
 /// Delete credentials based on storage mode（本番用ラッパー）
 fn delete_credentials(storage_mode: &StorageMode) -> Result<(), String> {
-    delete_credentials_with_storage(storage_mode, &KeyringStorage, &CREDENTIALS_CACHE)
+    delete_credentials_with_storage(storage_mode, &KEYRING_STORAGE, &CREDENTIALS_CACHE)
 }
 
 // =============================================================================
@@ -1336,6 +1445,253 @@ mod tests {
         assert!(result.is_ok());
         // delete後にキャッシュがNoneになっていることを確認
         assert!(cache.read().unwrap().is_none());
+    }
+
+    // =========================================================================
+    // secure モードの保存先（01_auth.md「secure モードの保存先」「1 件に入らないときの分割」）
+    // =========================================================================
+
+    /// keyring の 1 件ずつを模したテスト用の格納先。keyring 3.6.3 の Windows 実装と同じ上限で断る
+    #[derive(Default)]
+    struct InMemorySlots {
+        entries: std::sync::RwLock<std::collections::BTreeMap<String, String>>,
+    }
+
+    impl InMemorySlots {
+        fn users(&self) -> Vec<String> {
+            self.entries.read().unwrap().keys().cloned().collect()
+        }
+
+        fn value(&self, user: &str) -> Option<String> {
+            self.entries.read().unwrap().get(user).cloned()
+        }
+
+        fn remove_entry(&self, user: &str) {
+            self.entries.write().unwrap().remove(user);
+        }
+
+        /// 本体の件の見出し {"parts":N} の N
+        fn header_parts(&self) -> usize {
+            let header: PartsHeader =
+                serde_json::from_str(&self.value(KEYRING_USER).unwrap()).unwrap();
+            header.parts
+        }
+    }
+
+    impl SecretSlots for InMemorySlots {
+        fn get(&self, user: &str) -> Result<Option<String>, String> {
+            Ok(self.value(user))
+        }
+
+        fn set(&self, user: &str, secret: &str) -> Result<(), String> {
+            if secret.encode_utf16().count() > KEYRING_MAX_UTF16_UNITS {
+                return Err(
+                    "Attribute 'password' is longer than platform limit of 2560 chars".to_string(),
+                );
+            }
+            self.entries
+                .write()
+                .unwrap()
+                .insert(user.to_string(), secret.to_string());
+            Ok(())
+        }
+
+        fn remove(&self, user: &str) -> Result<(), String> {
+            self.remove_entry(user);
+            Ok(())
+        }
+    }
+
+    /// 保存がいつも容量超過で失敗するセキュアストレージ（分割前の版の keyring 相当）
+    struct TooLongStorage;
+
+    impl CredentialStorage for TooLongStorage {
+        fn load(&self) -> Result<YouTubeCookies, String> {
+            Err("No credentials found in secure storage".to_string())
+        }
+
+        fn save(&self, _cookies: &YouTubeCookies) -> Result<(), String> {
+            Err("Failed to save to secure storage: Attribute 'password' is longer than platform limit of 2560 chars".to_string())
+        }
+
+        fn delete(&self) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn is_available(&self) -> bool {
+            true
+        }
+    }
+
+    /// WebView ログイン相当の大きい Cookie（raw_cookie_string が約 len 文字）
+    fn large_cookies(len: usize) -> YouTubeCookies {
+        let mut raw = "SID=test_sid; HSID=test_hsid; SSID=test_ssid; APISID=test_apisid; SAPISID=test_sapisid".to_string();
+        let mut i = 0;
+        while raw.len() < len {
+            raw.push_str(&format!("; __Secure-C{}={}", i, "x".repeat(40)));
+            i += 1;
+        }
+        parse_raw_cookies(&raw)
+    }
+
+    /// テストの前後で credentials.toml を消す（liscov-test-unit の名前空間）
+    fn remove_credentials_file_for_test() -> CredentialsFileGuard {
+        let _ = delete_credentials_file();
+        CredentialsFileGuard
+    }
+
+    #[test]
+    fn keyring_storage_saves_small_credentials_as_single_entry() {
+        // 1280 単位以下 → youtube_credentials に JSON をそのまま保存（分割前の版と同じ形）
+        let storage = KeyringStorage(InMemorySlots::default());
+
+        storage.save(&sample_cookies()).unwrap();
+
+        assert_eq!(storage.0.users(), vec![KEYRING_USER.to_string()]);
+        let json: CredentialsJson =
+            serde_json::from_str(&storage.0.value(KEYRING_USER).unwrap()).unwrap();
+        assert_eq!(json.sapisid, "test_sapisid");
+    }
+
+    #[test]
+    fn keyring_storage_splits_3000_char_cookie_and_reads_it_back() {
+        // 例: 3000 文字の Cookie → .1〜.N に分け、本体の件は見出し {"parts":N}
+        let cookies = large_cookies(3000);
+        let storage = KeyringStorage(InMemorySlots::default());
+
+        storage.save(&cookies).unwrap();
+
+        let parts = storage.0.header_parts();
+        assert!(parts >= 3, "3000 文字超の JSON は 3 件以上: {}", parts);
+        let mut expected_users: Vec<String> = std::iter::once(KEYRING_USER.to_string())
+            .chain((1..=parts).map(|i| format!("{}.{}", KEYRING_USER, i)))
+            .collect();
+        expected_users.sort();
+        assert_eq!(storage.0.users(), expected_users);
+        assert!((1..=parts).all(|i| {
+            let part = storage.0.value(&format!("{}.{}", KEYRING_USER, i)).unwrap();
+            part.encode_utf16().count() <= KEYRING_MAX_UTF16_UNITS
+        }));
+
+        let loaded = storage.load().unwrap();
+        assert_eq!(loaded.raw_cookie_string, cookies.raw_cookie_string);
+        assert_eq!(loaded.sapisid, "test_sapisid");
+    }
+
+    #[test]
+    fn keyring_storage_removes_leftover_parts_when_new_value_is_shorter() {
+        // 保存: 前回の保存の余った部分（.N+1 以降）を消す
+        let storage = KeyringStorage(InMemorySlots::default());
+        storage.save(&large_cookies(5000)).unwrap();
+        storage.save(&large_cookies(2000)).unwrap();
+
+        assert_eq!(storage.0.users().len(), storage.0.header_parts() + 1);
+        assert_eq!(
+            storage.load().unwrap().raw_cookie_string,
+            large_cookies(2000).raw_cookie_string
+        );
+
+        storage.save(&sample_cookies()).unwrap();
+        assert_eq!(storage.0.users(), vec![KEYRING_USER.to_string()]);
+    }
+
+    #[test]
+    fn keyring_storage_delete_removes_all_parts() {
+        // 削除: youtube_credentials と .1 から順に見つからなくなるまでの部分を消す
+        let storage = KeyringStorage(InMemorySlots::default());
+        storage.save(&large_cookies(3000)).unwrap();
+
+        storage.delete().unwrap();
+
+        assert!(storage.0.users().is_empty());
+        assert!(storage.load().unwrap_err().contains("No credentials found"));
+    }
+
+    #[test]
+    fn keyring_storage_missing_part_is_not_reported_as_no_entry() {
+        // 読み込み: 部分が欠けていたら読み込み失敗（「認証情報なし」とは区別する）
+        let storage = KeyringStorage(InMemorySlots::default());
+        storage.save(&large_cookies(3000)).unwrap();
+        storage.0.remove_entry(&format!("{}.2", KEYRING_USER));
+
+        let err = storage.load().unwrap_err();
+        assert!(!err.contains("No credentials found"), "{}", err);
+    }
+
+    #[test]
+    fn split_secret_keeps_chars_whole_within_limit() {
+        // 文字の境目で分ける（UTF-16 で 2 単位の文字を途中で切らない）
+        let secret = "ab🎵cd🎵🎵e";
+        let parts = split_secret(secret, 3);
+
+        assert!(parts.iter().all(|p| p.encode_utf16().count() <= 3));
+        assert_eq!(parts.concat(), secret);
+    }
+
+    #[test]
+    #[serial(liscov_env)]
+    fn secure_mode_webview_sized_login_is_saved_without_file() {
+        // 例: WebView ログインの 3000 文字の Cookie → セキュアストレージに保存し、ファイルには書かない
+        let _guard = remove_credentials_file_for_test();
+        let cookies = large_cookies(3000);
+        let storage = KeyringStorage(InMemorySlots::default());
+        let cache = RwLock::new(None);
+
+        save_cookies_with_storage(&cookies, &StorageMode::Secure, &storage, &cache).unwrap();
+
+        assert!(!credentials_file_exists());
+        let reloaded =
+            load_cookies_with_storage(&StorageMode::Secure, &storage, &RwLock::new(None)).unwrap();
+        assert_eq!(reloaded.raw_cookie_string, cookies.raw_cookie_string);
+    }
+
+    #[test]
+    #[serial(liscov_env)]
+    fn secure_mode_save_failure_does_not_write_file() {
+        // セキュアストレージへの保存に失敗（容量超過も含む）→ エラーを返し、ファイルには書かない
+        let _guard = remove_credentials_file_for_test();
+        let cache = RwLock::new(None);
+
+        let result = save_cookies_with_storage(
+            &large_cookies(3000),
+            &StorageMode::Secure,
+            &TooLongStorage,
+            &cache,
+        );
+
+        assert!(result.is_err());
+        assert!(!credentials_file_exists());
+    }
+
+    #[test]
+    #[serial(liscov_env)]
+    fn secure_mode_load_removes_leftover_file_and_uses_keyring_value() {
+        // セキュアストレージから読めたときに credentials.toml が残っている → 削除し、セキュアストレージの値を使う
+        let _guard = remove_credentials_file_for_test();
+        save_cookies_to_file(&large_cookies(3000)).unwrap();
+        let storage = InMemoryStorage::with_data(sample_cookies());
+        let cache = RwLock::new(None);
+
+        let loaded = load_cookies_with_storage(&StorageMode::Secure, &storage, &cache).unwrap();
+
+        assert_eq!(loaded.raw_cookie_string, None);
+        assert_eq!(loaded.sapisid, "test_sapisid");
+        assert!(!credentials_file_exists());
+    }
+
+    #[test]
+    #[serial(liscov_env)]
+    fn secure_mode_save_removes_leftover_file() {
+        // セキュアストレージに保存できたときに credentials.toml が残っている → 削除する
+        let _guard = remove_credentials_file_for_test();
+        save_cookies_to_file(&large_cookies(3000)).unwrap();
+        let storage = InMemoryStorage::empty();
+        let cache = RwLock::new(None);
+
+        save_cookies_with_storage(&sample_cookies(), &StorageMode::Secure, &storage, &cache)
+            .unwrap();
+
+        assert!(!credentials_file_exists());
     }
 }
 

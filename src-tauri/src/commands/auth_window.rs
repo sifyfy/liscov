@@ -228,7 +228,7 @@ fn parse_cookie_string(cookie_str: &str) -> std::collections::HashMap<String, St
 
 /// HashMapからYouTubeCookiesへ変換
 /// 5つの必須Cookieに加え、全Cookieの文字列も保存する（member-only配信のアクセスに必要）
-/// 保存先はファイルストレージへ自動フォールバックされるため、サイズ制限は問題にならない
+/// 1 件に入らない大きさでも、secure モードでは keyring に分けて保存する（01_auth.md「1 件に入らないときの分割」）
 fn extract_youtube_cookies_from_map(
     cookies: &std::collections::HashMap<String, String>,
 ) -> Option<YouTubeCookies> {
