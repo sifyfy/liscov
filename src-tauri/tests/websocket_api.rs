@@ -1011,3 +1011,134 @@ async fn test_reaction_json_format_matches_spec() {
 
     server.stop().await;
 }
+
+// ============================================================================
+// 接続元の確認（03_websocket.md「接続元の確認」）
+// ============================================================================
+
+/// Origin・Host を指定してハンドシェイクだけ行う（None のヘッダは付けない。Host の None は既定の 127.0.0.1:port のまま）
+async fn handshake_with(
+    port: u16,
+    origin: Option<&str>,
+    host: Option<&str>,
+) -> Result<
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+    tokio_tungstenite::tungstenite::Error,
+> {
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    let mut request = format!("ws://127.0.0.1:{port}")
+        .into_client_request()
+        .unwrap();
+    if let Some(origin) = origin {
+        request
+            .headers_mut()
+            .insert("Origin", origin.parse().unwrap());
+    }
+    if let Some(host) = host {
+        request.headers_mut().insert("Host", host.parse().unwrap());
+    }
+    connect_async(request).await.map(|(ws, _)| ws)
+}
+
+/// 403 で断られたことを確かめる
+fn assert_forbidden<T>(result: Result<T, tokio_tungstenite::tungstenite::Error>, case: &str) {
+    match result {
+        Err(tokio_tungstenite::tungstenite::Error::Http(response)) => {
+            assert_eq!(response.status(), 403, "{case}");
+        }
+        Err(e) => panic!("{case}: 403 ではないエラー: {e}"),
+        Ok(_) => panic!("{case}: 断られずにつながった"),
+    }
+}
+
+#[tokio::test]
+#[serial]
+async fn test_allowed_origins_receive_connected() {
+    // Spec: Origin なし (Docker の Host でも)・OBS の http://absolute・ローカルホストのページは許す
+    let server = WebSocketServer::new(0);
+    let port = server.start().await.expect("Failed to start");
+
+    let host = format!("127.0.0.1:{port}");
+    let docker_host = format!("host.docker.internal:{port}");
+    let cases = [
+        (None, None),
+        (None, Some(docker_host.as_str())),
+        (Some("http://absolute"), Some(host.as_str())),
+        (Some("http://localhost:8931"), Some(host.as_str())),
+        (Some("http://127.0.0.1:5500"), Some(host.as_str())),
+    ];
+    for (origin, host) in cases {
+        let ws = handshake_with(port, origin, host)
+            .await
+            .unwrap_or_else(|e| panic!("{origin:?} {host:?}: つながらない: {e}"));
+        let (_write, mut read) = ws.split();
+        let msg = timeout(Duration::from_secs(5), read.next())
+            .await
+            .expect("Timeout")
+            .expect("Stream ended")
+            .expect("WebSocket error");
+        let json = parse_server_message(&msg).expect("Failed to parse");
+        assert_eq!(json["type"], "Connected", "{origin:?} {host:?}");
+    }
+
+    server.stop().await;
+}
+
+#[tokio::test]
+#[serial]
+async fn test_disallowed_origins_are_rejected_with_403() {
+    // Spec: 外部サイト・file://・null・DNS rebinding・ローカルホストでない Host は 403
+    let server = WebSocketServer::new(0);
+    let port = server.start().await.expect("Failed to start");
+
+    let host = format!("127.0.0.1:{port}");
+    let rebinding_host = format!("attacker.example:{port}");
+    let rebinding_origin = format!("http://attacker.example:{port}");
+    let cases = [
+        ("https://example.com", host.as_str()),
+        ("file://", host.as_str()),
+        ("null", host.as_str()),
+        (rebinding_origin.as_str(), rebinding_host.as_str()),
+        ("http://absolute", rebinding_host.as_str()),
+    ];
+    for (origin, host) in cases {
+        let result = handshake_with(port, Some(origin), Some(host)).await;
+        assert_forbidden(result, &format!("{origin} {host}"));
+    }
+
+    server.stop().await;
+}
+
+#[tokio::test]
+#[serial]
+async fn test_rejected_connection_is_not_counted_and_emits_no_event() {
+    // Spec: 断った接続には Connected を送らず、接続数にも数えない
+    let server = WebSocketServer::new(0);
+    let mut event_rx = server.subscribe_events();
+    let port = server.start().await.expect("Failed to start");
+
+    let result = handshake_with(port, Some("https://example.com"), None).await;
+    assert_forbidden(result, "https://example.com");
+
+    assert_eq!(server.connected_clients().await, 0);
+    assert!(
+        timeout(Duration::from_millis(300), event_rx.recv())
+            .await
+            .is_err(),
+        "断った接続でイベントが出た"
+    );
+
+    // 断った後も、許す接続は受け付け続ける
+    let ws = handshake_with(port, Some("http://absolute"), None)
+        .await
+        .expect("断った後につながらない");
+    let (_write, mut read) = ws.split();
+    let msg = timeout(Duration::from_secs(5), read.next())
+        .await
+        .expect("Timeout")
+        .expect("Stream ended")
+        .expect("WebSocket error");
+    assert_eq!(parse_server_message(&msg).unwrap()["type"], "Connected");
+
+    server.stop().await;
+}

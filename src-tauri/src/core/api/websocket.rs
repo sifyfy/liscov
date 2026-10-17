@@ -11,6 +11,8 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{RwLock, broadcast};
 use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
+use tokio_tungstenite::tungstenite::http::StatusCode;
 
 type ClientId = u64;
 
@@ -273,6 +275,93 @@ impl WebSocketServer {
     }
 }
 
+/// ハンドシェイクを断った理由 (03_websocket.md「接続元の確認」)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HandshakeRejection {
+    /// 許していない Origin (外部サイト・file://・null など)
+    OriginNotAllowed,
+    /// ブラウザからの接続なのに、Host がローカルホストの名前でない (無い)
+    HostNotLoopback,
+    /// Origin・Host の値が UTF-8 でない
+    InvalidHeader,
+}
+
+impl std::fmt::Display for HandshakeRejection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::OriginNotAllowed => "許していない Origin",
+            Self::HostNotLoopback => "Host がローカルホストでない",
+            Self::InvalidHeader => "Origin・Host が UTF-8 でない",
+        })
+    }
+}
+
+/// OBS のローカルファイルのブラウザソースが付ける Origin
+const OBS_LOCAL_FILE_ORIGIN: &str = "http://absolute";
+
+/// ローカルホストを指す名前 (Host・Origin のホスト部分)
+const LOOPBACK_HOSTS: [&str; 3] = ["localhost", "127.0.0.1", "[::1]"];
+
+/// `ホスト[:ポート]` のホストがローカルホストの名前か。ポートは省略できるが、書くなら数字だけ
+fn is_loopback_authority(authority: &str) -> bool {
+    LOOPBACK_HOSTS.iter().any(|host| {
+        authority.strip_prefix(host).is_some_and(|rest| {
+            rest.is_empty()
+                || rest.strip_prefix(':').is_some_and(|port| {
+                    !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit())
+                })
+        })
+    })
+}
+
+/// 接続元を確かめる (03_websocket.md「接続元の確認」)。
+/// Origin が無いのはブラウザ以外なので許す。ブラウザなら Origin と Host の両方を確かめる
+fn check_handshake(origin: Option<&str>, host: Option<&str>) -> Result<(), HandshakeRejection> {
+    let Some(origin) = origin else {
+        return Ok(());
+    };
+    let origin = origin.trim().to_ascii_lowercase();
+    let loopback_page = ["http://", "https://"]
+        .iter()
+        .filter_map(|scheme| origin.strip_prefix(scheme))
+        .any(is_loopback_authority);
+    if origin != OBS_LOCAL_FILE_ORIGIN && !loopback_page {
+        return Err(HandshakeRejection::OriginNotAllowed);
+    }
+    match host {
+        Some(host) if is_loopback_authority(&host.trim().to_ascii_lowercase()) => Ok(()),
+        _ => Err(HandshakeRejection::HostNotLoopback),
+    }
+}
+
+/// ハンドシェイクのリクエストを確かめ、断るなら 403 の応答を返す (accept_hdr_async のコールバック)
+// 戻り値の型は tungstenite の Callback が決めるので、Err が大きいのは変えられない
+#[allow(clippy::result_large_err)]
+fn screen_handshake(
+    request: &Request,
+    response: Response,
+    addr: SocketAddr,
+) -> Result<Response, ErrorResponse> {
+    let header = |name| request.headers().get(name).map(|value| value.to_str());
+    let (origin, host) = (header("Origin"), header("Host"));
+    let result = match (origin.transpose(), host.transpose()) {
+        (Ok(origin), Ok(host)) => check_handshake(origin, host),
+        _ => Err(HandshakeRejection::InvalidHeader),
+    };
+    result.map(|()| response).map_err(|reason| {
+        tracing::warn!(
+            "WebSocket の接続を断った ({}): {} Origin={:?} Host={:?}",
+            addr,
+            reason,
+            request.headers().get("Origin"),
+            request.headers().get("Host"),
+        );
+        let mut forbidden = ErrorResponse::new(Some(reason.to_string()));
+        *forbidden.status_mut() = StatusCode::FORBIDDEN;
+        forbidden
+    })
+}
+
 async fn handle_connection(
     stream: TcpStream,
     addr: SocketAddr,
@@ -281,7 +370,11 @@ async fn handle_connection(
     message_rx: &mut broadcast::Receiver<ServerMessage>,
     event_tx: broadcast::Sender<ClientEvent>,
 ) -> anyhow::Result<()> {
-    let ws_stream = tokio_tungstenite::accept_async(stream).await?;
+    #[allow(clippy::result_large_err)] // screen_handshake と同じ理由
+    let ws_stream = tokio_tungstenite::accept_hdr_async(stream, |request: &_, response| {
+        screen_handshake(request, response, addr)
+    })
+    .await?;
     let (mut write, mut read) = ws_stream.split();
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -378,6 +471,132 @@ mod tests {
         server.abort_accept_task().await;
 
         assert!(!server.is_running().await);
+    }
+
+    // 03_websocket.md「接続元の確認」の表の例
+    #[test]
+    fn origin_がないブラウザ以外の接続は_host_を問わず許す() {
+        assert_eq!(check_handshake(None, Some("127.0.0.1:8765")), Ok(()));
+        assert_eq!(
+            check_handshake(None, Some("host.docker.internal:8765")),
+            Ok(())
+        );
+        assert_eq!(check_handshake(None, None), Ok(()));
+    }
+
+    #[test]
+    fn obs_のローカルファイルのブラウザソースは許す() {
+        assert_eq!(
+            check_handshake(Some("http://absolute"), Some("127.0.0.1:8765")),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn ローカルホストで開いたページは許す() {
+        for origin in [
+            "http://localhost:8931",
+            "http://127.0.0.1:5500",
+            "http://[::1]:3000",
+            "https://localhost",
+            "http://localhost",
+        ] {
+            assert_eq!(
+                check_handshake(Some(origin), Some("127.0.0.1:8765")),
+                Ok(()),
+                "{origin}"
+            );
+        }
+    }
+
+    #[test]
+    fn file_と_null_と外部のサイトは断る() {
+        for origin in [
+            "file://",
+            "null",
+            "https://example.com",
+            "http://absolute.example.com",
+            "http://localhost.example.com",
+            "http://127.0.0.1.example.com",
+            "http://absolute:80",
+            "ws://localhost:8931",
+            "http://localhost:8931/path",
+            "http://localhost:",
+            "http://[::1]x",
+            "",
+        ] {
+            assert_eq!(
+                check_handshake(Some(origin), Some("127.0.0.1:8765")),
+                Err(HandshakeRejection::OriginNotAllowed),
+                "{origin:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn dns_rebinding_は断る() {
+        assert_eq!(
+            check_handshake(
+                Some("http://attacker.example:8765"),
+                Some("attacker.example:8765")
+            ),
+            Err(HandshakeRejection::OriginNotAllowed)
+        );
+    }
+
+    #[test]
+    fn origin_があるのに_host_がローカルホストでなければ断る() {
+        assert_eq!(
+            check_handshake(Some("http://absolute"), Some("attacker.example:8765")),
+            Err(HandshakeRejection::HostNotLoopback)
+        );
+        assert_eq!(
+            check_handshake(Some("http://absolute"), None),
+            Err(HandshakeRejection::HostNotLoopback)
+        );
+    }
+
+    #[test]
+    fn origin_があるときの_host_はローカルホストの名前ならポートを問わない() {
+        for host in [
+            "127.0.0.1:8765",
+            "localhost:8774",
+            "[::1]:8765",
+            "localhost",
+        ] {
+            assert_eq!(
+                check_handshake(Some("http://absolute"), Some(host)),
+                Ok(()),
+                "{host}"
+            );
+        }
+    }
+
+    #[test]
+    fn 大文字小文字と前後の空白は区別しない() {
+        assert_eq!(
+            check_handshake(Some(" HTTP://ABSOLUTE "), Some(" LocalHost:8765 ")),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn origin_や_host_が_utf8_でなければ断る() {
+        use tokio_tungstenite::tungstenite::http::HeaderValue;
+        let addr: SocketAddr = "127.0.0.1:50000".parse().unwrap();
+        let broken = HeaderValue::from_bytes(b"http://absolute\xff").unwrap();
+        for (origin, host) in [
+            (broken.clone(), HeaderValue::from_static("127.0.0.1:8765")),
+            (HeaderValue::from_static("http://absolute"), broken.clone()),
+        ] {
+            let request = Request::builder()
+                .header("Origin", origin)
+                .header("Host", host)
+                .body(())
+                .unwrap();
+            let rejected = screen_handshake(&request, Response::default(), addr).unwrap_err();
+            assert_eq!(rejected.status(), StatusCode::FORBIDDEN);
+        }
     }
 
     #[tokio::test]
