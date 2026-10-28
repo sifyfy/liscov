@@ -5,6 +5,16 @@ description: This skill should be used when investigating Rust cargo test interm
 
 # flake-hunt: Rust cargo test 間欠的失敗の調査
 
+**このスキルは手順書型が主の混合型。** Phase 0〜4 の流れ・鉄則・退場条件はそのとおりに進める。
+Phase 3 の原因の見立てだけは判断が要るので、`references/patterns.md` のパターンと判定を前提に照らして使う。
+手順に無い状況になったら「退場条件」へ。
+
+前提条件 (崩れたら手順の外):
+
+- 対象は cargo のワークスペース (単一クレートでも複数でもよい) の `cargo test`
+- bash で `scripts/flake-hunt.sh` を回せる (Windows では Git Bash)
+- 失敗が間欠的である。毎回落ちるなら flake ではないので、普通のテストの失敗として調べる
+
 ## 鉄則 (これを破ると毎回同じ罠に落ちる)
 
 1. **生ログを必ずファイルに保存する。フィルタは保存後に行う。**
@@ -47,7 +57,7 @@ bash .claude/skills/flake-hunt/scripts/flake-hunt.sh 100 libhunt -- \
 
 **重要な観測**: cargo test を **`--lib` 無し**にすると、lib 単体では再現しないバグが integration test 群とのプロセス間相互作用 (port, file, env, keyring) で再現することがある。`--lib` だけで諦めない。
 
-### Phase 2: 証拠収集 → Phase 3 前に advisor 相談
+### Phase 2: 証拠収集 → Phase 3 の前に別の仮説を出させる
 
 失敗が出たら `findings.txt` を読み、以下を整理:
 - 失敗テスト名 (`---- test_X stdout ----` から抽出)
@@ -55,11 +65,16 @@ bash .claude/skills/flake-hunt/scripts/flake-hunt.sh 100 libhunt -- \
 - 失敗テスト群が複数バイナリにまたがるか単一か
 - 出現率 (X/N)
 
-**Phase 3 で修正に入る前に必ず advisor() に相談**する。advisor は session の全文脈を見るので、別の仮説を提示してくれることがある。修正方針を独断で決めない。
+**Phase 3 で修正に入る前に、調査の文脈を持たないサブエージェントに別の仮説を出させる。** 自分で見つけた怪しいコードに引きずられる (A2) のを防ぐため。
+
+- 渡すもの: 上の整理 (失敗テスト名・panic location・バイナリの範囲・出現率)、発火した条件 (Phase 1 の表のどれか)、`references/patterns.md`
+- 渡さないもの: 自分の仮説と、怪しいと思ったコード (仮説が引きずられる)
+- 頼むこと: 証拠と矛盾しない仮説を複数、それぞれを確かめる実験と一緒に
+- 自分の仮説と食い違ったら、両方を Phase 3 の検証にかける。どちらを先に試すか決めきれなければシフィさんに相談する
 
 ### Phase 3: 診断 → 仮説検証 → 修正
 
-advisor の方針を踏まえ、仮説を**検証ステップ付き**で試す:
+Phase 2 の仮説を並べ、**検証ステップ付き**で試す:
 
 - 「intra-binary 並列が原因」仮説 → `-- --test-threads=1` で 0 失敗になるか確認
 - 「特定 test のみ脆弱」仮説 → 該当 test 単独実行 (`--test X testname`) と他 test 並走を比較
@@ -71,7 +86,7 @@ advisor の方針を踏まえ、仮説を**検証ステップ付き**で試す:
 
 修正後、Phase 1 で発火した条件で `flake-hunt.sh` N=20 以上を再実行。
 
-- 0/N 失敗 → fix 完了。次のステップ (commit, ledger 記録) へ。
+- 0/N 失敗 → fix 完了。次のステップ (commit と「記録」の節) へ。
 - 1件以上失敗が残る → 原因仮説が不完全。Phase 2 へ戻り再診断。
 
 ## アンチパターン集 (体験的に踏んだ罠)
@@ -81,7 +96,7 @@ advisor の方針を踏まえ、仮説を**検証ステップ付き**で試す:
 
 ### A2. 構造仮説バイアス
 「この関数は明らかにタイミング依存で脆弱だ → ここが原因に違いない」と決めつけて修正する罠。「脆弱性」と「現在の bug」は別。修正で問題が表面上消えても、別の真原因は残っている可能性がある。
-回避: 再現で確証 → advisor 相談 → 修正 → Phase 4 検証 の順序を崩さない。
+回避: 再現で確証 → 別の仮説を出させる (Phase 2) → 修正 → Phase 4 検証 の順序を崩さない。
 
 ### A3. `cargo test --lib` ループだけで諦める
 lib unit test だけで再現しなくても、`cargo test` (引数無し) なら integration test とのプロセス間相互作用で再現することがある。実際にこのプロジェクトの websocket flake はこの方法でしか再現しなかった (条件 H)。
@@ -90,33 +105,21 @@ lib unit test だけで再現しなくても、`cargo test` (引数無し) な�
 `serial_test` クレートの `#[serial]` は **`#[serial]` 同士でしか直列化しない**。非 serial test は並行実行のまま走るので、port や file を OS 層で奪い合うケースには無力。回避: 共有 OS リソースを掴むテストはバイナリ全テストに `#[serial]` を付けるか、リソース確保を unique 化する。
 
 ### A5. 反復回数を底なしに増やす
-< 1/200 程度のレアフレークは N=500 でもしばしば再現しない。300 iter で出ない場合は条件が違うと判断し、Phase 1 の条件絞り込みに戻る。あるいは bounded として記録 (`status=open`, severity=low) し別タスクへ持ち越す。
+< 1/200 程度のレアフレークは N=500 でもしばしば再現しない。300 iter で出ない場合は条件が違うと判断し、Phase 1 の条件絞り込みに戻る。あるいは bounded として記録 (下の「記録」) し別タスクへ持ち越す。
 
 ## 退場条件 (時間箱)
 
 - 2時間以内で再現条件が見つからない → bounded 化 (`<1/N` を明示) し、`.tmp/flake-runs/` の harness を残して別 PR / 別セッションへ
-- Phase 3 で advisor が「仮説不十分」と判断 → 即停止して相談
+- Phase 3 で、どの仮説も検証で裏付けられない → 即停止してシフィさんに相談
 - 修正後 Phase 4 で 0/N にならない → 修正取り消し or 別仮説で再診断
 
-## 品質オーナーシップ Plugin との連携
+## 記録
 
-調査結果は `event-append.sh` で vicinity_finding に記録する:
+後から同じ flake を調べる人が、条件と結論から始められるようにする。書く項目は解決・未解決で共通:
+テスト名・発火した条件・出現率 (X/N)・原因 (未確定ならそう書く)・修正・検証 (`条件X N/N → 0/N`)・`.tmp/flake-runs/<tag>/` の場所。
 
-```bash
-SCRIPT="${CLAUDE_PLUGINS_QO}/scripts/event-append.sh"  # 環境に応じて解決
-
-# 解決した場合
-bash "$SCRIPT" --event-type vicinity_finding \
-  --title "[resolved] <test名> flake: root cause=<原因>, fix=<修正概要>, 検証: condX N/N → 0/N" \
-  --status closed --location "<file:line>" \
-  --severity medium --provenance pre-existing-unknown
-
-# 再現できなかった場合
-bash "$SCRIPT" --event-type vicinity_finding \
-  --title "[bounded] <test名> flake: <N>+ iter で再現不能 (<1/N)、根本原因未確定" \
-  --status open --location "<best-guess location or 'unknown'>" \
-  --severity low --provenance pre-existing-unknown
-```
+- 解決した → 修正のコミットメッセージか PR の説明に書く
+- 再現できず持ち越す (bounded) → タスク記録 (`~/tasks/`) の handoff・log に書く。liscov は public なので、issue にするかはシフィさんに確かめてから
 
 ## 追加リソース
 
@@ -130,6 +133,5 @@ bash "$SCRIPT" --event-type vicinity_finding \
 
 ## 環境
 
-- 想定 shell: bash (Windows では MSYS / Git Bash 経由)
 - 出力先: `.tmp/flake-runs/<tag>/` (リポジトリ汚染回避のため `.tmp` 配下推奨)
-- 想定プロジェクト: cargo workspace (single crate でも multi crate でも OK)
+- shell と対象のプロジェクトは冒頭の前提条件
